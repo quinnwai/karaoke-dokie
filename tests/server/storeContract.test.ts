@@ -81,6 +81,19 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect((await s.getSongRanges([])).size).toBe(0);
   });
 
+  it('lists note-file song ranges for one artist, for the artist fallback', async () => {
+    const s = make();
+    const nf = (low: number) => ({ ...songRange, low, source: 'note-file' as const, confidence: 'high' as const });
+    await s.putSongRange('queen|bohemian rhapsody', { range: nf(50), log: logEntry(1) });
+    await s.putSongRange('queen|somebody to love', { range: nf(52), log: logEntry(2) });
+    await s.putSongRange('queen|guess', { range: { ...nf(40), source: 'artist-typical', confidence: 'low' }, log: logEntry(3) });
+    await s.putSongRange('queen|skipped', { range: null, log: logEntry(4, 'skipped') });
+    await s.putSongRange('queens of the stone age|no one knows', { range: nf(45), log: logEntry(5) });
+    const lows = (await s.listNoteFileRangesByArtist('queen')).map((r) => r.low).sort();
+    expect(lows).toEqual([50, 52]);
+    expect(await s.listNoteFileRangesByArtist('nobody')).toEqual([]);
+  });
+
   it('lists log entries newest first with a limit', async () => {
     const s = make();
     for (const n of [1, 3, 2]) await s.appendLog(logEntry(n, n === 2 ? 'skipped' : 'artist-typical'));

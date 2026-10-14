@@ -1,14 +1,14 @@
 // The one place that decides which implementations the running app uses.
-// Swap points:
-//  - song logic: songLogicFallback.ts -> src/lib/songs (songKey, matchSong, rankMatches, paginate,
-//    resolveSongRange(track, deps)) once that module is merged;
-//  - note files: noteFileSource -> the USDB fetcher once it exists.
+// Song logic comes from src/lib/songs. Note files come from noteFileSource (the USDB fetcher).
+// Seed ranges are used only with SPOTIFY_MOCK=1, so the offline demo and e2e tests have data.
 import type { SongRange, Track } from '../contracts';
 import seedFile from '../../../data/seed-song-ranges.json';
 import { configProblems, readConfig, type ServerConfig } from './config';
 import { getStore, resetStoreForTests } from './getStore';
 import { createMockSpotifyClient } from './mockSpotify';
-import { matchSong, paginate, rankMatches, songKey } from './songLogicFallback';
+import { matchSong as fitSong } from '../songs/match';
+import { paginate, rankMatches } from '../songs/rank';
+import { resolveSongRange, songKey } from '../songs/resolve';
 import { createSongService, type ResolveResult, type SongDeps, type SongService } from './songService';
 import { createSpotifyClient, type SpotifyClient } from './spotify';
 import type { Store } from './store';
@@ -64,11 +64,31 @@ export function createPlaceholderResolver(
   };
 }
 
-export function productionSongDeps(): SongDeps {
+/** The artist part of a songKey ("artist|title"), used to find other songs by the same artist. */
+export function artistKey(artist: string): string {
+  return songKey(artist, '').split('|')[0]!;
+}
+
+export function realResolver(store: Store, noteFiles: NoteFileSource): (track: Track) => Promise<ResolveResult> {
+  return (track) =>
+    resolveSongRange(track, {
+      getNoteFile: (artist, title) => noteFiles.getNoteFile(artist, title),
+      getArtistSongRanges: (artist) => store.listNoteFileRangesByArtist(artistKey(artist)),
+      // No outside artist-range source is connected in v1.
+      getExternalArtistRange: async () => null,
+    });
+}
+
+export function productionSongDeps(store: Store, mock: boolean): SongDeps {
   return {
     songKey,
-    resolveSongRange: createPlaceholderResolver(SEED_SONGS, songKey, noteFileSource),
-    matchSong,
+    resolveSongRange: mock
+      ? createPlaceholderResolver(SEED_SONGS, songKey, noteFileSource)
+      : realResolver(store, noteFileSource),
+    matchSong: (track, range, userRange) => {
+      const fit = fitSong(userRange, range);
+      return fit ? { track, range, ...fit } : null;
+    },
     rankMatches,
     paginate,
   };
@@ -94,7 +114,7 @@ export function getAppContext(): AppContext {
       config,
       store,
       spotify: config.spotifyMock ? createMockSpotifyClient() : createSpotifyClient(config.spotify),
-      songs: createSongService(store, productionSongDeps()),
+      songs: createSongService(store, productionSongDeps(store, config.spotifyMock)),
       tracks: createTrackCache(),
       problems: configProblems(config),
     };

@@ -32,6 +32,8 @@ export interface Store {
   /** Batch read; the map only has keys that are cached. */
   getSongRanges(songKeys: string[]): Promise<Map<string, SongRangeRecord>>;
   putSongRange(songKey: string, record: SongRangeRecord): Promise<void>;
+  /** Ranges read from note files for one artist (the artist part of songKey), for the artist fallback. */
+  listNoteFileRangesByArtist(artistKey: string): Promise<SongRange[]>;
 
   appendLog(entry: DataSourceLogEntry): Promise<void>;
   /** Newest first. */

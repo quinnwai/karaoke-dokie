@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { Track } from '../../src/lib/contracts';
-import { matchSong, paginate, rankMatches, songKey } from '../../src/lib/server/songLogicFallback';
-import { createPlaceholderResolver, noteFileSource, SEED_SONGS } from '../../src/lib/server/wiring';
+import { songKey } from '../../src/lib/songs/resolve';
+import {
+  artistKey,
+  createPlaceholderResolver,
+  noteFileSource,
+  productionSongDeps,
+  realResolver,
+  SEED_SONGS,
+} from '../../src/lib/server/wiring';
+import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { MOCK_TRACKS } from '../../src/lib/server/mockSpotify';
 
 const track = (artist: string, title: string): Track => ({
@@ -41,32 +49,43 @@ describe('seed song ranges', () => {
   });
 });
 
-describe('placeholder song logic', () => {
-  const r = { low: 50, high: 70, tessitura: 60, source: 'note-file' as const, confidence: 'high' as const, fastLyrics: false };
-  const t = track('A', 'B');
+describe('production song wiring', () => {
+  const NOTE_FILE = '#TITLE:Song\n#ARTIST:Band\n#BPM:120\n#GAP:0\n: 0 4 -5 la\n: 4 4 0 la\n: 8 4 7 la\nE\n';
+  const nf = (low: number, high: number) => ({ low, high, tessitura: (low + high) / 2, source: 'note-file' as const, confidence: 'high' as const, fastLyrics: false });
 
-  it('normalizes song keys', () => {
-    expect(songKey('Beyoncé', 'Halo (feat. X)')).toBe(songKey('beyonce', 'Halo'));
+  it('reads a note file when one exists', async () => {
+    const store = createMemoryStore();
+    const resolve = realResolver(store, { getNoteFile: async () => NOTE_FILE });
+    const { range, log } = await resolve(track('Band', 'Song'));
+    expect(range).toMatchObject({ low: 55, high: 67, source: 'note-file' });
+    expect(log.outcome).toBe('note-file');
   });
 
-  it('matches as written, an octave down or up, or not at all', () => {
-    expect(matchSong(t, r, { low: 45, high: 76, source: 'test' })).toMatchObject({ octave: 'none', difficulty: 'easy' });
-    expect(matchSong(t, r, { low: 50, high: 70, source: 'test' })).toMatchObject({ octave: 'none', difficulty: 'medium' });
-    expect(matchSong(t, r, { low: 36, high: 60, source: 'test' })).toMatchObject({ octave: 'down' });
-    expect(matchSong(t, r, { low: 60, high: 84, source: 'test' })).toMatchObject({ octave: 'up' });
-    expect(matchSong(t, r, { low: 55, high: 65, source: 'test' })).toBeNull();
-    expect(matchSong(t, { ...r, fastLyrics: true }, { low: 45, high: 76, source: 'test' })?.difficulty).toBe('medium');
+  it('falls back to the typical range of the artist\'s other songs in the store', async () => {
+    const store = createMemoryStore();
+    await store.putSongRange(songKey('Queen', 'A'), { range: nf(50, 70), log: {} as never });
+    await store.putSongRange(songKey('Queen', 'B'), { range: nf(52, 72), log: {} as never });
+    const resolve = realResolver(store, { getNoteFile: async () => null });
+    const { range, log } = await resolve(track('Queen', 'C'));
+    expect(range).toMatchObject({ low: 51, high: 71, source: 'artist-typical', confidence: 'low' });
+    expect(log.reason).toMatch(/2 other songs/);
   });
 
-  it('ranks easier songs first and pages', () => {
-    const m = (difficulty: 'easy' | 'hard', playRank: number) => ({
-      track: { ...t, playRank },
-      range: r,
-      difficulty,
-      octave: 'none' as const,
-    });
-    expect(rankMatches([m('hard', 0), m('easy', 2), m('easy', 1)]).map((x) => x.track.playRank)).toEqual([1, 2, 0]);
-    expect(paginate([1, 2, 3], 0, 2)).toEqual({ items: [1, 2], nextOffset: 2 });
-    expect(paginate([1, 2, 3], 2, 2)).toEqual({ items: [3], nextOffset: null });
+  it('skips and logs a song with no data at all', async () => {
+    const resolve = realResolver(createMemoryStore(), { getNoteFile: async () => null });
+    const { range, log } = await resolve(track('Omar Apollo', 'Evergreen'));
+    expect(range).toBeNull();
+    expect(log.outcome).toBe('skipped');
+  });
+
+  it('uses the artist part of the song key', () => {
+    expect(artistKey('Queen')).toBe(songKey('Queen', 'x').split('|')[0]);
+  });
+
+  it('adapts matchSong to return a full Match', () => {
+    const deps = productionSongDeps(createMemoryStore(), false);
+    const t = track('A', 'B');
+    expect(deps.matchSong(t, nf(56, 64), { low: 48, high: 72, source: 'test' })).toMatchObject({ track: t, difficulty: 'easy', octave: 'none' });
+    expect(deps.matchSong(t, nf(30, 90), { low: 48, high: 72, source: 'test' })).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import type { DataSourceLogEntry, FeedbackEntry, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
 import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UserRecord } from './store';
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -46,6 +46,13 @@ export function createMemoryStore(): Store {
     },
     async putSongRange(songKey, record) {
       songs.set(songKey, clone(record));
+    },
+    async listNoteFileRangesByArtist(artistKey) {
+      const out: SongRange[] = [];
+      for (const [k, rec] of songs) {
+        if (k.startsWith(`${artistKey}|`) && rec.range?.source === 'note-file') out.push(clone(rec.range));
+      }
+      return out;
     },
     async appendLog(entry) {
       log.push(clone(entry));

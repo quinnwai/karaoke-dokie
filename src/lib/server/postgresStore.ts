@@ -1,6 +1,6 @@
 // Postgres store using raw SQL through an injected query function, so the same code
 // runs on Neon (production) and pg-mem (tests).
-import type { DataSourceLogEntry, FeedbackEntry, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
 import { SCHEMA_SQL } from './schema';
 import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UserRecord } from './store';
 
@@ -140,6 +140,14 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
            range_json = EXCLUDED.range_json, log_json = EXCLUDED.log_json`,
         [songKey, rec.range === null, rec.range === null ? null : JSON.stringify(rec.range), JSON.stringify(rec.log)],
       );
+    },
+    async listNoteFileRangesByArtist(artistKey) {
+      // LIKE narrows the scan; the exact prefix check below guards against % or _ in names.
+      const rows = await query(`SELECT * FROM song_ranges WHERE song_key LIKE $1 AND skipped = false`, [`${artistKey}|%`]);
+      return rows
+        .filter((r) => str(r.song_key).startsWith(`${artistKey}|`))
+        .map((r) => toSongRecord(r).range)
+        .filter((r): r is SongRange => r !== null && r.source === 'note-file');
     },
     async appendLog(e) {
       await query(
