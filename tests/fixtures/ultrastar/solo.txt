@@ -1,0 +1,14 @@
+#TITLE:Solo Song
+#ARTIST:Test Artist
+#MP3:solo.mp3
+#BPM:300
+#GAP:1000
+: 0 4 0 Hel
+: 4 4 2 lo 
+* 8 8 7 world
+- 20
+: 24 4 -5 how
+F 28 4 0 are
+R 32 4 30 you
+: 36 4 4  to day
+E

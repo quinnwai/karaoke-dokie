@@ -1,0 +1,8 @@
+#TITLE:Deep Song
+#ARTIST:Bass Man
+#BPM:300
+#GAP:0
+: 0 8 -24 down
+: 8 8 -18 deep
+: 16 8 -12 low
+E
