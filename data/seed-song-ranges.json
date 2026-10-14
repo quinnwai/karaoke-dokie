@@ -1,0 +1,135 @@
+{
+  "_comment": "PLACEHOLDER seed song ranges (MIDI, C4 = 60) so the app works before the USDB fetcher exists. Every entry is approximate and must be replaced by note-file data.",
+  "songs": [
+    {
+      "artist": "Queen",
+      "title": "Bohemian Rhapsody",
+      "range": {
+        "low": 46,
+        "high": 70,
+        "tessitura": 60,
+        "source": "artist-external",
+        "confidence": "low",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+    },
+    {
+      "artist": "Whitney Houston",
+      "title": "I Will Always Love You",
+      "range": {
+        "low": 56,
+        "high": 76,
+        "tessitura": 66,
+        "source": "artist-external",
+        "confidence": "low",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+    },
+    {
+      "artist": "Journey",
+      "title": "Don't Stop Believin'",
+      "range": {
+        "low": 52,
+        "high": 73,
+        "tessitura": 64,
+        "source": "artist-external",
+        "confidence": "low",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+    },
+    {
+      "artist": "Justin Bieber",
+      "title": "Baby",
+      "range": {
+        "low": 57,
+        "high": 72,
+        "tessitura": 65,
+        "source": "artist-external",
+        "confidence": "low",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+    },
+    {
+      "artist": "Omar Apollo",
+      "title": "Evergreen",
+      "range": {
+        "low": 53,
+        "high": 77,
+        "tessitura": 63,
+        "source": "artist-external",
+        "confidence": "low",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+    },
+    {
+      "artist": "Adele",
+      "title": "Someone Like You",
+      "range": {
+        "low": 57,
+        "high": 76,
+        "tessitura": 66,
+        "source": "artist-external",
+        "confidence": "low",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+    },
+    {
+      "artist": "Bon Jovi",
+      "title": "Livin' on a Prayer",
+      "range": {
+        "low": 52,
+        "high": 76,
+        "tessitura": 64,
+        "source": "artist-external",
+        "confidence": "low",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+    },
+    {
+      "artist": "Elvis Presley",
+      "title": "Can't Help Falling in Love",
+      "range": {
+        "low": 47,
+        "high": 64,
+        "tessitura": 56,
+        "source": "artist-external",
+        "confidence": "low",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+    },
+    {
+      "artist": "ABBA",
+      "title": "Dancing Queen",
+      "range": {
+        "low": 57,
+        "high": 76,
+        "tessitura": 67,
+        "source": "artist-external",
+        "confidence": "low",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+    },
+    {
+      "artist": "Frank Sinatra",
+      "title": "My Way",
+      "range": {
+        "low": 45,
+        "high": 66,
+        "tessitura": 55,
+        "source": "artist-external",
+        "confidence": "low",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+    }
+  ]
+}
