@@ -52,6 +52,15 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(await s.getUser('u1')).toEqual(u2);
   });
 
+  it('lists user ids', async () => {
+    const s = make();
+    expect(await s.listUserIds()).toEqual([]);
+    const tokens = { accessToken: 'a', refreshToken: 'r', expiresAt: 1 };
+    await s.upsertUser({ id: 'u2', displayName: 'B', spotify: tokens });
+    await s.upsertUser({ id: 'u1', displayName: 'A', spotify: tokens });
+    expect((await s.listUserIds()).sort()).toEqual(['u1', 'u2']);
+  });
+
   it('reads back vocal ranges per user', async () => {
     const s = make();
     expect(await s.getRange('u1')).toBeNull();

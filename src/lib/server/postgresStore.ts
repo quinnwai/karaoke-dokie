@@ -141,6 +141,9 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         [songKey, rec.range === null, rec.range === null ? null : JSON.stringify(rec.range), JSON.stringify(rec.log)],
       );
     },
+    async listUserIds() {
+      return (await query(`SELECT id FROM users ORDER BY id`, [])).map((r) => str(r.id));
+    },
     async listNoteFileRangesByArtist(artistKey) {
       // LIKE narrows the scan; the exact prefix check below guards against % or _ in names.
       const rows = await query(`SELECT * FROM song_ranges WHERE song_key LIKE $1 AND skipped = false`, [`${artistKey}|%`]);

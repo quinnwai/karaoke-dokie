@@ -24,6 +24,7 @@ export interface SongRangeRecord {
 export interface Store {
   getUser(id: string): Promise<UserRecord | null>;
   upsertUser(user: UserRecord): Promise<void>;
+  listUserIds(): Promise<string[]>;
 
   saveRange(userId: string, range: VocalRange): Promise<void>;
   getRange(userId: string): Promise<VocalRange | null>;

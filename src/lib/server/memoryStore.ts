@@ -28,6 +28,9 @@ export function createMemoryStore(): Store {
     async saveRange(userId, range) {
       ranges.set(userId, clone(range));
     },
+    async listUserIds() {
+      return [...users.keys()];
+    },
     async getRange(userId) {
       const r = ranges.get(userId);
       return r ? clone(r) : null;
