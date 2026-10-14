@@ -1,0 +1,14 @@
+#TITLE:Duet Song
+#ARTIST:Duo
+#BPM:200
+#GAP:0
+#P1:Singer One
+#P2:Singer Two
+P1
+: 0 4 0 one
+: 4 4 2 two
+- 10
+P2
+: 12 4 7 three
+: 16 8 12 four
+E

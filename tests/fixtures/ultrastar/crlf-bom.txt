@@ -1,0 +1,9 @@
+﻿#TITLE:Crlf Song
+#ARTIST:Windows Writer
+#BPM:312,5
+#GAP:1500,5
+: 0 4 5 a
+: 4 4 7 b
+- 10
+: 12 2 9 c
+E
