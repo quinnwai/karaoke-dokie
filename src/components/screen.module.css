@@ -214,6 +214,10 @@
   padding: 28px 56px 28px 24px;
 }
 
+.holdText .hint {
+  max-width: 24ch;
+}
+
 .holdText {
   align-self: end;
   display: flex;
@@ -707,20 +711,16 @@
 }
 
 .tooltip {
-  position: absolute;
-  z-index: 2;
-  bottom: calc(100% + 10px);
-  right: -12px;
-  width: min(250px, 70vw);
-  padding: 10px 12px;
+  margin: -10px 0 0;
+  max-width: 300px;
+  padding: 10px 14px;
   border-radius: 12px;
   background: #1d1a22;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
   font-size: 13px;
   line-height: 1.4;
   color: var(--ink);
-  text-align: left;
+  text-align: center;
 }
 
 .octave {

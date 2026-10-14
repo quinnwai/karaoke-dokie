@@ -78,18 +78,21 @@ registerProcessor('kd-tap', KdTap);
 export const browserMic: Mic = {
   async open() {
     if (!navigator.mediaDevices?.getUserMedia) throw new MicDeniedError('No microphone available');
+    // Create the context before any await so it starts inside the press gesture (iOS Safari).
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const ctx = new Ctx();
+    const resumed = ctx.resume().catch(() => {});
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       });
     } catch (err) {
+      void ctx.close().catch(() => {});
       throw new MicDeniedError(err instanceof Error ? err.message : undefined);
     }
+    await resumed;
 
-    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new Ctx();
-    if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
     const source = ctx.createMediaStreamSource(stream);
     const silent = ctx.createGain();
     silent.gain.value = 0;

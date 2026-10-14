@@ -77,16 +77,18 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
             aria-expanded={infoOpen}
             aria-describedby={infoOpen ? tipId : undefined}
             onClick={() => setInfoOpen((o) => !o)}
+            onKeyDown={(e) => e.key === 'Escape' && setInfoOpen(false)}
           >
             i
           </button>
-          {infoOpen && (
-            <span role="tooltip" id={tipId} className={styles.tooltip}>
-              {sourceTooltip(source)}
-            </span>
-          )}
         </span>
       </div>
+
+      {infoOpen && (
+        <p role="tooltip" id={tipId} className={styles.tooltip}>
+          {sourceTooltip(source)}
+        </p>
+      )}
 
       {octave && <p className={styles.octave}>{octave}</p>}
 

@@ -67,6 +67,7 @@ export function Results({ range, matches, loading, error, hasMore, onSelect, onM
         </button>
       )}
       {loading && !hasMore && !error && <p className={styles.hint}>Loading…</p>}
+      {!loading && !error && !hasMore && matches.length > 0 && <p className={styles.hint}>That’s every song that fits, for now.</p>}
     </div>
   );
 }
