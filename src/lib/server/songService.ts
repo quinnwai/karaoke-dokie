@@ -135,19 +135,22 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         return matches.length >= need;
       });
 
-      const ranked = deps.rankMatches(matches);
-      const page = deps.paginate(ranked, offset, limit);
+      // Matches are found in play order and paged in that order, then ranked within the page.
+      // Ranking the whole list would need every song resolved up front, and ranking a growing
+      // prefix would let songs jump between pages (duplicates or gaps while scrolling).
+      const page = deps.paginate(matches, offset, limit);
+      const items = deps.rankMatches(page.items);
       // paginate() only sees the matches found so far; whether more exist depends on the walk.
       let nextOffset: number | null = null;
-      if (ranked.length > offset + limit) nextOffset = offset + limit;
+      if (matches.length > offset + limit) nextOffset = offset + limit;
       else if (!exhausted) nextOffset = offset + page.items.length; // more tracks left to look up
 
       const sources: Record<string, DataSourceLogEntry> = {};
-      for (const m of page.items) {
+      for (const m of items) {
         const log = logs.get(m.track.id);
         if (log) sources[m.track.id] = log;
       }
-      return { matches: page.items, nextOffset, sources };
+      return { matches: items, nextOffset, sources };
     },
 
     async knownSongs(tracks) {

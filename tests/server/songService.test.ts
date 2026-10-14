@@ -157,3 +157,14 @@ describe('song service known songs', () => {
     expect(res.songs[1]!.range).toEqual(range(50, 70));
   });
 });
+
+describe('song service ranking', () => {
+  it('ranks within a page so pages never overlap', async () => {
+    const { deps } = fakeDeps({ rankMatches: (m) => [...m].reverse() });
+    const svc = createSongService(createMemoryStore(), deps);
+    const p1 = await svc.recommend(tracks, user, 0, 5);
+    const p2 = await svc.recommend(tracks, user, 5, 5);
+    expect(p1.matches.map((m) => m.track.id)).toEqual(['t14', 't10', 't8', 't4', 't2']);
+    expect(p2.matches.map((m) => m.track.id)).toEqual(['t28', 't26', 't22', 't20', 't16']);
+  });
+});
