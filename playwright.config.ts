@@ -20,6 +20,6 @@ export default defineConfig({
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: true,
     timeout: 180_000,
-    env: { KARAOKE_STORE: 'memory', SPOTIFY_MOCK: '1', SESSION_SECRET: 'e2e-secret-e2e-secret-e2e-secret!!' },
+    env: { KARAOKE_STORE: 'memory', SPOTIFY_MOCK: '1', SESSION_SECRET: 'e2e-secret-e2e-secret-e2e-secret!!', ADMIN_TOKEN: 'e2e-admin' },
   },
 });
