@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
-    "usdb:sync": "tsx scripts/usdb-sync.ts"
+    "usdb:sync": "tsx scripts/usdb-sync.ts",
+    "ranges:build": "tsx scripts/note-ranges-build.ts",
+    "ranges:import": "tsx scripts/note-ranges-import.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
