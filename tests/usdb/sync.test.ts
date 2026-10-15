@@ -105,4 +105,32 @@ describe('syncNoteFiles', () => {
     await expect(syncNoteFiles({ store, usdb, tracks: [track('1', 'A', 'B')] })).rejects.toThrow(/login failed/);
     expect(calls).toEqual([]);
   });
+
+  it('fetches one song per artist first, so other songs get artist estimates early', async () => {
+    const store = createMemoryStore();
+    const calls: { title: string; download: boolean }[] = [];
+    const estimatesWhenA2Fetched: (string | undefined)[] = [];
+    const base = fakeUsdb(() => noteFile([0, 4]), calls);
+    const usdb = {
+      findSong: async (a: string, t: string, o?: { download?: boolean }) => {
+        if (t === 'A2') estimatesWhenA2Fetched.push((await store.getSongRange(songKey('A', 'A2')))?.range?.source);
+        return base.findSong(a, t, o);
+      },
+    };
+    const tracks = [track('1', 'A', 'A1'), track('2', 'A', 'A2'), track('3', 'B', 'B1'), track('4', 'B', 'B2')];
+    const summary = await syncNoteFiles({ store, usdb, tracks });
+    expect(calls.map((c) => c.title)).toEqual(['A1', 'B1', 'A2', 'B2']);
+    expect(estimatesWhenA2Fetched).toEqual(['artist-typical']);
+    expect(summary).toMatchObject({ noteFile: 4, artistTypical: 0, skipped: 0 });
+    expect((await store.listLog()).length).toBe(4);
+  });
+
+  it('tries a second song when an artist\'s first one is not on USDB', async () => {
+    const store = createMemoryStore();
+    const calls: { title: string; download: boolean }[] = [];
+    const usdb = fakeUsdb((_a, t) => (t === 'A1' ? null : noteFile([0, 4])), calls);
+    await syncNoteFiles({ store, usdb, tracks: [track('1', 'A', 'A1'), track('2', 'A', 'A2'), track('3', 'A', 'A3')] });
+    expect(calls.map((c) => c.title)).toEqual(['A1', 'A2', 'A3']);
+    expect((await store.getSongRange(songKey('A', 'A1')))?.range?.source).toBe('artist-typical');
+  });
 });
