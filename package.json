@@ -13,6 +13,7 @@
     "usdb:sync": "tsx scripts/usdb-sync.ts",
     "usdb:index": "tsx scripts/usdb-index.ts",
     "usdb:fill": "tsx scripts/usdb-fill.ts",
+    "report:coverage": "tsx scripts/coverage-report.ts",
     "ranges:build": "tsx scripts/note-ranges-build.ts",
     "ranges:import": "tsx scripts/note-ranges-import.ts"
   },
