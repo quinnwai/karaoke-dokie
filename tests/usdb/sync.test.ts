@@ -165,3 +165,45 @@ describe('syncNoteFiles', () => {
     expect(calls.map((c) => c.title)).toEqual(['Guessed']);
   });
 });
+
+describe('syncNoteFiles with the USDB song index', () => {
+  it('looks songs up in the index instead of searching: misses cost nothing, hits download by id', async () => {
+    const store = createMemoryStore();
+    await store.putUsdbSongs([
+      { id: 42, key: songKey('Queen', 'Bohemian Rhapsody'), artist: 'Queen', title: 'Bohemian Rhapsody', views: 5000, rating: 4.5 },
+    ]);
+    const searches: string[] = [];
+    const downloads: number[] = [];
+    const usdb = {
+      findSong: async (_a: string, t: string) => {
+        searches.push(t);
+        return null;
+      },
+      downloadById: async (id: number) => {
+        downloads.push(id);
+        return noteFile([-5, 0, 7]);
+      },
+    };
+    const tracks = [track('1', 'Queen', 'Bohemian Rhapsody - Remastered 2011'), track('2', 'Queen', 'Not On USDB')];
+    const summary = await syncNoteFiles({ store, usdb, tracks });
+    expect(searches).toEqual([]);
+    expect(downloads).toEqual([42]);
+    expect(summary.noteFile).toBe(1);
+    const range = (await store.getSongRange(songKey('Queen', 'Bohemian Rhapsody')))!.range!;
+    expect(range).toMatchObject({ usdbId: 42, usdbViews: 5000, usdbRating: 4.5 });
+    expect((await store.getSongRange(songKey('Queen', 'Not On USDB')))!.range?.source).toBe('artist-typical');
+  });
+
+  it('backfills views and stars from the index with no request', async () => {
+    const store = createMemoryStore();
+    const key = songKey('Queen', 'Bohemian Rhapsody');
+    const base = { low: 55, high: 67, tessitura: 60, source: 'note-file' as const, confidence: 'high' as const, fastLyrics: false };
+    await store.putSongRange(key, { range: base, log: { trackId: '1', title: 't', artist: 'a', outcome: 'note-file', reason: 'r', at: 'x' } });
+    await store.putUsdbSongs([{ id: 7, key, artist: 'Queen', title: 'Bohemian Rhapsody', views: 10, rating: 3 }]);
+    let requests = 0;
+    const usdb = { findSong: async () => (requests++, null), downloadById: async () => (requests++, null) };
+    await syncNoteFiles({ store, usdb, tracks: [track('1', 'Queen', 'Bohemian Rhapsody')] });
+    expect(requests).toBe(0);
+    expect((await store.getSongRange(key))!.range).toMatchObject({ usdbId: 7, usdbViews: 10, usdbRating: 3 });
+  });
+});

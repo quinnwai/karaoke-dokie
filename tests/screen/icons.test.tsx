@@ -82,3 +82,18 @@ describe('SongDetail', () => {
     expect(screen.getByText('You play this a lot')).toBeTruthy();
   });
 });
+
+describe('sources', () => {
+  it('links the song to its USDB page from the info button when the id is known', async () => {
+    const { fireEvent } = await import('@testing-library/react');
+    const m = { ...match(0), range: { ...match(0).range, usdbId: 1234 } };
+    render(<SongDetail match={m} userRange={range} source={undefined} feedback={undefined} onFeedback={() => {}} onBack={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Where this came from' }));
+    expect(screen.getByRole('link', { name: 'View on USDB' }).getAttribute('href')).toBe('https://usdb.animux.de/index.php?link=detail&id=1234');
+  });
+
+  it('shows a Sources and credits link under the results', () => {
+    render(<Results range={range} matches={[match(0)]} hasMore={false} loading={false} error={false} onSelect={() => {}} onMore={() => {}} onRedo={() => {}} />);
+    expect(screen.getByRole('link', { name: 'Sources and credits' }).getAttribute('href')).toBe('/credits');
+  });
+});

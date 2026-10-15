@@ -2,7 +2,7 @@
 // runs on Neon (production) and pg-mem (tests).
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
 import { SCHEMA_SQL } from './schema';
-import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UserRecord } from './store';
+import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
 
 export type Row = Record<string, unknown>;
 export type QueryFn = (text: string, params?: unknown[]) => Promise<Row[]>;
@@ -43,6 +43,14 @@ function toSongRecord(r: Row): SongRangeRecord {
     range: r.skipped || r.range_json == null ? null : JSON.parse(str(r.range_json)),
     log: JSON.parse(str(r.log_json)),
   };
+}
+
+function toUsdbEntry(r: Row): UsdbIndexEntry {
+  const e: UsdbIndexEntry = { id: num(r.id), key: str(r.song_key), artist: str(r.artist), title: str(r.title) };
+  if (r.views !== null && r.views !== undefined) e.views = num(r.views);
+  if (r.rating !== null && r.rating !== undefined) e.rating = num(r.rating);
+  if (r.last_change !== null && r.last_change !== undefined) e.lastChange = num(r.last_change);
+  return e;
 }
 
 function toLog(r: Row): DataSourceLogEntry {
@@ -151,6 +159,43 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         .filter((r) => str(r.song_key).startsWith(`${artistKey}|`))
         .map((r) => toSongRecord(r).range)
         .filter((r): r is SongRange => r !== null && r.source === 'note-file');
+    },
+    async putUsdbSongs(entries) {
+      // Multi-row inserts, 100 at a time, so a full index (about 32k songs) is a few hundred queries.
+      for (let i = 0; i < entries.length; i += 100) {
+        const chunk = entries.slice(i, i + 100);
+        const params: unknown[] = [];
+        const rows = chunk.map((e) => {
+          params.push(e.id, e.key, e.artist, e.title, e.views ?? null, e.rating ?? null, e.lastChange ?? null);
+          const n = params.length;
+          return `($${n - 6}, $${n - 5}, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(
+          `INSERT INTO usdb_songs (id, song_key, artist, title, views, rating, last_change) VALUES ${rows.join(', ')}
+           ON CONFLICT (id) DO UPDATE SET song_key = EXCLUDED.song_key, artist = EXCLUDED.artist, title = EXCLUDED.title,
+             views = EXCLUDED.views, rating = EXCLUDED.rating, last_change = EXCLUDED.last_change`,
+          params,
+        );
+      }
+    },
+    async findUsdbSongs(songKeys) {
+      const out = new Map<string, UsdbIndexEntry>();
+      const unique = [...new Set(songKeys)];
+      for (let i = 0; i < unique.length; i += 200) {
+        const chunk = unique.slice(i, i + 200);
+        const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
+        const rows = await query(`SELECT * FROM usdb_songs WHERE song_key IN (${placeholders})`, chunk);
+        for (const r of rows) {
+          const e = toUsdbEntry(r);
+          const best = out.get(e.key);
+          if (!best || (e.views ?? 0) > (best.views ?? 0)) out.set(e.key, e);
+        }
+      }
+      return out;
+    },
+    async usdbIndexStats() {
+      const [r] = await query('SELECT COUNT(*) AS n, MAX(last_change) AS newest FROM usdb_songs', []);
+      return { count: num(r?.n ?? 0), newestChange: r?.newest === null || r?.newest === undefined ? null : num(r.newest) };
     },
     async appendLog(e) {
       await query(

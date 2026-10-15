@@ -1,5 +1,5 @@
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
-import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UserRecord } from './store';
+import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -10,6 +10,7 @@ export function createMemoryStore(): Store {
   const songs = new Map<string, SongRangeRecord>();
   const log: DataSourceLogEntry[] = [];
   const feedback: FeedbackEntry[] = [];
+  const usdbSongs = new Map<number, UsdbIndexEntry>();
 
   const newestFirst = <T extends { at: string }>(items: T[]): T[] =>
     items
@@ -56,6 +57,24 @@ export function createMemoryStore(): Store {
         if (k.startsWith(`${artistKey}|`) && rec.range?.source === 'note-file') out.push(clone(rec.range));
       }
       return out;
+    },
+    async putUsdbSongs(entries) {
+      for (const e of entries) usdbSongs.set(e.id, clone(e));
+    },
+    async findUsdbSongs(songKeys) {
+      const wanted = new Set(songKeys);
+      const out = new Map<string, UsdbIndexEntry>();
+      for (const e of usdbSongs.values()) {
+        if (!wanted.has(e.key)) continue;
+        const best = out.get(e.key);
+        if (!best || (e.views ?? 0) > (best.views ?? 0)) out.set(e.key, clone(e));
+      }
+      return out;
+    },
+    async usdbIndexStats() {
+      let newest: number | null = null;
+      for (const e of usdbSongs.values()) if (e.lastChange !== undefined && (newest === null || e.lastChange > newest)) newest = e.lastChange;
+      return { count: usdbSongs.size, newestChange: newest };
     },
     async appendLog(entry) {
       log.push(clone(entry));

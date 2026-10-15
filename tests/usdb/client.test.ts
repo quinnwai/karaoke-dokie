@@ -26,8 +26,8 @@ const html = (body: string, cookie?: string) =>
 describe('USDB page parsing', () => {
   it('reads song rows from a search result page', () => {
     expect(parseSongList(fixture('list.html'))).toEqual([
-      { id: 1234, artist: 'Queen', title: 'Bohemian Rhapsody', rating: 5, views: 1000 },
-      { id: 5678, artist: 'Queen & David Bowie', title: 'Under Pressure', rating: 4, views: 500 },
+      { id: 1234, artist: 'Queen', title: 'Bohemian Rhapsody', rating: 5, views: 1000, lastChange: 1700000000 },
+      { id: 5678, artist: 'Queen & David Bowie', title: 'Under Pressure', rating: 4, views: 500, lastChange: 1700000001 },
     ]);
   });
 
@@ -93,6 +93,25 @@ describe('USDB client', () => {
     expect(calls.filter((c) => c.body.includes('login=Login'))).toHaveLength(1);
   });
 
+  it('pages through the song list 100 rows at a time, sorted as asked', async () => {
+    const { fetch, calls } = pages();
+    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
+    const rows = await client.listSongs({ order: 'lastchange', descending: true, start: 200 });
+    expect(rows.map((r) => r.id)).toEqual([1234, 5678]);
+    const form = new URLSearchParams(calls.find((c) => c.url.includes('link=list'))!.body);
+    expect(Object.fromEntries(form)).toEqual({ order: 'lastchange', ud: 'desc', limit: '100', details: '1', start: '200' });
+  });
+
+  it('downloads a note file by id, waiting out the countdown', async () => {
+    const { fetch, calls } = pages();
+    const slept: number[] = [];
+    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async (ms) => { slept.push(ms); } });
+    expect(await client.downloadById(1234)).toContain('#ARTIST:Queen');
+    expect(calls.filter((c) => c.url.includes('link=gettxt')).map((c) => c.method)).toEqual(['GET', 'POST']);
+    expect(calls.some((c) => c.url.includes('link=list'))).toBe(false);
+    expect(slept).toContain(25_000);
+  });
+
   it('returns null when no result matches the artist and title', async () => {
     const { fetch } = pages();
     const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
@@ -156,7 +175,7 @@ describe('USDB client', () => {
   it('can search without downloading, for views and rating only', async () => {
     const { fetch, calls } = pages();
     const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
-    expect(await client.findSong('Queen', 'Bohemian Rhapsody', { download: false })).toEqual({ noteText: null, rating: 5, views: 1000 });
+    expect(await client.findSong('Queen', 'Bohemian Rhapsody', { download: false })).toEqual({ id: 1234, noteText: null, rating: 5, views: 1000 });
     expect(calls.some((c) => c.url.includes('link=gettxt'))).toBe(false);
   });
 

@@ -7,12 +7,14 @@
 // Songs synced before ranking v2 lack USDB views/rating and the pitch histogram. Views and rating
 // are backfilled with a search only (fast); the histogram needs the note file again (about 25 s
 // per song), so that only happens with `rescan: true`.
+// When the USDB song index is filled (npm run usdb:index), songs are looked up there instead of
+// searched one by one: a song not in the index is a miss at no cost, and a hit is downloaded by id.
 
 import type { SongRange, Track } from '../contracts';
 import type { Store } from '../server/store';
 import { songRangeFromUltrastar } from '../songs/range';
 import { resolveSongRange, songKey } from '../songs/resolve';
-import type { UsdbClient } from './client';
+import type { UsdbClient, UsdbSong } from './client';
 
 /** A song USDB had no note file for is not searched again for this long. */
 export const MISS_RECHECK_DAYS = 90;
@@ -32,7 +34,7 @@ export interface SyncSummary {
 
 export interface SyncOptions {
   store: Store;
-  usdb: Pick<UsdbClient, 'findSong'> & Partial<Pick<UsdbClient, 'login'>>;
+  usdb: Pick<UsdbClient, 'findSong'> & Partial<Pick<UsdbClient, 'login' | 'downloadById'>>;
   tracks: Track[];
   /** Re-download note files for known songs that lack a pitch histogram. */
   rescan?: boolean;
@@ -42,8 +44,9 @@ export interface SyncOptions {
   onProgress?: (line: string) => void;
 }
 
-function withPopularity(range: SongRange, song: { views?: number; rating?: number }): SongRange {
+function withPopularity(range: SongRange, song: { id?: number; views?: number; rating?: number }): SongRange {
   const out = { ...range };
+  if (song.id !== undefined) out.usdbId = song.id;
   if (song.views !== undefined) out.usdbViews = song.views;
   if (song.rating !== undefined) out.usdbRating = song.rating;
   return out;
@@ -69,13 +72,23 @@ export async function syncNoteFiles({
   /** Lookups that errored: left unstored so the next run tries again. */
   const failed = new Set<string>();
   const remaining: Track[] = [];
+  const indexed = (await store.usdbIndexStats()).count > 0 && usdb.downloadById !== undefined;
+  const index = indexed ? await store.findUsdbSongs(tracks.map((t) => songKey(t.artist, t.title))) : new Map();
+
+  /** The song on USDB (from the index when there is one, else a search), optionally with its notes. */
+  async function lookup(track: Track, download: boolean): Promise<UsdbSong | null> {
+    if (!indexed) return usdb.findSong(track.artist, track.title, { download });
+    const entry = index.get(songKey(track.artist, track.title));
+    if (!entry) return null;
+    return { id: entry.id, views: entry.views, rating: entry.rating, noteText: download ? await usdb.downloadById!(entry.id) : null };
+  }
 
   /** Looks one song up on USDB and stores its note-file range. False when USDB has no file for it. */
   async function fetchSong(track: Track): Promise<boolean> {
     const key = songKey(track.artist, track.title);
     looked.add(key);
     try {
-      const song = await usdb.findSong(track.artist, track.title);
+      const song = await lookup(track, true);
       const text = song?.noteText;
       if (!song || !text) {
         missAt.set(key, now().toISOString());
@@ -125,7 +138,7 @@ export async function syncNoteFiles({
     const cached = await store.getSongRange(key);
     if (cached?.range?.source !== 'note-file') {
       const miss = cached?.log.usdbMissAt;
-      if (miss && now().getTime() - Date.parse(miss) < MISS_RECHECK_DAYS * 86_400_000) {
+      if (!indexed && miss && now().getTime() - Date.parse(miss) < MISS_RECHECK_DAYS * 86_400_000) {
         summary.recentMiss++;
         looked.add(key); // keep its estimate fresh in the fallback pass, but don't search again
       }
@@ -137,7 +150,7 @@ export async function syncNoteFiles({
     const needsPopularity = cached.range.usdbViews === undefined && cached.range.usdbRating === undefined;
     if (!needsHistogram && !needsPopularity) continue;
     try {
-      const song = await usdb.findSong(track.artist, track.title, { download: needsHistogram });
+      const song = await lookup(track, needsHistogram);
       if (song) {
         const base = needsHistogram && song.noteText ? songRangeFromUltrastar(song.noteText) : cached.range;
         await store.putSongRange(key, { range: withPopularity(base, song), log: cached.log });

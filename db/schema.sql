@@ -42,3 +42,13 @@ CREATE TABLE IF NOT EXISTS feedback (
   at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS feedback_user ON feedback (user_id);
+CREATE TABLE IF NOT EXISTS usdb_songs (
+  id INTEGER PRIMARY KEY,
+  song_key TEXT NOT NULL,
+  artist TEXT NOT NULL,
+  title TEXT NOT NULL,
+  views INTEGER,
+  rating DOUBLE PRECISION,
+  last_change BIGINT
+);
+CREATE INDEX IF NOT EXISTS usdb_songs_key ON usdb_songs (song_key);

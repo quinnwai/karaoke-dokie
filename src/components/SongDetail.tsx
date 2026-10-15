@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import type { DataSourceLogEntry, Match, VocalRange } from '../lib/contracts';
 import { difficultyLabel, octaveWording, rangeBar, sourceTooltip } from '../lib/client/display';
+import { usdbSongUrl } from '../lib/usdb/client';
 import { FastLyricsIcon, OctaveIcon } from './Icon';
 import styles from './screen.module.css';
 
@@ -93,6 +94,14 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
       {infoOpen && (
         <p role="tooltip" id={tipId} className={styles.tooltip}>
           {sourceTooltip(source)}
+          {match.range.usdbId !== undefined && (
+            <>
+              {' '}
+              <a href={usdbSongUrl(match.range.usdbId)} target="_blank" rel="noreferrer">
+                View on USDB
+              </a>
+            </>
+          )}
         </p>
       )}
 

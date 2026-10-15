@@ -21,6 +21,19 @@ export interface SongRangeRecord {
   log: DataSourceLogEntry;
 }
 
+/** One song in our copy of USDB's song list (no note text), keyed by USDB id. */
+export interface UsdbIndexEntry {
+  id: number;
+  /** songKey(artist, title). */
+  key: string;
+  artist: string;
+  title: string;
+  views?: number;
+  rating?: number;
+  /** USDB's last-changed time, epoch seconds. */
+  lastChange?: number;
+}
+
 export interface Store {
   getUser(id: string): Promise<UserRecord | null>;
   upsertUser(user: UserRecord): Promise<void>;
@@ -35,6 +48,13 @@ export interface Store {
   putSongRange(songKey: string, record: SongRangeRecord): Promise<void>;
   /** Ranges read from note files for one artist (the artist part of songKey), for the artist fallback. */
   listNoteFileRangesByArtist(artistKey: string): Promise<SongRange[]>;
+
+  /** Adds or updates songs in the USDB song index. */
+  putUsdbSongs(entries: UsdbIndexEntry[]): Promise<void>;
+  /** The most-viewed indexed USDB song for each key; the map only has keys that are indexed. */
+  findUsdbSongs(songKeys: string[]): Promise<Map<string, UsdbIndexEntry>>;
+  /** Size of the USDB index and its newest last-changed time (null when empty). */
+  usdbIndexStats(): Promise<{ count: number; newestChange: number | null }>;
 
   appendLog(entry: DataSourceLogEntry): Promise<void>;
   /** Newest first. */

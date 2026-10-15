@@ -843,3 +843,15 @@
     transition: none;
   }
 }
+
+.credits {
+  display: block;
+  margin: 24px auto 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.tooltip a {
+  color: var(--ink);
+}

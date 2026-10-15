@@ -28,6 +28,10 @@ export interface SongRange {
   /** USDB page views and star rating (0-5) for this song's note file, when known. */
   usdbViews?: number;
   usdbRating?: number;
+  /** USDB song id the note file came from, for a link to its page. */
+  usdbId?: number;
+  /** Where the note file came from when it was not USDB directly, e.g. "singmania". */
+  collection?: string;
 }
 
 export type Difficulty = 'easy' | 'medium' | 'hard';

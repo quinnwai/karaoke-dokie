@@ -43,7 +43,7 @@ export function rangeFromNoteText(text: string, collection: string): BulkRange |
     const key = songKey(artist, title);
     if (key.startsWith('|') || key.endsWith('|')) return null;
     const range = songRangeFromUltrastar(file);
-    return plausible(range) ? { key, artist, title, collection, range } : null;
+    return plausible(range) ? { key, artist, title, collection, range: { ...range, collection } } : null;
   } catch {
     return null;
   }

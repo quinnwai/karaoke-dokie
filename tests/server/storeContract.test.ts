@@ -103,6 +103,23 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(await s.listNoteFileRangesByArtist('nobody')).toEqual([]);
   });
 
+  it('keeps a USDB song index: upserts by id, finds the most-viewed per key, reports size and newest change', async () => {
+    const s = make();
+    expect(await s.usdbIndexStats()).toEqual({ count: 0, newestChange: null });
+    await s.putUsdbSongs([
+      { id: 1, key: 'queen|bohemian rhapsody', artist: 'Queen', title: 'Bohemian Rhapsody', views: 100, rating: 4.5, lastChange: 1700 },
+      { id: 2, key: 'queen|bohemian rhapsody', artist: 'Queen', title: 'Bohemian Rhapsody (Live)', views: 900, lastChange: 1800 },
+      { id: 3, key: 'abba|sos', artist: 'ABBA', title: 'SOS' },
+    ]);
+    await s.putUsdbSongs([{ id: 3, key: 'abba|sos', artist: 'ABBA', title: 'SOS', views: 7, lastChange: 1750 }]);
+    const found = await s.findUsdbSongs(['queen|bohemian rhapsody', 'abba|sos', 'nobody|x']);
+    expect(found.get('queen|bohemian rhapsody')?.id).toBe(2);
+    expect(found.get('abba|sos')).toEqual({ id: 3, key: 'abba|sos', artist: 'ABBA', title: 'SOS', views: 7, lastChange: 1750 });
+    expect(found.has('nobody|x')).toBe(false);
+    expect(await s.usdbIndexStats()).toEqual({ count: 3, newestChange: 1800 });
+    expect((await s.findUsdbSongs(['queen|bohemian rhapsody'])).get('queen|bohemian rhapsody')).not.toHaveProperty('rating');
+  });
+
   it('lists log entries newest first with a limit', async () => {
     const s = make();
     for (const n of [1, 3, 2]) await s.appendLog(logEntry(n, n === 2 ? 'skipped' : 'artist-typical'));

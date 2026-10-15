@@ -13,6 +13,7 @@ describe('rangeFromNoteText', () => {
     expect(r.range.source).toBe('note-file');
     expect(r.range.low).toBe(55);
     expect(r.collection).toBe('test');
+    expect(r.range.collection).toBe('test');
   });
 
   it('keeps no lyrics', () => {

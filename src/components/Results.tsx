@@ -73,6 +73,9 @@ export function Results({ range, matches, loading, error, hasMore, onSelect, onM
       )}
       {loading && !hasMore && !error && <p className={styles.hint}>Loading…</p>}
       {!loading && !error && !hasMore && matches.length > 0 && <p className={styles.hint}>That’s every song that fits, for now.</p>}
+      <a className={styles.credits} href="/credits">
+        Sources and credits
+      </a>
     </div>
   );
 }
