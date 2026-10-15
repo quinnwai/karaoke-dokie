@@ -10,6 +10,7 @@ import type {
   VocalRange,
 } from '../contracts';
 import type { SongRangeRecord, Store } from './store';
+import { hasLittleSinging } from '../songs/resolve';
 
 export interface ResolveResult {
   /** null = skipped (no usable data). */
@@ -127,6 +128,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       const logs = new Map<string, DataSourceLogEntry>();
       const exhausted = await walk(tracks, ({ track, record }) => {
         if (!record.range) return false; // skipped songs never match
+        if (hasLittleSinging(track.title)) return false; // a dub or instrumental shares the original's key
         const m = deps.matchSong(track, record.range, userRange);
         if (m) {
           matches.push(m);
@@ -155,7 +157,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
     async knownSongs(tracks) {
       const songs: KnownSongsResponse['songs'] = [];
       await walk(tracks, ({ track, record }) => {
-        if (record.range) songs.push({ track, range: record.range });
+        if (record.range && !hasLittleSinging(track.title)) songs.push({ track, range: record.range });
         return songs.length >= maxKnown;
       });
       return { songs };

@@ -103,6 +103,15 @@ describe('song service recommendations', () => {
     expect(seen).toEqual(['t2', 't4', 't8', 't10', 't14', 't16', 't20', 't22', 't26', 't28']);
   });
 
+  it('leaves out dub and instrumental versions, which share the original song key', async () => {
+    // Like the real songKey, both versions share the original's key, so they share its range.
+    const svc = createSongService(createMemoryStore(), fakeDeps({ songKey: (a, t) => `${a}|${t.replace(/ - .*$/, '')}`.toLowerCase() }).deps);
+    const dub = { ...track(2), id: 't2dub', title: 'Song 2 - Satta Dub' };
+    const remix = { ...track(2), id: 't2remix', title: 'Song 2 - Remix' };
+    const res = await svc.recommend([track(2), dub, remix], user, 0, 50);
+    expect(res.matches.map((m) => m.track.id)).toEqual(['t2', 't2remix']);
+  });
+
   it('never matches skipped songs', async () => {
     const svc = createSongService(createMemoryStore(), fakeDeps().deps);
     const res = await svc.recommend(tracks, { low: 20, high: 100, source: 'test' }, 0, 50);

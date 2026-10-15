@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SongRange, Track } from '../../src/lib/contracts';
-import { resolveSongRange, songKey, type ResolveDeps } from '../../src/lib/songs/resolve';
+import { hasLittleSinging, resolveSongRange, songKey, type ResolveDeps } from '../../src/lib/songs/resolve';
 import { fixture } from './fixture';
 
 const track: Track = {
@@ -135,5 +135,22 @@ describe('songKey', () => {
 
   it('keeps a hyphen that is part of a word', () => {
     expect(songKey('a-ha', 'Take On Me')).toBe('a-ha|take on me');
+  });
+});
+
+describe('hasLittleSinging', () => {
+  it('spots dub, instrumental and karaoke versions in the version tag', () => {
+    expect(hasLittleSinging('Back To Life (However Do You Want Me) - Satta Dub')).toBe(true);
+    expect(hasLittleSinging('Back to Life (Instrumental)')).toBe(true);
+    expect(hasLittleSinging('Hello [Karaoke Version]')).toBe(true);
+    expect(hasLittleSinging('Hello - Backing Track')).toBe(true);
+  });
+
+  it('keeps the original, remixes, live and acoustic versions, and titles that only contain the word', () => {
+    expect(hasLittleSinging('Back To Life (However Do You Want Me)')).toBe(false);
+    expect(hasLittleSinging('Titanium - David Guetta Remix')).toBe(false);
+    expect(hasLittleSinging('Hello - Live at the BBC')).toBe(false);
+    expect(hasLittleSinging('Rub a Dub')).toBe(false);
+    expect(hasLittleSinging('Dubstep Love - Acoustic')).toBe(false);
   });
 });

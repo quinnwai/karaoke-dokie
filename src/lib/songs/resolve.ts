@@ -92,3 +92,18 @@ function normalizePart(text: string): string {
 export function songKey(artist: string, title: string): string {
   return `${normalizePart(artist)}|${normalizePart(title)}`;
 }
+
+const LITTLE_SINGING = /\b(instrumental|karaoke|backing track|dub|beat only|no vocals?)\b/i;
+
+/**
+ * True for versions with little or no singing, named in the title's version tag:
+ * "Back To Life - Satta Dub", "Song (Instrumental)", "Song [Karaoke Version]". These share the
+ * original's songKey, so without this check they would inherit its range. Remixes, live and
+ * acoustic versions keep the vocal and still match.
+ */
+export function hasLittleSinging(title: string): boolean {
+  const tags = [...title.matchAll(/\(([^)]*)\)|\[([^\]]*)\]/g)].map((m) => m[1] ?? m[2] ?? '');
+  const dash = title.match(/\s+-\s(.*)$/);
+  if (dash) tags.push(dash[1]!);
+  return tags.some((t) => LITTLE_SINGING.test(t));
+}
