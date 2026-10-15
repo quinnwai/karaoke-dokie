@@ -21,7 +21,7 @@ function lyricFor(kind: 'low' | 'high', status: HoldStatus): string {
     case 'short':
       return 'Try again and hold the note a little longer';
     case 'order':
-      return 'That was lower than your low note. Go higher';
+      return kind === 'low' ? 'That was higher than your high note. Go lower' : 'That was lower than your low note. Go higher';
     case 'denied':
       return 'We need your mic to hear you';
     default:

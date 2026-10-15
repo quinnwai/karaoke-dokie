@@ -44,6 +44,8 @@ export interface FlowState {
   feedback: Record<string, 'up' | 'down'>;
   known: KnownSong[] | null;
   picks: string[];
+  /** Set while re-singing just one end of a saved range; the other end is kept. */
+  redoing: 'low' | 'high' | null;
 }
 
 export const initialState: FlowState = {
@@ -63,6 +65,7 @@ export const initialState: FlowState = {
   feedback: {},
   known: null,
   picks: [],
+  redoing: null,
 };
 
 export type FlowEvent =
@@ -82,6 +85,7 @@ export type FlowEvent =
   | { type: 'deselect' }
   | { type: 'feedback'; trackId: string; thumbs: 'up' | 'down' }
   | { type: 'redo' }
+  | { type: 'redoEnd'; end: 'low' | 'high' }
   | { type: 'pickStart' }
   | { type: 'knownLoaded'; songs: KnownSong[] }
   | { type: 'togglePick'; trackId: string }
@@ -117,7 +121,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       return { ...state, step: 'landing' };
     }
     case 'start':
-      return { ...state, step: 'quiet', hold: 'ready', low: null, high: null };
+      return { ...state, step: 'quiet', hold: 'ready', low: null, high: null, redoing: null };
     case 'quietDone':
       return state.step === 'quiet' ? { ...state, step: 'low', hold: 'ready' } : state;
     case 'holdStart':
@@ -126,10 +130,21 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       if (!isHoldStep(state)) return state;
       const { midi } = event;
       if (midi === null) return { ...state, hold: 'short' };
-      if (state.step === 'low') return { ...state, step: 'high', hold: 'ready', low: midi };
+      const done = (low: Midi, high: Midi): FlowState => ({
+        ...state,
+        low,
+        high,
+        hold: 'ready',
+        redoing: null,
+        range: testRange(low, high),
+        step: state.signedIn ? 'saving' : 'signin',
+      });
+      if (state.step === 'low') {
+        if (state.redoing !== 'low' || state.high === null) return { ...state, step: 'high', hold: 'ready', low: midi };
+        return midi >= state.high ? { ...state, hold: 'order' } : done(midi, state.high);
+      }
       if (state.low !== null && midi <= state.low) return { ...state, hold: 'order' };
-      const range = testRange(state.low ?? midi, midi);
-      return { ...state, high: midi, hold: 'ready', range, step: state.signedIn ? 'saving' : 'signin' };
+      return done(state.low ?? midi, midi);
     }
     case 'micDenied':
       return isHoldStep(state) ? { ...state, hold: 'denied' } : state;
@@ -163,7 +178,12 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
     case 'feedback':
       return { ...state, feedback: { ...state.feedback, [event.trackId]: event.thumbs } };
     case 'redo':
-      return { ...state, ...freshResults, step: 'quiet', hold: 'ready', low: null, high: null, loading: false, picks: [] };
+      return { ...state, ...freshResults, step: 'quiet', hold: 'ready', low: null, high: null, loading: false, picks: [], redoing: null };
+    case 'redoEnd': {
+      if (!state.range) return state;
+      const keep = event.end === 'low' ? { low: null, high: state.range.high } : { low: state.range.low, high: null };
+      return { ...state, ...keep, step: event.end, hold: 'ready', redoing: event.end, selectedId: null };
+    }
     case 'pickStart':
       return { ...state, step: 'pick', picks: [], selectedId: null };
     case 'knownLoaded':

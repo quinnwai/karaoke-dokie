@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import type { Match, VocalRange } from '../lib/contracts';
 import { midiToNoteName } from '../lib/audio/notes';
 import { difficultyLabel, octaveWording } from '../lib/client/display';
+import { rangeWarning } from '../lib/client/rangeCheck';
+import { isRangeKept, keepRange } from '../lib/client/storage';
 import { FastLyricsIcon, OctaveIcon } from './Icon';
 import { Lyric } from './Lyric';
 import styles from './screen.module.css';
@@ -14,19 +17,52 @@ interface ResultsProps {
   onSelect(trackId: string): void;
   onMore(): void;
   onRedo(): void;
+  /** Re-sing just the low or the high note, keeping the other. */
+  onRedoEnd(end: 'low' | 'high'): void;
 }
 
-export function Results({ range, matches, loading, error, hasMore, onSelect, onMore, onRedo }: ResultsProps) {
+export function Results({ range, matches, loading, error, hasMore, onSelect, onMore, onRedo, onRedoEnd }: ResultsProps) {
+  const low = midiToNoteName(range.low);
+  const high = midiToNoteName(range.high);
+  const warning = rangeWarning(range);
+  const [kept, setKept] = useState(() => isRangeKept(range.low, range.high));
+  const keep = () => {
+    keepRange(range.low, range.high);
+    setKept(true);
+  };
   return (
     <div className={styles.results}>
       <div className={styles.resultsBar}>
-        <span className={styles.rangeChip} aria-label={`Your range ${midiToNoteName(range.low)} to ${midiToNoteName(range.high)}`}>
-          {midiToNoteName(range.low)} – {midiToNoteName(range.high)}
+        <span className={styles.rangeChip} aria-label={`Your range ${low} to ${high}`}>
+          <button type="button" className={styles.rangeNote} onClick={() => onRedoEnd('low')} aria-label={`Redo your low note, ${low}`}>
+            {low}
+          </button>{' '}
+          –{' '}
+          <button type="button" className={styles.rangeNote} onClick={() => onRedoEnd('high')} aria-label={`Redo your high note, ${high}`}>
+            {high}
+          </button>
         </span>
         <button type="button" className={styles.redo} onClick={onRedo} aria-label="Redo the singing test">
           redo
         </button>
       </div>
+
+      {warning && !kept && (
+        <div className={styles.rangeWarning} role="status">
+          <p>{warning.message}</p>
+          <div className={styles.rangeWarningActions}>
+            <button type="button" className={warning.end === 'low' ? styles.more : styles.redo} onClick={() => onRedoEnd('low')}>
+              Redo low note
+            </button>
+            <button type="button" className={warning.end === 'high' ? styles.more : styles.redo} onClick={() => onRedoEnd('high')}>
+              Redo high note
+            </button>
+            <button type="button" className={styles.textButton} onClick={keep}>
+              Keep it
+            </button>
+          </div>
+        </div>
+      )}
 
       <Lyric text="Songs for your voice" />
 

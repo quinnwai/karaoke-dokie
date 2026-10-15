@@ -283,6 +283,7 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
           onSelect={(trackId) => dispatch({ type: 'select', trackId })}
           onMore={() => dispatch({ type: 'loadMore' })}
           onRedo={redo}
+          onRedoEnd={(end) => dispatch({ type: 'redoEnd', end })}
         />
       )}
 

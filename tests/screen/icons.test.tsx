@@ -46,7 +46,7 @@ describe('icons', () => {
 });
 
 describe('Results row', () => {
-  const props = { range, loading: false, error: false, hasMore: false, onSelect: vi.fn(), onMore: vi.fn(), onRedo: vi.fn() };
+  const props = { range, loading: false, error: false, hasMore: false, onSelect: vi.fn(), onMore: vi.fn(), onRedo: vi.fn(), onRedoEnd: vi.fn() };
 
   it('shows octave and fast-lyrics icons, and reasons under the artist', () => {
     const matches = [
@@ -93,7 +93,7 @@ describe('sources', () => {
   });
 
   it('shows a Sources and credits link under the results', () => {
-    render(<Results range={range} matches={[match(0)]} hasMore={false} loading={false} error={false} onSelect={() => {}} onMore={() => {}} onRedo={() => {}} />);
+    render(<Results range={range} matches={[match(0)]} hasMore={false} loading={false} error={false} onSelect={() => {}} onMore={() => {}} onRedo={() => {}} onRedoEnd={() => {}} />);
     expect(screen.getByRole('link', { name: 'Sources and credits' }).getAttribute('href')).toBe('/credits');
   });
 });

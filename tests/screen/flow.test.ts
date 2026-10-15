@@ -112,6 +112,22 @@ describe('results', () => {
     expect(s.feedback).toEqual({ t2: 'up' });
   });
 
+  it('re-sings just the low note and keeps the high one', () => {
+    let s = run([{ type: 'pageLoaded', page: recommendationsPage(0) }, { type: 'redoEnd', end: 'low' }], atResults);
+    expect(s).toMatchObject({ step: 'low', low: null, high: 72, redoing: 'low' });
+    expect(run([{ type: 'holdEnd', midi: 74 }], s)).toMatchObject({ step: 'low', hold: 'order' });
+    s = run([{ type: 'holdEnd', midi: 48 }], s);
+    expect(s).toMatchObject({ step: 'saving', range: { low: 48, high: 72, source: 'test' }, redoing: null });
+    expect(run([{ type: 'rangeSaved' }], s)).toMatchObject({ step: 'results', matches: [], loading: true });
+  });
+
+  it('re-sings just the high note and keeps the low one', () => {
+    let s = run([{ type: 'redoEnd', end: 'high' }], atResults);
+    expect(s).toMatchObject({ step: 'high', low: 45, high: null, redoing: 'high' });
+    s = run([{ type: 'holdEnd', midi: 70 }], s);
+    expect(s).toMatchObject({ step: 'saving', range: { low: 45, high: 70 } });
+  });
+
   it('redo restarts the test and clears results', () => {
     const s = run([{ type: 'pageLoaded', page: recommendationsPage(0) }, { type: 'redo' }], atResults);
     expect(s).toMatchObject({ step: 'quiet', low: null, high: null, matches: [], nextOffset: 0, signedIn: true });
