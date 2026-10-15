@@ -12,7 +12,7 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    `detectHeldNote` runs on the recording. Too short a hold → "Try again…" lyric.
 4. **Highest note**: same button; the low note shows small in the corner. A high note at
    or below the low one asks to go higher.
-5. **Range + arrow**: "That's your range A2 – C5" and a wordless arrow bouncing bottom-left
+5. **Range + arrow**: "That's your range A2 – C5" and a wordless arrow bouncing bottom-right
    (`aria-label="Continue"`) that goes to `/api/auth/login`.
 6. **After sign-in** (`/?signedIn=1`): the range kept in `sessionStorage` (`kd.test`) is
    PUT to `/api/me/range`, then results load 5 at a time from `/api/recommendations`.

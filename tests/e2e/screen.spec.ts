@@ -172,6 +172,11 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await holdButton(page, /highest note/, 1600);
   const arrow = page.getByRole('button', { name: 'Continue' });
   await expect(arrow).toBeVisible();
+  // The arrow sits in the bottom-right corner of the viewport.
+  const box = (await arrow.boundingBox())!;
+  const view = page.viewportSize()!;
+  expect(box.x + box.width / 2).toBeGreaterThan(view.width / 2);
+  expect(box.y + box.height / 2).toBeGreaterThan(view.height / 2);
   await expect(page.getByTestId('range-low')).toHaveText('A2');
   await expect(page.getByTestId('range-high')).toHaveText('C5');
   await page.waitForTimeout(900);

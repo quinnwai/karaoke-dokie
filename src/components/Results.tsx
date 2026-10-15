@@ -57,7 +57,7 @@ export function Results({ range, matches, loading, error, hasMore, onSelect, onM
       )}
 
       {!loading && !error && matches.length === 0 && (
-        <p className={styles.hint}>No songs from your library fit yet. Try saving more songs on Spotify.</p>
+        <p className={styles.hint}>None of your songs have range data yet, or none fit your range.</p>
       )}
       {error && <p className={styles.hint}>Couldn’t load songs.</p>}
 
