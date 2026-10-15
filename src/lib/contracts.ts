@@ -23,6 +23,11 @@ export interface SongRange {
   confidence: 'high' | 'low';
   /** True when sung syllables come faster than a comfortable pace. */
   fastLyrics: boolean;
+  /** Share of sung time on each pitch, [midi, share] sorted by pitch, shares summing to 1. Note files only. */
+  pitchShare?: [Midi, number][];
+  /** USDB page views and star rating (0-5) for this song's note file, when known. */
+  usdbViews?: number;
+  usdbRating?: number;
 }
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
@@ -40,6 +45,21 @@ export interface Track {
   albumArtUrl?: string;
   /** Lower = played more. Top tracks rank first, then saved-songs order. */
   playRank: number;
+  /** 0-1: how much the user listens to this song (top tracks over 3 time spans, recent plays, saved). */
+  familiarity?: number;
+  /** Spotify's 0-100 track popularity, when Spotify returns it. */
+  popularity?: number;
+}
+
+export interface ScoreParts {
+  /** 0-1: share of the song in the middle of the user's range. */
+  comfort: number;
+  /** 0-1: how much the user listens to it. */
+  familiarity: number;
+  /** 0-1: how well known the song is. */
+  popularity: number;
+  /** Total subtracted for octave shift, artist-estimated range and fast lyrics. */
+  penalty: number;
 }
 
 export interface Match {
@@ -47,6 +67,11 @@ export interface Match {
   range: SongRange;
   difficulty: Difficulty;
   octave: OctaveShift;
+  /** Ranking score, higher first: 0.50 comfort + 0.35 familiarity + 0.15 popularity - penalties. */
+  score?: number;
+  parts?: ScoreParts;
+  /** One or two short reasons for the rank, e.g. "In your sweet spot". */
+  reasons?: string[];
 }
 
 export type LogOutcome = RangeSource | 'skipped';
