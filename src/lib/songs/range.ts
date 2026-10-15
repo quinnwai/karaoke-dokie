@@ -107,6 +107,11 @@ export function songRangeFromUltrastar(file: UltrastarFile | string, part = 1): 
   const tessitura = weighted / total;
   const shift = octaveCorrection(tessitura);
   const { low, high } = trimmedRange(pitched);
+  const byPitch = new Map<number, number>();
+  for (const n of pitched) byPitch.set(n.midi + shift, (byPitch.get(n.midi + shift) ?? 0) + n.length);
+  const pitchShare = [...byPitch.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([midi, len]): [number, number] => [midi, Math.round((len / total) * 1000) / 1000]);
 
   return {
     low: low + shift,
@@ -115,5 +120,6 @@ export function songRangeFromUltrastar(file: UltrastarFile | string, part = 1): 
     source: 'note-file',
     confidence: 'high',
     fastLyrics: syllableRate(notes, song.bpm) > FAST_LYRICS_SYLLABLES_PER_SECOND,
+    pitchShare,
   };
 }

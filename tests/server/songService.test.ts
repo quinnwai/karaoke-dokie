@@ -57,15 +57,14 @@ function fakeDeps(overrides: Partial<SongDeps> = {}) {
 const tracks = Array.from({ length: 30 }, (_, i) => track(i + 1));
 
 describe('song service recommendations', () => {
-  it('returns the first page lazily, resolving only what it needs', async () => {
+  it('looks up the whole library so it can rank all of it, then returns the first page', async () => {
     const store = createMemoryStore();
     const { deps, resolveSongRange } = fakeDeps();
     const svc = createSongService(store, deps, { concurrency: 1 });
     const res = await svc.recommend(tracks, user, 0, 5);
     expect(res.matches.map((m) => m.track.id)).toEqual(['t2', 't4', 't8', 't10', 't14']);
     expect(res.nextOffset).toBe(5);
-    // Needed 6 matches (one extra to know a next page exists): t16 is the 6th -> 16 lookups.
-    expect(resolveSongRange).toHaveBeenCalledTimes(16);
+    expect(resolveSongRange).toHaveBeenCalledTimes(30);
     expect(Object.keys(res.sources).sort()).toEqual(['t10', 't14', 't2', 't4', 't8']);
     expect(res.sources.t2).toMatchObject({ outcome: 'note-file', trackId: 't2' });
   });
@@ -76,9 +75,9 @@ describe('song service recommendations', () => {
     const svc = createSongService(store, deps, { concurrency: 1 });
     await svc.recommend(tracks, user, 0, 5);
     const log = await store.listLog(100);
-    expect(log).toHaveLength(16);
+    expect(log).toHaveLength(30);
     expect(log.filter((e) => e.outcome === 'skipped').map((e) => e.trackId).sort()).toEqual(
-      ['t12', 't15', 't3', 't6', 't9'].sort(),
+      ['t12', 't15', 't18', 't21', 't24', 't27', 't3', 't30', 't6', 't9'].sort(),
     );
     expect(await store.getSongRange('artist 3|song 3')).toMatchObject({ range: null });
     expect(await store.getSongRange('artist 2|song 2')).toMatchObject({ range: range(50, 70) });
@@ -87,7 +86,7 @@ describe('song service recommendations', () => {
     const again = await svc.recommend(tracks, user, 0, 5);
     expect(again.matches).toHaveLength(5);
     expect(resolveSongRange).not.toHaveBeenCalled();
-    expect(await store.listLog(100)).toHaveLength(16); // cache hits are not logged again
+    expect(await store.listLog(100)).toHaveLength(30); // cache hits are not logged again
   });
 
   it('pages through to the end and returns nextOffset null', async () => {
@@ -159,12 +158,13 @@ describe('song service known songs', () => {
 });
 
 describe('song service ranking', () => {
-  it('ranks within a page so pages never overlap', async () => {
+  it('ranks the whole library before paging, so pages never overlap', async () => {
     const { deps } = fakeDeps({ rankMatches: (m) => [...m].reverse() });
     const svc = createSongService(createMemoryStore(), deps);
     const p1 = await svc.recommend(tracks, user, 0, 5);
     const p2 = await svc.recommend(tracks, user, 5, 5);
-    expect(p1.matches.map((m) => m.track.id)).toEqual(['t14', 't10', 't8', 't4', 't2']);
-    expect(p2.matches.map((m) => m.track.id)).toEqual(['t28', 't26', 't22', 't20', 't16']);
+    expect(p1.matches.map((m) => m.track.id)).toEqual(['t28', 't26', 't22', 't20', 't16']);
+    expect(p2.matches.map((m) => m.track.id)).toEqual(['t14', 't10', 't8', 't4', 't2']);
+    expect(p2.nextOffset).toBeNull();
   });
 });

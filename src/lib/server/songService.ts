@@ -28,7 +28,8 @@ export interface SongDeps {
 }
 
 export interface SongServiceOptions {
-  /** Max uncached lookups per request, so a page comes back fast. Default 40. */
+  /** Max uncached lookups per request. Lookups only read the database, and ranking needs the
+   * whole library, so the default (1000) covers a full library. */
   maxResolvesPerRequest?: number;
   /** Uncached lookups run this many at a time. Default 5. */
   concurrency?: number;
@@ -48,7 +49,7 @@ interface Walked {
 }
 
 export function createSongService(store: Store, deps: SongDeps, opts: SongServiceOptions = {}): SongService {
-  const maxResolves = opts.maxResolvesPerRequest ?? 40;
+  const maxResolves = opts.maxResolvesPerRequest ?? 1000;
   const concurrency = Math.max(1, opts.concurrency ?? 5);
   const maxKnown = opts.maxKnownSongs ?? 50;
   const now = opts.now ?? (() => new Date());
@@ -122,7 +123,6 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
 
   return {
     async recommend(tracks, userRange, offset, limit) {
-      const need = offset + limit + 1; // one extra tells us whether another page exists
       const matches: Match[] = [];
       const logs = new Map<string, DataSourceLogEntry>();
       const exhausted = await walk(tracks, ({ track, record }) => {
@@ -132,18 +132,17 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
           matches.push(m);
           logs.set(track.id, record.log);
         }
-        return matches.length >= need;
+        return false;
       });
 
-      // Matches are found in play order and paged in that order, then ranked within the page.
-      // Ranking the whole list would need every song resolved up front, and ranking a growing
-      // prefix would let songs jump between pages (duplicates or gaps while scrolling).
-      const page = deps.paginate(matches, offset, limit);
-      const items = deps.rankMatches(page.items);
-      // paginate() only sees the matches found so far; whether more exist depends on the walk.
-      let nextOffset: number | null = null;
-      if (matches.length > offset + limit) nextOffset = offset + limit;
-      else if (!exhausted) nextOffset = offset + page.items.length; // more tracks left to look up
+      // Rank the whole library, then page it. The order is the same on every request (same
+      // tracks, same cached ranges), so pages never repeat or skip a song.
+      const ranked = deps.rankMatches(matches);
+      const page = deps.paginate(ranked, offset, limit);
+      const items = page.items;
+      // Lookup budget spent before the end of the library (only on a first visit to a very large
+      // library): let the client ask again, which continues the lookups.
+      const nextOffset = page.nextOffset ?? (exhausted ? null : offset + items.length);
 
       const sources: Record<string, DataSourceLogEntry> = {};
       for (const m of items) {

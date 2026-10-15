@@ -15,6 +15,16 @@ export interface UsdbSongRow {
   id: number;
   artist: string;
   title: string;
+  /** Page views (last cell) and star rating 0-5 (cell before it), when the row has them. */
+  views?: number;
+  rating?: number;
+}
+
+export interface UsdbSong {
+  /** The note file text, or null when only the search was done. */
+  noteText: string | null;
+  views?: number;
+  rating?: number;
 }
 
 export interface UsdbClientOptions {
@@ -30,6 +40,8 @@ export interface UsdbClientOptions {
 export interface UsdbClient {
   /** Searches by artist and title and returns the note file text, or null when USDB has no match. */
   findNoteFile(artist: string, title: string): Promise<string | null>;
+  /** Like findNoteFile, plus the song's views and rating. `download: false` only searches (fast). */
+  findSong(artist: string, title: string, opts?: { download?: boolean }): Promise<UsdbSong | null>;
 }
 
 function decodeEntities(s: string): string {
@@ -53,9 +65,34 @@ export function parseSongList(html: string): UsdbSongRow[] {
   for (const m of html.matchAll(rowRe)) {
     const cells = [...m[2]!.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) => c[1]!);
     if (cells.length < 4) continue;
-    rows.push({ id: Number(m[1]), artist: stripTags(cells[2]!), title: stripTags(cells[3]!) });
+    const row: UsdbSongRow = { id: Number(m[1]), artist: stripTags(cells[2]!), title: stripTags(cells[3]!) };
+    if (cells.length >= 6) {
+      const views = parseCount(cells[cells.length - 1]!);
+      const rating = parseRating(cells[cells.length - 2]!);
+      if (views !== undefined) row.views = views;
+      if (rating !== undefined) row.rating = rating;
+    }
+    rows.push(row);
   }
   return rows;
+}
+
+/** A whole number like "1000" or "1.234" (thousands separator); undefined when the cell is not one. */
+function parseCount(cell: string): number | undefined {
+  const text = stripTags(cell).replace(/[.,\s]/g, '');
+  return /^\d+$/.test(text) ? Number(text) : undefined;
+}
+
+/** A rating cell: a number 0-5, or star images (full and half). Undefined when it is neither. */
+function parseRating(cell: string): number | undefined {
+  const stars = (cell.match(/<img[^>]*star[^>]*>/gi) ?? []).filter((t) => !/empty|off|grey|gray/i.test(t));
+  const half = stars.filter((t) => /half/i.test(t)).length;
+  const full = stars.length - half;
+  if (full || half) return Math.min(5, full + half / 2);
+  const text = stripTags(cell).replace(',', '.');
+  if (!/^\d+(\.\d+)?$/.test(text)) return undefined;
+  const n = Number(text);
+  return n >= 0 && n <= 5 ? n : undefined;
 }
 
 /** The note file text from a gettxt page, or null when the page has none (e.g. logged out). */
@@ -113,21 +150,33 @@ export function createUsdbClient(opts: UsdbClientOptions): UsdbClient {
     loggedIn = true;
   }
 
+  async function download(id: number): Promise<string | null> {
+    const params = { link: 'gettxt', id: String(id) };
+    const countdown = await request(params, null);
+    const ready = parseNoteText(countdown);
+    if (ready !== null) return ready;
+    const wait = parseDownloadWait(countdown);
+    if (wait > 0) await sleep((wait + 1) * 1000);
+    return parseNoteText(await request(params, { wd: '1' }));
+  }
+
+  async function findSong(artist: string, title: string, { download: fetchNotes = true } = {}): Promise<UsdbSong | null> {
+    await login();
+    const cleanTitle = searchTitle(title);
+    const list = await request({ link: 'list' }, { interpret: artist, title: cleanTitle, details: '1', limit: '30', start: '0' });
+    const want = songKey(artist, cleanTitle);
+    const hit = parseSongList(list).find((row) => songKey(row.artist, row.title) === want);
+    if (!hit) return null;
+    const song: UsdbSong = { noteText: fetchNotes ? await download(hit.id) : null };
+    if (hit.views !== undefined) song.views = hit.views;
+    if (hit.rating !== undefined) song.rating = hit.rating;
+    return song;
+  }
+
   return {
+    findSong,
     async findNoteFile(artist, title) {
-      await login();
-      const cleanTitle = searchTitle(title);
-      const list = await request({ link: 'list' }, { interpret: artist, title: cleanTitle, details: '1', limit: '30', start: '0' });
-      const want = songKey(artist, cleanTitle);
-      const hit = parseSongList(list).find((row) => songKey(row.artist, row.title) === want);
-      if (!hit) return null;
-      const params = { link: 'gettxt', id: String(hit.id) };
-      const countdown = await request(params, null);
-      const ready = parseNoteText(countdown);
-      if (ready !== null) return ready;
-      const wait = parseDownloadWait(countdown);
-      if (wait > 0) await sleep((wait + 1) * 1000);
-      return parseNoteText(await request(params, { wd: '1' }));
+      return (await findSong(artist, title))?.noteText ?? null;
     },
   };
 }

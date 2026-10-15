@@ -1,15 +1,21 @@
 // Orders matched songs for the recommendations list and cuts it into pages.
 //
-// Songs the user can sing as written come first, then songs that need an
-// octave shift (up or down, treated alike). Within each group, songs the user
-// plays more (lower Spotify playRank) come first. Ties keep their input order
-// (Array.prototype.sort is stable since ES2019).
+// Scored matches (see score.ts) sort by score, highest first; ties go to comfort, then
+// familiarity, then play rank. Unscored matches keep the old order: songs that fit as written,
+// then octave-shifted ones, each by play rank. Ties keep their input order (stable sort).
 
 import type { Match } from '../contracts';
 
 export function rankMatches(matches: Match[]): Match[] {
   const group = (m: Match) => (m.octave === 'none' ? 0 : 1);
-  return [...matches].sort((a, b) => group(a) - group(b) || a.track.playRank - b.track.playRank);
+  return [...matches].sort(
+    (a, b) =>
+      (b.score ?? -Infinity) - (a.score ?? -Infinity) ||
+      (b.parts?.comfort ?? 0) - (a.parts?.comfort ?? 0) ||
+      (b.parts?.familiarity ?? 0) - (a.parts?.familiarity ?? 0) ||
+      group(a) - group(b) ||
+      a.track.playRank - b.track.playRank,
+  );
 }
 
 export interface Page<T> {

@@ -26,8 +26,8 @@ const html = (body: string, cookie?: string) =>
 describe('USDB page parsing', () => {
   it('reads song rows from a search result page', () => {
     expect(parseSongList(fixture('list.html'))).toEqual([
-      { id: 1234, artist: 'Queen', title: 'Bohemian Rhapsody' },
-      { id: 5678, artist: 'Queen & David Bowie', title: 'Under Pressure' },
+      { id: 1234, artist: 'Queen', title: 'Bohemian Rhapsody', rating: 5, views: 1000 },
+      { id: 5678, artist: 'Queen & David Bowie', title: 'Under Pressure', rating: 4, views: 500 },
     ]);
   });
 
@@ -40,6 +40,15 @@ describe('USDB page parsing', () => {
     expect(text).toContain('#ARTIST:Queen');
     expect(text).toContain('#TITLE:Bohemian & Rhapsody');
     expect(text?.trim().endsWith('E')).toBe(true);
+  });
+
+  it('reads star-image ratings and views with thousands separators', () => {
+    const row = (rating: string, views: string) =>
+      `<tr data-songid="9"><td></td><td></td><td>A</td><td>B</td><td>x</td><td>${rating}</td><td>${views}</td></tr>`;
+    const stars = '<img src="images/star.png"><img src="images/star.png"><img src="images/star.png"><img src="images/half_star.png"><img src="images/star_empty.png">';
+    expect(parseSongList(row(stars, '12.345'))[0]).toMatchObject({ rating: 3.5, views: 12345 });
+    expect(parseSongList(row('', 'n/a'))[0]).not.toHaveProperty('views');
+    expect(parseSongList('<tr data-songid="9"><td></td><td></td><td>A</td><td>B</td></tr>')[0]).toEqual({ id: 9, artist: 'A', title: 'B' });
   });
 
   it('returns null when the page has no notes', () => {
@@ -106,6 +115,13 @@ describe('USDB client', () => {
     await client.findNoteFile('Queen', 'Bohemian Rhapsody');
     expect(waits).toContain(25_000); // the page's 24 s countdown plus a second
     expect(waits.filter((w) => w !== 25_000).every((w) => w <= 2500 && w > 0)).toBe(true);
+  });
+
+  it('can search without downloading, for views and rating only', async () => {
+    const { fetch, calls } = pages();
+    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
+    expect(await client.findSong('Queen', 'Bohemian Rhapsody', { download: false })).toEqual({ noteText: null, rating: 5, views: 1000 });
+    expect(calls.some((c) => c.url.includes('link=gettxt'))).toBe(false);
   });
 
   it('reads the countdown from the gettxt page', () => {

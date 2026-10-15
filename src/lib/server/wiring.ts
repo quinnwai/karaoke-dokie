@@ -8,6 +8,7 @@ import { getStore, resetStoreForTests } from './getStore';
 import { createMockSpotifyClient } from './mockSpotify';
 import { matchSong as fitSong } from '../songs/match';
 import { paginate, rankMatches } from '../songs/rank';
+import { scoreMatch } from '../songs/score';
 import { resolveSongRange, songKey } from '../songs/resolve';
 import { createSongService, type ResolveResult, type SongDeps, type SongService } from './songService';
 import { createSpotifyClient, type SpotifyClient } from './spotify';
@@ -87,7 +88,7 @@ export function productionSongDeps(store: Store, mock: boolean): SongDeps {
       : realResolver(store, noteFileSource),
     matchSong: (track, range, userRange) => {
       const fit = fitSong(userRange, range);
-      return fit ? { track, range, ...fit } : null;
+      return fit ? scoreMatch(userRange, { track, range, ...fit }) : null;
     },
     rankMatches,
     paginate,

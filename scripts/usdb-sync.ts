@@ -1,5 +1,6 @@
 // Fills song ranges for signed-in users' libraries from USDB note files.
-// Usage: npm run usdb:sync [-- <spotifyUserId>]   (default: every user in the database)
+// Usage: npm run usdb:sync [-- [--rescan] <spotifyUserId>]   (default: every user in the database)
+// --rescan re-downloads note files for songs synced before pitch histograms existed (~25 s each).
 // Needs DATABASE_URL, SPOTIFY_CLIENT_ID/SECRET/REDIRECT_URI, USDB_USERNAME, USDB_PASSWORD.
 // Run from a machine that can reach usdb.animux.de. Requests are spaced 2.5 s apart.
 
@@ -17,7 +18,10 @@ async function main() {
   const config = readConfig();
   const spotify = createSpotifyClient(config.spotify);
   const usdb = createUsdbClient({ username, password });
-  const ids = process.argv[2] ? [process.argv[2]] : await store.listUserIds();
+  const args = process.argv.slice(2);
+  const rescan = args.includes('--rescan');
+  const userArg = args.find((a) => !a.startsWith('--'));
+  const ids = userArg ? [userArg] : await store.listUserIds();
   if (!ids.length) console.log('No signed-in users yet. Sign in on the site first.');
 
   for (const id of ids) {
@@ -29,7 +33,7 @@ async function main() {
     const fresh = await ensureFreshTokens(user, spotify, store);
     const tracks = await getUserTracks(spotify, fresh.spotify.accessToken);
     console.log(`${user.displayName}: ${tracks.length} songs`);
-    const summary = await syncNoteFiles({ store, usdb, tracks, onProgress: (l) => console.log(`  ${l}`) });
+    const summary = await syncNoteFiles({ store, usdb, tracks, rescan, onProgress: (l) => console.log(`  ${l}`) });
     console.log(JSON.stringify(summary));
   }
 }

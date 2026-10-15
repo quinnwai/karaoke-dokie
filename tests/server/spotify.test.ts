@@ -4,7 +4,7 @@ import {
   ensureFreshTokens,
   getUserTracks,
   mapTrack,
-  mergeTracks,
+  buildLibrary,
   SpotifyError,
   type FetchFn,
 } from '../../src/lib/server/spotify';
@@ -47,7 +47,7 @@ describe('Spotify authorization', () => {
   it('builds the authorize URL with scopes, redirect and state', () => {
     const url = new URL(createSpotifyClient(cfg).authorizeUrl('st4te', 'http://ignored'));
     expect(url.origin + url.pathname).toBe('https://accounts.spotify.com/authorize');
-    expect(url.searchParams.get('scope')).toBe('user-library-read user-top-read');
+    expect(url.searchParams.get('scope')).toBe('user-library-read user-top-read user-read-recently-played');
     expect(url.searchParams.get('state')).toBe('st4te');
     expect(url.searchParams.get('redirect_uri')).toBe(cfg.redirectUri);
     expect(url.searchParams.get('client_id')).toBe('cid');
@@ -160,24 +160,58 @@ describe('Spotify library reads', () => {
   });
 });
 
-describe('play rank merge', () => {
-  const t = (id: string, playRank: number): Track => ({
+describe('familiarity', () => {
+  const t = (id: string, playRank = 0, extra: Partial<Track> = {}): Track => ({
     id,
     title: id,
     artist: 'A',
     artistId: 'a',
     spotifyUrl: '',
     playRank,
+    ...extra,
+  });
+  const fam = (lib: Track[]) => Object.fromEntries(lib.map((x) => [x.id, x.familiarity]));
+
+  it('scores top-list position from 1.0 at #1 to 0.2 at #50, and saved-only songs at 0.15', () => {
+    const fifty = Array.from({ length: 50 }, (_, i) => t(`m${i}`, i));
+    const f = fam(buildLibrary({ top: { medium_term: fifty }, recent: [], saved: [t('s')] }));
+    expect(f.m0).toBe(1);
+    expect(f.m49).toBeCloseTo(0.2);
+    expect(f.s).toBe(0.15);
   });
 
-  it('ranks top tracks first, then saved songs not in the top list in saved order', () => {
-    const merged = mergeTracks([t('x', 0), t('y', 1)], [t('a', 0), t('y', 1), t('b', 2), t('x', 3)]);
-    expect(merged.map((m) => [m.id, m.playRank])).toEqual([
-      ['x', 0],
-      ['y', 1],
-      ['a', 2],
-      ['b', 3],
+  it('adds a bonus for each extra time span and for recent plays, capped at 1', () => {
+    const f = fam(
+      buildLibrary({
+        top: { short_term: [t('x'), t('y')], medium_term: [t('z'), t('y')], long_term: [t('w'), t('x')] },
+        recent: [t('y'), t('y'), t('z')],
+        saved: [t('z')],
+      }),
+    );
+    expect(f.x).toBeCloseTo(1); // #1 short + second span
+    expect(f.y).toBeCloseTo(Math.min(1, (1 - 0.8 / 49) + 0.1 + 0.2));
+    expect(f.z).toBeCloseTo(1); // #1 medium + a play + saved, capped
+    expect(f.w).toBe(1);
+  });
+
+  it('orders the library by familiarity and keeps one entry per song', () => {
+    const lib = buildLibrary({ top: { short_term: [t('a')], medium_term: [t('b'), t('a')] }, recent: [], saved: [t('c'), t('b')] });
+    expect(lib.map((x) => [x.id, x.playRank])).toEqual([
+      ['a', 0],
+      ['b', 1],
+      ['c', 2],
     ]);
+  });
+
+  it('keeps Spotify popularity from any list that has it', () => {
+    const lib = buildLibrary({ top: { medium_term: [t('a')] }, recent: [], saved: [t('a', 0, { popularity: 70 })] });
+    expect(lib[0]!.popularity).toBe(70);
+  });
+
+  it('skips recent plays when the permission is missing', async () => {
+    const client = { ...createMockSpotifyClient(), getRecentlyPlayed: async () => { throw new SpotifyError('no scope', 403); } };
+    const lib = await getUserTracks(client, 'tok');
+    expect(lib.length).toBeGreaterThan(20);
   });
 });
 
