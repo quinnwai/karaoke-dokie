@@ -40,7 +40,7 @@ export const CREDITS: Credit[] = [
   {
     name: 'Material Symbols, Google',
     url: 'https://fonts.google.com/icons',
-    what: 'The fast-lyrics and octave icons (Apache 2.0).',
+    what: 'The fast-lyrics icon (Apache 2.0).',
   },
   {
     name: 'Spotify',

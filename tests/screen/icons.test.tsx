@@ -26,11 +26,11 @@ describe('icons', () => {
     );
     const up = screen.getByRole('img', { name: 'Sing it an octave higher than the artist' });
     const down = screen.getByRole('img', { name: 'Sing it an octave lower than the artist' });
-    expect(up.querySelector('title')?.textContent).toBe('Sing it an octave higher than the artist');
-    expect(down.querySelector('title')?.textContent).toBe('Sing it an octave lower than the artist');
-    expect(up.getAttribute('fill')).toBe('currentColor');
-    expect(up.getAttribute('viewBox')).toBe('0 -960 960 960');
-    expect(container.querySelectorAll('svg')).toHaveLength(2);
+    expect(up.getAttribute('title')).toBe('Sing it an octave higher than the artist');
+    expect(down.getAttribute('title')).toBe('Sing it an octave lower than the artist');
+    expect(up.textContent).toBe('8va');
+    expect(down.textContent).toBe('8vb');
+    expect(container.querySelectorAll('svg')).toHaveLength(0);
   });
 
   it('octave none renders nothing', () => {
