@@ -117,6 +117,7 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(found.get('abba|sos')).toEqual({ id: 3, key: 'abba|sos', artist: 'ABBA', title: 'SOS', views: 7, lastChange: 1750 });
     expect(found.has('nobody|x')).toBe(false);
     expect(await s.usdbIndexStats()).toEqual({ count: 3, newestChange: 1800 });
+    expect((await s.listUsdbSongs()).map((e) => e.id)).toEqual([2, 1, 3]);
     expect((await s.findUsdbSongs(['queen|bohemian rhapsody'])).get('queen|bohemian rhapsody')).not.toHaveProperty('rating');
   });
 

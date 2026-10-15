@@ -193,6 +193,9 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       }
       return out;
     },
+    async listUsdbSongs() {
+      return (await query('SELECT * FROM usdb_songs ORDER BY COALESCE(views, 0) DESC, id ASC', [])).map(toUsdbEntry);
+    },
     async usdbIndexStats() {
       const [r] = await query('SELECT COUNT(*) AS n, MAX(last_change) AS newest FROM usdb_songs', []);
       return { count: num(r?.n ?? 0), newestChange: r?.newest === null || r?.newest === undefined ? null : num(r.newest) };

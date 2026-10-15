@@ -71,6 +71,9 @@ export function createMemoryStore(): Store {
       }
       return out;
     },
+    async listUsdbSongs() {
+      return [...usdbSongs.values()].sort((a, b) => (b.views ?? 0) - (a.views ?? 0) || a.id - b.id).map(clone);
+    },
     async usdbIndexStats() {
       let newest: number | null = null;
       for (const e of usdbSongs.values()) if (e.lastChange !== undefined && (newest === null || e.lastChange > newest)) newest = e.lastChange;

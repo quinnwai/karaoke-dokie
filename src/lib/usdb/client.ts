@@ -39,6 +39,11 @@ export interface UsdbClientOptions {
   minIntervalMs?: number;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Ask for the note text straight away instead of waiting out the countdown, as USDB Syncer does.
+   * Only for the catalogue fill, which the USDB folks OK'd. Falls back to waiting if USDB refuses.
+   */
+  skipCountdown?: boolean;
 }
 
 export interface UsdbClient {
@@ -175,6 +180,10 @@ export function createUsdbClient(opts: UsdbClientOptions): UsdbClient {
 
   async function download(id: number): Promise<string | null> {
     const params = { link: 'gettxt', id: String(id) };
+    if (opts.skipCountdown) {
+      const direct = parseNoteText(await request(params, { wd: '1' }));
+      if (direct !== null) return direct;
+    }
     const countdown = await request(params, null);
     const ready = parseNoteText(countdown);
     if (ready !== null) return ready;

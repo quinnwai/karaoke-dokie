@@ -53,6 +53,8 @@ export interface Store {
   putUsdbSongs(entries: UsdbIndexEntry[]): Promise<void>;
   /** The most-viewed indexed USDB song for each key; the map only has keys that are indexed. */
   findUsdbSongs(songKeys: string[]): Promise<Map<string, UsdbIndexEntry>>;
+  /** Every indexed USDB song, most-viewed first. */
+  listUsdbSongs(): Promise<UsdbIndexEntry[]>;
   /** Size of the USDB index and its newest last-changed time (null when empty). */
   usdbIndexStats(): Promise<{ count: number; newestChange: number | null }>;
 

@@ -112,6 +112,31 @@ describe('USDB client', () => {
     expect(slept).toContain(25_000);
   });
 
+  it('with skipCountdown, asks for the notes straight away and does not wait', async () => {
+    const { fetch, calls } = pages();
+    const slept: number[] = [];
+    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async (ms) => { slept.push(ms); }, skipCountdown: true });
+    expect(await client.downloadById(1234)).toContain('#ARTIST:Queen');
+    expect(calls.filter((c) => c.url.includes('link=gettxt')).map((c) => c.method)).toEqual(['POST']);
+    expect(slept).toEqual([]);
+  });
+
+  it('with skipCountdown, falls back to waiting when USDB refuses the direct request', async () => {
+    let posts = 0;
+    const { fetch } = fakeFetch({
+      'link=gettxt': (method) => {
+        if (method === 'GET') return html(fixture('gettxt-countdown.html'));
+        posts++;
+        return html(posts === 1 ? '<html>please wait</html>' : fixture('gettxt.html'));
+      },
+      'index.php': () => html('<a href="?link=logout">Logout</a>', 'PHPSESSID=abc123; path=/'),
+    });
+    const slept: number[] = [];
+    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async (ms) => { slept.push(ms); }, skipCountdown: true });
+    expect(await client.downloadById(1234)).toContain('#ARTIST:Queen');
+    expect(slept).toContain(25_000);
+  });
+
   it('returns null when no result matches the artist and title', async () => {
     const { fetch } = pages();
     const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
