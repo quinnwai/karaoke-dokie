@@ -6,7 +6,9 @@ import type { SpotifyTokens, Store, UserRecord } from './store';
 export const SPOTIFY_SCOPES = 'user-library-read user-top-read user-read-recently-played';
 export const SPOTIFY_ACCOUNTS = 'https://accounts.spotify.com';
 export const SPOTIFY_API = 'https://api.spotify.com/v1';
-export const MAX_SAVED_TRACKS = 500;
+export const MAX_SAVED_TRACKS = 2000;
+/** Saved-song pages fetched at once (50 songs each). */
+const SAVED_PAGE_CONCURRENCY = 5;
 /** Refresh this long before the access token actually expires. */
 const REFRESH_MARGIN_MS = 60_000;
 
@@ -29,7 +31,7 @@ export interface SpotifyClient {
   exchangeCode(code: string): Promise<SpotifyTokens>;
   refresh(refreshToken: string): Promise<SpotifyTokens>;
   getMe(accessToken: string): Promise<SpotifyProfile>;
-  /** Saved songs in Spotify's order (newest saved first), up to `max`. playRank is the saved position. */
+  /** Saved songs in Spotify's order (newest saved first), up to `max` (default 2000). playRank is the saved position. */
   getSavedTracks(accessToken: string, max?: number): Promise<Track[]>;
   /** Top tracks for one time span (about 4 weeks, 6 months, or all time), most played first. */
   getTopTracks(accessToken: string, timeRange?: TimeRange): Promise<Track[]>;
@@ -199,15 +201,30 @@ export function createSpotifyClient(cfg: SpotifyConfig, fetchFn: FetchFn = (i, i
       return { id: me.id, displayName: me.display_name || me.id };
     },
     async getSavedTracks(accessToken, max = MAX_SAVED_TRACKS) {
+      type Page = { items: { track: SpotifyTrackObject | null }[]; next: string | null; total?: number };
+      const pageUrl = (offset: number) => `/me/tracks?limit=50&offset=${offset}`;
+      const first: Page = await api(accessToken, pageUrl(0));
+      const pages: Page[] = [first];
+      if (typeof first.total === 'number') {
+        // The first page says how many songs there are, so fetch the rest a few pages at a time.
+        const offsets: number[] = [];
+        for (let o = 50; o < Math.min(first.total, max); o += 50) offsets.push(o);
+        for (let i = 0; i < offsets.length; i += SAVED_PAGE_CONCURRENCY) {
+          pages.push(...(await Promise.all(offsets.slice(i, i + SAVED_PAGE_CONCURRENCY).map((o) => api<Page>(accessToken, pageUrl(o))))));
+        }
+      } else {
+        let page = first;
+        while (page.items.length && page.next && pages.length * 50 < max) {
+          page = await api<Page>(accessToken, page.next);
+          pages.push(page);
+        }
+      }
       const out: Track[] = [];
-      let url: string | null = `/me/tracks?limit=50&offset=0`;
-      while (url && out.length < max) {
-        const page: { items: { track: SpotifyTrackObject | null }[]; next: string | null } = await api(accessToken, url);
+      for (const page of pages) {
         for (const item of page.items) {
           const t = mapTrack(item.track, out.length);
           if (t && out.length < max) out.push(t);
         }
-        url = page.items.length ? page.next : null;
       }
       return out;
     },
