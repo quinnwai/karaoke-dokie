@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import type { DataSourceLogEntry, Match, VocalRange } from '../lib/contracts';
 import { difficultyLabel, octaveWording, rangeBar, sourceTooltip } from '../lib/client/display';
+import { FastLyricsIcon, OctaveIcon } from './Icon';
 import styles from './screen.module.css';
 
 interface SongDetailProps {
@@ -68,7 +69,12 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
 
       <div className={styles.tags}>
         <span className={styles.pill}>{difficultyLabel(match.difficulty)}</span>
-        {match.range.fastLyrics && <span className={styles.pillQuiet}>Fast lyrics</span>}
+        {match.range.fastLyrics && (
+          <span className={`${styles.pillQuiet} ${styles.pillIcon}`}>
+            <FastLyricsIcon className={styles.icon} size={16} />
+            <span aria-hidden>Fast lyrics</span>
+          </span>
+        )}
         <span className={styles.infoWrap}>
           <button
             type="button"
@@ -90,7 +96,14 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
         </p>
       )}
 
-      {octave && <p className={styles.octave}>{octave}</p>}
+      {octave && (
+        <p className={styles.octave}>
+          <OctaveIcon octave={match.octave} className={styles.icon} />
+          <span>{octave}</span>
+        </p>
+      )}
+
+      {match.reasons && match.reasons.length > 0 && <p className={styles.detailReasons}>{match.reasons.join(' · ')}</p>}
 
       <a className={styles.spotify} href={match.track.spotifyUrl} target="_blank" rel="noreferrer">
         Open in Spotify

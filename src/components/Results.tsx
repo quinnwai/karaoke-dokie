@@ -1,6 +1,7 @@
 import type { Match, VocalRange } from '../lib/contracts';
 import { midiToNoteName } from '../lib/audio/notes';
 import { difficultyLabel, octaveWording } from '../lib/client/display';
+import { FastLyricsIcon, OctaveIcon } from './Icon';
 import { Lyric } from './Lyric';
 import styles from './screen.module.css';
 
@@ -39,15 +40,19 @@ export function Results({ range, matches, loading, error, hasMore, onSelect, onM
                   type="button"
                   className={styles.song}
                   onClick={() => onSelect(m.track.id)}
-                  aria-label={`${m.track.title} by ${m.track.artist}, ${difficultyLabel(m.difficulty)}${octave ? `. ${octave}` : ''}`}
+                  aria-label={`${m.track.title} by ${m.track.artist}, ${difficultyLabel(m.difficulty)}${octave ? `. ${octave}` : ''}${m.range.fastLyrics ? '. Fast lyrics' : ''}`}
                 >
                   <span className={styles.songText}>
                     <span className={styles.songTitle}>{m.track.title}</span>
                     <span className={styles.songArtist}>{m.track.artist}</span>
-                    {octave && <span className={styles.songOctave}>{octave}</span>}
+                    {m.reasons && m.reasons.length > 0 && <span className={styles.songReasons}>{m.reasons.join(' · ')}</span>}
                   </span>
-                  <span className={styles.pill} data-difficulty={m.difficulty}>
-                    {difficultyLabel(m.difficulty)}
+                  <span className={styles.songMeta}>
+                    <OctaveIcon octave={m.octave} className={styles.icon} />
+                    {m.range.fastLyrics && <FastLyricsIcon className={styles.icon} />}
+                    <span className={styles.pill} data-difficulty={m.difficulty}>
+                      {difficultyLabel(m.difficulty)}
+                    </span>
                   </span>
                 </button>
               </li>

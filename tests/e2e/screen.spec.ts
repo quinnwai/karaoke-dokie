@@ -194,6 +194,17 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await page.waitForTimeout(1000);
   await shot(page, '07-results');
 
+  // Ranking v2: octave and fast-lyrics icons beside the label, reasons under the artist.
+  const dancing = page.locator('ol li').filter({ hasText: 'Dancing Queen' });
+  await expect(dancing.getByRole('img', { name: 'Sing it an octave higher than the artist' })).toBeVisible();
+  await expect(dancing.getByText('In your sweet spot')).toBeVisible();
+  const yoru = page.locator('ol li').filter({ hasText: 'Yoru ni Kakeru' });
+  await expect(yoru.getByRole('img', { name: 'Fast lyrics' })).toBeVisible();
+  await expect(yoru.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeVisible();
+  await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByText('In your sweet spot · You play this a lot')).toBeVisible();
+  await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByRole('img')).toHaveCount(0);
+  await shot(page, '07b-results-icons');
+
   await page.getByRole('button', { name: 'Generate more songs' }).click();
   await expect(page.locator('ol li')).toHaveCount(10);
   expect(api.recommendationOffsets).toEqual([0, 5]);
@@ -204,8 +215,11 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   // ---- Song detail ----
   await page.getByRole('button', { name: /^Yoru ni Kakeru/ }).click();
   await expect(page.getByRole('heading', { name: 'Yoru ni Kakeru' })).toBeVisible();
-  await expect(page.getByText('Fast lyrics')).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Fast lyrics' })).toBeVisible();
+  await expect(page.getByText('Fast lyrics', { exact: true }).last()).toBeVisible();
   await expect(page.getByText('Sing it lower than the artist')).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeVisible();
+  await expect(page.getByText('You play this a lot')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open in Spotify' })).toHaveAttribute('href', 'https://open.spotify.com/track/t2');
   await shot(page, '09-song-detail');
 

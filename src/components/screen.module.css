@@ -488,10 +488,40 @@
   text-overflow: ellipsis;
 }
 
-.songOctave {
+.songReasons {
   font-size: 12px;
   color: var(--pink);
-  opacity: 0.85;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.songMeta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Material Symbols icons: muted by default, pink when pointed at. */
+.icon {
+  flex: none;
+  display: block;
+  color: var(--dim);
+  transition: color 0.15s;
+}
+
+.icon:hover,
+.song:hover .icon {
+  color: var(--pink);
+}
+
+.pillQuiet.pillIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 7px;
 }
 
 .pill,
@@ -725,8 +755,22 @@
 
 .octave {
   margin: -8px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 15px;
   color: var(--pink);
+}
+
+.octave .icon {
+  color: var(--pink);
+}
+
+.detailReasons {
+  margin: -8px 0 0;
+  font-size: 13px;
+  color: var(--dim);
+  text-align: center;
 }
 
 .spotify {

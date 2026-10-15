@@ -25,6 +25,13 @@ const SONGS: [string, string, Difficulty, OctaveShift, number, number, boolean][
   ['Sukiyaki', 'Kyu Sakamoto', 'easy', 'none', 48, 62, false],
 ];
 
+/** Ranking reasons for some songs, by index; the rest have none. */
+const REASONS: Record<number, string[]> = {
+  0: ['In your sweet spot', 'You play this a lot'],
+  2: ['You play this a lot'],
+  4: ['In your sweet spot'],
+};
+
 export function track(i: number): Track {
   const [title, artist] = SONGS[i % SONGS.length]!;
   return {
@@ -47,7 +54,8 @@ export function match(i: number): Match {
     confidence: i % 2 ? 'low' : 'high',
     fastLyrics,
   };
-  return { track: track(i), range, difficulty, octave };
+  const reasons = REASONS[i];
+  return { track: track(i), range, difficulty, octave, ...(reasons ? { reasons } : {}) };
 }
 
 export function source(i: number): DataSourceLogEntry {
