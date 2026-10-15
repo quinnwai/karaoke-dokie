@@ -6,9 +6,12 @@
 // and rap ('R', 'G') notes carry placeholder pitches that are never judged
 // (https://usdx.eu/format/), so they would give nonsense ranges.
 //
-// Fast lyrics: we count sung syllables in the busiest 10-second window. Rap
-// notes count (they are the fastest lyrics there are); "~" notes do not, as
-// they hold the previous vowel rather than start a new syllable. Speech runs
+// Fast lyrics: for each sung syllable we count the syllables in the 10 seconds
+// from it. Rap notes count (they are the fastest lyrics there are); notes
+// written "~" or "~a", "~n" and so on do not, as they hold or finish the
+// previous syllable rather than start a new one. A song has fast lyrics when
+// at least a tenth of its syllables start a 10 s stretch above 4.5 syllables
+// per second, so one busy run or ad-lib does not flag a slow song. Speech runs
 // at roughly 5-8 syllables per second (English about 6; Pellegrino, Coupé &
 // Marsico 2011, "A cross-language perspective on speech information rate",
 // Language 87(3)), while ballads sit around 1-3. A 10 s stretch above 4.5
@@ -29,6 +32,8 @@ import type { SongRange } from '../contracts';
 import { parseUltrastar, secondsPerBeat, type UltrastarFile, type UltrastarNote } from './ultrastar';
 
 export const FAST_LYRICS_SYLLABLES_PER_SECOND = 4.5;
+/** Share of syllables that must start a fast 10 s stretch. */
+export const FAST_LYRICS_MIN_SHARE = 0.1;
 export const FAST_LYRICS_WINDOW_SECONDS = 10;
 export const OUTLIER_SHARE = 0.05;
 /** Typical (tessitura) notes outside [E2, C5) are treated as octave errors in the file. */
@@ -63,24 +68,36 @@ export function trimmedRange(notes: { midi: number; length: number }[], share = 
 }
 
 const isPitched = (n: UltrastarNote) => n.type === 'normal' || n.type === 'golden';
-const isNewSyllable = (n: UltrastarNote) => n.syllable.trim() !== '~';
+/** "~" alone or "~" plus letters or punctuation continues the previous syllable. */
+const isNewSyllable = (n: UltrastarNote) => !n.syllable.trim().startsWith('~');
 
-/** Syllables per second in the busiest FAST_LYRICS_WINDOW_SECONDS window. */
-export function syllableRate(notes: UltrastarNote[], bpm: number): number {
+/** Syllables per second in the 10 s window starting at each new syllable, in time order. */
+function windowRates(notes: UltrastarNote[], bpm: number): number[] {
   const spb = secondsPerBeat(bpm);
   const times = notes
     .filter(isNewSyllable)
     .map((n) => n.start * spb)
     .sort((a, b) => a - b);
-  let best = 0;
+  const rates: number[] = [];
   let end = 0;
   // Two pointers: for each window start, count syllables starting before start + window.
   for (let i = 0; i < times.length; i++) {
     if (end < i) end = i;
     while (end < times.length && times[end]! < times[i]! + FAST_LYRICS_WINDOW_SECONDS) end++;
-    best = Math.max(best, end - i);
+    rates.push((end - i) / FAST_LYRICS_WINDOW_SECONDS);
   }
-  return best / FAST_LYRICS_WINDOW_SECONDS;
+  return rates;
+}
+
+/** Syllables per second in the busiest FAST_LYRICS_WINDOW_SECONDS window. */
+export function syllableRate(notes: UltrastarNote[], bpm: number): number {
+  return windowRates(notes, bpm).reduce((a, b) => Math.max(a, b), 0);
+}
+
+/** Share of syllables that start a 10 s stretch faster than FAST_LYRICS_SYLLABLES_PER_SECOND. */
+export function fastShare(notes: UltrastarNote[], bpm: number): number {
+  const rates = windowRates(notes, bpm);
+  return rates.length ? rates.filter((r) => r > FAST_LYRICS_SYLLABLES_PER_SECOND).length / rates.length : 0;
 }
 
 /**
@@ -119,7 +136,7 @@ export function songRangeFromUltrastar(file: UltrastarFile | string, part = 1): 
     tessitura: tessitura + shift,
     source: 'note-file',
     confidence: 'high',
-    fastLyrics: syllableRate(notes, song.bpm) > FAST_LYRICS_SYLLABLES_PER_SECOND,
+    fastLyrics: fastShare(notes, song.bpm) >= FAST_LYRICS_MIN_SHARE,
     pitchShare,
   };
 }

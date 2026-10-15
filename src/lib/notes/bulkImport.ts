@@ -60,26 +60,40 @@ export interface ImportSummary {
   imported: number;
   /** Already had a range from a note file (USDB sync or an earlier import). */
   kept: number;
+  /** Kept songs from the same collection whose fast-lyrics flag was corrected (recheckFast). */
+  fastUpdated: number;
 }
 
 /**
  * Writes bulk ranges to the store. Songs that already have a note-file range are kept as they
- * are; songs with only an estimate or a skip are upgraded. No log rows are appended.
+ * are (with recheckFast, only their fast-lyrics flag is corrected); songs with only an estimate
+ * or a skip are upgraded. No log rows are appended.
  */
 export async function importBulkRanges(
   store: Store,
   ranges: BulkRange[],
-  opts: { now?: () => Date; batchSize?: number; onProgress?: (done: number) => void } = {},
+  opts: {
+    now?: () => Date;
+    batchSize?: number;
+    onProgress?: (done: number) => void;
+    /** Also correct the fast-lyrics flag of kept songs imported earlier from the same collection. */
+    recheckFast?: boolean;
+  } = {},
 ): Promise<ImportSummary> {
   const now = opts.now ?? (() => new Date());
   const batchSize = opts.batchSize ?? 500;
-  const summary: ImportSummary = { imported: 0, kept: 0 };
+  const summary: ImportSummary = { imported: 0, kept: 0, fastUpdated: 0 };
   for (let i = 0; i < ranges.length; i += batchSize) {
     const batch = ranges.slice(i, i + batchSize);
     const existing = await store.getSongRanges(batch.map((r) => r.key));
     for (const r of batch) {
-      if (existing.get(r.key)?.range?.source === 'note-file') {
+      const old = existing.get(r.key);
+      if (old?.range?.source === 'note-file') {
         summary.kept++;
+        if (opts.recheckFast && old.range.collection === r.collection && old.range.fastLyrics !== r.range.fastLyrics) {
+          await store.putSongRange(r.key, { ...old, range: { ...old.range, fastLyrics: r.range.fastLyrics } });
+          summary.fastUpdated++;
+        }
         continue;
       }
       await store.putSongRange(r.key, {

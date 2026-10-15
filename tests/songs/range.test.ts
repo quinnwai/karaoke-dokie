@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FAST_LYRICS_SYLLABLES_PER_SECOND, octaveCorrection, songRangeFromUltrastar, syllableRate, trimmedRange } from '../../src/lib/songs/range';
+import { FAST_LYRICS_SYLLABLES_PER_SECOND, fastShare, octaveCorrection, songRangeFromUltrastar, syllableRate, trimmedRange } from '../../src/lib/songs/range';
 import { parseUltrastar } from '../../src/lib/songs/ultrastar';
 import { fixture } from './fixture';
 
@@ -51,6 +51,35 @@ describe('fast lyrics', () => {
     const file = parseUltrastar(fixture('fast.txt'));
     expect(syllableRate(file.players[0]!, file.bpm)).toBeCloseTo(5, 2);
     expect(songRangeFromUltrastar(file).fastLyrics).toBe(true);
+  });
+
+  // BPM 150: one beat is 0.1 s. `notes` is [beat, syllable] pairs.
+  const song = (notes: [number, string][]) =>
+    ['#TITLE:T', '#ARTIST:A', '#BPM:150', '#GAP:0', ...notes.map(([b, syl]) => `: ${b} 1 0 ${syl}`), 'E'].join('\n');
+  const run = (from: number, count: number, everyBeats: number, syl = 'la'): [number, string][] =>
+    Array.from({ length: count }, (_, i) => [from + Math.round(i * everyBeats), syl]);
+
+  it('does not flag a slow song for one busy 10 s run', () => {
+    // 200 s at one syllable a second, with a 10 s run at about 5.5 a second in the middle.
+    const text = song([...run(0, 100, 10), ...run(1000, 55, 1.8), ...run(1200, 100, 10)]);
+    const file = parseUltrastar(text);
+    expect(syllableRate(file.players[0]!, file.bpm)).toBeGreaterThan(4.5);
+    expect(fastShare(file.players[0]!, file.bpm)).toBeLessThan(0.1);
+    expect(songRangeFromUltrastar(text).fastLyrics).toBe(false);
+  });
+
+  it('flags a song with a long fast stretch', () => {
+    // A minute at about 5.5 syllables a second, then a minute at one a second.
+    const text = song([...run(0, 330, 1.8), ...run(700, 60, 10)]);
+    expect(songRangeFromUltrastar(text).fastLyrics).toBe(true);
+  });
+
+  it('does not count "~a"-style continuations as new syllables', () => {
+    // Six notes a second, but every other one finishes the previous syllable.
+    const notes = run(0, 600, 1.667).map(([b], i): [number, string] => [b, i % 2 ? '~a' : 'la']);
+    const file = parseUltrastar(song(notes));
+    expect(syllableRate(file.players[0]!, file.bpm)).toBeLessThan(3.5);
+    expect(songRangeFromUltrastar(song(notes)).fastLyrics).toBe(false);
   });
 
   it('does not count "~" held-vowel continuations as syllables', () => {

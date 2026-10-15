@@ -50,6 +50,20 @@ describe('dedupeRanges', () => {
 });
 
 describe('importBulkRanges', () => {
+  it('with recheckFast, corrects the fast flag of songs from the same collection only', async () => {
+    const store = createMemoryStore();
+    const solo = rangeFromNoteText(fixture('solo.txt'), 'c')!;
+    const ballad = rangeFromNoteText(fixture('ballad.txt'), 'c')!;
+    const log = { trackId: '', title: 'x', artist: 'y', outcome: 'note-file' as const, reason: 'r', at: at().toISOString() };
+    await store.putSongRange(solo.key, { range: { ...solo.range, fastLyrics: true }, log });
+    await store.putSongRange(ballad.key, { range: { ...ballad.range, collection: 'other', fastLyrics: true }, log });
+    const summary = await importBulkRanges(store, [solo, ballad], { now: at, recheckFast: true });
+    expect(summary).toEqual({ imported: 0, kept: 2, fastUpdated: 1 });
+    expect((await store.getSongRange(solo.key))!.range!.fastLyrics).toBe(false);
+    expect((await store.getSongRange(solo.key))!.log).toEqual(log);
+    expect((await store.getSongRange(ballad.key))!.range!.fastLyrics).toBe(true);
+  });
+
   it('stores new songs, upgrades estimates, keeps existing note files', async () => {
     const store = createMemoryStore();
     const solo = rangeFromNoteText(fixture('solo.txt'), 'c')!;
@@ -61,7 +75,7 @@ describe('importBulkRanges', () => {
     await store.putSongRange(ballad.key, { range: { ...ballad.range, source: 'artist-typical', confidence: 'low' }, log: { ...log, outcome: 'artist-typical' } });
 
     const summary = await importBulkRanges(store, [solo, ballad, low], { now: at, batchSize: 2 });
-    expect(summary).toEqual({ imported: 2, kept: 1 });
+    expect(summary).toEqual({ imported: 2, kept: 1, fastUpdated: 0 });
     expect((await store.getSongRange(solo.key))!.range!.low).toBe(40);
     expect((await store.getSongRange(ballad.key))!.range!.source).toBe('note-file');
     const lowRec = (await store.getSongRange(low.key))!;

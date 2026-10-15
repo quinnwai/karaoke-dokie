@@ -38,4 +38,19 @@ describe('fillCatalogue', () => {
     await fillCatalogue({ store, usdb });
     expect(downloads).toEqual([1, 2, 3]);
   });
+
+  it('with recheckFast, re-reads only flagged USDB songs and clears flags the rule no longer gives', async () => {
+    const store = createMemoryStore();
+    await store.putUsdbSongs([1, 2, 3].map((id) => ({ id, key: `a|${id}`, artist: 'A', title: String(id), views: 10 - id })));
+    const base = { low: 50, high: 60, tessitura: 55, source: 'note-file' as const, confidence: 'high' as const };
+    await store.putSongRange('a|1', { range: { ...base, fastLyrics: true, usdbId: 1 }, log });
+    await store.putSongRange('a|2', { range: { ...base, fastLyrics: false, usdbId: 2 }, log });
+    await store.putSongRange('a|3', { range: { ...base, fastLyrics: true, collection: 'singmania' }, log });
+    const downloads: number[] = [];
+    const usdb = { downloadById: async (id: number) => (downloads.push(id), noteFile([0, 4, 7])) };
+    const summary = await fillCatalogue({ store, usdb, recheckFast: true });
+    expect(downloads).toEqual([1]);
+    expect(summary).toEqual({ candidates: 1, stored: 1, failed: 0 });
+    expect((await store.getSongRange('a|1'))!.range).toEqual({ ...base, fastLyrics: false, usdbId: 1 });
+  });
 });
