@@ -70,8 +70,10 @@ describe('USDB client', () => {
     const notes = await client.findNoteFile('Queen', 'Bohemian Rhapsody - Remastered 2011');
     expect(notes).toContain('#TITLE:Bohemian Rhapsody');
 
-    const login = calls[0]!;
+    expect(calls[0]!.method).toBe('GET'); // opens the site first for a session cookie
+    const login = calls[1]!;
     expect(login.method).toBe('POST');
+    expect(login.cookie).toContain('PHPSESSID=abc123');
     expect(new URLSearchParams(login.body).get('user')).toBe('u');
     expect(new URLSearchParams(login.body).get('login')).toBe('Login');
 
@@ -95,6 +97,23 @@ describe('USDB client', () => {
     const { fetch } = pages();
     const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
     expect(await client.findNoteFile('Omar Apollo', 'Evergreen')).toBeNull();
+  });
+
+  it('follows a login answer that is an empty redirect', async () => {
+    let loggedIn = false;
+    const { fetch } = fakeFetch({
+      'link=list': () => html(fixture('list.html')),
+      'link=gettxt': () => html(fixture('gettxt.html')),
+      'index.php': (method) => {
+        if (method === 'POST') {
+          loggedIn = true;
+          return new Response('', { status: 302, headers: { 'set-cookie': 'PHPSESSID=new1; path=/', location: 'index.php' } });
+        }
+        return html(loggedIn ? '<a href="?link=logout">Logout</a>' : 'Please login', 'PHPSESSID=first; path=/');
+      },
+    });
+    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
+    expect(await client.findNoteFile('Queen', 'Bohemian Rhapsody')).toContain('#ARTIST:Queen');
   });
 
   it('fails clearly when login is rejected', async () => {

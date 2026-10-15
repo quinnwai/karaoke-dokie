@@ -142,11 +142,17 @@ export function createUsdbClient(opts: UsdbClientOptions): UsdbClient {
     return res.text();
   }
 
+  // A logged-in page links to a logout.
+  const isLoggedIn = (page: string) => /link=logout/i.test(page);
+
   async function login() {
     if (loggedIn) return;
-    const page = await request({}, { user: opts.username, pass: opts.password, login: 'Login' });
-    // A logged-in page links to the user's profile and a logout.
-    if (!/link=logout/i.test(page) || !cookie) throw new Error('USDB login failed: check USDB_USERNAME and USDB_PASSWORD');
+    // Open the site first so the login form is posted with a session cookie, like a browser.
+    if (!cookie) await request({}, null);
+    let page = await request({}, { user: opts.username, pass: opts.password, login: 'Login' });
+    // The login answer can be a redirect with an empty body; the next page shows the result.
+    if (!isLoggedIn(page)) page = await request({}, null);
+    if (!isLoggedIn(page) || !cookie) throw new Error('USDB login failed: check USDB_USERNAME and USDB_PASSWORD');
     loggedIn = true;
   }
 
