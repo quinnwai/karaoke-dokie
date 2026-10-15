@@ -84,6 +84,8 @@ export interface DataSourceLogEntry {
   outcome: LogOutcome;
   reason: string;
   at: string; // ISO time
+  /** When the sync last searched USDB for this song and found no note file. Unset = never searched. */
+  usdbMissAt?: string;
 }
 
 export interface FeedbackEntry {

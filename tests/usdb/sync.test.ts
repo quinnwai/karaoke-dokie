@@ -36,7 +36,7 @@ describe('syncNoteFiles', () => {
 
     const summary = await syncNoteFiles({ store, usdb, tracks, now: () => new Date(0) });
 
-    expect(summary).toEqual({ checked: 4, noteFile: 2, artistTypical: 1, skipped: 1, alreadyKnown: 0, updated: 0, errors: 0 });
+    expect(summary).toEqual({ checked: 4, noteFile: 2, artistTypical: 1, skipped: 1, alreadyKnown: 0, recentMiss: 0, updated: 0, errors: 0 });
     expect((await store.getSongRange(songKey('Queen', 'Bohemian Rhapsody')))?.range).toMatchObject({
       low: 55,
       high: 67,
@@ -132,5 +132,36 @@ describe('syncNoteFiles', () => {
     await syncNoteFiles({ store, usdb, tracks: [track('1', 'A', 'A1'), track('2', 'A', 'A2'), track('3', 'A', 'A3')] });
     expect(calls.map((c) => c.title)).toEqual(['A1', 'A2', 'A3']);
     expect((await store.getSongRange(songKey('A', 'A1')))?.range?.source).toBe('artist-typical');
+  });
+
+  it('does not search again for 90 days after USDB had no note file', async () => {
+    const store = createMemoryStore();
+    const tracks = [track('1', 'A', 'Missing')];
+    let day = Date.UTC(2026, 0, 1);
+    const now = () => new Date(day);
+    const calls: { title: string; download: boolean }[] = [];
+    const usdb = fakeUsdb(() => null, calls);
+
+    await syncNoteFiles({ store, usdb, tracks, now });
+    expect(calls).toHaveLength(1);
+    expect((await store.getSongRange(songKey('A', 'Missing')))?.log.usdbMissAt).toBe('2026-01-01T00:00:00.000Z');
+
+    day += 89 * 86_400_000;
+    const later = await syncNoteFiles({ store, usdb, tracks, now });
+    expect(calls).toHaveLength(1);
+    expect(later.recentMiss).toBe(1);
+    expect((await store.getSongRange(songKey('A', 'Missing')))?.log.usdbMissAt).toBe('2026-01-01T00:00:00.000Z');
+
+    day += 2 * 86_400_000;
+    await syncNoteFiles({ store, usdb, tracks, now });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('still searches songs the website only guessed at (never checked on USDB)', async () => {
+    const store = createMemoryStore();
+    await store.putSongRange(songKey('A', 'Guessed'), { range: null, log: { outcome: 'skipped' } as never });
+    const calls: { title: string; download: boolean }[] = [];
+    await syncNoteFiles({ store, usdb: fakeUsdb(() => null, calls), tracks: [track('1', 'A', 'Guessed')] });
+    expect(calls.map((c) => c.title)).toEqual(['Guessed']);
   });
 });

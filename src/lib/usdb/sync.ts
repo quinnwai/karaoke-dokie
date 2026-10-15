@@ -14,12 +14,17 @@ import { songRangeFromUltrastar } from '../songs/range';
 import { resolveSongRange, songKey } from '../songs/resolve';
 import type { UsdbClient } from './client';
 
+/** A song USDB had no note file for is not searched again for this long. */
+export const MISS_RECHECK_DAYS = 90;
+
 export interface SyncSummary {
   checked: number;
   noteFile: number;
   artistTypical: number;
   skipped: number;
   alreadyKnown: number;
+  /** Songs USDB lacked when checked in the last MISS_RECHECK_DAYS, so not searched again. */
+  recentMiss: number;
   /** Already-known songs that got USDB views/rating or a pitch histogram added. */
   updated: number;
   errors: number;
@@ -53,12 +58,14 @@ export async function syncNoteFiles({
   now = () => new Date(),
   onProgress,
 }: SyncOptions): Promise<SyncSummary> {
-  const summary: SyncSummary = { checked: tracks.length, noteFile: 0, artistTypical: 0, skipped: 0, alreadyKnown: 0, updated: 0, errors: 0 };
+  const summary: SyncSummary = { checked: tracks.length, noteFile: 0, artistTypical: 0, skipped: 0, alreadyKnown: 0, recentMiss: 0, updated: 0, errors: 0 };
   // Log in before the first song, so a bad password stops the run instead of failing every song.
   await usdb.login?.();
   const artistOf = (t: Track) => songKey(t.artist, '').split('|')[0]!;
   /** Songs already looked up on USDB in this run (found, missing or failed). */
   const looked = new Set<string>();
+  /** Songs USDB had no note file for in this run, with the time we checked. */
+  const missAt = new Map<string, string>();
   /** Lookups that errored: left unstored so the next run tries again. */
   const failed = new Set<string>();
   const remaining: Track[] = [];
@@ -70,7 +77,10 @@ export async function syncNoteFiles({
     try {
       const song = await usdb.findSong(track.artist, track.title);
       const text = song?.noteText;
-      if (!song || !text) return false;
+      if (!song || !text) {
+        missAt.set(key, now().toISOString());
+        return false;
+      }
       const range = withPopularity(songRangeFromUltrastar(text), song);
       const log = { trackId: track.id, title: track.title, artist: track.artist, outcome: 'note-file' as const, reason: 'Used the UltraStar note file for this song (from USDB).', at: now().toISOString() };
       await store.putSongRange(key, { range, log });
@@ -91,12 +101,15 @@ export async function syncNoteFiles({
     for (const track of list) {
       const key = songKey(track.artist, track.title);
       if (failed.has(key) || (await store.getSongRange(key))?.range?.source === 'note-file') continue;
+      const previous = await store.getSongRange(key);
       const { range, log } = await resolveSongRange(track, {
         getNoteFile: async () => null,
         getArtistSongRanges: () => store.listNoteFileRangesByArtist(artistOf(track)),
         getExternalArtistRange: async () => null,
         now,
       });
+      const miss = missAt.get(key) ?? previous?.log.usdbMissAt;
+      if (miss) log.usdbMissAt = miss;
       await store.putSongRange(key, { range, log });
       if (!final) continue;
       await store.appendLog(log);
@@ -111,6 +124,11 @@ export async function syncNoteFiles({
     const key = songKey(track.artist, track.title);
     const cached = await store.getSongRange(key);
     if (cached?.range?.source !== 'note-file') {
+      const miss = cached?.log.usdbMissAt;
+      if (miss && now().getTime() - Date.parse(miss) < MISS_RECHECK_DAYS * 86_400_000) {
+        summary.recentMiss++;
+        looked.add(key); // keep its estimate fresh in the fallback pass, but don't search again
+      }
       remaining.push(track);
       continue;
     }
@@ -143,7 +161,7 @@ export async function syncNoteFiles({
     const covered = new Set<string>();
     for (const track of remaining) {
       const artist = artistOf(track);
-      if (covered.has(artist) || (tries.get(artist) ?? 0) >= 2) continue;
+      if (covered.has(artist) || (tries.get(artist) ?? 0) >= 2 || looked.has(songKey(track.artist, track.title))) continue;
       const known = (await store.listNoteFileRangesByArtist(artist)).length > 0;
       if (!known) tries.set(artist, (tries.get(artist) ?? 0) + 1);
       if (known || (await fetchSong(track))) {
