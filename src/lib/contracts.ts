@@ -51,6 +51,8 @@ export interface Track {
   playRank: number;
   /** 0-1: how much the user listens to this song (top tracks over 3 time spans, recent plays, saved). */
   familiarity?: number;
+  /** True when the user knows the song: in a top list, recent plays or one of their playlists. Saved-only songs are false. */
+  known?: boolean;
   /** Spotify's 0-100 track popularity, when Spotify returns it. */
   popularity?: number;
 }
@@ -71,7 +73,7 @@ export interface Match {
   range: SongRange;
   difficulty: Difficulty;
   octave: OctaveShift;
-  /** Ranking score, higher first: 0.50 comfort + 0.35 familiarity + 0.15 popularity - penalties. */
+  /** Ranking score, higher first: 0.85 comfort × familiarity + 0.15 popularity - penalties. */
   score?: number;
   parts?: ScoreParts;
   /** One or two short reasons for the rank, e.g. "In your sweet spot". */

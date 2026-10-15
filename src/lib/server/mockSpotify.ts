@@ -75,6 +75,9 @@ export function createMockSpotifyClient(): SpotifyClient {
       const start = timeRange === 'short_term' ? 1 : timeRange === 'long_term' ? 2 : 0;
       return MOCK_TRACKS.slice(start, start + MOCK_TOP_COUNT).map((t, i) => ({ ...t, playRank: i, popularity: 90 - i * 5 }));
     },
+    async getPlaylistTracks() {
+      return [MOCK_TRACKS[10]!, MOCK_TRACKS[15]!].map((t, i) => ({ ...t, playRank: i }));
+    },
     async getRecentlyPlayed() {
       return [MOCK_TRACKS[3]!, MOCK_TRACKS[7]!, MOCK_TRACKS[3]!].map((t, i) => ({ ...t, playRank: i }));
     },

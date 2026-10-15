@@ -3,10 +3,13 @@
 import type { Track } from '../contracts';
 import type { SpotifyTokens, Store, UserRecord } from './store';
 
-export const SPOTIFY_SCOPES = 'user-library-read user-top-read user-read-recently-played';
+export const SPOTIFY_SCOPES = 'user-library-read user-top-read user-read-recently-played playlist-read-private playlist-read-collaborative';
 export const SPOTIFY_ACCOUNTS = 'https://accounts.spotify.com';
 export const SPOTIFY_API = 'https://api.spotify.com/v1';
 export const MAX_SAVED_TRACKS = 2000;
+/** Playlists and playlist songs read per sign-in. */
+export const MAX_PLAYLISTS = 100;
+export const MAX_PLAYLIST_TRACKS = 3000;
 /** Saved-song pages fetched at once (50 songs each). */
 const SAVED_PAGE_CONCURRENCY = 5;
 /** Refresh this long before the access token actually expires. */
@@ -37,6 +40,8 @@ export interface SpotifyClient {
   getTopTracks(accessToken: string, timeRange?: TimeRange): Promise<Track[]>;
   /** The last 50 plays, newest first (a song can appear more than once). */
   getRecentlyPlayed(accessToken: string): Promise<Track[]>;
+  /** Songs in playlists the user made or collaborates on (not ones they only follow), deduplicated. */
+  getPlaylistTracks(accessToken: string): Promise<Track[]>;
 }
 
 export type TimeRange = 'short_term' | 'medium_term' | 'long_term';
@@ -98,6 +103,8 @@ export interface Listening {
   /** Last plays, newest first; repeats count. */
   recent: Track[];
   saved: Track[];
+  /** Songs in the user's own playlists. */
+  playlists?: Track[];
 }
 
 /** Position in a top-50 list as a score: #1 = 1.0, falling to 0.2 at #50. */
@@ -105,20 +112,25 @@ const topPositionScore = (index: number) => 1 - (0.8 * Math.min(index, 49)) / 49
 const EXTRA_WINDOW_BONUS = 0.1;
 const RECENT_PLAY_BONUS = 0.1;
 const MAX_RECENT_BONUS = 0.3;
-const SAVED_ONLY = 0.15;
+export const SAVED_ONLY = 0.15;
 const SAVED_BONUS = 0.05;
+/** A song in one of the user's own playlists that they have not played lately. */
+export const PLAYLIST_ONLY = 0.4;
 
 /**
  * The user's library with a familiarity score per song (0-1): the best top-list position across
  * the three time spans, plus a bonus for each extra span it appears in and for recent plays.
- * Songs that are only saved get 0.15. playRank is the order by familiarity (0 = most familiar).
+ * Songs in the user's own playlists get at least 0.4; songs that are only saved get 0.15.
+ * `known` is true for songs in a top list, recent plays or a playlist: the ones the user knows.
+ * playRank is the order by familiarity (0 = most familiar).
  */
-export function buildLibrary({ top, recent, saved }: Listening): Track[] {
+export function buildLibrary({ top, recent, saved, playlists = [] }: Listening): Track[] {
   const byId = new Map<string, Track>();
   const best = new Map<string, number>();
   const windows = new Map<string, number>();
   const plays = new Map<string, number>();
   const savedIds = new Set(saved.map((t) => t.id));
+  const playlistIds = new Set(playlists.map((t) => t.id));
   const order: string[] = [];
   const add = (t: Track) => {
     if (!byId.has(t.id)) {
@@ -140,18 +152,21 @@ export function buildLibrary({ top, recent, saved }: Listening): Track[] {
     plays.set(t.id, (plays.get(t.id) ?? 0) + 1);
   }
   for (const t of saved) add(t);
+  for (const t of playlists) add(t);
 
+  const known = (id: string) => best.has(id) || plays.has(id) || playlistIds.has(id);
   const familiarity = (id: string) => {
     let f = best.get(id) ?? 0;
     f += Math.max(0, (windows.get(id) ?? 0) - 1) * EXTRA_WINDOW_BONUS;
     f += Math.min(MAX_RECENT_BONUS, (plays.get(id) ?? 0) * RECENT_PLAY_BONUS);
+    if (playlistIds.has(id)) f = Math.max(f, PLAYLIST_ONLY);
     if (savedIds.has(id)) f = f === 0 ? SAVED_ONLY : f + SAVED_BONUS;
     return Math.min(1, Math.round(f * 1000) / 1000);
   };
   return order
     .map((id, i) => ({ track: byId.get(id)!, f: familiarity(id), i }))
     .sort((a, b) => b.f - a.f || a.i - b.i)
-    .map(({ track, f }, playRank) => ({ ...track, familiarity: f, playRank }));
+    .map(({ track, f }, playRank) => ({ ...track, familiarity: f, known: known(track.id), playRank }));
 }
 
 // ---- real client ----
@@ -246,6 +261,45 @@ export function createSpotifyClient(cfg: SpotifyConfig, fetchFn: FetchFn = (i, i
       }
       return out;
     },
+    async getPlaylistTracks(accessToken) {
+      type ListPage = { items: { id: string; collaborative?: boolean; owner?: { id?: string } }[]; next: string | null };
+      const me = await api<{ id: string }>(accessToken, '/me');
+      const own: string[] = [];
+      let list: ListPage | null = await api<ListPage>(accessToken, '/me/playlists?limit=50');
+      while (list) {
+        for (const p of list.items) if (p && (p.owner?.id === me.id || p.collaborative)) own.push(p.id);
+        list = list.next && own.length < MAX_PLAYLISTS ? await api<ListPage>(accessToken, list.next) : null;
+      }
+      // Newer apps read playlist songs from /items (entries carry `item`); older ones from /tracks (`track`).
+      type ItemPage = { items: { item?: SpotifyTrackObject | null; track?: SpotifyTrackObject | null }[]; next: string | null };
+      const firstPage = async (id: string): Promise<ItemPage> => {
+        try {
+          return await api<ItemPage>(accessToken, `/playlists/${id}/items?limit=50`);
+        } catch (err) {
+          if (err instanceof SpotifyError && (err.status === 404 || err.status === 410)) {
+            return api<ItemPage>(accessToken, `/playlists/${id}/tracks?limit=50`);
+          }
+          throw err;
+        }
+      };
+      const out: Track[] = [];
+      const seen = new Set<string>();
+      for (const id of own.slice(0, MAX_PLAYLISTS)) {
+        let page: ItemPage | null = await firstPage(id).catch(() => null);
+        while (page) {
+          for (const entry of page.items) {
+            const t = mapTrack(entry.item ?? entry.track, out.length);
+            if (t && !seen.has(t.id) && out.length < MAX_PLAYLIST_TRACKS) {
+              seen.add(t.id);
+              out.push(t);
+            }
+          }
+          page = page.next && out.length < MAX_PLAYLIST_TRACKS ? await api<ItemPage>(accessToken, page.next).catch(() => null) : null;
+        }
+        if (out.length >= MAX_PLAYLIST_TRACKS) break;
+      }
+      return out;
+    },
   };
 }
 
@@ -267,18 +321,20 @@ export async function ensureFreshTokens(
 
 /** The user's library as contract Tracks with familiarity, ordered by playRank. */
 export async function getUserTracks(client: SpotifyClient, accessToken: string): Promise<Track[]> {
-  // Recently played needs a permission users who signed in before it was added have not granted;
-  // without it we skip that signal rather than fail.
-  const recent = client.getRecentlyPlayed(accessToken).catch((err) => {
-    if (err instanceof SpotifyError && (err.status === 401 || err.status === 403)) return [] as Track[];
-    throw err;
-  });
-  const [short, medium, long, plays, saved] = await Promise.all([
+  // Recently played and playlists need permissions that users who signed in before they were added
+  // have not granted; without them we skip that signal rather than fail.
+  const optional = (p: Promise<Track[]>) =>
+    p.catch((err) => {
+      if (err instanceof SpotifyError && (err.status === 401 || err.status === 403)) return [] as Track[];
+      throw err;
+    });
+  const [short, medium, long, plays, saved, playlists] = await Promise.all([
     client.getTopTracks(accessToken, 'short_term'),
     client.getTopTracks(accessToken, 'medium_term'),
     client.getTopTracks(accessToken, 'long_term'),
-    recent,
+    optional(client.getRecentlyPlayed(accessToken)),
     client.getSavedTracks(accessToken),
+    optional(client.getPlaylistTracks(accessToken)),
   ]);
-  return buildLibrary({ top: { short_term: short, medium_term: medium, long_term: long }, recent: plays, saved });
+  return buildLibrary({ top: { short_term: short, medium_term: medium, long_term: long }, recent: plays, saved, playlists });
 }

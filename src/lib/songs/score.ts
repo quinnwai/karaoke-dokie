@@ -1,6 +1,8 @@
 // Ranks songs that fit: one score per song, higher first.
-//   score = 0.50 comfort + 0.35 familiarity + 0.15 popularity - penalties
-// Comfort comes first (the user's call): a song you will nail beats one you merely know.
+//   score = 0.85 comfort × familiarity + 0.15 popularity - penalties
+// Comfort and familiarity multiply (the user's call): a song ranks high only when it is both
+// comfortable and one you know; low on either sinks it. Songs the user does not know (saved
+// only) are also ranked below known ones in rank.ts.
 //
 // Comfort (0-1): how much of the song's sung time sits in the user's sweet spot, the middle
 // half of their range. Notes outside it count less the closer they get to the edge. Songs
@@ -12,7 +14,9 @@
 
 import type { Match, OctaveShift, ScoreParts, SongRange, Track, VocalRange } from '../contracts';
 
-export const WEIGHTS = { comfort: 0.5, familiarity: 0.35, popularity: 0.15 } as const;
+export const WEIGHTS = { fit: 0.85, popularity: 0.15 } as const;
+/** How much each part counts when picking the reasons shown for a rank. */
+const REASON_WEIGHTS = { comfort: 0.5, familiarity: 0.35, popularity: 0.15 } as const;
 export const PENALTIES = { octave: 0.1, artistEstimate: 0.1, fastLyrics: 0.05 } as const;
 /** Used when we know nothing about a song's popularity. */
 export const UNKNOWN_POPULARITY = 0.4;
@@ -78,17 +82,17 @@ export function scoreParts(user: VocalRange, track: Track, song: SongRange, octa
 }
 
 export function totalScore(p: ScoreParts): number {
-  return WEIGHTS.comfort * p.comfort + WEIGHTS.familiarity * p.familiarity + WEIGHTS.popularity * p.popularity - p.penalty;
+  return WEIGHTS.fit * p.comfort * p.familiarity + WEIGHTS.popularity * p.popularity - p.penalty;
 }
 
 /** The one or two biggest contributors, in words. */
 export function reasonsFor(p: ScoreParts): string[] {
   const candidates: { text: string; weight: number }[] = [];
-  if (p.comfort >= 0.8) candidates.push({ text: 'In your sweet spot', weight: WEIGHTS.comfort * p.comfort });
-  else if (p.comfort >= 0.5) candidates.push({ text: 'Mostly comfortable', weight: WEIGHTS.comfort * p.comfort });
-  if (p.familiarity >= 0.6) candidates.push({ text: 'You play this a lot', weight: WEIGHTS.familiarity * p.familiarity });
-  else if (p.familiarity >= 0.3) candidates.push({ text: 'You know this one', weight: WEIGHTS.familiarity * p.familiarity });
-  if (p.popularity >= 0.7) candidates.push({ text: 'Crowd favourite', weight: WEIGHTS.popularity * p.popularity });
+  if (p.comfort >= 0.8) candidates.push({ text: 'In your sweet spot', weight: REASON_WEIGHTS.comfort * p.comfort });
+  else if (p.comfort >= 0.5) candidates.push({ text: 'Mostly comfortable', weight: REASON_WEIGHTS.comfort * p.comfort });
+  if (p.familiarity >= 0.6) candidates.push({ text: 'You play this a lot', weight: REASON_WEIGHTS.familiarity * p.familiarity });
+  else if (p.familiarity >= 0.3) candidates.push({ text: 'You know this one', weight: REASON_WEIGHTS.familiarity * p.familiarity });
+  if (p.popularity >= 0.7) candidates.push({ text: 'Crowd favourite', weight: REASON_WEIGHTS.popularity * p.popularity });
   return candidates
     .sort((a, b) => b.weight - a.weight)
     .slice(0, 2)

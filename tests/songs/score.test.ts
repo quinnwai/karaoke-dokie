@@ -104,6 +104,28 @@ describe('ranking', () => {
     expect(shifted.parts!.penalty).toBeCloseTo(0.1);
   });
 
+  it('multiplies comfort and familiarity, so a song must be both', () => {
+    // Quinn's example: very comfortable but barely played vs. well known but only moderately comfortable.
+    const laGrange = match(track('lagrange', { familiarity: 0.15, known: true, popularity: 80 }), song(56, 64));
+    const favourite = match(track('fav', { familiarity: 0.8, known: true, popularity: 80 }), song(50, 70, { pitchShare: [[51, 0.4], [60, 0.6]] }));
+    expect(laGrange.parts!.comfort).toBeGreaterThan(favourite.parts!.comfort);
+    expect(rankMatches([laGrange, favourite]).map((m) => m.track.id)).toEqual(['fav', 'lagrange']);
+    expect(laGrange.score!).toBeCloseTo(0.85 * laGrange.parts!.comfort * 0.15 + 0.15 * laGrange.parts!.popularity);
+  });
+
+  it('ranks saved-only songs after every song you know', () => {
+    const savedOnly = match(track('saved', { familiarity: 0.15, known: false, popularity: 100 }), song(57, 63));
+    const known = match(track('known', { familiarity: 0.2, known: true, popularity: 0 }), song(50, 70, { pitchShare: [[50, 0.5], [60, 0.5]] }));
+    expect(savedOnly.score!).toBeGreaterThan(known.score!);
+    expect(rankMatches([savedOnly, known]).map((m) => m.track.id)).toEqual(['known', 'saved']);
+  });
+
+  it('treats cached tracks without a known flag as known unless saved-only', () => {
+    const old = match(track('old', { familiarity: 0.15 }), song(57, 63));
+    const played = match(track('played', { familiarity: 0.2 }), song(50, 70, { pitchShare: [[50, 0.5], [60, 0.5]] }));
+    expect(rankMatches([old, played]).map((m) => m.track.id)).toEqual(['played', 'old']);
+  });
+
   it('breaks score ties by comfort, then familiarity', () => {
     const a: Match = { track: track('a'), range: song(55, 65), difficulty: 'easy', octave: 'none', score: 0.5, parts: { comfort: 0.6, familiarity: 0.2, popularity: 0, penalty: 0 } };
     const b: Match = { ...a, track: track('b'), parts: { comfort: 0.8, familiarity: 0.1, popularity: 0, penalty: 0 } };

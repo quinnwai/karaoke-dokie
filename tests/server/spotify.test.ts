@@ -47,7 +47,7 @@ describe('Spotify authorization', () => {
   it('builds the authorize URL with scopes, redirect and state', () => {
     const url = new URL(createSpotifyClient(cfg).authorizeUrl('st4te', 'http://ignored'));
     expect(url.origin + url.pathname).toBe('https://accounts.spotify.com/authorize');
-    expect(url.searchParams.get('scope')).toBe('user-library-read user-top-read user-read-recently-played');
+    expect(url.searchParams.get('scope')).toBe('user-library-read user-top-read user-read-recently-played playlist-read-private playlist-read-collaborative');
     expect(url.searchParams.get('state')).toBe('st4te');
     expect(url.searchParams.get('redirect_uri')).toBe(cfg.redirectUri);
     expect(url.searchParams.get('client_id')).toBe('cid');
@@ -227,10 +227,61 @@ describe('familiarity', () => {
     expect(lib[0]!.popularity).toBe(70);
   });
 
+  it('counts songs in your playlists as known, at least 0.4, and saved-only songs as not known', () => {
+    const lib = buildLibrary({ top: { medium_term: [t('top')] }, recent: [t('played')], saved: [t('saved'), t('both')], playlists: [t('list'), t('both')] });
+    const by = Object.fromEntries(lib.map((x) => [x.id, x]));
+    expect(by.top!.known).toBe(true);
+    expect(by.played!.known).toBe(true);
+    expect(by.list!.known).toBe(true);
+    expect(by.list!.familiarity).toBe(0.4);
+    expect(by.both!.familiarity).toBeCloseTo(0.45);
+    expect(by.saved!.known).toBe(false);
+    expect(by.saved!.familiarity).toBe(0.15);
+  });
+
+  it('skips playlists when the permission is missing', async () => {
+    const client = { ...createMockSpotifyClient(), getPlaylistTracks: async () => { throw new SpotifyError('no scope', 403); } };
+    const lib = await getUserTracks(client, 'tok');
+    expect(lib.length).toBeGreaterThan(20);
+  });
+
   it('skips recent plays when the permission is missing', async () => {
     const client = { ...createMockSpotifyClient(), getRecentlyPlayed: async () => { throw new SpotifyError('no scope', 403); } };
     const lib = await getUserTracks(client, 'tok');
     expect(lib.length).toBeGreaterThan(20);
+  });
+});
+
+describe('playlist songs', () => {
+  it('reads only playlists you own or collaborate on, following pages, without repeats', async () => {
+    const calls: Call[] = [];
+    const page = (ids: number[], next: string | null) => ({ items: ids.map((n) => ({ item: sTrack(n) })), next });
+    const client = createSpotifyClient(
+      cfg,
+      fakeFetch(
+        {
+          'https://api.spotify.com/v1/me': () => ({ id: 'me' }),
+          'https://api.spotify.com/v1/me/playlists': (u) =>
+            u.searchParams.get('offset')
+              ? { items: [{ id: 'collab', collaborative: true, owner: { id: 'friend' } }], next: null }
+              : {
+                  items: [
+                    { id: 'mine', owner: { id: 'me' } },
+                    { id: 'followed', owner: { id: 'spotify' } },
+                  ],
+                  next: 'https://api.spotify.com/v1/me/playlists?offset=50',
+                },
+          'https://api.spotify.com/v1/playlists/mine/items': (u) =>
+            u.searchParams.get('offset') ? page([3], null) : page([1, 2], 'https://api.spotify.com/v1/playlists/mine/items?offset=50'),
+          // An older app answers on /tracks only, with `track` entries.
+          'https://api.spotify.com/v1/playlists/collab/tracks': () => ({ items: [{ track: sTrack(2) }, { track: sTrack(4) }], next: null }),
+        },
+        calls,
+      ),
+    );
+    const tracks = await client.getPlaylistTracks('tok');
+    expect(tracks.map((x) => x.id)).toEqual(['id1', 'id2', 'id3', 'id4']);
+    expect(calls.some((c) => c.url.includes('/playlists/followed'))).toBe(false);
   });
 });
 
