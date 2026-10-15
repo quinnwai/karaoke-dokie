@@ -26,7 +26,7 @@ export interface SyncSummary {
 
 export interface SyncOptions {
   store: Store;
-  usdb: Pick<UsdbClient, 'findSong'>;
+  usdb: Pick<UsdbClient, 'findSong'> & Partial<Pick<UsdbClient, 'login'>>;
   tracks: Track[];
   /** Re-download note files for known songs that lack a pitch histogram. */
   rescan?: boolean;
@@ -43,6 +43,8 @@ function withPopularity(range: SongRange, song: { views?: number; rating?: numbe
 
 export async function syncNoteFiles({ store, usdb, tracks, rescan = false, now = () => new Date(), onProgress }: SyncOptions): Promise<SyncSummary> {
   const summary: SyncSummary = { checked: tracks.length, noteFile: 0, artistTypical: 0, skipped: 0, alreadyKnown: 0, updated: 0, errors: 0 };
+  // Log in before the first song, so a bad password stops the run instead of failing every song.
+  await usdb.login?.();
   const remaining: Track[] = [];
   const failed = new Set<string>();
 

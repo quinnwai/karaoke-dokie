@@ -97,4 +97,12 @@ describe('syncNoteFiles', () => {
     expect(calls).toEqual([{ title: 'Old', download: true }]);
     expect((await store.getSongRange(songKey('A', 'Old')))?.range).toMatchObject({ low: 60, high: 64, pitchShare: [[60, 0.5], [64, 0.5]], usdbViews: 2000 });
   });
+
+  it('logs in before the first song and stops the run when login fails', async () => {
+    const store = createMemoryStore();
+    const calls: { title: string; download: boolean }[] = [];
+    const usdb = { ...fakeUsdb(() => null, calls), login: async () => { throw new Error('USDB login failed: check USDB_USERNAME and USDB_PASSWORD'); } };
+    await expect(syncNoteFiles({ store, usdb, tracks: [track('1', 'A', 'B')] })).rejects.toThrow(/login failed/);
+    expect(calls).toEqual([]);
+  });
 });

@@ -116,6 +116,23 @@ describe('USDB client', () => {
     expect(await client.findNoteFile('Queen', 'Bohemian Rhapsody')).toContain('#ARTIST:Queen');
   });
 
+  it('only logs in when the session cookie is sent with the form, like USDB', async () => {
+    let sessions = 0;
+    const loggedIn = new Set<string>();
+    const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const cookie = new Headers(init?.headers).get('cookie');
+      if (url.includes('link=list')) return html(fixture('list.html'));
+      if (url.includes('link=gettxt')) return html(fixture('gettxt.html'));
+      if (!cookie) return html('Please login', `PHPSESSID=s${++sessions}; path=/`);
+      if (init?.method === 'POST') loggedIn.add(cookie);
+      return html(loggedIn.has(cookie) ? '<a href="?link=logout">Logout</a>' : 'Please login');
+    }) as typeof globalThis.fetch;
+    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
+    await expect(client.login()).resolves.toBeUndefined();
+    expect(await client.findNoteFile('Queen', 'Bohemian Rhapsody')).toContain('#ARTIST:Queen');
+  });
+
   it('fails clearly when login is rejected', async () => {
     const { fetch } = fakeFetch({ 'index.php': () => html('Login failed. Wrong user or password') });
     const client = createUsdbClient({ username: 'u', password: 'bad', fetch, minIntervalMs: 0, sleep: async () => {} });

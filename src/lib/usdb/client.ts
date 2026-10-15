@@ -38,6 +38,8 @@ export interface UsdbClientOptions {
 }
 
 export interface UsdbClient {
+  /** Logs in (once). Throws a clear error when USDB rejects the username or password. */
+  login(): Promise<void>;
   /** Searches by artist and title and returns the note file text, or null when USDB has no match. */
   findNoteFile(artist: string, title: string): Promise<string | null>;
   /** Like findNoteFile, plus the song's views and rating. `download: false` only searches (fast). */
@@ -180,6 +182,7 @@ export function createUsdbClient(opts: UsdbClientOptions): UsdbClient {
   }
 
   return {
+    login,
     findSong,
     async findNoteFile(artist, title) {
       return (await findSong(artist, title))?.noteText ?? null;
