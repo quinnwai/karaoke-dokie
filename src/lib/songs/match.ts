@@ -1,12 +1,16 @@
 // Decides whether a song fits a user's vocal range and how hard it will feel.
 //
 // A song is only offered if every sung note (low..high) lies inside the
-// user's comfortable range. Difficulty then depends on how close the song
-// gets to the edges of that range: notes near the middle are easy to sustain,
-// notes at the very top or bottom of a range strain the voice. We measure the
-// furthest song note from the centre of the user's range as a fraction f of
-// the half-range (0 = centre, 1 = edge): easy up to 0.5, medium up to 0.7,
-// hard beyond.
+// user's comfortable range. Difficulty then depends on how much of the singing
+// sits near the edges of that range. The range splits into the middle half,
+// then on each side an outer eighth and, at the very top and bottom, an edge
+// eighth:
+//   hard:   10% or more of the sung time in an edge eighth
+//   medium: 2% or more in an edge eighth, or 25% or more outside the middle half
+//   easy:   everything else
+// Time comes from the note file's pitch histogram (pitchShare). Songs without
+// one are estimated as 70% at their typical note and 15% each at their lowest
+// and highest notes, the same weighting score.ts uses for comfort.
 //
 // If the song does not fit as written, we try it an octave down, then an
 // octave up. Singing an octave away from the recording is natural (men and
@@ -15,10 +19,14 @@
 
 import type { Difficulty, OctaveShift, SongRange, VocalRange } from '../contracts';
 
-export const EASY_MAX_EDGE_FRACTION = 0.5;
-export const MEDIUM_MAX_EDGE_FRACTION = 0.7;
+/** Distance from the centre, as a fraction of the half-range, where the outer and edge eighths start. */
+export const OUTER_FROM = 0.5;
+export const EDGE_FROM = 0.75;
+export const HARD_MIN_EDGE_SHARE = 0.1;
+export const MEDIUM_MIN_EDGE_SHARE = 0.02;
+export const MEDIUM_MIN_OUTER_SHARE = 0.25;
 
-// Absorbs floating-point noise so boundaries like 7/10 stay inclusive.
+// Absorbs floating-point noise so boundaries stay put.
 const EPSILON = 1e-9;
 
 export interface SongFit {
@@ -26,21 +34,59 @@ export interface SongFit {
   octave: OctaveShift;
 }
 
+export interface EdgeTime {
+  /** Share of sung time outside the middle half of the range (edge eighths included). */
+  outer: number;
+  /** Share of sung time in the edge eighths. */
+  edge: number;
+  /** Which edge the song leans on most. */
+  side: 'top' | 'bottom';
+}
+
 function fits(user: VocalRange, low: number, high: number): boolean {
   return low >= user.low - EPSILON && high <= user.high + EPSILON;
 }
 
-function difficultyOf(user: VocalRange, low: number, high: number): Difficulty {
-  const center = (user.low + user.high) / 2;
-  const half = (user.high - user.low) / 2;
-  if (half <= 0) return 'hard'; // single-note range: anything that fits is at the edge
-  const f = Math.max(Math.abs(low - center), Math.abs(high - center)) / half;
-  if (f <= EASY_MAX_EDGE_FRACTION + EPSILON) return 'easy';
-  if (f <= MEDIUM_MAX_EDGE_FRACTION + EPSILON) return 'medium';
-  return 'hard';
+/** The song's sung time by pitch, shifted by `semitones`. */
+function pitchTime(song: SongRange, semitones: number): [number, number][] {
+  if (song.pitchShare?.length) return song.pitchShare.map(([m, share]) => [m + semitones, share]);
+  return [
+    [song.tessitura + semitones, 0.7],
+    [song.low + semitones, 0.15],
+    [song.high + semitones, 0.15],
+  ];
 }
 
-const SHIFTS: { octave: OctaveShift; semitones: number }[] = [
+/** How much of a song (shifted by `semitones`) sits outside the user's middle half and at their edges. */
+export function edgeTime(user: VocalRange, song: SongRange, semitones = 0): EdgeTime {
+  const center = (user.low + user.high) / 2;
+  const half = (user.high - user.low) / 2;
+  let outer = 0;
+  let edge = 0;
+  let total = 0;
+  let above = 0;
+  let below = 0;
+  for (const [midi, share] of pitchTime(song, semitones)) {
+    total += share;
+    const d = half > 0 ? Math.abs(midi - center) / half : 1;
+    if (d > OUTER_FROM + EPSILON) {
+      outer += share;
+      if (midi > center) above += share;
+      else below += share;
+    }
+    if (d > EDGE_FROM + EPSILON) edge += share;
+  }
+  if (total <= 0) return { outer: 0, edge: 0, side: 'top' };
+  return { outer: outer / total, edge: edge / total, side: below > above ? 'bottom' : 'top' };
+}
+
+export function difficultyFromEdgeTime({ outer, edge }: EdgeTime): Difficulty {
+  if (edge >= HARD_MIN_EDGE_SHARE - EPSILON) return 'hard';
+  if (edge >= MEDIUM_MIN_EDGE_SHARE - EPSILON || outer >= MEDIUM_MIN_OUTER_SHARE - EPSILON) return 'medium';
+  return 'easy';
+}
+
+export const SHIFTS: { octave: OctaveShift; semitones: number }[] = [
   { octave: 'none', semitones: 0 },
   { octave: 'down', semitones: -12 },
   { octave: 'up', semitones: 12 },
@@ -51,7 +97,7 @@ export function matchSong(userRange: VocalRange, song: SongRange): SongFit | nul
     const low = song.low + semitones;
     const high = song.high + semitones;
     if (fits(userRange, low, high)) {
-      return { difficulty: difficultyOf(userRange, low, high), octave };
+      return { difficulty: difficultyFromEdgeTime(edgeTime(userRange, song, semitones)), octave };
     }
   }
   return null;

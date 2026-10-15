@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SongRange, VocalRange } from '../../src/lib/contracts';
-import { matchSong } from '../../src/lib/songs/match';
+import { edgeTime, matchSong } from '../../src/lib/songs/match';
 import { songRangeFromUltrastar } from '../../src/lib/songs/range';
 import { fixture } from './fixture';
 
@@ -17,27 +17,40 @@ const song = (low: number, high: number): SongRange => ({
 const C3C5 = user(48, 72);
 
 describe('matchSong difficulty (user C3..C5)', () => {
-  it('is easy for songs within F#3..F#4', () => {
+  // Centre C4. Middle half: F#3..F#4. Edge eighths: up to D3 and from A#4.
+  const shared = (pitchShare: [number, number][]): SongRange => ({
+    ...song(Math.min(...pitchShare.map(([m]) => m)), Math.max(...pitchShare.map(([m]) => m))),
+    pitchShare,
+  });
+
+  it('is easy when the singing stays in the middle half', () => {
     expect(matchSong(C3C5, song(54, 66))).toEqual({ difficulty: 'easy', octave: 'none' });
     expect(matchSong(C3C5, song(60, 60))).toEqual({ difficulty: 'easy', octave: 'none' });
+    expect(matchSong(C3C5, shared([[60, 0.99], [70, 0.01]]))?.difficulty).toBe('easy');
   });
 
-  it('is medium for songs reaching about E3..G#4', () => {
-    expect(matchSong(C3C5, song(53, 66))).toEqual({ difficulty: 'medium', octave: 'none' });
-    expect(matchSong(C3C5, song(52, 68))).toEqual({ difficulty: 'medium', octave: 'none' });
+  it('is medium with a few notes at an edge, or a quarter of the song outside the middle', () => {
+    expect(matchSong(C3C5, shared([[60, 0.95], [72, 0.05]]))?.difficulty).toBe('medium');
+    expect(matchSong(C3C5, shared([[60, 0.98], [70, 0.02]]))?.difficulty).toBe('medium');
+    expect(matchSong(C3C5, shared([[60, 0.7], [67, 0.3]]))?.difficulty).toBe('medium');
+    expect(matchSong(C3C5, shared([[60, 0.75], [66, 0.25]]))?.difficulty).toBe('easy'); // F#4 is still the middle
   });
 
-  it('is hard for songs that reach near the edges, including exactly the edges', () => {
-    expect(matchSong(C3C5, song(51, 60))).toEqual({ difficulty: 'hard', octave: 'none' });
-    expect(matchSong(C3C5, song(60, 69))).toEqual({ difficulty: 'hard', octave: 'none' });
-    expect(matchSong(C3C5, song(48, 72))).toEqual({ difficulty: 'hard', octave: 'none' });
+  it('is hard when a tenth of the singing is at an edge', () => {
+    expect(matchSong(C3C5, shared([[60, 0.9], [71, 0.1]]))?.difficulty).toBe('hard');
+    expect(matchSong(C3C5, shared([[50, 0.2], [60, 0.8]]))?.difficulty).toBe('hard');
   });
 
-  it('treats the 0.5 and 0.7 boundaries as inclusive', () => {
-    const u = user(50, 70); // center 60, half 10
-    expect(matchSong(u, song(55, 65))?.difficulty).toBe('easy');
-    expect(matchSong(u, song(53, 67))?.difficulty).toBe('medium');
-    expect(matchSong(u, song(52, 60))?.difficulty).toBe('hard');
+  it('estimates songs without a pitch histogram from their typical, lowest and highest notes', () => {
+    expect(matchSong(C3C5, song(48, 72))?.difficulty).toBe('hard'); // both extremes at the edges
+    expect(matchSong(C3C5, song(50, 60))?.difficulty).toBe('hard'); // lowest note at the edge
+    expect(matchSong(C3C5, song(51, 60))?.difficulty).toBe('easy'); // D#3 is outside the middle, not at the edge
+  });
+
+  it('says which edge a song leans on', () => {
+    expect(edgeTime(C3C5, shared([[50, 0.2], [60, 0.8]])).side).toBe('bottom');
+    expect(edgeTime(C3C5, shared([[60, 0.9], [71, 0.1]])).side).toBe('top');
+    expect(edgeTime(C3C5, shared([[60, 0.9], [71, 0.1]]))).toMatchObject({ outer: 0.1, edge: 0.1 });
   });
 });
 

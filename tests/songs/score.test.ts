@@ -38,10 +38,10 @@ describe('comfort', () => {
   });
 
   it('weighs the time spent on each pitch, not just the extremes', () => {
-    // Hard by its top note (C5), but 95% of it sits on C4.
+    // Reaches C5, but 95% of it sits on C4: a few notes at the edge make it Medium, not Hard.
     const mostlyMiddle = song(60, 72, { pitchShare: [[60, 0.95], [72, 0.05]] });
     expect(comfortScore(user, mostlyMiddle, 'none')).toBeCloseTo(0.95);
-    expect(matchSong(user, mostlyMiddle)!.difficulty).toBe('hard');
+    expect(matchSong(user, mostlyMiddle)!.difficulty).toBe('medium');
   });
 
   it('applies the octave shift', () => {
@@ -139,5 +139,20 @@ describe('reasons', () => {
     expect(reasonsFor({ comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0 })).toEqual(['In your sweet spot', 'You play this a lot']);
     expect(reasonsFor({ comfort: 0.3, familiarity: 0.1, popularity: 0.9, penalty: 0 })).toEqual(['Crowd favourite']);
     expect(reasonsFor({ comfort: 0.2, familiarity: 0.1, popularity: 0.2, penalty: 0 })).toEqual([]);
+  });
+
+  it('follows the difficulty label, so a Hard song never says sweet spot', () => {
+    const p = { comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0 };
+    expect(reasonsFor(p, { difficulty: 'easy', side: 'top' })[0]).toBe('In your sweet spot');
+    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })[0]).toBe('A few notes near your top');
+    expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' })).toEqual(['Spends time at your low end', 'You play this a lot']);
+  });
+
+  it('gives a scored match reasons that match its label', () => {
+    const hard = match(track('h', { familiarity: 0.9 }), song(60, 71, { pitchShare: [[60, 0.85], [71, 0.15]] }));
+    expect(hard.difficulty).toBe('hard');
+    expect(hard.parts!.comfort).toBeGreaterThan(0.8);
+    expect(hard.reasons).not.toContain('In your sweet spot');
+    expect(hard.reasons![0]).toBe('Spends time at your top');
   });
 });

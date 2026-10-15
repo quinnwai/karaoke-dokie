@@ -12,7 +12,8 @@
 // Popularity (0-1): average of Spotify popularity and USDB karaoke popularity (views, stars).
 // Penalties lower a song without hiding it.
 
-import type { Match, OctaveShift, ScoreParts, SongRange, Track, VocalRange } from '../contracts';
+import type { Difficulty, Match, OctaveShift, ScoreParts, SongRange, Track, VocalRange } from '../contracts';
+import { edgeTime } from './match';
 
 export const WEIGHTS = { fit: 0.85, popularity: 0.15 } as const;
 /** How much each part counts when picking the reasons shown for a rank. */
@@ -85,11 +86,30 @@ export function totalScore(p: ScoreParts): number {
   return WEIGHTS.fit * p.comfort * p.familiarity + WEIGHTS.popularity * p.popularity - p.penalty;
 }
 
-/** The one or two biggest contributors, in words. */
-export function reasonsFor(p: ScoreParts): string[] {
+/** Where a song sits for the user: its difficulty and the edge it leans on. */
+export interface FitNote {
+  difficulty: Difficulty;
+  side: 'top' | 'bottom';
+}
+
+/**
+ * The one or two biggest contributors, in words. With a FitNote the range reason follows the
+ * difficulty label, so a Hard song never says "In your sweet spot"; a Hard song always says why.
+ */
+export function reasonsFor(p: ScoreParts, fit?: FitNote): string[] {
   const candidates: { text: string; weight: number }[] = [];
-  if (p.comfort >= 0.8) candidates.push({ text: 'In your sweet spot', weight: REASON_WEIGHTS.comfort * p.comfort });
-  else if (p.comfort >= 0.5) candidates.push({ text: 'Mostly comfortable', weight: REASON_WEIGHTS.comfort * p.comfort });
+  const comfortWeight = REASON_WEIGHTS.comfort * p.comfort;
+  const edge = fit?.side === 'bottom' ? 'low end' : 'top';
+  if (!fit) {
+    if (p.comfort >= 0.8) candidates.push({ text: 'In your sweet spot', weight: comfortWeight });
+    else if (p.comfort >= 0.5) candidates.push({ text: 'Mostly comfortable', weight: comfortWeight });
+  } else if (fit.difficulty === 'easy') {
+    candidates.push({ text: 'In your sweet spot', weight: comfortWeight });
+  } else if (fit.difficulty === 'medium') {
+    candidates.push({ text: `A few notes near your ${edge}`, weight: comfortWeight });
+  } else {
+    candidates.push({ text: `Spends time at your ${edge}`, weight: Infinity });
+  }
   if (p.familiarity >= 0.6) candidates.push({ text: 'You play this a lot', weight: REASON_WEIGHTS.familiarity * p.familiarity });
   else if (p.familiarity >= 0.3) candidates.push({ text: 'You know this one', weight: REASON_WEIGHTS.familiarity * p.familiarity });
   if (p.popularity >= 0.7) candidates.push({ text: 'Crowd favourite', weight: REASON_WEIGHTS.popularity * p.popularity });
@@ -102,5 +122,6 @@ export function reasonsFor(p: ScoreParts): string[] {
 /** Adds score, parts and reasons to a match. */
 export function scoreMatch(user: VocalRange, m: Match): Match {
   const parts = scoreParts(user, m.track, m.range, m.octave);
-  return { ...m, parts, score: totalScore(parts), reasons: reasonsFor(parts) };
+  const { side } = edgeTime(user, m.range, shiftOf(m.octave));
+  return { ...m, parts, score: totalScore(parts), reasons: reasonsFor(parts, { difficulty: m.difficulty, side }) };
 }
