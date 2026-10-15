@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FAST_LYRICS_SYLLABLES_PER_SECOND, songRangeFromUltrastar, syllableRate } from '../../src/lib/songs/range';
+import { FAST_LYRICS_SYLLABLES_PER_SECOND, octaveCorrection, songRangeFromUltrastar, syllableRate, trimmedRange } from '../../src/lib/songs/range';
 import { parseUltrastar } from '../../src/lib/songs/ultrastar';
 import { fixture } from './fixture';
 
@@ -63,5 +63,40 @@ describe('fast lyrics', () => {
     const rap = Array.from({ length: 60 }, (_, i) => `R ${i * 4} 3 0 yo`).join('\n');
     const file = parseUltrastar(`#BPM:300\n: 0 4 0 a\n${rap}\n`);
     expect(songRangeFromUltrastar(file).fastLyrics).toBe(true);
+  });
+});
+
+describe('outliers and octave errors', () => {
+  const song = (notes: [number, number][]) => '#BPM:120\n' + notes.map(([pitch, len], i) => `: ${i * 8} ${len} ${pitch} la`).join('\n') + '\nE\n';
+
+  it('drops extreme pitches that cover at most 5% of sung time', () => {
+    const notes = [{ midi: 40, length: 1 }, ...Array.from({ length: 20 }, (_, i) => ({ midi: 55 + (i % 10), length: 4 })), { midi: 80, length: 1 }];
+    expect(trimmedRange(notes)).toEqual({ low: 55, high: 64 });
+  });
+
+  it('keeps an extreme pitch that is held long enough to matter', () => {
+    expect(trimmedRange([{ midi: 50, length: 10 }, { midi: 60, length: 80 }, { midi: 70, length: 10 }])).toEqual({ low: 50, high: 70 });
+  });
+
+  it('a one-beat shout does not set the top of the range', () => {
+    const body: [number, number][] = Array.from({ length: 30 }, (_, i) => [i % 2 ? 2 : 4, 4]);
+    expect(songRangeFromUltrastar(song([...body, [19, 1]]))).toMatchObject({ low: 62, high: 64 });
+  });
+
+  it('only moves songs whose typical note is outside E2 to C5', () => {
+    expect(octaveCorrection(64)).toBe(0);
+    expect(octaveCorrection(42)).toBe(0); // a bass song stays put
+    expect(octaveCorrection(88)).toBe(-24); // E6, as in a real USDB file
+    expect(octaveCorrection(70)).toBe(0); // a high female song stays put
+    expect(octaveCorrection(79)).toBe(-12);
+    expect(octaveCorrection(30)).toBe(12);
+  });
+
+  it('shifts a note file written two octaves too high back down', () => {
+    // Pitch 28 = E6 with C4 = 0; the melody sits around E4 once corrected.
+    const range = songRangeFromUltrastar(song(Array.from({ length: 12 }, (_, i) => [26 + (i % 5), 4])));
+    expect(range.tessitura).toBeGreaterThanOrEqual(62);
+    expect(range.tessitura).toBeLessThan(67);
+    expect(range).toMatchObject({ low: 62, high: 66 });
   });
 });

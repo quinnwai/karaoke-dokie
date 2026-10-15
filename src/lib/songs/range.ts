@@ -14,12 +14,53 @@
 // Language 87(3)), while ballads sit around 1-3. A 10 s stretch above 4.5
 // syllables/s is near speaking pace: patter, rap verses, tongue-twister
 // choruses, which are hard to sing along to from a lyric screen.
+//
+// Outliers: a single grace note or shout should not set the range, so low and
+// high skip the extreme pitches that together take up at most 5% of the sung
+// time at each end (a duration-weighted 5th to 95th percentile).
+//
+// Octave: UltraStar scores pitch class only, so many note files are written
+// one or two octaves off (pitch 0 should be C4, but real USDB files put a
+// tenor's melody around E6). When the song's typical note lands outside
+// E2 to C5, where almost every pop vocal sits, we shift the whole song by
+// octaves until it lands inside.
 
 import type { SongRange } from '../contracts';
 import { parseUltrastar, secondsPerBeat, type UltrastarFile, type UltrastarNote } from './ultrastar';
 
 export const FAST_LYRICS_SYLLABLES_PER_SECOND = 4.5;
 export const FAST_LYRICS_WINDOW_SECONDS = 10;
+export const OUTLIER_SHARE = 0.05;
+/** Typical (tessitura) notes outside [E2, C5) are treated as octave errors in the file. */
+export const PLAUSIBLE_TESSITURA = { low: 40, high: 72 } as const;
+
+/** Whole-octave shift that moves `tessitura` into PLAUSIBLE_TESSITURA. */
+export function octaveCorrection(tessitura: number): number {
+  let shift = 0;
+  while (tessitura + shift >= PLAUSIBLE_TESSITURA.high) shift -= 12;
+  while (tessitura + shift < PLAUSIBLE_TESSITURA.low) shift += 12;
+  return shift;
+}
+
+/** Lowest and highest pitch after dropping the extremes that cover at most `share` of sung time at each end. */
+export function trimmedRange(notes: { midi: number; length: number }[], share = OUTLIER_SHARE): { low: number; high: number } {
+  const byPitch = new Map<number, number>();
+  let total = 0;
+  for (const n of notes) {
+    byPitch.set(n.midi, (byPitch.get(n.midi) ?? 0) + n.length);
+    total += n.length;
+  }
+  const pitches = [...byPitch.keys()].sort((a, b) => a - b);
+  const edge = (order: number[]) => {
+    let cum = 0;
+    for (const p of order) {
+      cum += byPitch.get(p)!;
+      if (cum > share * total) return p;
+    }
+    return order[order.length - 1]!;
+  };
+  return { low: edge(pitches), high: edge([...pitches].reverse()) };
+}
 
 const isPitched = (n: UltrastarNote) => n.type === 'normal' || n.type === 'golden';
 const isNewSyllable = (n: UltrastarNote) => n.syllable.trim() !== '~';
@@ -57,21 +98,20 @@ export function songRangeFromUltrastar(file: UltrastarFile | string, part = 1): 
     throw new Error('UltraStar file has no pitched notes to measure');
   }
 
-  let low = Infinity;
-  let high = -Infinity;
   let weighted = 0;
   let total = 0;
   for (const n of pitched) {
-    low = Math.min(low, n.midi);
-    high = Math.max(high, n.midi);
     weighted += n.midi * n.length;
     total += n.length;
   }
+  const tessitura = weighted / total;
+  const shift = octaveCorrection(tessitura);
+  const { low, high } = trimmedRange(pitched);
 
   return {
-    low,
-    high,
-    tessitura: weighted / total,
+    low: low + shift,
+    high: high + shift,
+    tessitura: tessitura + shift,
     source: 'note-file',
     confidence: 'high',
     fastLyrics: syllableRate(notes, song.bpm) > FAST_LYRICS_SYLLABLES_PER_SECOND,

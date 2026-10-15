@@ -4,6 +4,8 @@
 // <textarea>) was learned from the open-source USDB Syncer project
 // (https://github.com/bohning/usdb_syncer); this is an independent implementation.
 // Requests are spaced out (minIntervalMs) so we never hammer a small hobby site.
+// Downloads follow the site's own countdown: GET ?link=gettxt shows a wait (about 24 s, in its
+// script as `time = N`), and only after it do we POST wd=1 for the note text, like a browser does.
 
 import { songKey } from '../songs/resolve';
 
@@ -62,6 +64,12 @@ export function parseNoteText(html: string): string | null {
   return m ? decodeEntities(m[1]!) : null;
 }
 
+/** Seconds the gettxt page asks the browser to wait before it may fetch the notes (0 when there is no countdown). */
+export function parseDownloadWait(html: string): number {
+  const m = /\btime\s*=\s*(\d+)/.exec(html);
+  return m ? Number(m[1]) : 0;
+}
+
 /** Title without "(feat. X)", "[Live]" or " - Remastered 2011" parts, for the USDB search box. */
 function searchTitle(title: string): string {
   return title.replace(/\s+-\s+.*$/, '').replace(/\s*[([].*?[)\]]/g, '').trim();
@@ -76,18 +84,18 @@ export function createUsdbClient(opts: UsdbClientOptions): UsdbClient {
   let lastRequest = -Infinity;
   let loggedIn = false;
 
-  async function request(params: Record<string, string>, form: Record<string, string>): Promise<string> {
+  async function request(params: Record<string, string>, form: Record<string, string> | null): Promise<string> {
     const wait = lastRequest + minInterval - now();
     if (wait > 0) await sleep(wait);
     lastRequest = now();
     const url = `${USDB_BASE_URL}${Object.keys(params).length ? `?${new URLSearchParams(params)}` : ''}`;
     const res = await fetch(url, {
-      method: 'POST',
+      method: form ? 'POST' : 'GET',
       headers: {
-        'content-type': 'application/x-www-form-urlencoded',
+        ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
         ...(cookie ? { cookie } : {}),
       },
-      body: new URLSearchParams(form).toString(),
+      ...(form ? { body: new URLSearchParams(form).toString() } : {}),
       redirect: 'manual',
     });
     const setCookie = res.headers.get('set-cookie');
@@ -113,8 +121,13 @@ export function createUsdbClient(opts: UsdbClientOptions): UsdbClient {
       const want = songKey(artist, cleanTitle);
       const hit = parseSongList(list).find((row) => songKey(row.artist, row.title) === want);
       if (!hit) return null;
-      const page = await request({ link: 'gettxt', id: String(hit.id) }, { wd: '1' });
-      return parseNoteText(page);
+      const params = { link: 'gettxt', id: String(hit.id) };
+      const countdown = await request(params, null);
+      const ready = parseNoteText(countdown);
+      if (ready !== null) return ready;
+      const wait = parseDownloadWait(countdown);
+      if (wait > 0) await sleep((wait + 1) * 1000);
+      return parseNoteText(await request(params, { wd: '1' }));
     },
   };
 }

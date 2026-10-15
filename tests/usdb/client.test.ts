@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createUsdbClient, parseSongList, parseNoteText } from '../../src/lib/usdb/client';
+import { createUsdbClient, parseDownloadWait, parseSongList, parseNoteText } from '../../src/lib/usdb/client';
 
 const fixture = (name: string) => readFileSync(join(__dirname, '../fixtures/usdb', name), 'utf8');
 
 interface Call { url: string; method: string; body: string; cookie: string | null }
 
-function fakeFetch(pages: Record<string, () => Response>) {
+function fakeFetch(pages: Record<string, (method: string) => Response>) {
   const calls: Call[] = [];
   const fetch = async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
@@ -15,7 +15,7 @@ function fakeFetch(pages: Record<string, () => Response>) {
     calls.push({ url, method: init?.method ?? 'GET', body: String(init?.body ?? ''), cookie: headers.get('cookie') });
     const key = Object.keys(pages).find((k) => url.includes(k));
     if (!key) return new Response('not found', { status: 404 });
-    return pages[key]!();
+    return pages[key]!(init?.method ?? 'GET');
   };
   return { fetch: fetch as typeof globalThis.fetch, calls };
 }
@@ -51,13 +51,13 @@ describe('USDB client', () => {
   const pages = () =>
     fakeFetch({
       'link=list': () => html(fixture('list.html')),
-      'link=gettxt': () => html(fixture('gettxt.html')),
+      'link=gettxt': (method) => html(method === 'GET' ? fixture('gettxt-countdown.html') : fixture('gettxt.html')),
       'index.php': () => html('<a href="?link=profil">profile</a> <a href="?link=logout">Logout</a>', 'PHPSESSID=abc123; path=/'),
     });
 
   it('logs in once, keeps the session cookie, searches and downloads notes', async () => {
     const { fetch, calls } = pages();
-    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0 });
+    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
     const notes = await client.findNoteFile('Queen', 'Bohemian Rhapsody - Remastered 2011');
     expect(notes).toContain('#TITLE:Bohemian Rhapsody');
 
@@ -71,9 +71,12 @@ describe('USDB client', () => {
     expect(new URLSearchParams(search.body).get('interpret')).toBe('Queen');
     expect(new URLSearchParams(search.body).get('title')).toBe('Bohemian Rhapsody');
 
-    const get = calls.find((c) => c.url.includes('link=gettxt'))!;
-    expect(get.url).toContain('id=1234');
-    expect(get.cookie).toContain('PHPSESSID=abc123');
+    const [get, post] = calls.filter((c) => c.url.includes('link=gettxt'));
+    expect(get!.method).toBe('GET');
+    expect(get!.url).toContain('id=1234');
+    expect(get!.cookie).toContain('PHPSESSID=abc123');
+    expect(post!.method).toBe('POST');
+    expect(new URLSearchParams(post!.body).get('wd')).toBe('1');
 
     await client.findNoteFile('Queen', 'Bohemian Rhapsody');
     expect(calls.filter((c) => c.body.includes('login=Login'))).toHaveLength(1);
@@ -81,13 +84,13 @@ describe('USDB client', () => {
 
   it('returns null when no result matches the artist and title', async () => {
     const { fetch } = pages();
-    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0 });
+    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
     expect(await client.findNoteFile('Omar Apollo', 'Evergreen')).toBeNull();
   });
 
   it('fails clearly when login is rejected', async () => {
     const { fetch } = fakeFetch({ 'index.php': () => html('Login failed. Wrong user or password') });
-    const client = createUsdbClient({ username: 'u', password: 'bad', fetch, minIntervalMs: 0 });
+    const client = createUsdbClient({ username: 'u', password: 'bad', fetch, minIntervalMs: 0, sleep: async () => {} });
     await expect(client.findNoteFile('Queen', 'Bohemian Rhapsody')).rejects.toThrow(/login/i);
   });
 
@@ -101,7 +104,25 @@ describe('USDB client', () => {
       sleep: async (ms) => { waits.push(ms); clock += ms; },
     });
     await client.findNoteFile('Queen', 'Bohemian Rhapsody');
-    expect(waits.length).toBeGreaterThanOrEqual(2);
-    expect(waits.every((w) => w <= 2500 && w > 0)).toBe(true);
+    expect(waits).toContain(25_000); // the page's 24 s countdown plus a second
+    expect(waits.filter((w) => w !== 25_000).every((w) => w <= 2500 && w > 0)).toBe(true);
+  });
+
+  it('reads the countdown from the gettxt page', () => {
+    expect(parseDownloadWait(fixture('gettxt-countdown.html'))).toBe(24);
+    expect(parseDownloadWait('<html>no timer</html>')).toBe(0);
+  });
+
+  it('skips the wait when the notes are already on the first page', async () => {
+    const { fetch, calls } = fakeFetch({
+      'link=list': () => html(fixture('list.html')),
+      'link=gettxt': () => html(fixture('gettxt.html')),
+      'index.php': () => html('<a href="?link=logout">Logout</a>', 'PHPSESSID=abc123; path=/'),
+    });
+    const waits: number[] = [];
+    const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async (ms) => { waits.push(ms); } });
+    expect(await client.findNoteFile('Queen', 'Bohemian Rhapsody')).toContain('#ARTIST:Queen');
+    expect(calls.filter((c) => c.url.includes('link=gettxt'))).toHaveLength(1);
+    expect(waits).toEqual([]);
   });
 });
