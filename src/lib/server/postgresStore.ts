@@ -1,6 +1,7 @@
 // Postgres store using raw SQL through an injected query function, so the same code
 // runs on Neon (production) and pg-mem (tests).
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
+import { isMeasured } from '../songs/sourceRank';
 import { SCHEMA_SQL } from './schema';
 import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
 
@@ -64,8 +65,10 @@ function toLog(r: Row): DataSourceLogEntry {
   };
 }
 
+const isSet = (v: unknown) => v !== null && v !== undefined;
+
 function toFeedback(r: Row): FeedbackEntry {
-  return {
+  const f: FeedbackEntry = {
     userId: str(r.user_id),
     trackId: str(r.track_id),
     thumbs: str(r.thumbs) as FeedbackEntry['thumbs'],
@@ -78,6 +81,14 @@ function toFeedback(r: Row): FeedbackEntry {
     octave: str(r.octave) as FeedbackEntry['octave'],
     at: str(r.at),
   };
+  if (isSet(r.range_source)) {
+    const s: NonNullable<FeedbackEntry['songRange']> = { source: str(r.range_source) as DataSourceLogEntry['outcome'] };
+    if (isSet(r.range_method)) s.method = str(r.range_method);
+    if (isSet(r.range_low)) s.low = num(r.range_low);
+    if (isSet(r.range_high)) s.high = num(r.range_high);
+    f.songRange = s;
+  }
+  return f;
 }
 
 export interface PostgresStoreOptions {
@@ -152,13 +163,13 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
     async listUserIds() {
       return (await query(`SELECT id FROM users ORDER BY id`, [])).map((r) => str(r.id));
     },
-    async listNoteFileRangesByArtist(artistKey) {
+    async listMeasuredRangesByArtist(artistKey) {
       // LIKE narrows the scan; the exact prefix check below guards against % or _ in names.
       const rows = await query(`SELECT * FROM song_ranges WHERE song_key LIKE $1 AND skipped = false`, [`${artistKey}|%`]);
       return rows
         .filter((r) => str(r.song_key).startsWith(`${artistKey}|`))
         .map((r) => toSongRecord(r).range)
-        .filter((r): r is SongRange => r !== null && r.source === 'note-file');
+        .filter((r): r is SongRange => r !== null && isMeasured(r));
     },
     async putUsdbSongs(entries) {
       // Multi-row inserts, 100 at a time, so a full index (about 32k songs) is a few hundred queries.
@@ -211,10 +222,15 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       return rows.map(toLog);
     },
     async saveFeedback(f) {
+      const s = f.songRange;
       await query(
-        `INSERT INTO feedback (user_id, track_id, thumbs, user_low, user_high, user_range_source, difficulty, octave, at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [f.userId, f.trackId, f.thumbs, f.userRange.low, f.userRange.high, f.userRange.source, f.difficulty, f.octave, f.at],
+        `INSERT INTO feedback (user_id, track_id, thumbs, user_low, user_high, user_range_source, difficulty, octave, at,
+           range_source, range_method, range_low, range_high)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [
+          f.userId, f.trackId, f.thumbs, f.userRange.low, f.userRange.high, f.userRange.source, f.difficulty, f.octave, f.at,
+          s?.source ?? null, s?.method ?? null, s?.low ?? null, s?.high ?? null,
+        ],
       );
     },
     async listFeedback(o = {}) {

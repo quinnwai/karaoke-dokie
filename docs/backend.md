@@ -12,9 +12,9 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | POST | `/api/auth/logout` | | `{ ok: true }`, clears the session cookie |
 | GET | `/api/me` | | `MeResponse` |
 | PUT | `/api/me/range` | `VocalRange` | `{ ok: true }`; 400 unless `low`/`high` are integers, 28 <= low < high <= 96, span 5..48, `source` is `test` or `songs` |
-| GET | `/api/recommendations` | `offset` (default 0), `limit` (1..50, default 5) | `RecommendationsResponse`; 409 `{ error: 'no-range' }` before a range is saved |
+| GET | `/api/recommendations` | `offset` (default 0), `limit` (1..50, default 5) | `RecommendationsResponse`; songs with a low-confidence range come last with `difficulty: 'maybe'` (the Maybe group); 409 `{ error: 'no-range' }` before a range is saved |
 | GET | `/api/songs/known` | | `KnownSongsResponse` (up to 50 library songs with a known range, play order) |
-| POST | `/api/feedback` | `FeedbackRequest` | `{ ok: true }`; 400 on bad input; 409 before a range is saved. Stored with the user's current range |
+| POST | `/api/feedback` | `FeedbackRequest` (`difficulty` may be `maybe`) | `{ ok: true }`; 400 on bad input; 409 before a range is saved. Stored with the user's current range and, when the song is in the cached library, its range at that moment (`range_source` = the log outcome, `range_method`, `range_low`, `range_high`); the tap never loads the library from Spotify |
 | GET | `/api/admin/log` | header `x-admin-token`, `limit` (1..1000, default 200) | `{ entries: DataSourceLogEntry[] }`, newest first; 403 on a wrong token or when `ADMIN_TOKEN` is unset |
 
 Errors are JSON `{ error, message? }`. Every user route returns 401 `{ error: 'signed-out' }`
@@ -46,7 +46,8 @@ server process (kept on `globalThis`). The memory store is lost on restart.
 
 Postgres tables are in `db/schema.sql` (an identical copy is inlined in
 `src/lib/server/schema.ts`). The Postgres store runs `migrate()` (idempotent `CREATE ... IF NOT
-EXISTS`) once before its first query, so there is no separate migration step.
+EXISTS`, plus `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for columns added later, such as the
+feedback range columns) once before its first query, so there is no separate migration step.
 
 ## Swap points
 
@@ -55,8 +56,9 @@ EXISTS`) once before its first query, so there is no separate migration step.
 - Song logic currently comes from `src/lib/server/songLogicFallback.ts` (placeholder `songKey`,
   `matchSong`, `rankMatches`, `paginate`). Replace with `src/lib/songs` once merged.
 - Ranges come from the store cache, then `data/seed-song-ranges.json` (10 **placeholder** songs
-  with approximate ranges, `confidence: 'low'`), then `noteFileSource` (returns nothing until the
-  USDB fetcher exists). Anything else is logged as skipped and cached as skipped.
+  with approximate ranges: five stand in for measured recordings, five for low-confidence
+  estimates), then `noteFileSource` (returns nothing until the USDB fetcher exists). Anything else
+  is logged as skipped and cached as skipped.
 
 ## Tests
 

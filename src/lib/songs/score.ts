@@ -12,7 +12,7 @@
 // Popularity (0-1): average of Spotify popularity and USDB karaoke popularity (views, stars).
 // Penalties lower a song without hiding it.
 
-import type { Difficulty, Match, OctaveShift, ScoreParts, SongRange, Track, VocalRange } from '../contracts';
+import type { Label, Match, OctaveShift, ScoreParts, SongRange, Track, VocalRange } from '../contracts';
 import { edgeTime } from './match';
 
 export const WEIGHTS = { fit: 0.85, popularity: 0.15 } as const;
@@ -88,13 +88,14 @@ export function totalScore(p: ScoreParts): number {
 
 /** Where a song sits for the user: its difficulty and the edge it leans on. */
 export interface FitNote {
-  difficulty: Difficulty;
+  difficulty: Label;
   side: 'top' | 'bottom';
 }
 
 /**
  * The one or two biggest contributors, in words. With a FitNote the range reason follows the
  * difficulty label, so a Hard song never says "In your sweet spot"; a Hard song always says why.
+ * A Maybe song's range is only an estimate, so it gets no range reason.
  */
 export function reasonsFor(p: ScoreParts, fit?: FitNote): string[] {
   const candidates: { text: string; weight: number }[] = [];
@@ -107,7 +108,7 @@ export function reasonsFor(p: ScoreParts, fit?: FitNote): string[] {
     candidates.push({ text: 'In your sweet spot', weight: comfortWeight });
   } else if (fit.difficulty === 'medium') {
     candidates.push({ text: `A few notes near your ${edge}`, weight: comfortWeight });
-  } else {
+  } else if (fit.difficulty === 'hard') {
     candidates.push({ text: `Spends time at your ${edge}`, weight: Infinity });
   }
   if (p.familiarity >= 0.6) candidates.push({ text: 'You play this a lot', weight: REASON_WEIGHTS.familiarity * p.familiarity });

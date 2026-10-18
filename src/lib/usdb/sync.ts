@@ -14,6 +14,7 @@ import type { SongRange, Track } from '../contracts';
 import type { Store } from '../server/store';
 import { songRangeFromUltrastar } from '../songs/range';
 import { resolveSongRange, songKey } from '../songs/resolve';
+import { MEASURED_RANK, sourceRank } from '../songs/sourceRank';
 import type { UsdbClient, UsdbSong } from './client';
 
 /** A song USDB had no note file for is not searched again for this long. */
@@ -109,19 +110,27 @@ export async function syncNoteFiles({
     }
   }
 
-  /** Artist-typical range (or skipped) for every song still without a note file. */
+  /**
+   * Artist-typical range (or skipped) for every song still without a measured range. Note files
+   * and measured recordings (rank MEASURED_RANK and up) are kept; a recording only gets the time
+   * USDB was checked, so it is not searched again too soon.
+   */
   async function fallbackPass(list: Track[], final: boolean) {
     for (const track of list) {
       const key = songKey(track.artist, track.title);
-      if (failed.has(key) || (await store.getSongRange(key))?.range?.source === 'note-file') continue;
+      if (failed.has(key)) continue;
       const previous = await store.getSongRange(key);
+      const miss = missAt.get(key) ?? previous?.log.usdbMissAt;
+      if (previous && sourceRank(previous.range) >= MEASURED_RANK) {
+        if (miss && previous.log.usdbMissAt !== miss) await store.putSongRange(key, { ...previous, log: { ...previous.log, usdbMissAt: miss } });
+        continue;
+      }
       const { range, log } = await resolveSongRange(track, {
         getNoteFile: async () => null,
-        getArtistSongRanges: () => store.listNoteFileRangesByArtist(artistOf(track)),
+        getArtistSongRanges: () => store.listMeasuredRangesByArtist(artistOf(track)),
         getExternalArtistRange: async () => null,
         now,
       });
-      const miss = missAt.get(key) ?? previous?.log.usdbMissAt;
       if (miss) log.usdbMissAt = miss;
       await store.putSongRange(key, { range, log });
       if (!final) continue;
@@ -175,7 +184,7 @@ export async function syncNoteFiles({
     for (const track of remaining) {
       const artist = artistOf(track);
       if (covered.has(artist) || (tries.get(artist) ?? 0) >= 2 || looked.has(songKey(track.artist, track.title))) continue;
-      const known = (await store.listNoteFileRangesByArtist(artist)).length > 0;
+      const known = (await store.listMeasuredRangesByArtist(artist)).length > 0;
       if (!known) tries.set(artist, (tries.get(artist) ?? 0) + 1);
       if (known || (await fetchSong(track))) {
         covered.add(artist);

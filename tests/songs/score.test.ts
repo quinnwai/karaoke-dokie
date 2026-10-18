@@ -96,9 +96,10 @@ describe('ranking', () => {
     const guessed = match(track('guessed', { familiarity: 0.5 }), song(57, 63, { source: 'artist-typical', confidence: 'low' }));
     const shifted = match(track('shifted', { familiarity: 0.5 }), song(69, 75));
     expect(shifted.octave).toBe('down');
+    expect(guessed.difficulty).toBe('maybe');
     const order = rankMatches([shifted, guessed, fast, plain]).map((m) => m.track.id);
-    // Shifted and guessed tie at -0.10; the song that fits as written goes first.
-    expect(order).toEqual(['plain', 'fast', 'guessed', 'shifted']);
+    // The guessed range is in the Maybe group, after every song with a label.
+    expect(order).toEqual(['plain', 'fast', 'shifted', 'guessed']);
     expect(fast.score!).toBeCloseTo(plain.score! - 0.05);
     expect(guessed.score!).toBeCloseTo(plain.score! - 0.1);
     expect(shifted.parts!.penalty).toBeCloseTo(0.1);
@@ -146,6 +147,14 @@ describe('reasons', () => {
     expect(reasonsFor(p, { difficulty: 'easy', side: 'top' })[0]).toBe('In your sweet spot');
     expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })[0]).toBe('A few notes near your top');
     expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' })).toEqual(['Spends time at your low end', 'You play this a lot']);
+  });
+
+  it('says nothing about where a Maybe song sits, since its range is an estimate', () => {
+    const p = { comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0.1 };
+    expect(reasonsFor(p, { difficulty: 'maybe', side: 'top' })).toEqual(['You play this a lot', 'Crowd favourite']);
+    const rough = match(track('r', { familiarity: 0.9 }), song(56, 64, { source: 'audio-full', confidence: 'low' }));
+    expect(rough).toMatchObject({ difficulty: 'maybe', reasons: ['You play this a lot'] });
+    expect(rough.parts!.penalty).toBeCloseTo(0.1);
   });
 
   it('gives a scored match reasons that match its label', () => {

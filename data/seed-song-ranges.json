@@ -1,5 +1,5 @@
 {
-  "_comment": "PLACEHOLDER seed song ranges (MIDI, C4 = 60) so the app works before the USDB fetcher exists. Every entry is approximate and must be replaced by note-file data.",
+  "_comment": "PLACEHOLDER seed song ranges (MIDI, C4 = 60) so the app works before the USDB fetcher exists. Every entry is approximate and must be replaced by note-file data. Five stand in for measured recordings (high confidence, the main list) and five for estimates (low confidence, the Maybe group), so the offline demo shows both.",
   "songs": [
     {
       "artist": "Queen",
@@ -47,11 +47,11 @@
         "low": 57,
         "high": 72,
         "tessitura": 65,
-        "source": "artist-external",
-        "confidence": "low",
+        "source": "audio-full",
+        "confidence": "high",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data."
     },
     {
       "artist": "Omar Apollo",
@@ -73,11 +73,11 @@
         "low": 57,
         "high": 76,
         "tessitura": 66,
-        "source": "artist-external",
-        "confidence": "low",
+        "source": "audio-full",
+        "confidence": "high",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data."
     },
     {
       "artist": "Bon Jovi",
@@ -99,11 +99,11 @@
         "low": 47,
         "high": 64,
         "tessitura": 56,
-        "source": "artist-external",
-        "confidence": "low",
+        "source": "audio-full",
+        "confidence": "high",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data."
     },
     {
       "artist": "ABBA",
@@ -112,11 +112,11 @@
         "low": 57,
         "high": 76,
         "tessitura": 67,
-        "source": "artist-external",
-        "confidence": "low",
+        "source": "audio-full",
+        "confidence": "high",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data."
     },
     {
       "artist": "Frank Sinatra",
@@ -125,11 +125,11 @@
         "low": 45,
         "high": 66,
         "tessitura": 55,
-        "source": "artist-external",
-        "confidence": "low",
+        "source": "audio-full",
+        "confidence": "high",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data."
     }
   ]
 }

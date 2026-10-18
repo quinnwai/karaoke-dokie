@@ -17,6 +17,7 @@ import type {
 } from '../../src/lib/contracts';
 import { getStore } from '../../src/lib/server/getStore';
 import { MOCK_USER } from '../../src/lib/server/mockSpotify';
+import { songKey } from '../../src/lib/songs/resolve';
 import { SESSION_COOKIE, STATE_COOKIE } from '../../src/lib/server/session';
 import { getAppContext, resetAppContextForTests } from '../../src/lib/server/wiring';
 
@@ -230,6 +231,26 @@ describe('recommendations', () => {
     for (const id of ids) expect(skippedIds.has(id)).toBe(false);
   });
 
+  it('lists low-confidence ranges after every labeled song, as Maybe', async () => {
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const wide = ((await (await recs.GET(req('/api/recommendations?offset=0&limit=50', jar))).json()) as RecommendationsResponse).matches;
+    expect(wide.map((m) => m.difficulty === 'maybe')).toEqual([false, false, false, false, false, true, true, true, true, true]);
+    for (const m of wide) expect(m.difficulty === 'maybe').toBe(m.range.confidence === 'low');
+
+    // A2 to C5: estimates within 2 semitones of it are Maybe (Whitney Houston only an octave down); the rest stay hidden.
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: { low: 45, high: 72, source: 'test' } }));
+    const page = (await (await recs.GET(req('/api/recommendations?offset=0&limit=50', jar))).json()) as RecommendationsResponse;
+    const maybe = page.matches.filter((m) => m.difficulty === 'maybe');
+    expect(maybe.map((m) => `${m.track.title} ${m.octave}`).sort()).toEqual([
+      'Bohemian Rhapsody none',
+      "Don't Stop Believin' none",
+      'I Will Always Love You down',
+    ]);
+    expect(page.matches.slice(0, 5).every((m) => m.difficulty !== 'maybe')).toBe(true);
+    expect(page.matches).toHaveLength(8);
+  });
+
   it('rejects bad paging params', async () => {
     const jar = await signIn();
     await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
@@ -262,6 +283,26 @@ describe('feedback', () => {
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatchObject({ ...body, userId: MOCK_USER.id, userRange: WIDE });
     expect(Date.parse(stored[0]!.at)).not.toBeNaN();
+    // The library was never loaded, and the tap does not load it from Spotify.
+    expect(stored[0]!.songRange).toBeUndefined();
+  });
+
+  it('stores where the song’s range came from, read from the cached library and range', async () => {
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const africa = { low: 52, high: 69, tessitura: 60, source: 'audio-full' as const, confidence: 'high' as const, fastLyrics: false, method: 'pyin-v1/app-range-v1' };
+    const log = { trackId: '', title: 'Africa', artist: 'Toto', outcome: 'audio-full' as const, reason: 'Measured.', at: '2026-10-18T00:00:00.000Z' };
+    await getStore().putSongRange(songKey('Toto', 'Africa'), { range: africa, log });
+    await recs.GET(req('/api/recommendations', jar)); // loads and caches the library
+    const post = async (json: unknown) => (await feedback.POST(req('/api/feedback', jar, { method: 'POST', json }))).status;
+    expect(await post({ trackId: 'mock-16-africa', thumbs: 'up', difficulty: 'easy', octave: 'none' })).toBe(200);
+    expect(await post({ trackId: 'mock-1-bohemian-rhapsody', thumbs: 'down', difficulty: 'maybe', octave: 'none' })).toBe(200);
+    expect(await post({ trackId: 'not-in-the-library', thumbs: 'up', difficulty: 'easy', octave: 'none' })).toBe(200);
+    const [unknown, estimate, measured] = await getStore().listFeedback({ userId: MOCK_USER.id });
+    expect(measured!.songRange).toEqual({ source: 'audio-full', method: 'pyin-v1/app-range-v1', low: 52, high: 69 });
+    expect(estimate).toMatchObject({ difficulty: 'maybe', songRange: { source: 'artist-external', low: 46, high: 70 } });
+    expect(estimate!.songRange).not.toHaveProperty('method');
+    expect(unknown!.songRange).toBeUndefined();
   });
 
   it.each([

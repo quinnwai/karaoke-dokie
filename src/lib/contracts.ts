@@ -11,8 +11,8 @@ export interface VocalRange {
   source: 'test' | 'songs';
 }
 
-/** Where a song's range numbers came from. */
-export type RangeSource = 'note-file' | 'artist-typical' | 'artist-external';
+/** Where a song's range numbers came from. 'audio-full': measured from the song's full recording. */
+export type RangeSource = 'note-file' | 'audio-full' | 'artist-typical' | 'artist-external';
 
 export interface SongRange {
   low: Midi;
@@ -32,9 +32,19 @@ export interface SongRange {
   usdbId?: number;
   /** Where the note file came from when it was not USDB directly, e.g. "singmania". */
   collection?: string;
+  /** How a recording was measured, e.g. "pyin-v1/app-range-v1"; a new value marks a newer export. */
+  method?: string;
+  /** MusicBrainz recording id of a measured recording. */
+  mbid?: string;
 }
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
+
+/**
+ * What a song is shown as: its difficulty, or 'maybe' for a low-confidence range that fits the
+ * user's range give or take a couple of semitones (listed after the others, without a difficulty).
+ */
+export type Label = Difficulty | 'maybe';
 
 /** 'none' = fits as written; 'up'/'down' = fits if sung an octave higher/lower than the artist. */
 export type OctaveShift = 'none' | 'up' | 'down';
@@ -71,7 +81,7 @@ export interface ScoreParts {
 export interface Match {
   track: Track;
   range: SongRange;
-  difficulty: Difficulty;
+  difficulty: Label;
   octave: OctaveShift;
   /** Ranking score, higher first: 0.85 comfort × familiarity + 0.15 popularity - penalties. */
   score?: number;
@@ -99,9 +109,15 @@ export interface FeedbackEntry {
   trackId: string;
   thumbs: 'up' | 'down';
   userRange: VocalRange;
-  difficulty: Difficulty;
+  difficulty: Label;
   octave: OctaveShift;
   at: string; // ISO time
+  /**
+   * The song's range when the tap was made (the row can be replaced later): where it came from
+   * (the log outcome), how it was measured, and its notes. Unset when the song was not in the
+   * cached library or had no cached range.
+   */
+  songRange?: { source: LogOutcome; method?: string; low?: Midi; high?: Midi };
 }
 
 // ---------- HTTP API (app/api) ----------
@@ -136,6 +152,6 @@ export interface KnownSongsResponse {
 export interface FeedbackRequest {
   trackId: string;
   thumbs: 'up' | 'down';
-  difficulty: Difficulty;
+  difficulty: Label;
   octave: OctaveShift;
 }

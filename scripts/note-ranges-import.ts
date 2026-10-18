@@ -1,6 +1,8 @@
-// Imports a ranges file made by note-ranges-build.ts into the database.
+// Imports a ranges file into the database: one made by note-ranges-build.ts, or the vocal-range
+// pipeline's export of measured recordings (karaoke_ranges.json).
 // Usage: npx tsx scripts/note-ranges-import.ts ranges.json [--recheck-fast]   (needs DATABASE_URL)
-// Songs that already have a note-file range are left alone; with --recheck-fast, songs imported
+// A row replaces a lower-ranked source or the same source from another export; note files are
+// never replaced (src/lib/songs/sourceRank.ts). With --recheck-fast, note-file songs imported
 // earlier from the same collection get their fast-lyrics flag corrected.
 
 import { readFile } from 'node:fs/promises';

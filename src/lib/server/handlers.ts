@@ -8,6 +8,7 @@ import type {
   RecommendationsResponse,
   Track,
 } from '../contracts';
+import { songKey } from '../songs/resolve';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_S,
@@ -184,6 +185,23 @@ export async function knownSongs(req: Request, ctx: AppContext): Promise<Respons
 
 // ---------- feedback ----------
 
+/**
+ * The song's range as the user saw it, from the cached library (never a Spotify call) and the
+ * cached song range; undefined when either is missing.
+ */
+async function songRangeAtTap(userId: string, trackId: string, ctx: AppContext): Promise<FeedbackEntry['songRange']> {
+  const track = ctx.tracks.peek(userId)?.find((t) => t.id === trackId);
+  const rec = track ? await ctx.store.getSongRange(songKey(track.artist, track.title)) : null;
+  if (!rec) return undefined;
+  const snapshot: NonNullable<FeedbackEntry['songRange']> = { source: rec.log.outcome };
+  if (rec.range?.method !== undefined) snapshot.method = rec.range.method;
+  if (rec.range) {
+    snapshot.low = rec.range.low;
+    snapshot.high = rec.range.high;
+  }
+  return snapshot;
+}
+
 export async function postFeedback(req: Request, ctx: AppContext): Promise<Response> {
   const user = await requireUser(req, ctx);
   if (user instanceof Response) return user;
@@ -194,6 +212,8 @@ export async function postFeedback(req: Request, ctx: AppContext): Promise<Respo
   const userRange = await ctx.store.getRange(user.id);
   if (!userRange) return errorJson(409, 'no-range', 'Save a vocal range first (PUT /api/me/range)');
   const entry: FeedbackEntry = { userId: user.id, ...v.value, userRange, at: new Date().toISOString() };
+  const songRange = await songRangeAtTap(user.id, v.value.trackId, ctx);
+  if (songRange) entry.songRange = songRange;
   await ctx.store.saveFeedback(entry);
   return json({ ok: true });
 }

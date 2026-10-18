@@ -51,6 +51,26 @@ test('signs in, saves the range, recommends real matches, stores feedback and lo
   expect((await feedback).status()).toBe(200);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-02-feedback.png') });
 
+  // The placeholder estimates come after the labeled songs, under Maybe: within 2 semitones of
+  // A2 to C5 (as written or an octave away), with no difficulty.
+  const all = await (await page.request.get('/api/recommendations?offset=0&limit=50')).json();
+  const maybe = all.matches.filter((m: { difficulty: string }) => m.difficulty === 'maybe');
+  expect(maybe).toHaveLength(3);
+  expect(all.matches.slice(0, all.matches.length - maybe.length).every((m: { difficulty: string }) => m.difficulty !== 'maybe')).toBe(true);
+  for (const m of maybe) {
+    const shift = m.octave === 'down' ? -12 : m.octave === 'up' ? 12 : 0;
+    expect(m.range.confidence).toBe('low');
+    expect(m.range.low + shift).toBeGreaterThanOrEqual(43);
+    expect(m.range.high + shift).toBeLessThanOrEqual(74);
+  }
+  await page.getByRole('button', { name: 'Back to songs' }).click();
+  await page.getByRole('button', { name: 'Generate more songs' }).click();
+  const group = page.getByRole('region', { name: 'Maybe' });
+  await expect(group.locator('li')).toHaveCount(3);
+  await expect(group.locator('[data-difficulty]')).toHaveCount(0);
+  await group.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(SCREENS, 'fullstack-03-maybe.png') });
+
   // The hidden admin log lists where each song's data came from, and is locked without the token.
   expect((await page.request.get('/api/admin/log')).status()).toBe(403);
   const log = await (await page.request.get('/api/admin/log', { headers: { 'x-admin-token': 'e2e-admin' } })).json();

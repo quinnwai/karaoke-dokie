@@ -42,6 +42,12 @@ CREATE TABLE IF NOT EXISTS feedback (
   at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS feedback_user ON feedback (user_id);
+-- The song's range at the time of the tap (its source is the log outcome). Added after launch,
+-- so nullable and added to existing tables here.
+ALTER TABLE feedback ADD COLUMN IF NOT EXISTS range_source TEXT;
+ALTER TABLE feedback ADD COLUMN IF NOT EXISTS range_method TEXT;
+ALTER TABLE feedback ADD COLUMN IF NOT EXISTS range_low DOUBLE PRECISION;
+ALTER TABLE feedback ADD COLUMN IF NOT EXISTS range_high DOUBLE PRECISION;
 CREATE TABLE IF NOT EXISTS usdb_songs (
   id INTEGER PRIMARY KEY,
   song_key TEXT NOT NULL,

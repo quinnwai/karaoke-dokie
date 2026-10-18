@@ -100,10 +100,19 @@ describe('resolveSongRange', () => {
     );
   });
 
-  it('ignores non-note-file ranges from the artist lookup', async () => {
+  it('ignores estimated ranges from the artist lookup', async () => {
     const guess: SongRange = { ...noteRange(40, 60), source: 'artist-typical', confidence: 'low' };
-    const d = deps({ getArtistSongRanges: vi.fn(async () => [guess]) });
+    const published: SongRange = { ...noteRange(40, 60), source: 'artist-external', confidence: 'low' };
+    const d = deps({ getArtistSongRanges: vi.fn(async () => [guess, published]) });
     expect((await resolveSongRange(track, d)).log.outcome).toBe('skipped');
+  });
+
+  it('counts measured recordings of other songs, one per recording', async () => {
+    const recording: SongRange = { ...noteRange(54, 66), source: 'audio-full', mbid: 'r1' };
+    const d = deps({ getArtistSongRanges: vi.fn(async () => [noteRange(50, 70), recording, { ...recording }]) });
+    const { range, log } = await resolveSongRange(track, d);
+    expect(range).toMatchObject({ low: 52, high: 68, source: 'artist-typical', confidence: 'low' });
+    expect(log.reason).toBe('No note file found; used the typical range of 2 other songs by Queen.');
   });
 
   it('stamps the current time when no clock is given', async () => {

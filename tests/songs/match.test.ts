@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SongRange, VocalRange } from '../../src/lib/contracts';
-import { edgeTime, matchSong } from '../../src/lib/songs/match';
+import { edgeTime, MAYBE_SLACK, matchSong } from '../../src/lib/songs/match';
 import { songRangeFromUltrastar } from '../../src/lib/songs/range';
 import { fixture } from './fixture';
 
@@ -81,5 +81,32 @@ describe('matchSong octave shifts', () => {
     // User C3..C4. G3..F#4 is too high as written and too low an octave down;
     // only a 6-semitone shift would fit, which we do not offer.
     expect(matchSong(user(48, 60), song(55, 66))).toBeNull();
+  });
+});
+
+describe('matchSong for low-confidence ranges (the Maybe group)', () => {
+  const rough = (low: number, high: number): SongRange => ({ ...song(low, high), source: 'artist-typical', confidence: 'low' });
+
+  it('widens the user range by 2 semitones at each end', () => {
+    expect(MAYBE_SLACK).toBe(2);
+    expect(matchSong(C3C5, rough(46, 74))).toEqual({ difficulty: 'maybe', octave: 'none' });
+    expect(matchSong(C3C5, rough(45, 70))).toBeNull(); // 3 below the user's lowest note
+    expect(matchSong(C3C5, rough(50, 75))).toBeNull(); // 3 above the highest
+  });
+
+  it('tries an octave down, then up, like confident ranges', () => {
+    expect(matchSong(C3C5, rough(70, 86))).toEqual({ difficulty: 'maybe', octave: 'down' }); // 58..74
+    expect(matchSong(C3C5, rough(34, 50))).toEqual({ difficulty: 'maybe', octave: 'up' }); // 46..62
+  });
+
+  it('never gets a difficulty, even when it fits as written', () => {
+    expect(matchSong(C3C5, rough(56, 64))).toEqual({ difficulty: 'maybe', octave: 'none' });
+    expect(matchSong(C3C5, { ...rough(56, 64), source: 'audio-full' })?.difficulty).toBe('maybe');
+  });
+
+  it('leaves confident ranges to the strict fit', () => {
+    expect(matchSong(C3C5, song(47, 72))).toBeNull();
+    expect(matchSong(C3C5, { ...song(47, 72), source: 'audio-full' })).toBeNull();
+    expect(matchSong(C3C5, { ...song(56, 64), source: 'audio-full' })).toEqual({ difficulty: 'easy', octave: 'none' });
   });
 });

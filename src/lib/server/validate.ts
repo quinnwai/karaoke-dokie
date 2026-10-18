@@ -34,7 +34,7 @@ export function validateFeedback(body: unknown): Validated<FeedbackRequest> {
     return { ok: false, error: 'trackId must be a non-empty string' };
   }
   if (!oneOf(thumbs, ['up', 'down'] as const)) return { ok: false, error: "thumbs must be 'up' or 'down'" };
-  if (!oneOf(difficulty, ['easy', 'medium', 'hard'] as const)) return { ok: false, error: 'difficulty is invalid' };
+  if (!oneOf(difficulty, ['easy', 'medium', 'hard', 'maybe'] as const)) return { ok: false, error: 'difficulty is invalid' };
   if (!oneOf(octave, ['none', 'up', 'down'] as const)) return { ok: false, error: 'octave is invalid' };
   return { ok: true, value: { trackId, thumbs, difficulty, octave } };
 }

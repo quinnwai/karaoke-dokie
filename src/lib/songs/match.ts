@@ -16,8 +16,17 @@
 // octave up. Singing an octave away from the recording is natural (men and
 // women routinely do it with each other's songs) and keeps the melody; other
 // transpositions need a karaoke key-change, so we do not offer them.
+//
+// All of that is for confident ranges. A low-confidence range (an artist
+// estimate, or a mostly-rap or thinly sung recording) is too rough for a
+// label: it goes in the Maybe group, shown after the other songs without a
+// difficulty, when it fits the user's range widened by MAYBE_SLACK semitones
+// at each end (as written or an octave away). Two semitones is about the
+// artist estimate's typical error at each end; against note files it catches
+// 93% of the estimated songs that really fit (maybe_group.py in the
+// vocal-range pipeline).
 
-import type { Difficulty, OctaveShift, SongRange, VocalRange } from '../contracts';
+import type { Difficulty, Label, OctaveShift, SongRange, VocalRange } from '../contracts';
 
 /** Distance from the centre, as a fraction of the half-range, where the outer and edge eighths start. */
 export const OUTER_FROM = 0.5;
@@ -25,12 +34,14 @@ export const EDGE_FROM = 0.75;
 export const HARD_MIN_EDGE_SHARE = 0.1;
 export const MEDIUM_MIN_EDGE_SHARE = 0.02;
 export const MEDIUM_MIN_OUTER_SHARE = 0.25;
+/** Semitones of slack at each end of the user's range for low-confidence ranges (the Maybe group). */
+export const MAYBE_SLACK = 2;
 
 // Absorbs floating-point noise so boundaries stay put.
 const EPSILON = 1e-9;
 
 export interface SongFit {
-  difficulty: Difficulty;
+  difficulty: Label;
   octave: OctaveShift;
 }
 
@@ -93,12 +104,22 @@ export const SHIFTS: { octave: OctaveShift; semitones: number }[] = [
 ];
 
 export function matchSong(userRange: VocalRange, song: SongRange): SongFit | null {
+  if (song.confidence === 'low') return maybeFit(userRange, song);
   for (const { octave, semitones } of SHIFTS) {
     const low = song.low + semitones;
     const high = song.high + semitones;
     if (fits(userRange, low, high)) {
       return { difficulty: difficultyFromEdgeTime(edgeTime(userRange, song, semitones)), octave };
     }
+  }
+  return null;
+}
+
+/** A low-confidence range that fits the user's range give or take MAYBE_SLACK: the Maybe group. */
+function maybeFit(userRange: VocalRange, song: SongRange): SongFit | null {
+  const wide = { ...userRange, low: userRange.low - MAYBE_SLACK, high: userRange.high + MAYBE_SLACK };
+  for (const { octave, semitones } of SHIFTS) {
+    if (fits(wide, song.low + semitones, song.high + semitones)) return { difficulty: 'maybe', octave };
   }
   return null;
 }

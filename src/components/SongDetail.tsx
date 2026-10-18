@@ -54,6 +54,7 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
   const [infoOpen, setInfoOpen] = useState(false);
   const tipId = useId();
   const octave = octaveWording(match.octave);
+  const maybe = match.difficulty === 'maybe';
 
   return (
     <div className={styles.detail}>
@@ -69,7 +70,7 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
       <RangeBarView userRange={userRange} match={match} />
 
       <div className={styles.tags}>
-        <span className={styles.pill}>{difficultyLabel(match.difficulty)}</span>
+        <span className={maybe ? styles.pillQuiet : styles.pill}>{difficultyLabel(match.difficulty)}</span>
         {match.range.fastLyrics && (
           <span className={`${styles.pillQuiet} ${styles.pillIcon}`}>
             <FastLyricsIcon className={styles.icon} size={16} />
@@ -93,7 +94,7 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
 
       {infoOpen && (
         <p role="tooltip" id={tipId} className={styles.tooltip}>
-          {sourceTooltip(source)}
+          {sourceTooltip(source, maybe)}
           {match.range.usdbId !== undefined && (
             <>
               {' '}

@@ -4,7 +4,9 @@
 // so the typical range of an artist's other charted songs is a fair guess.
 // Medians rather than means, so one unusual song (a falsetto single, a duet
 // where the file tracks the other singer) does not skew the estimate. Only
-// 'note-file' ranges are used, so one guess never feeds another.
+// measured ranges are used (note files and full recordings), so one guess
+// never feeds another. A recording stored under several spellings of its
+// title (same MusicBrainz id) counts once.
 //
 // narrowExternalArtistRange: published "vocal range" figures for an artist
 // (fan wikis, range databases) span their whole career, including one-off
@@ -15,6 +17,7 @@
 // confidence everywhere it is shown.
 
 import type { SongRange } from '../contracts';
+import { isMeasured } from './sourceRank';
 
 export const EXTERNAL_RANGE_TRIM_FRACTION = 0.25;
 
@@ -24,9 +27,21 @@ function median(values: number[]): number {
   return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
-/** Typical range of an artist from the note-file ranges of their other songs; null if there are none. */
+/** The measured ranges among an artist's songs, one per recording. */
+export function measuredSongs(ranges: SongRange[]): SongRange[] {
+  const seen = new Set<string>();
+  return ranges.filter((s) => {
+    if (!isMeasured(s)) return false;
+    if (s.mbid === undefined) return true;
+    if (seen.has(s.mbid)) return false;
+    seen.add(s.mbid);
+    return true;
+  });
+}
+
+/** Typical range of an artist from the measured ranges of their other songs; null if there are none. */
 export function artistTypicalRange(otherSongs: SongRange[]): SongRange | null {
-  const usable = otherSongs.filter((s) => s.source === 'note-file');
+  const usable = measuredSongs(otherSongs);
   if (usable.length === 0) return null;
   return {
     low: median(usable.map((s) => s.low)),
