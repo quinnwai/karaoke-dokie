@@ -65,9 +65,9 @@ interface SpotifyImage {
 }
 interface SpotifyTrackObject {
   id: string | null;
-  name: string;
+  name: string | null;
   is_local?: boolean;
-  artists: { id: string; name: string }[];
+  artists: { id: string; name: string | null }[];
   external_urls?: { spotify?: string };
   album?: { images?: SpotifyImage[] };
   popularity?: number;
@@ -80,9 +80,12 @@ function pickImage(images: SpotifyImage[] | undefined): string | undefined {
   return sorted[0]?.url;
 }
 
+/** A contract Track, or null for an item that cannot be matched: no id, a local file, or no title or artist name. */
 export function mapTrack(t: SpotifyTrackObject | null | undefined, playRank: number): Track | null {
   if (!t || !t.id || t.is_local || !t.artists?.[0]) return null;
   const artist = t.artists[0];
+  // Spotify can send a null title or artist name; on Oct 22, 2026 one such item crashed every recommendations request.
+  if (!t.name?.trim() || !artist.name?.trim()) return null;
   const track: Track = {
     id: t.id,
     title: t.name,
