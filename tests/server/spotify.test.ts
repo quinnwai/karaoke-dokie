@@ -177,6 +177,14 @@ describe('Spotify library reads', () => {
     expect(mapTrack({ ...sTrack(1), album: { images: [] } }, 3)).not.toHaveProperty('albumArtUrl');
     expect(mapTrack(null, 0)).toBeNull();
   });
+
+  it('skips items without a title or artist name, which cannot be matched (they crashed recommendations on Oct 22)', () => {
+    expect(mapTrack({ ...sTrack(1), name: null }, 0)).toBeNull();
+    expect(mapTrack({ ...sTrack(1), name: '  ' }, 0)).toBeNull();
+    expect(mapTrack({ ...sTrack(1), artists: [{ id: 'a1', name: null }] }, 0)).toBeNull();
+    expect(mapTrack({ ...sTrack(1), artists: [{ id: 'a1', name: '' }] }, 0)).toBeNull();
+    expect(mapTrack(sTrack(1), 0)).toMatchObject({ title: 'Song 1', artist: 'Artist 1' });
+  });
 });
 
 describe('familiarity', () => {
@@ -282,6 +290,21 @@ describe('playlist songs', () => {
     const tracks = await client.getPlaylistTracks('tok');
     expect(tracks.map((x) => x.id)).toEqual(['id1', 'id2', 'id3', 'id4']);
     expect(calls.some((c) => c.url.includes('/playlists/followed'))).toBe(false);
+  });
+
+  it('skips playlist entries with a null title or artist name and keeps the rest', async () => {
+    const client = createSpotifyClient(
+      cfg,
+      fakeFetch({
+        'https://api.spotify.com/v1/me': () => ({ id: 'me' }),
+        'https://api.spotify.com/v1/me/playlists': () => ({ items: [{ id: 'mine', owner: { id: 'me' } }], next: null }),
+        'https://api.spotify.com/v1/playlists/mine/items': () => ({
+          items: [{ item: sTrack(1) }, { item: { ...sTrack(2), name: null } }, { item: { ...sTrack(3), artists: [{ id: 'a3', name: null }] } }, { item: sTrack(4) }],
+          next: null,
+        }),
+      }),
+    );
+    expect((await client.getPlaylistTracks('tok')).map((x) => x.id)).toEqual(['id1', 'id4']);
   });
 });
 
