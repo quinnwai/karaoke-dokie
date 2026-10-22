@@ -16,9 +16,12 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    (`aria-label="Continue"`) that goes to `/api/auth/login`.
 6. **After sign-in** (`/?signedIn=1`): the range kept in `sessionStorage` (`kd.test`) is
    PUT to `/api/me/range`, then results load 5 at a time from `/api/recommendations`.
+   Songs whose range is only an estimate (`difficulty: 'maybe'`) arrive last and show in
+   their own "Maybe" list after the main one, without a difficulty pill.
 7. **Song detail**: range bar (song in neon pink over the user's range, note names at the
-   ends), difficulty, "Fast lyrics", an "i" button explaining where the data came from,
-   Open in Spotify, and "How'd it go?" thumbs that POST `/api/feedback`.
+   ends), difficulty (or a quiet "Maybe"), "Fast lyrics", an "i" button explaining where the
+   data came from (for Maybe songs, also that the range is an estimate), Open in Spotify, and
+   "How'd it go?" thumbs that POST `/api/feedback`.
 8. **Returning user** with a saved range lands on results; "redo" restarts the test.
 9. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
    low and highest high become the range (`source: 'songs'`). Signed-out users sign in first.

@@ -22,14 +22,15 @@ const track = (artist: string, title: string): Track => ({
 });
 
 describe('seed song ranges', () => {
-  it('has 10 valid, clearly marked placeholder entries', () => {
+  it('has 10 valid, clearly marked placeholder entries: five stand in for recordings, five for estimates', () => {
     expect(SEED_SONGS).toHaveLength(10);
     for (const s of SEED_SONGS) {
       expect(s.range.low).toBeLessThan(s.range.tessitura);
       expect(s.range.tessitura).toBeLessThan(s.range.high);
       expect(s.provenance).toMatch(/Placeholder/);
-      expect(s.range.confidence).toBe('low');
+      expect(s.range.confidence).toBe(s.range.source === 'audio-full' ? 'high' : 'low');
     }
+    expect(SEED_SONGS.filter((s) => s.range.confidence === 'high')).toHaveLength(5);
   });
 
   it('every seed is in the mock library', () => {
@@ -71,6 +72,15 @@ describe('production song wiring', () => {
     expect(log.reason).toMatch(/2 other songs/);
   });
 
+  it('counts the artist\'s measured recordings in the fallback, but not estimates', async () => {
+    const store = createMemoryStore();
+    await store.putSongRange(songKey('Queen', 'A'), { range: { ...nf(50, 70), source: 'audio-full', method: 'm' }, log: {} as never });
+    await store.putSongRange(songKey('Queen', 'B'), { range: { ...nf(40, 60), source: 'artist-typical', confidence: 'low' }, log: {} as never });
+    const { range, log } = await realResolver(store, { getNoteFile: async () => null })(track('Queen', 'C'));
+    expect(range).toMatchObject({ low: 50, high: 70, source: 'artist-typical' });
+    expect(log.reason).toMatch(/1 other song by Queen/);
+  });
+
   it('skips and logs a song with no data at all', async () => {
     const resolve = realResolver(createMemoryStore(), { getNoteFile: async () => null });
     const { range, log } = await resolve(track('Omar Apollo', 'Evergreen'));
@@ -87,5 +97,7 @@ describe('production song wiring', () => {
     const t = track('A', 'B');
     expect(deps.matchSong(t, nf(56, 64), { low: 48, high: 72, source: 'test' })).toMatchObject({ track: t, difficulty: 'easy', octave: 'none' });
     expect(deps.matchSong(t, nf(30, 90), { low: 48, high: 72, source: 'test' })).toBeNull();
+    const estimate = { ...nf(46, 74), source: 'artist-typical' as const, confidence: 'low' as const };
+    expect(deps.matchSong(t, estimate, { low: 48, high: 72, source: 'test' })).toMatchObject({ difficulty: 'maybe', octave: 'none', reasons: ['You play this a lot'] });
   });
 });

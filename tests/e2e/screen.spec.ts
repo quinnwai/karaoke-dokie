@@ -209,6 +209,11 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await expect(page.locator('ol li')).toHaveCount(10);
   expect(api.recommendationOffsets).toEqual([0, 5]);
   await expect(page.getByRole('button', { name: 'Generate more songs' })).toHaveCount(0);
+  // Low-confidence songs come last, under Maybe, without a difficulty label.
+  const maybe = page.getByRole('region', { name: 'Maybe' });
+  await expect(maybe.locator('li')).toHaveCount(2);
+  await expect(maybe.getByRole('button', { name: 'Sukiyaki by Kyu Sakamoto, Maybe' })).toBeVisible();
+  await expect(maybe.locator('[data-difficulty]')).toHaveCount(0);
   await page.locator('ol li').nth(9).scrollIntoViewIfNeeded();
   await shot(page, '08-generate-more');
 
@@ -250,6 +255,33 @@ test('returning user goes straight to results, and redo restarts the test', asyn
   await page.getByRole('button', { name: 'Redo the singing test' }).click();
   await expect(page.getByText('Find a quiet spot')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Hold to record your lowest note' })).toBeVisible({ timeout: 5000 });
+  await context.close();
+});
+
+test('a Maybe song has no difficulty, and its info says the range is an estimate', async ({ browser, baseURL }) => {
+  const api = freshState();
+  api.user = me({ low: 45, high: 72, source: 'test' });
+  const context = await browser.newContext({ ...iPhone, baseURL, reducedMotion: 'reduce' });
+  await mockApi(context, api);
+  const page = await context.newPage();
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Generate more songs' }).click();
+  const maybe = page.getByRole('region', { name: 'Maybe' });
+  await expect(maybe.getByText('We only have an estimate of these songs’ range.', { exact: false })).toBeVisible();
+  await maybe.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(500);
+  await shot(page, '17-maybe-group');
+
+  await maybe.getByRole('button', { name: /^Sukiyaki/ }).click();
+  await expect(page.getByRole('heading', { name: 'Sukiyaki' })).toBeVisible();
+  await expect(page.getByText('Maybe', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^(Easy|Medium|Hard)$/)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Where this came from' }).click();
+  await expect(page.getByRole('tooltip')).toHaveText(/9 s of clear singing\. This range is only an estimate/);
+  await shot(page, '18-maybe-detail');
+
+  await page.getByRole('button', { name: "It didn't go well" }).click();
+  await expect.poll(() => api.feedback).toEqual([{ trackId: 't9', thumbs: 'down', difficulty: 'maybe', octave: 'none' }]);
   await context.close();
 });
 

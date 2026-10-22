@@ -9,8 +9,8 @@ import { SCHEMA_SQL } from '../../src/lib/server/schema';
 import { pickStoreKind } from '../../src/lib/server/getStore';
 import type { Store } from '../../src/lib/server/store';
 
-function pgMemQuery(): QueryFn {
-  const db = newDb();
+function pgMemQuery(opts: Parameters<typeof newDb>[0] = {}): QueryFn {
+  const db = newDb(opts);
   const { Pool } = db.adapters.createPg();
   const pool = new Pool();
   return async (text, params) => (await pool.query(text, params)).rows;
@@ -90,7 +90,7 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect((await s.getSongRanges([])).size).toBe(0);
   });
 
-  it('lists note-file song ranges for one artist, for the artist fallback', async () => {
+  it('lists measured song ranges for one artist (note files and recordings, never estimates)', async () => {
     const s = make();
     const nf = (low: number) => ({ ...songRange, low, source: 'note-file' as const, confidence: 'high' as const });
     await s.putSongRange('queen|bohemian rhapsody', { range: nf(50), log: logEntry(1) });
@@ -98,9 +98,13 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     await s.putSongRange('queen|guess', { range: { ...nf(40), source: 'artist-typical', confidence: 'low' }, log: logEntry(3) });
     await s.putSongRange('queen|skipped', { range: null, log: logEntry(4, 'skipped') });
     await s.putSongRange('queens of the stone age|no one knows', { range: nf(45), log: logEntry(5) });
-    const lows = (await s.listNoteFileRangesByArtist('queen')).map((r) => r.low).sort();
-    expect(lows).toEqual([50, 52]);
-    expect(await s.listNoteFileRangesByArtist('nobody')).toEqual([]);
+    await s.putSongRange('queen|radio ga ga', { range: { ...nf(53), source: 'audio-full', method: 'pyin-v1/app-range-v1' }, log: logEntry(6, 'audio-full') });
+    await s.putSongRange('queen|rough', { range: { ...nf(54), source: 'audio-full', confidence: 'low' }, log: logEntry(7, 'audio-full') });
+    await s.putSongRange('queen|published', { range: { ...nf(41), source: 'artist-external', confidence: 'low' }, log: logEntry(8) });
+    const listed = await s.listMeasuredRangesByArtist('queen');
+    expect(listed.map((r) => r.low).sort()).toEqual([50, 52, 53, 54]);
+    expect(listed.find((r) => r.low === 53)).toMatchObject({ source: 'audio-full', method: 'pyin-v1/app-range-v1' });
+    expect(await s.listMeasuredRangesByArtist('nobody')).toEqual([]);
   });
 
   it('keeps a USDB song index: upserts by id, finds the most-viewed per key, reports size and newest change', async () => {
@@ -139,6 +143,15 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(await s.listFeedback({ userId: 'u1' })).toEqual([feedback('u1', 3), feedback('u1', 1)]);
     expect(await s.listFeedback({ limit: 1 })).toEqual([feedback('u1', 3)]);
   });
+
+  it('reads back the song range stored with feedback, and the Maybe label', async () => {
+    const s = make();
+    const measured = { ...feedback('u1', 1), songRange: { source: 'audio-full' as const, method: 'pyin-v1/app-range-v1', low: 52, high: 65 } };
+    const estimate = { ...feedback('u1', 2), difficulty: 'maybe' as const, songRange: { source: 'artist-typical' as const, low: 50.5, high: 70 } };
+    const skipped = { ...feedback('u1', 3), songRange: { source: 'skipped' as const } };
+    for (const f of [measured, estimate, skipped]) await s.saveFeedback(f);
+    expect(await s.listFeedback()).toEqual([skipped, estimate, measured]);
+  });
 });
 
 describe('schema and store selection', () => {
@@ -154,6 +167,26 @@ describe('schema and store selection', () => {
     for (const t of ['users', 'vocal_ranges', 'song_ranges', 'source_log', 'feedback']) {
       await expect(q(`SELECT * FROM ${t}`)).resolves.toEqual([]);
     }
+  });
+
+  it('migrate adds the feedback range columns to a table made before them, and can run again', async () => {
+    // pg-mem rejects CREATE TABLE IF NOT EXISTS on an existing table unless this check is off (Postgres does not).
+    const q = pgMemQuery({ noAstCoverageCheck: true });
+    await q(`CREATE TABLE feedback (id BIGSERIAL PRIMARY KEY, user_id TEXT NOT NULL, track_id TEXT NOT NULL, thumbs TEXT NOT NULL,
+      user_low INTEGER NOT NULL, user_high INTEGER NOT NULL, user_range_source TEXT NOT NULL, difficulty TEXT NOT NULL,
+      octave TEXT NOT NULL, at TEXT NOT NULL)`);
+    const old = feedback('u1', 1);
+    await q(
+      `INSERT INTO feedback (user_id, track_id, thumbs, user_low, user_high, user_range_source, difficulty, octave, at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [old.userId, old.trackId, old.thumbs, old.userRange.low, old.userRange.high, old.userRange.source, old.difficulty, old.octave, old.at],
+    );
+    await migrate(q);
+    await migrate(q);
+    const s = createPostgresStore(q, { autoMigrate: false });
+    const fresh = { ...feedback('u1', 2), songRange: { source: 'audio-full' as const, method: 'm', low: 52, high: 65 } };
+    await s.saveFeedback(fresh);
+    expect(await s.listFeedback()).toEqual([fresh, old]);
   });
 
   it('picks memory unless a DATABASE_URL is set and KARAOKE_STORE is not memory', () => {

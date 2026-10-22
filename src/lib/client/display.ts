@@ -1,10 +1,10 @@
 // Plain-words text and geometry for the screen. No music jargon reaches the user.
 
-import type { DataSourceLogEntry, Difficulty, LogOutcome, Midi, OctaveShift, SongRange, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, Label, LogOutcome, Midi, OctaveShift, SongRange, VocalRange } from '../contracts';
 import { midiToNoteName } from '../audio/notes';
 
-export function difficultyLabel(d: Difficulty): string {
-  return d === 'easy' ? 'Easy' : d === 'medium' ? 'Medium' : 'Hard';
+export function difficultyLabel(d: Label): string {
+  return d === 'easy' ? 'Easy' : d === 'medium' ? 'Medium' : d === 'hard' ? 'Hard' : 'Maybe';
 }
 
 /** Shown only when the song fits after moving it; null when it fits as written. */
@@ -16,16 +16,26 @@ export function octaveWording(octave: OctaveShift): string | null {
 
 const OUTCOME_TEXT: Record<LogOutcome, string> = {
   'note-file': 'Measured from a note-by-note file of this song.',
+  'audio-full': 'From a recording of this song.',
   'artist-typical': "Estimated from this artist's usual singing range.",
   'artist-external': 'Estimated from published info about this artist.',
   skipped: "We couldn't find range info for this song.",
 };
 
-/** Text for the "i" button on a song. */
-export function sourceTooltip(entry: DataSourceLogEntry | undefined): string {
-  if (!entry) return "We don't have details on where this song's range came from.";
-  const reason = entry.reason.trim();
-  return reason ? `${OUTCOME_TEXT[entry.outcome]} ${reason}` : OUTCOME_TEXT[entry.outcome];
+/** Under the Maybe heading in the results. */
+export const MAYBE_NOTE = 'We only have an estimate of these songs’ range. They fit yours, give or take a couple of notes.';
+
+const MAYBE_TEXT = 'This range is only an estimate, so the song is a maybe: it fits your range, give or take a couple of notes.';
+
+/** Text for the "i" button on a song; Maybe songs also say their range is an estimate. */
+export function sourceTooltip(entry: DataSourceLogEntry | undefined, maybe = false): string {
+  const reason = entry?.reason.trim();
+  const text = !entry
+    ? "We don't have details on where this song's range came from."
+    : reason
+      ? `${OUTCOME_TEXT[entry.outcome]} ${reason}`
+      : OUTCOME_TEXT[entry.outcome];
+  return maybe ? `${text} ${MAYBE_TEXT}` : text;
 }
 
 export interface Span {

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { Match, VocalRange } from '../lib/contracts';
 import { midiToNoteName } from '../lib/audio/notes';
-import { difficultyLabel, octaveWording } from '../lib/client/display';
+import { difficultyLabel, MAYBE_NOTE, octaveWording } from '../lib/client/display';
 import { rangeWarning } from '../lib/client/rangeCheck';
 import { isRangeKept, keepRange } from '../lib/client/storage';
 import { FastLyricsIcon, OctaveIcon } from './Icon';
@@ -29,6 +29,38 @@ export function Results({ range, matches, loading, error, hasMore, onSelect, onM
   const keep = () => {
     keepRange(range.low, range.high);
     setKept(true);
+  };
+  const maybeId = useId();
+  // Maybe songs (ranked last by the server) get their own list after the main one, without a label.
+  const sure = matches.filter((m) => m.difficulty !== 'maybe');
+  const maybe = matches.filter((m) => m.difficulty === 'maybe');
+  const row = (m: Match) => {
+    const octave = octaveWording(m.octave);
+    return (
+      <li key={m.track.id}>
+        <button
+          type="button"
+          className={styles.song}
+          onClick={() => onSelect(m.track.id)}
+          aria-label={`${m.track.title} by ${m.track.artist}, ${difficultyLabel(m.difficulty)}${octave ? `. ${octave}` : ''}${m.range.fastLyrics ? '. Fast lyrics' : ''}`}
+        >
+          <span className={styles.songText}>
+            <span className={styles.songTitle}>{m.track.title}</span>
+            <span className={styles.songArtist}>{m.track.artist}</span>
+            {m.reasons && m.reasons.length > 0 && <span className={styles.songReasons}>{m.reasons.join(' · ')}</span>}
+          </span>
+          <span className={styles.songMeta}>
+            <OctaveIcon octave={m.octave} className={styles.icon} />
+            {m.range.fastLyrics && <FastLyricsIcon className={styles.icon} />}
+            {m.difficulty !== 'maybe' && (
+              <span className={styles.pill} data-difficulty={m.difficulty}>
+                {difficultyLabel(m.difficulty)}
+              </span>
+            )}
+          </span>
+        </button>
+      </li>
+    );
   };
   return (
     <div className={styles.results}>
@@ -66,35 +98,16 @@ export function Results({ range, matches, loading, error, hasMore, onSelect, onM
 
       <Lyric text="Songs for your voice" />
 
-      {matches.length > 0 && (
-        <ol className={styles.songList}>
-          {matches.map((m) => {
-            const octave = octaveWording(m.octave);
-            return (
-              <li key={m.track.id}>
-                <button
-                  type="button"
-                  className={styles.song}
-                  onClick={() => onSelect(m.track.id)}
-                  aria-label={`${m.track.title} by ${m.track.artist}, ${difficultyLabel(m.difficulty)}${octave ? `. ${octave}` : ''}${m.range.fastLyrics ? '. Fast lyrics' : ''}`}
-                >
-                  <span className={styles.songText}>
-                    <span className={styles.songTitle}>{m.track.title}</span>
-                    <span className={styles.songArtist}>{m.track.artist}</span>
-                    {m.reasons && m.reasons.length > 0 && <span className={styles.songReasons}>{m.reasons.join(' · ')}</span>}
-                  </span>
-                  <span className={styles.songMeta}>
-                    <OctaveIcon octave={m.octave} className={styles.icon} />
-                    {m.range.fastLyrics && <FastLyricsIcon className={styles.icon} />}
-                    <span className={styles.pill} data-difficulty={m.difficulty}>
-                      {difficultyLabel(m.difficulty)}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
+      {sure.length > 0 && <ol className={styles.songList}>{sure.map(row)}</ol>}
+
+      {maybe.length > 0 && (
+        <section className={styles.maybe} aria-labelledby={maybeId}>
+          <h2 id={maybeId} className={styles.maybeTitle}>
+            Maybe
+          </h2>
+          <p className={styles.maybeNote}>{MAYBE_NOTE}</p>
+          <ol className={styles.songList}>{maybe.map(row)}</ol>
+        </section>
       )}
 
       {!loading && !error && matches.length === 0 && (

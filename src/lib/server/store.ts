@@ -46,8 +46,11 @@ export interface Store {
   /** Batch read; the map only has keys that are cached. */
   getSongRanges(songKeys: string[]): Promise<Map<string, SongRangeRecord>>;
   putSongRange(songKey: string, record: SongRangeRecord): Promise<void>;
-  /** Ranges read from note files for one artist (the artist part of songKey), for the artist fallback. */
-  listNoteFileRangesByArtist(artistKey: string): Promise<SongRange[]>;
+  /**
+   * Measured ranges (note files and full recordings, never estimates) for one artist (the artist
+   * part of songKey), for the artist fallback.
+   */
+  listMeasuredRangesByArtist(artistKey: string): Promise<SongRange[]>;
 
   /** Adds or updates songs in the USDB song index. */
   putUsdbSongs(entries: UsdbIndexEntry[]): Promise<void>;

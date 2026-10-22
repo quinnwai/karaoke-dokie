@@ -30,6 +30,17 @@ describe('rankMatches', () => {
     ]);
   });
 
+  it('puts the Maybe group after every other song, in the same order within it', () => {
+    const maybe = (id: string, playRank: number, score: number): Match => ({ ...match(id, playRank), difficulty: 'maybe', score });
+    const ranked = rankMatches([
+      maybe('maybeLow', 0, 0.2),
+      { ...match('shifted', 5, 'up'), score: 0.1 },
+      maybe('maybeHigh', 1, 0.9),
+      { ...match('plain', 3), score: 0.5 },
+    ]);
+    expect(ids(ranked)).toEqual(['plain', 'shifted', 'maybeHigh', 'maybeLow']);
+  });
+
   it('keeps input order for ties', () => {
     expect(ids(rankMatches([match('b', 1), match('a', 1), match('c', 1)]))).toEqual(['b', 'a', 'c']);
   });

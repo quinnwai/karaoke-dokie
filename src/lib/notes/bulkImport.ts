@@ -1,11 +1,14 @@
 // Builds song ranges in bulk from folders of UltraStar note files (public collections that
 // were originally shared on USDB), and imports them into the store. Only computed numbers
 // are kept (range, tessitura, pitch shares, fast-lyrics flag); lyrics and notes are not.
+// The import also takes rows measured from full recordings (the vocal-range pipeline's export),
+// which carry their own log line.
 
-import type { SongRange } from '../contracts';
+import type { DataSourceLogEntry, LogOutcome, SongRange } from '../contracts';
 import type { Store } from '../server/store';
 import { songRangeFromUltrastar } from '../songs/range';
 import { songKey } from '../songs/resolve';
+import { importReplaces, isKnownSource, SOURCE_RANK } from '../songs/sourceRank';
 import { parseUltrastar } from '../songs/ultrastar';
 
 export interface BulkRange {
@@ -15,7 +18,13 @@ export interface BulkRange {
   /** Which collection the note file came from. */
   collection: string;
   range: SongRange;
+  /** Log line for the info button. Without one, the outcome is the range's source (and note files get the note-file line). */
+  outcome?: LogOutcome;
+  reason?: string;
 }
+
+const NOTE_FILE_REASON = (collection: string) =>
+  `Used the UltraStar note file for this song (public collection ${collection}, originally from USDB).`;
 
 /** Decodes a note file: UTF-8 when valid, otherwise Latin-1 (older UltraStar files). */
 export function decodeNoteFile(bytes: Uint8Array): string {
@@ -58,16 +67,20 @@ export function dedupeRanges(ranges: Iterable<BulkRange>): BulkRange[] {
 
 export interface ImportSummary {
   imported: number;
-  /** Already had a range from a note file (USDB sync or an earlier import). */
+  /** Already had a range from an equal or better source: a note file, or this export's own row. */
   kept: number;
   /** Kept songs from the same collection whose fast-lyrics flag was corrected (recheckFast). */
   fastUpdated: number;
 }
 
 /**
- * Writes bulk ranges to the store. Songs that already have a note-file range are kept as they
- * are (with recheckFast, only their fast-lyrics flag is corrected); songs with only an estimate
- * or a skip are upgraded. No log rows are appended.
+ * Writes bulk ranges to the store, going by the source rank (sourceRank.ts): a row is written
+ * over a lower-ranked one, or over the same source from another export; anything else is kept
+ * as it is (with recheckFast, a kept note file only gets its fast-lyrics flag corrected). So
+ * estimates and skips are upgraded, and note files are never replaced. A replaced row keeps the
+ * time the USDB sync last found nothing for the song. A file with a source this app does not
+ * know, or a log outcome that is not the row's source, is refused before anything is written.
+ * No log rows are appended.
  */
 export async function importBulkRanges(
   store: Store,
@@ -80,6 +93,14 @@ export async function importBulkRanges(
     recheckFast?: boolean;
   } = {},
 ): Promise<ImportSummary> {
+  for (const r of ranges) {
+    if (!isKnownSource(r.range.source)) {
+      throw new Error(`Unknown range source "${r.range.source}" (${r.key}); this app imports ${Object.keys(SOURCE_RANK).join(', ')}`);
+    }
+    if (r.outcome !== undefined && r.outcome !== r.range.source) {
+      throw new Error(`Log outcome "${r.outcome}" is not the range source "${r.range.source}" (${r.key})`);
+    }
+  }
   const now = opts.now ?? (() => new Date());
   const batchSize = opts.batchSize ?? 500;
   const summary: ImportSummary = { imported: 0, kept: 0, fastUpdated: 0 };
@@ -88,25 +109,24 @@ export async function importBulkRanges(
     const existing = await store.getSongRanges(batch.map((r) => r.key));
     for (const r of batch) {
       const old = existing.get(r.key);
-      if (old?.range?.source === 'note-file') {
+      if (!importReplaces(r.range, old?.range)) {
         summary.kept++;
-        if (opts.recheckFast && old.range.collection === r.collection && old.range.fastLyrics !== r.range.fastLyrics) {
+        if (opts.recheckFast && old?.range?.source === 'note-file' && old.range.collection === r.collection && old.range.fastLyrics !== r.range.fastLyrics) {
           await store.putSongRange(r.key, { ...old, range: { ...old.range, fastLyrics: r.range.fastLyrics } });
           summary.fastUpdated++;
         }
         continue;
       }
-      await store.putSongRange(r.key, {
-        range: r.range,
-        log: {
-          trackId: '',
-          title: r.title,
-          artist: r.artist,
-          outcome: 'note-file',
-          reason: `Used the UltraStar note file for this song (public collection ${r.collection}, originally from USDB).`,
-          at: now().toISOString(),
-        },
-      });
+      const log: DataSourceLogEntry = {
+        trackId: '',
+        title: r.title,
+        artist: r.artist,
+        outcome: r.outcome ?? r.range.source,
+        reason: r.reason ?? (r.range.source === 'note-file' ? NOTE_FILE_REASON(r.collection) : ''),
+        at: now().toISOString(),
+      };
+      if (old?.log.usdbMissAt) log.usdbMissAt = old.log.usdbMissAt;
+      await store.putSongRange(r.key, { range: r.range, log });
       summary.imported++;
     }
     opts.onProgress?.(Math.min(i + batchSize, ranges.length));

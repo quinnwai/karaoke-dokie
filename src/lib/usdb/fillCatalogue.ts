@@ -1,5 +1,6 @@
 // Computes ranges for every song in the USDB index that has no note-file range yet, most-viewed
 // first, so the app covers USDB's whole catalogue rather than only signed-in users' libraries.
+// A note file outranks every other source (sourceRank.ts), so it also replaces measured recordings.
 // Each note file is downloaded by id through the client, which waits out USDB's countdown.
 // Safe to stop and rerun: finished songs are stored as they go and skipped next time.
 // With recheckFast it instead re-reads USDB songs flagged as fast lyrics and clears the flag where
@@ -7,6 +8,7 @@
 
 import type { SongRangeRecord, Store } from '../server/store';
 import { songRangeFromUltrastar } from '../songs/range';
+import { SOURCE_RANK, sourceRank } from '../songs/sourceRank';
 import type { UsdbClient } from './client';
 
 export interface FillSummary {
@@ -46,7 +48,7 @@ export async function fillCatalogue({
       seen.add(e.key);
       const rec = known.get(e.key);
       if (!recheckFast) {
-        if (rec?.range?.source !== 'note-file') todo.push(e);
+        if (sourceRank(rec?.range) < SOURCE_RANK['note-file']) todo.push(e);
       } else if (rec?.range?.source === 'note-file' && rec.range.fastLyrics && rec.range.usdbId === e.id) {
         flagged.set(e.key, rec);
         todo.push(e);

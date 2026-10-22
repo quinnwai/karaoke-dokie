@@ -1,6 +1,6 @@
 // Works out a range for one Spotify track, trying the best source first:
 //   1. an UltraStar note file for the song itself (high confidence),
-//   2. the typical range of the artist's other songs that have note files,
+//   2. the typical range of the artist's other songs that have note files or measured recordings,
 //   3. the artist's published career range, narrowed to its middle half,
 //   4. otherwise the song is skipped (never shown).
 // Every result comes with a plain-English log line for the info button and
@@ -12,7 +12,7 @@
 // 2011", "Song (feat. X)") line up with note-file names ("Song").
 
 import type { DataSourceLogEntry, SongRange, Track } from '../contracts';
-import { artistTypicalRange, narrowExternalArtistRange } from './artistFallback';
+import { artistTypicalRange, measuredSongs, narrowExternalArtistRange } from './artistFallback';
 import { songRangeFromUltrastar } from './range';
 
 export interface ResolveDeps {
@@ -55,7 +55,7 @@ export async function resolveSongRange(track: Track, deps: ResolveDeps): Promise
     }
   }
 
-  const others = (await deps.getArtistSongRanges(artist, title)).filter((r) => r.source === 'note-file');
+  const others = measuredSongs(await deps.getArtistSongRanges(artist, title));
   const typical = artistTypicalRange(others);
   if (typical) {
     const songs = others.length === 1 ? 'song' : 'songs';

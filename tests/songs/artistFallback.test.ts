@@ -34,9 +34,18 @@ describe('artistTypicalRange', () => {
     expect(range).toMatchObject({ low: 50, high: 71 });
   });
 
-  it('only uses note-file ranges, so guesses do not feed further guesses', () => {
+  it('only uses measured ranges, so guesses do not feed further guesses', () => {
     const range = artistTypicalRange([r(50, 70, 60), r(30, 40, 35, { source: 'artist-typical', confidence: 'low' })]);
     expect(range).toMatchObject({ low: 50, high: 70, tessitura: 60 });
+  });
+
+  it('uses measured recordings alongside note files, counting each recording once', () => {
+    const recording = (low: number, mbid: string, extra: Partial<SongRange> = {}) =>
+      r(low, 70, 60, { source: 'audio-full', confidence: 'high', mbid, ...extra });
+    // "It's" and "It’s" rows of one recording share an mbid; a low-confidence recording still counts.
+    const range = artistTypicalRange([r(50, 70, 60), recording(40, 'x'), recording(40, 'x'), recording(56, 'y', { confidence: 'low' })]);
+    expect(range).toMatchObject({ low: 50, source: 'artist-typical', confidence: 'low' });
+    expect(artistTypicalRange([recording(44, 'x'), recording(44, 'x')])).toMatchObject({ low: 44 });
   });
 
   it('returns null with no usable songs', () => {

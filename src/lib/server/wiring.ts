@@ -74,7 +74,7 @@ export function realResolver(store: Store, noteFiles: NoteFileSource): (track: T
   return (track) =>
     resolveSongRange(track, {
       getNoteFile: (artist, title) => noteFiles.getNoteFile(artist, title),
-      getArtistSongRanges: (artist) => store.listNoteFileRangesByArtist(artistKey(artist)),
+      getArtistSongRanges: (artist) => store.listMeasuredRangesByArtist(artistKey(artist)),
       // No outside artist-range source is connected in v1.
       getExternalArtistRange: async () => null,
     });

@@ -479,6 +479,32 @@
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+/* Low-confidence songs, after the main list. */
+.maybe {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.maybeTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pink);
+}
+
+.maybeNote {
+  margin: 0 0 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--dim);
+}
+
 .song {
   width: 100%;
   display: flex;

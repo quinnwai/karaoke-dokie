@@ -157,6 +157,35 @@ describe('syncNoteFiles', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('keeps measured recordings through the fallback pass, but still looks them up so a note file replaces them', async () => {
+    const store = createMemoryStore();
+    const audio = (low: number, high: number) => ({ low, high, tessitura: (low + high) / 2, source: 'audio-full' as const, confidence: 'high' as const, fastLyrics: false, method: 'pyin-v1/app-range-v1' });
+    const log = (title: string) => ({ trackId: '', title, artist: 'A', outcome: 'audio-full' as const, reason: 'Measured from the full recording.', at: 'x' });
+    await store.putSongRange(songKey('A', 'On USDB'), { range: audio(50, 62), log: log('On USDB') });
+    await store.putSongRange(songKey('A', 'Not On USDB'), { range: audio(52, 64), log: log('Not On USDB') });
+    let day = Date.UTC(2026, 0, 1);
+    const now = () => new Date(day);
+    const calls: { title: string; download: boolean }[] = [];
+    const usdb = fakeUsdb((_a, t) => (t === 'On USDB' ? noteFile([0, 7]) : null), calls);
+    const tracks = [track('1', 'A', 'On USDB'), track('2', 'A', 'Not On USDB'), track('3', 'A', 'Unmeasured')];
+
+    const summary = await syncNoteFiles({ store, usdb, tracks, now });
+
+    expect(calls.map((c) => c.title).sort()).toEqual(['Not On USDB', 'On USDB', 'Unmeasured']);
+    expect(summary).toMatchObject({ noteFile: 1, artistTypical: 1, skipped: 0 });
+    expect((await store.getSongRange(songKey('A', 'On USDB')))?.range).toMatchObject({ source: 'note-file', low: 60, high: 67 });
+    const kept = (await store.getSongRange(songKey('A', 'Not On USDB')))!;
+    expect(kept.range).toEqual(audio(52, 64));
+    expect(kept.log).toEqual({ ...log('Not On USDB'), usdbMissAt: '2026-01-01T00:00:00.000Z' });
+    // The estimate for the unmeasured song uses both the note file and the recording.
+    expect((await store.getSongRange(songKey('A', 'Unmeasured')))?.range).toMatchObject({ source: 'artist-typical', low: 56, high: 65.5 });
+
+    day += 89 * 86_400_000;
+    await syncNoteFiles({ store, usdb, tracks, now });
+    expect(calls.filter((c) => c.title === 'Not On USDB')).toHaveLength(1);
+    expect((await store.getSongRange(songKey('A', 'Not On USDB')))!.range).toEqual(audio(52, 64));
+  });
+
   it('still searches songs the website only guessed at (never checked on USDB)', async () => {
     const store = createMemoryStore();
     await store.putSongRange(songKey('A', 'Guessed'), { range: null, log: { outcome: 'skipped' } as never });

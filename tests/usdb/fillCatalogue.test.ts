@@ -29,6 +29,22 @@ describe('fillCatalogue', () => {
     expect(await store.getSongRange('a|bad')).toBeNull();
   });
 
+  it('replaces measured recordings and estimates with the note file', async () => {
+    const store = createMemoryStore();
+    await store.putUsdbSongs([
+      { id: 1, key: 'a|recorded', artist: 'A', title: 'Recorded', views: 10 },
+      { id: 2, key: 'a|guessed', artist: 'A', title: 'Guessed', views: 5 },
+    ]);
+    const base = { low: 50, high: 60, tessitura: 55, fastLyrics: false };
+    await store.putSongRange('a|recorded', { range: { ...base, source: 'audio-full', confidence: 'high', method: 'm' }, log: { ...log, outcome: 'audio-full' } });
+    await store.putSongRange('a|guessed', { range: { ...base, source: 'artist-typical', confidence: 'low' }, log: { ...log, outcome: 'artist-typical' } });
+    const usdb = { downloadById: async () => noteFile([0, 4, 7]) };
+    expect(await fillCatalogue({ store, usdb })).toEqual({ candidates: 2, stored: 2, failed: 0 });
+    for (const key of ['a|recorded', 'a|guessed']) {
+      expect((await store.getSongRange(key))!).toMatchObject({ range: { source: 'note-file', low: 60, high: 67 }, log: { outcome: 'note-file' } });
+    }
+  });
+
   it('stops after the limit, and a rerun picks up where it left off', async () => {
     const store = createMemoryStore();
     await store.putUsdbSongs([1, 2, 3].map((id) => ({ id, key: `a|${id}`, artist: 'A', title: String(id), views: 10 - id })));

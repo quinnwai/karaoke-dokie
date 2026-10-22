@@ -50,20 +50,32 @@ describe('wording', () => {
   });
 
   it('difficulty labels', () => {
-    expect(['easy', 'medium', 'hard'].map((d) => difficultyLabel(d as 'easy'))).toEqual(['Easy', 'Medium', 'Hard']);
+    expect(['easy', 'medium', 'hard', 'maybe'].map((d) => difficultyLabel(d as 'easy'))).toEqual(['Easy', 'Medium', 'Hard', 'Maybe']);
   });
 });
 
 describe('sourceTooltip', () => {
   it('explains the outcome and adds the reason', () => {
     expect(sourceTooltip(source(0))).toBe('Measured from a note-by-note file of this song. Matched a note file by title and artist.');
-    expect(sourceTooltip(source(1))).toBe("Estimated from this artist's usual singing range. No note file found, used Kenshi Yonezu's usual range.");
+    expect(sourceTooltip(source(1))).toBe(
+      'From a recording of this song. Measured from the full recording: vocals separated and pitch-tracked, 74 s of clear singing.',
+    );
+    expect(sourceTooltip(source(8))).toBe("Estimated from this artist's usual singing range. No note file found, used The Blue Hearts's usual range.");
   });
 
   it('covers every outcome and missing data', () => {
     expect(sourceTooltip({ ...source(0), outcome: 'artist-external', reason: '' })).toBe('Estimated from published info about this artist.');
+    expect(sourceTooltip({ ...source(0), outcome: 'audio-full', reason: '' })).toBe('From a recording of this song.');
     expect(sourceTooltip({ ...source(0), outcome: 'skipped', reason: ' ' })).toMatch(/couldn't find/);
     expect(sourceTooltip(undefined)).toMatch(/don't have details/);
+  });
+
+  it('says a Maybe song’s range is an estimate', () => {
+    expect(sourceTooltip(source(9), true)).toBe(
+      'From a recording of this song. Measured from the full recording: vocals separated and pitch-tracked, 9 s of clear singing. ' +
+        'This range is only an estimate, so the song is a maybe: it fits your range, give or take a couple of notes.',
+    );
+    expect(sourceTooltip(undefined, true)).toMatch(/don't have details.* This range is only an estimate/);
   });
 });
 
