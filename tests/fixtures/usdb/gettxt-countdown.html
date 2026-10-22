@@ -1,0 +1,10 @@
+<html><body>
+<!-- Hand-written to match the shape of the real page: a countdown script, then a form that POSTs wd=1. -->
+<div id="countdown">Please wait <span id="sec">24</span> seconds</div>
+<script type="text/javascript">
+var time = 24;
+function tick() { time--; document.getElementById('sec').innerHTML = time; if (time <= 0) document.forms[0].submit(); else setTimeout(tick, 1000); }
+setTimeout(tick, 1000);
+</script>
+<form method="post" action="?link=gettxt&amp;id=1234"><input type="hidden" name="wd" value="1"></form>
+</body></html>

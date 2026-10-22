@@ -1,0 +1,39 @@
+{
+  "name": "karaoke-dokie",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "usdb:sync": "tsx scripts/usdb-sync.ts",
+    "usdb:index": "tsx scripts/usdb-index.ts",
+    "usdb:fill": "tsx scripts/usdb-fill.ts",
+    "report:coverage": "tsx scripts/coverage-report.ts",
+    "ranges:build": "tsx scripts/note-ranges-build.ts",
+    "ranges:import": "tsx scripts/note-ranges-import.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "jsdom": "^26.0.0",
+    "pg-mem": "3.0.14",
+    "tsx": "^4.20.6",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.0"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "1.2.0",
+    "next": "16.4.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}

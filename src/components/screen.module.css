@@ -1,0 +1,915 @@
+/* The page is a dark room with one karaoke TV in it. One accent: hot pink. */
+
+.stage {
+  min-height: 100vh;
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: radial-gradient(ellipse 70% 55% at 50% 45%, rgba(255, 46, 147, 0.07), transparent 70%), var(--bg);
+}
+
+.tv {
+  width: min(100%, 880px);
+  height: min(calc(100svh - 32px), 660px);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 12px 0;
+  border-radius: 26px;
+  background: linear-gradient(160deg, #1c1a21, #0f0e13 60%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 40px 80px -30px rgba(0, 0, 0, 0.9),
+    0 0 90px -20px rgba(255, 46, 147, 0.18);
+}
+
+.screen {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 40%, #16121c 0%, #09080c 75%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 0 60px rgba(0, 0, 0, 0.8);
+}
+
+/* Faint scanlines: a TV, not a web page. */
+.screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px);
+}
+
+.screenInner {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chin {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+}
+
+.chinLabel {
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 246, 0.28);
+}
+
+.led {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pink);
+  box-shadow: 0 0 8px var(--pink-glow);
+}
+
+/* ---------- lyrics ---------- */
+
+.lyric,
+.lyricSmall {
+  margin: 0;
+  max-width: 18ch;
+  font-size: clamp(28px, 7.4vw, 46px);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.lyricSmall {
+  max-width: 22ch;
+  font-size: clamp(18px, 4.6vw, 24px);
+  font-weight: 600;
+}
+
+.word {
+  opacity: 0.18;
+  animation: sing 0.9s ease-out forwards;
+}
+
+@keyframes sing {
+  0% {
+    opacity: 0.18;
+    color: var(--ink);
+  }
+  25% {
+    opacity: 1;
+    color: var(--pink);
+    text-shadow: 0 0 18px var(--pink-glow);
+  }
+  100% {
+    opacity: 1;
+    color: var(--ink);
+    text-shadow: none;
+  }
+}
+
+.hint {
+  margin: 0;
+  max-width: 30ch;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--dim);
+  text-align: center;
+}
+
+/* ---------- layout helpers ---------- */
+
+.center,
+.centerButton {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 32px 24px;
+}
+
+.centerButton {
+  width: 100%;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* ---------- landing ---------- */
+
+.sign {
+  margin: 0;
+  font-size: clamp(40px, 12vw, 72px);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--pink);
+  text-shadow:
+    0 0 6px var(--pink-glow),
+    0 0 24px var(--pink-glow),
+    0 0 48px rgba(255, 46, 147, 0.3);
+  animation: flicker 5s infinite;
+}
+
+@keyframes flicker {
+  0%, 92%, 100% { opacity: 1; }
+  93% { opacity: 0.55; }
+  94% { opacity: 1; }
+  96% { opacity: 0.7; }
+}
+
+.brand {
+  margin: -10px 0 18px;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  color: var(--dim);
+}
+
+.play {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--pink);
+  background: rgba(255, 46, 147, 0.08);
+  color: var(--pink);
+  cursor: pointer;
+  box-shadow: 0 0 22px -4px var(--pink-glow);
+}
+
+.play svg {
+  margin-left: 4px;
+}
+
+.textButton {
+  border: 0;
+  background: none;
+  padding: 8px;
+  font-size: 14px;
+  color: var(--dim);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--faint);
+  text-underline-offset: 4px;
+}
+
+/* ---------- hold steps ---------- */
+
+.holdStep {
+  position: relative;
+  min-height: 100%;
+  display: grid;
+  grid-template-rows: 1fr auto 1fr;
+  justify-items: center;
+  padding: 28px 56px 28px 24px;
+}
+
+.holdText .hint {
+  max-width: 24ch;
+}
+
+.holdText {
+  align-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 32px;
+  padding-left: 32px;
+}
+
+.holdCenter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-left: 32px;
+}
+
+.holdButton {
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--pink);
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  box-shadow: 0 0 26px -6px var(--pink-glow);
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.holdDot {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--pink);
+  opacity: 0.85;
+  transition: transform 0.2s ease;
+}
+
+.holding {
+  transform: scale(0.94);
+  box-shadow: 0 0 46px 4px var(--pink-glow);
+}
+
+.holding .holdDot {
+  transform: scale(1.6);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.holdCaption {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.scale {
+  position: absolute;
+  top: 32px;
+  bottom: 32px;
+  right: 30px;
+  width: 2px;
+  background: var(--faint);
+  border-radius: 1px;
+}
+
+.tick {
+  position: absolute;
+  right: 8px;
+  transform: translateY(50%);
+  font-size: 10px;
+  color: rgba(244, 241, 246, 0.32);
+  white-space: nowrap;
+}
+
+.tick::after {
+  content: '';
+  position: absolute;
+  right: -11px;
+  top: 50%;
+  width: 6px;
+  height: 1px;
+  background: var(--faint);
+}
+
+.pitchDot {
+  position: absolute;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  transform: translateY(50%);
+  border-radius: 50%;
+  background: var(--pink);
+  box-shadow: 0 0 14px var(--pink-glow);
+  transition: bottom 0.06s linear;
+}
+
+.pitchNote {
+  position: absolute;
+  right: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #09080c;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.noteChip {
+  position: absolute;
+  left: 18px;
+  bottom: 14px;
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.noteChip strong {
+  margin-left: 4px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---------- range + sign-in arrow ---------- */
+
+.bigRange {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin: 0;
+  font-size: clamp(44px, 13vw, 76px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.dash {
+  color: var(--pink);
+  text-shadow: 0 0 14px var(--pink-glow);
+}
+
+.arrow {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 76px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 16px;
+  background: none;
+  color: var(--pink);
+  cursor: pointer;
+  filter: drop-shadow(0 0 8px var(--pink-glow));
+  animation: nudge 1.2s ease-in-out infinite;
+}
+
+@keyframes nudge {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(10px); }
+}
+
+/* ---------- results ---------- */
+
+.results {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 16px 24px;
+}
+
+.results > .lyric {
+  font-size: clamp(24px, 6.4vw, 36px);
+  margin-top: 6px;
+}
+
+.resultsBar {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.rangeChip {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+
+.rangeNote {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.rangeWarning {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--faint);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.rangeWarning p {
+  margin: 0 0 8px;
+}
+
+.rangeWarningActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.redo {
+  border: 1px solid var(--faint);
+  border-radius: 999px;
+  background: none;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.songList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-width: 560px;
+}
+
+.songList li + li {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Low-confidence songs, after the main list. */
+.maybe {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.maybeTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pink);
+}
+
+.maybeNote {
+  margin: 0 0 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--dim);
+}
+
+.song {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 4px;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.song:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.songText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.songTitle {
+  font-size: 17px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.songArtist {
+  font-size: 14px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.songReasons {
+  font-size: 12px;
+  color: var(--pink);
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.songMeta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Material Symbols icons: muted by default, pink when pointed at. */
+.icon {
+  flex: none;
+  display: block;
+  color: var(--dim);
+  transition: color 0.15s;
+}
+
+.icon:hover,
+.song:hover .icon {
+  color: var(--pink);
+}
+
+.pillQuiet.pillIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 7px;
+}
+
+.pill,
+.pillQuiet {
+  flex: none;
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--faint);
+  color: var(--ink);
+}
+
+.pill[data-difficulty='easy'] {
+  border-color: var(--pink);
+  color: var(--pink);
+}
+
+.pillQuiet {
+  color: var(--dim);
+  font-weight: 500;
+}
+
+.more {
+  min-width: 160px;
+  padding: 12px 22px;
+  border-radius: 999px;
+  border: 1.5px solid var(--pink);
+  background: rgba(255, 46, 147, 0.08);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 0 18px -6px var(--pink-glow);
+}
+
+.more:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.picked .songTitle {
+  color: var(--pink);
+}
+
+.check {
+  color: var(--pink);
+  font-size: 14px;
+}
+
+.pickActions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+}
+
+/* ---------- song detail ---------- */
+
+.detail {
+  position: relative;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 56px 20px 28px;
+}
+
+.back {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  font-size: 30px;
+  line-height: 1;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.detailHead {
+  text-align: center;
+}
+
+.detailTitle {
+  margin: 0;
+  font-size: clamp(28px, 7.6vw, 44px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.detailArtist {
+  margin: 6px 0 0;
+  font-size: 16px;
+  color: var(--dim);
+}
+
+.rangeBar {
+  width: 100%;
+  max-width: 460px;
+  padding: 0 34px;
+}
+
+.barTrack {
+  position: relative;
+  height: 64px;
+}
+
+.barUser {
+  position: absolute;
+  top: 22px;
+  height: 22px;
+  border-radius: 11px;
+  border: 1px solid rgba(244, 241, 246, 0.22);
+  background: rgba(244, 241, 246, 0.05);
+}
+
+.barUser .barEndLow,
+.barUser .barEndHigh {
+  top: calc(100% + 6px);
+}
+
+.barSong {
+  position: absolute;
+  top: 30px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--pink);
+  box-shadow: 0 0 10px var(--pink-glow), 0 0 22px rgba(255, 46, 147, 0.35);
+}
+
+.barSong .barEndLow,
+.barSong .barEndHigh {
+  bottom: calc(100% + 22px);
+  color: var(--pink);
+}
+
+.barEndLow,
+.barEndHigh {
+  position: absolute;
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.barEndLow {
+  left: 0;
+  transform: translateX(-50%);
+}
+
+.barEndHigh {
+  right: 0;
+  transform: translateX(50%);
+}
+
+.barLegend {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 18px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.barLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendSong,
+.legendUser {
+  display: inline-block;
+  width: 16px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--pink);
+}
+
+.legendUser {
+  height: 8px;
+  border: 1px solid rgba(244, 241, 246, 0.3);
+  background: rgba(244, 241, 246, 0.05);
+}
+
+.tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.infoWrap {
+  position: relative;
+}
+
+.info {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--faint);
+  background: none;
+  font-size: 13px;
+  font-style: italic;
+  font-family: Georgia, serif;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.tooltip {
+  margin: -10px 0 0;
+  max-width: 300px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #1d1a22;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+  text-align: center;
+}
+
+.octave {
+  margin: -8px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  color: var(--pink);
+}
+
+.octave .icon {
+  color: var(--pink);
+}
+
+.detailReasons {
+  margin: -8px 0 0;
+  font-size: 13px;
+  color: var(--dim);
+  text-align: center;
+}
+
+.spotify {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 1px solid var(--faint);
+}
+
+.feedback {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.feedbackQ {
+  font-size: 14px;
+  color: var(--dim);
+  margin-right: 4px;
+}
+
+.thumb {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--faint);
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.thumb:hover,
+.thumb:focus-visible {
+  border-color: var(--pink);
+  color: var(--pink);
+}
+
+.thanks {
+  margin: 0;
+  font-size: 15px;
+  color: var(--pink);
+}
+
+@media (min-width: 700px) {
+  .tv {
+    padding: 16px 16px 0;
+    border-radius: 32px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .word {
+    opacity: 1;
+    animation: none;
+  }
+  .sign,
+  .arrow,
+  .holding .holdDot {
+    animation: none;
+  }
+  .holdButton,
+  .holdDot,
+  .pitchDot {
+    transition: none;
+  }
+}
+
+.credits {
+  display: block;
+  margin: 24px auto 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.tooltip a {
+  color: var(--ink);
+}

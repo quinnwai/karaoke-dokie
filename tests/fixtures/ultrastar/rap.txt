@@ -1,0 +1,11 @@
+#TITLE:Rap Song
+#ARTIST:MC Test
+#BPM:300
+#GAP:0
+: 0 8 2 sing
+R 8 2 0 rap
+G 10 2 0 gold
+F 12 2 40 free
+* 14 8 9 high
+: 22 4 -3 low
+E

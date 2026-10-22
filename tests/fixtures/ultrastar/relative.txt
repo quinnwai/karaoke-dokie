@@ -1,0 +1,11 @@
+#TITLE:Relative Song
+#ARTIST:Old Format
+#BPM:300
+#GAP:0
+#RELATIVE:yes
+: 0 4 0 a
+: 4 4 2 b
+- 10 12
+: 0 4 4 c
+: 4 4 5 d
+E
