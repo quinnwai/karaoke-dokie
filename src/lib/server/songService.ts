@@ -40,7 +40,7 @@ export interface SongServiceOptions {
   now?: () => Date;
 }
 
-/** Most songs a whole-list response carries; past it, the rest can be paged from its nextOffset. */
+/** Most songs a whole-list response carries: the best-ranked ones; any past it are left out. */
 export const MAX_ALL_MATCHES = 1000;
 
 export interface SongService {
@@ -187,7 +187,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
   }
 
   return {
-    async recommend(tracks, userRange, offset, limit, opts = {}) {
+    async recommend(tracks, userRange, offset, limit, { all = false } = {}) {
       const candidates: { track: Track; key: string; range: SongRange; log: DataSourceLogEntry }[] = [];
       const exhausted = await walk(tracks, ({ track, key, record }) => {
         if (!record.range) return false; // skipped songs never match
@@ -198,7 +198,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
 
       // The whole list also carries song facts from our USDB index, read once for every candidate.
       // Pages leave it out, so they stay exactly as they were.
-      const index = opts.all ? await store.findUsdbSongs(candidates.map((c) => c.key)) : null;
+      const index = all ? await store.findUsdbSongs(candidates.map((c) => c.key)) : null;
       const matches: Match[] = [];
       const logs = new Map<string, DataSourceLogEntry>();
       for (const { track, key, range, log } of candidates) {
@@ -220,12 +220,14 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       // Rank the whole library, then page it. The order is the same on every request (same
       // tracks, same cached ranges), so pages never repeat or skip a song.
       const ranked = deps.rankMatches(matches);
-      if (opts.all) {
+      if (all) {
         const items = ranked.slice(0, MAX_ALL_MATCHES).map(compact);
-        // Not complete when lookups ran out of budget (asking again continues them) or the list
-        // was cut at MAX_ALL_MATCHES; either way the client can carry on from nextOffset.
+        // Not complete while lookups have run out of budget: nextOffset is then set, and asking for
+        // the whole list again carries on with them. Paging on from it would not line up, since
+        // pages rank without the index's popularity. A list cut at MAX_ALL_MATCHES is not complete
+        // either, but has nothing more to ask for: nextOffset is null.
         const complete = exhausted && items.length === ranked.length;
-        return { matches: items, nextOffset: complete ? null : items.length, sources: sourcesOf(items), complete };
+        return { matches: items, nextOffset: exhausted ? null : items.length, sources: sourcesOf(items), complete };
       }
       const page = deps.paginate(ranked, offset, limit);
       const items = page.items;

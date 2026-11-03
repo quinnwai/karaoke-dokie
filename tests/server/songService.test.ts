@@ -226,18 +226,25 @@ describe('song service whole list (all)', () => {
     expect(res.matches).toHaveLength(10);
   });
 
-  it(`stops at ${MAX_ALL_MATCHES} songs and lets the client page the rest`, async () => {
-    const many = Array.from({ length: MAX_ALL_MATCHES + 3 }, (_, i) => track(i + 1));
+  const fitting = (n: number) => {
     const { deps } = fakeDeps({ resolveSongRange: everyone(range(50, 70)) });
     const svc = createSongService(createMemoryStore(), deps, { maxResolvesPerRequest: 5000, concurrency: 100 });
-    const res = await svc.recommend(many, user, 0, 0, { all: true });
+    return svc.recommend(Array.from({ length: n }, (_, i) => track(i + 1)), user, 0, 0, { all: true });
+  };
+
+  it(`keeps the ${MAX_ALL_MATCHES} best-ranked songs, and says the list is cut with nothing more to ask for`, async () => {
+    const res = await fitting(MAX_ALL_MATCHES + 3);
     expect(res.matches).toHaveLength(MAX_ALL_MATCHES);
+    expect(res.matches.at(-1)!.track.id).toBe(`t${MAX_ALL_MATCHES}`); // the fake ranks by play order
     expect(Object.keys(res.sources)).toHaveLength(MAX_ALL_MATCHES);
     expect(res.complete).toBe(false);
-    expect(res.nextOffset).toBe(MAX_ALL_MATCHES);
-    const rest = await svc.recommend(many, user, MAX_ALL_MATCHES, 50);
-    expect(ids(rest.matches)).toEqual(['t1001', 't1002', 't1003']);
-    expect(rest.nextOffset).toBeNull();
+    expect(res.nextOffset).toBeNull();
+  });
+
+  it(`is complete with exactly ${MAX_ALL_MATCHES} songs`, async () => {
+    const res = await fitting(MAX_ALL_MATCHES);
+    expect(res.matches).toHaveLength(MAX_ALL_MATCHES);
+    expect(res).toMatchObject({ complete: true, nextOffset: null });
   });
 
   it('leaves pages exactly as they were: no index read, no song facts, histograms kept', async () => {
@@ -307,17 +314,22 @@ describe('song service whole list (all)', () => {
   it('scores with the index row\'s views and stars only when the range has none, and never stores them', async () => {
     const store = createMemoryStore();
     await store.putUsdbSongs([indexRow(2, { views: 5000, rating: 4 }), indexRow(4, { views: 9000, rating: 5 })]);
+    // The very objects the lookups hand over, to check they are never changed.
+    const plain = range(50, 70);
     const own = { ...range(50, 70), usdbViews: 10 };
     const matchSong = vi.fn(fakeDeps().deps.matchSong);
     const { deps } = fakeDeps({
       matchSong,
-      resolveSongRange: async (t) => ({ range: t.id === 't4' ? own : range(50, 70), log: logFor(t) }),
+      resolveSongRange: async (t) => ({ range: t.id === 't2' ? plain : t.id === 't4' ? own : range(50, 70), log: logFor(t) }),
     });
     const res = await createSongService(store, deps).recommend([track(2), track(4), track(8)], user, 0, 0, { all: true });
     const scored = Object.fromEntries(matchSong.mock.calls.map(([t, r]) => [t.id, r]));
     expect(scored.t2).toStrictEqual({ ...range(50, 70), usdbViews: 5000, usdbRating: 4 });
-    expect(scored.t4).toStrictEqual(own); // its own views stand, and the index adds no stars to them
+    expect(scored.t2).not.toBe(plain); // scored on a copy
+    expect(scored.t4).toStrictEqual({ ...range(50, 70), usdbViews: 10 }); // its own views stand, and the index adds no stars
     expect(scored.t8).toStrictEqual(range(50, 70)); // not in the index
+    expect(plain).toStrictEqual(range(50, 70));
+    expect(own).toStrictEqual({ ...range(50, 70), usdbViews: 10 });
     expect(res.matches[0]!.range).toMatchObject({ usdbViews: 5000, usdbRating: 4 });
     expect((await store.getSongRange(key(2)))!.range).toStrictEqual(range(50, 70));
   });
