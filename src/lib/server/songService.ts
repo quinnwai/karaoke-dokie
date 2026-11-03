@@ -1,5 +1,6 @@
-// Turns a user's library into paged recommendations. Song-data logic (range lookup, matching,
-// ranking, paging) is injected so this file only owns caching, logging and lazy resolution.
+// Turns a user's library into recommendations, paged or as one whole list. Song-data logic (range
+// lookup, matching, ranking, paging) is injected so this file only owns caching, logging, lazy
+// resolution and the song facts the whole list carries.
 import type {
   DataSourceLogEntry,
   KnownSongsResponse,
@@ -9,7 +10,7 @@ import type {
   Track,
   VocalRange,
 } from '../contracts';
-import type { SongRangeRecord, Store } from './store';
+import type { SongRangeRecord, Store, UsdbIndexEntry } from './store';
 import { hasLittleSinging } from '../songs/resolve';
 
 export interface ResolveResult {
@@ -39,14 +40,76 @@ export interface SongServiceOptions {
   now?: () => Date;
 }
 
+/** Most songs a whole-list response carries; past it, the rest can be paged from its nextOffset. */
+export const MAX_ALL_MATCHES = 1000;
+
 export interface SongService {
-  recommend(tracks: Track[], userRange: VocalRange, offset: number, limit: number): Promise<RecommendationsResponse>;
+  /**
+   * One page of the ranked library. With `all`, every match in one response instead (offset and
+   * limit are ignored), with its year, genre and USDB popularity, for the results screen to sort
+   * and filter on the phone.
+   */
+  recommend(
+    tracks: Track[],
+    userRange: VocalRange,
+    offset: number,
+    limit: number,
+    opts?: { all?: boolean },
+  ): Promise<RecommendationsResponse>;
   knownSongs(tracks: Track[]): Promise<KnownSongsResponse>;
 }
 
 interface Walked {
   track: Track;
+  key: string;
   record: SongRangeRecord;
+}
+
+/**
+ * The range to score: when it has no USDB views or stars of its own (a range from a bulk collection
+ * or a measured recording never had a USDB lookup), the index row's. A copy for scoring only; it is
+ * never stored.
+ */
+function withIndexPopularity(range: SongRange, row: UsdbIndexEntry | undefined): SongRange {
+  if (!row || range.usdbViews !== undefined || range.usdbRating !== undefined) return range;
+  const scored = { ...range };
+  if (row.views !== undefined) scored.usdbViews = row.views;
+  if (row.rating !== undefined) scored.usdbRating = row.rating;
+  return scored;
+}
+
+/**
+ * Year and genre for the decade filter and the song info. The year is the earlier of USDB's (the
+ * note file's #YEAR) and Spotify's album year, since a reissue only ever makes a date later; a tie
+ * counts as USDB's.
+ */
+function songFacts(track: Track, row: UsdbIndexEntry | undefined): Pick<Match, 'year' | 'yearSource' | 'genre'> {
+  const facts: Pick<Match, 'year' | 'yearSource' | 'genre'> = {};
+  const usdb = row?.year;
+  const spotify = track.releaseYear;
+  if (usdb !== undefined && (spotify === undefined || usdb <= spotify)) {
+    facts.year = usdb;
+    facts.yearSource = 'usdb';
+  } else if (spotify !== undefined) {
+    facts.year = spotify;
+    facts.yearSource = 'spotify';
+  }
+  if (row?.genre !== undefined) facts.genre = row.genre;
+  return facts;
+}
+
+/** A copy without the pitch histogram, most of a range's size. */
+function withoutPitchShare<T extends { pitchShare?: [number, number][] }>(x: T): T {
+  const copy = { ...x };
+  delete copy.pitchShare;
+  return copy;
+}
+
+/** The match as the whole-list response sends it: no pitch histograms, for the song or its duet parts. */
+function compact(m: Match): Match {
+  const range = withoutPitchShare(m.range);
+  if (range.parts) range.parts = range.parts.map(withoutPitchShare);
+  return { ...m, range };
 }
 
 export function createSongService(store: Store, deps: SongDeps, opts: SongServiceOptions = {}): SongService {
@@ -96,9 +159,10 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       // Visit every track we already know about, in order.
       while (i < ordered.length && (cache.has(keys[i]!) || failed.has(keys[i]!))) {
         const track = ordered[i]!;
-        const record = cache.get(keys[i]!);
+        const key = keys[i]!;
+        const record = cache.get(key);
         i++;
-        if (record && visit({ track, record: { ...record, log: { ...record.log, trackId: track.id } } })) return false;
+        if (record && visit({ track, key, record: { ...record, log: { ...record.log, trackId: track.id } } })) return false;
       }
       if (i >= ordered.length) break;
       if (resolves >= maxResolves) return false; // budget spent; the client can ask again
@@ -123,35 +187,52 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
   }
 
   return {
-    async recommend(tracks, userRange, offset, limit) {
-      const matches: Match[] = [];
-      const logs = new Map<string, DataSourceLogEntry>();
-      const exhausted = await walk(tracks, ({ track, record }) => {
+    async recommend(tracks, userRange, offset, limit, opts = {}) {
+      const candidates: { track: Track; key: string; range: SongRange; log: DataSourceLogEntry }[] = [];
+      const exhausted = await walk(tracks, ({ track, key, record }) => {
         if (!record.range) return false; // skipped songs never match
         if (hasLittleSinging(track.title)) return false; // a dub or instrumental shares the original's key
-        const m = deps.matchSong(track, record.range, userRange);
-        if (m) {
-          matches.push(m);
-          logs.set(track.id, record.log);
-        }
+        candidates.push({ track, key, range: record.range, log: record.log });
         return false;
       });
+
+      // The whole list also carries song facts from our USDB index, read once for every candidate.
+      // Pages leave it out, so they stay exactly as they were.
+      const index = opts.all ? await store.findUsdbSongs(candidates.map((c) => c.key)) : null;
+      const matches: Match[] = [];
+      const logs = new Map<string, DataSourceLogEntry>();
+      for (const { track, key, range, log } of candidates) {
+        const row = index?.get(key);
+        const m = deps.matchSong(track, index ? withIndexPopularity(range, row) : range, userRange);
+        if (!m) continue;
+        matches.push(index ? { ...m, ...songFacts(track, row) } : m);
+        logs.set(track.id, log);
+      }
+      const sourcesOf = (items: Match[]) => {
+        const sources: Record<string, DataSourceLogEntry> = {};
+        for (const m of items) {
+          const log = logs.get(m.track.id);
+          if (log) sources[m.track.id] = log;
+        }
+        return sources;
+      };
 
       // Rank the whole library, then page it. The order is the same on every request (same
       // tracks, same cached ranges), so pages never repeat or skip a song.
       const ranked = deps.rankMatches(matches);
+      if (opts.all) {
+        const items = ranked.slice(0, MAX_ALL_MATCHES).map(compact);
+        // Not complete when lookups ran out of budget (asking again continues them) or the list
+        // was cut at MAX_ALL_MATCHES; either way the client can carry on from nextOffset.
+        const complete = exhausted && items.length === ranked.length;
+        return { matches: items, nextOffset: complete ? null : items.length, sources: sourcesOf(items), complete };
+      }
       const page = deps.paginate(ranked, offset, limit);
       const items = page.items;
       // Lookup budget spent before the end of the library (only on a first visit to a very large
       // library): let the client ask again, which continues the lookups.
       const nextOffset = page.nextOffset ?? (exhausted ? null : offset + items.length);
-
-      const sources: Record<string, DataSourceLogEntry> = {};
-      for (const m of items) {
-        const log = logs.get(m.track.id);
-        if (log) sources[m.track.id] = log;
-      }
-      return { matches: items, nextOffset, sources };
+      return { matches: items, nextOffset, sources: sourcesOf(items) };
     },
 
     async knownSongs(tracks) {
