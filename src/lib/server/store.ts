@@ -55,6 +55,10 @@ export interface StoredEvent extends AppEvent {
   anonId: string;
 }
 
+/** listEvents returns this many events unless asked for another number, and never more than the max. */
+export const DEFAULT_EVENTS_LIMIT = 5_000;
+export const MAX_EVENTS_LIMIT = 20_000;
+
 /** Mood labels for one song (QWW-11), from one labelling method. */
 export interface SongMoodsRecord {
   key: string;

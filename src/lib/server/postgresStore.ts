@@ -3,7 +3,16 @@
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
 import { isMeasured } from '../songs/sourceRank';
 import { SCHEMA_SQL } from './schema';
-import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
+import {
+  DEFAULT_EVENTS_LIMIT,
+  DEFAULT_LIST_LIMIT,
+  MAX_EVENTS_LIMIT,
+  type SongRangeRecord,
+  type Store,
+  type StoredEvent,
+  type UsdbIndexEntry,
+  type UserRecord,
+} from './store';
 
 export type Row = Record<string, unknown>;
 export type QueryFn = (text: string, params?: unknown[]) => Promise<Row[]>;
@@ -89,6 +98,12 @@ function toFeedback(r: Row): FeedbackEntry {
     f.songRange = s;
   }
   return f;
+}
+
+function toEvent(r: Row): StoredEvent {
+  const e: StoredEvent = { anonId: str(r.anon_id), name: str(r.name), at: str(r.at) };
+  if (isSet(r.props_json)) e.props = JSON.parse(str(r.props_json));
+  return e;
 }
 
 export interface PostgresStoreOptions {
@@ -245,12 +260,27 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       throw new Error('listCatalogue not implemented yet');
     },
 
-    // ---- beta event log (QWW-16): implemented by the event-log work ----
-    async appendEvents() {
-      throw new Error('appendEvents not implemented yet');
+    // ---- beta event log (QWW-16) ----
+    async appendEvents(anonId, events) {
+      // One multi-row insert per 100 events (a request carries at most 50). Rows get ids in
+      // VALUES order, which keeps events with the same time in the order they arrived.
+      for (let i = 0; i < events.length; i += 100) {
+        const params: unknown[] = [];
+        const rows = events.slice(i, i + 100).map((e) => {
+          params.push(anonId, e.name, e.at, e.props ? JSON.stringify(e.props) : null);
+          const n = params.length;
+          return `($${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(`INSERT INTO events (anon_id, name, at, props_json) VALUES ${rows.join(', ')}`, params);
+      }
     },
-    async listEvents() {
-      throw new Error('listEvents not implemented yet');
+    async listEvents(o = {}) {
+      const limit = Math.min(o.limit ?? DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
+      // The newest `limit` rows, turned back to oldest first.
+      const rows = o.anonId
+        ? await query('SELECT * FROM events WHERE anon_id = $1 ORDER BY at DESC, id DESC LIMIT $2', [o.anonId, limit])
+        : await query('SELECT * FROM events ORDER BY at DESC, id DESC LIMIT $1', [limit]);
+      return rows.reverse().map(toEvent);
     },
 
     // ---- mood labels (QWW-11): implemented by the mood-label work ----
