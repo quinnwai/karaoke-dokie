@@ -1,9 +1,9 @@
 // Postgres store using raw SQL through an injected query function, so the same code
 // runs on Neon (production) and pg-mem (tests).
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
-import { isMeasured } from '../songs/sourceRank';
+import { isMeasured, MEASURED_RANK, SOURCE_RANK } from '../songs/sourceRank';
 import { SCHEMA_SQL } from './schema';
-import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
+import { DEFAULT_LIST_LIMIT, type CatalogueSong, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
 
 export type Row = Record<string, unknown>;
 export type QueryFn = (text: string, params?: unknown[]) => Promise<Row[]>;
@@ -90,6 +90,11 @@ function toFeedback(r: Row): FeedbackEntry {
   }
   return f;
 }
+
+/** Range sources measured from the song itself (note files, recordings): the catalogue's rows. */
+const MEASURED_SOURCES = Object.entries(SOURCE_RANK)
+  .filter(([, rank]) => rank >= MEASURED_RANK)
+  .map(([source]) => source);
 
 export interface PostgresStoreOptions {
   /** Run migrate() before the first query (default true). */
@@ -240,9 +245,31 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         : await query('SELECT * FROM feedback ORDER BY at DESC, id DESC LIMIT $1', [limit]);
       return rows.map(toFeedback);
     },
-    // ---- catalogue (QWW-2 Track B): implemented by the catalogue work ----
-    async listCatalogue() {
-      throw new Error('listCatalogue not implemented yet');
+    // ---- catalogue (QWW-2 Track B) ----
+    async listCatalogue(limit) {
+      // One query: the most-viewed USDB row per key (DISTINCT ON; a tie goes to the lower id) joined
+      // to the measured ranges, then ordered and cut in the database, so only `limit` range_json
+      // values come back out of tens of thousands. Artist estimates stay out: they exist only
+      // because a tester's library had the song. The key tie-break uses the database's collation.
+      // The join is on `b.song_key || ''` because pg-mem otherwise reads usdb_songs through its
+      // song_key index and skips the DISTINCT ON, returning every row per key; Postgres is the same either way.
+      const sources = MEASURED_SOURCES.map((_, i) => `$${i + 1}`).join(', ');
+      const rows = await query(
+        `SELECT b.*, s.song_key AS range_key, s.range_json, s.log_json
+         FROM song_ranges s
+         LEFT JOIN (SELECT DISTINCT ON (song_key) * FROM usdb_songs ORDER BY song_key, COALESCE(views, 0) DESC, id) b
+           ON (b.song_key || '') = s.song_key
+         WHERE s.skipped = false AND (s.range_json::jsonb ->> 'source') IN (${sources})
+         ORDER BY (b.id IS NULL), COALESCE(b.views, 0) DESC, COALESCE(b.rating, 0) DESC, s.song_key
+         LIMIT $${MEASURED_SOURCES.length + 1}`,
+        [...MEASURED_SOURCES, limit],
+      );
+      return rows.map((r) => {
+        const log: DataSourceLogEntry = JSON.parse(str(r.log_json));
+        const song: CatalogueSong = { key: str(r.range_key), artist: log.artist, title: log.title, range: JSON.parse(str(r.range_json)), log };
+        if (isSet(r.id)) song.usdb = toUsdbEntry(r);
+        return song;
+      });
     },
 
     // ---- beta event log (QWW-16): implemented by the event-log work ----

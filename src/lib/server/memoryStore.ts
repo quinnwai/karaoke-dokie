@@ -1,8 +1,18 @@
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
 import { isMeasured } from '../songs/sourceRank';
-import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
+import { DEFAULT_LIST_LIMIT, type CatalogueSong, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
 
 const clone = <T>(v: T): T => structuredClone(v);
+
+/** Catalogue order: songs with a USDB row first, most views then most stars; then the rest by key. */
+function byCatalogueOrder(a: CatalogueSong, b: CatalogueSong): number {
+  return (
+    Number(!a.usdb) - Number(!b.usdb) ||
+    (b.usdb?.views ?? 0) - (a.usdb?.views ?? 0) ||
+    (b.usdb?.rating ?? 0) - (a.usdb?.rating ?? 0) ||
+    (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+  );
+}
 
 /** In-process store. Everything is copied in and out so callers cannot mutate stored data. */
 export function createMemoryStore(): Store {
@@ -93,9 +103,25 @@ export function createMemoryStore(): Store {
       const items = opts.userId ? feedback.filter((f) => f.userId === opts.userId) : feedback;
       return newestFirst(items).slice(0, opts.limit ?? DEFAULT_LIST_LIMIT).map(clone);
     },
-    // ---- catalogue (QWW-2 Track B): implemented by the catalogue work ----
-    async listCatalogue() {
-      throw new Error('listCatalogue not implemented yet');
+    // ---- catalogue (QWW-2 Track B) ----
+    async listCatalogue(limit) {
+      // The most-viewed USDB row per key, as findUsdbSongs picks it; a tie goes to the lower id.
+      const best = new Map<string, UsdbIndexEntry>();
+      for (const e of usdbSongs.values()) {
+        const b = best.get(e.key);
+        const more = (e.views ?? 0) - (b?.views ?? 0);
+        if (!b || more > 0 || (more === 0 && e.id < b.id)) best.set(e.key, e);
+      }
+      const out: CatalogueSong[] = [];
+      for (const [key, { range, log }] of songs) {
+        // Measured ranges only. Artist estimates exist only because a tester's library had the song.
+        if (!range || !isMeasured(range)) continue;
+        const song: CatalogueSong = { key, artist: log.artist, title: log.title, range, log };
+        const usdb = best.get(key);
+        if (usdb) song.usdb = usdb;
+        out.push(song);
+      }
+      return out.sort(byCatalogueOrder).slice(0, limit).map(clone);
     },
 
     // ---- beta event log (QWW-16): implemented by the event-log work ----
