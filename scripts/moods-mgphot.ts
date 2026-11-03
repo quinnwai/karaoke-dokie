@@ -1,99 +1,96 @@
-// Sanity check of Claude's mood labels against MGPHot (QWW-19). Not the gate: the gate uses the
-// hand-labelled gold set. MGPHot is musicologists' annotations of 58 attributes for Billboard Hot
-// 100 songs, 1958-2022: Oramas, Gouyon, Hogan, Landau and Ehmann, "MGPHot: A Dataset of
-// Musicological Annotations for Popular Music (1958-2022)", TISMIR 8(1), 2025,
-// doi:10.5334/tismir.236, data on Zenodo (record 15372063). Licensed CC BY-NC-ND 4.0, copyright
-// SiriusXM 2025: used offline and non-commercially, and nothing from it is stored or shipped.
-// Usage: npx tsx scripts/moods-mgphot.ts <mgphot folder> labels.json
-// Reads mgphot_genes.tsv and mgphot_gene_values.tsv from the folder (attributes are scored 0 to
-// 1), joins songs to the labels by songKey of MGPHot's Billboard artist and title, or of its
-// first credited artist when that misses (as moods-billboard.ts does), and prints per mood the
-// precision and recall of the labels against a proxy rule, with how common the proxy is.
-// The proxy rules were fixed before any labels were compared with them. "High" is about the top
-// third of songs since 1990 on that attribute; a lyric theme counts at 0.6 or more.
+// Scores the other mood sources against MGPHot's proxy labels (QWW-19), a provisional reference:
+// the hand-labelled gold set is the real gate. Runs the gate code (gate.ts) with the proxy labels
+// of the listed songs MGPHot has as the gold set, so the same seeded held-out half decides, with
+// the same bars (precision and recall in each of 3 runs). Prints, per mood:
+//   - the LLM's runs;
+//   - AcousticBrainz, whose labels are the same every run (fixed rules over fixed data);
+//   - AcousticBrainz with the LLM where it has no data: what the app shows under the import's
+//     precedence (everywhere by default; with MGPHot opted in, on songs MGPHot does not cover);
+// then how far the three sources agree where all three label a song.
+// MGPHot is CC BY-NC-ND 4.0 (SiriusXM) and the repo is public: its files are read from a folder
+// you pass, and the proxy labels stay in memory. Only the counts printed here go in the README.
+// Usage: npm run moods:mgphot-check -- <mgphot folder> --songs songs.json --labels run1.json --labels run2.json --labels run3.json [--ab labels-acousticbrainz-v1.json]
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { parseArgs } from 'node:util';
 import { MOODS, type Mood } from '../src/lib/contracts';
-import { scoreMood, shippedMoods } from '../src/lib/moods/gate';
-import type { GoldSong } from '../src/lib/moods/gold';
-import { parseLabelRun } from '../src/lib/moods/label';
-import { songKey } from '../src/lib/songs/resolve';
+import { GATE, gateMoods, shippedMoods, sourcesAgreement, splitGold, type MoodGate, type MoodScore } from '../src/lib/moods/gate';
+import { parseLabelRun, songsToLabel, toMoodRecords } from '../src/lib/moods/label';
+import { mergeMoodRows, readLabelsFile } from '../src/lib/moods/merge';
+import { MGPHOT_PROXIES, mgphotGold, readMgphot } from '../src/lib/moods/mgphot';
+import { PROVIDERS } from '../src/lib/moods/providers';
+import type { SongMoodsRecord } from '../src/lib/server/store';
 
-const GENES = ['Danceability', 'Aural Intensity', 'Sad Lyrics', 'Love/Romance Lyrics'] as const;
-type Genes = Record<(typeof GENES)[number], number>;
+const NAMES: Record<Mood, string> = { upbeat: 'Upbeat', heartfelt: 'Heartfelt' };
+const pct = (n: number, of: number) => (of ? `${((100 * n) / of).toFixed(1)}%` : 'n/a');
+const ratio = (value: number | null, n: number, of: number) => `${value === null ? ' none' : value.toFixed(2)} (${n} of ${of})`;
+const scoreLine = (label: string, s: MoodScore) =>
+  `    ${label.padEnd(6)} precision ${ratio(s.precision, s.tp, s.tp + s.fp).padEnd(18)} recall ${ratio(s.recall, s.tp, s.tp + s.fn)}`;
+const toMap = (rows: readonly SongMoodsRecord[]) => new Map(rows.map((r) => [r.key, r.moods]));
 
-const PROXIES: Record<Mood, { rule: string; test: (g: Genes) => boolean }> = {
-  upbeat: {
-    rule: 'Danceability >= 0.8 or Aural Intensity >= 0.7, and Sad Lyrics < 0.6',
-    test: (g) => (g.Danceability >= 0.8 || g['Aural Intensity'] >= 0.7) && g['Sad Lyrics'] < 0.6,
-  },
-  heartfelt: {
-    rule: 'Love/Romance Lyrics >= 0.6 or Sad Lyrics >= 0.6',
-    test: (g) => g['Love/Romance Lyrics'] >= 0.6 || g['Sad Lyrics'] >= 0.6,
-  },
-};
-
-const lines = (text: string) => text.split(/\r?\n/).filter(Boolean).map((l) => l.split('\t'));
-const pct = (n: number, of: number) => (of ? `${Math.round((100 * n) / of)}%` : 'n/a');
+function printGate(title: string, gates: MoodGate[], runNames: string[]) {
+  console.log(`\n== ${title}`);
+  for (const g of gates) {
+    console.log(`  ${NAMES[g.mood]}: ${g.pass ? 'PASS' : 'FAIL'}`);
+    console.log('   held-out half (the gate)');
+    g.heldOut.forEach((s, i) => console.log(scoreLine(runNames[i]!, s)));
+    console.log('   tune half');
+    g.tune.forEach((s, i) => console.log(scoreLine(runNames[i]!, s)));
+    for (const f of g.failures) console.log(`    - ${f}`);
+  }
+}
 
 async function main() {
-  const [dir, labelsPath] = process.argv.slice(2);
-  if (!dir || !labelsPath) throw new Error('Usage: moods-mgphot.ts <mgphot folder> labels.json');
-  const [geneHeader = [], ...geneRows] = lines(await readFile(join(dir, 'mgphot_genes.tsv'), 'utf8'));
-  const nameCol = geneHeader.indexOf('name');
-  const idCol = geneHeader.indexOf('gene_id');
-  const geneIndex = new Map(geneRows.map((r) => [r[nameCol] ?? '', Number(r[idCol])]));
-  for (const g of GENES) if (!geneIndex.has(g)) throw new Error(`mgphot_genes.tsv has no "${g}"`);
-
-  const [valueHeader = [], ...valueRows] = lines(await readFile(join(dir, 'mgphot_gene_values.tsv'), 'utf8'));
-  const at = (name: string) => valueHeader.indexOf(name);
-  const [artistCol, titleCol, valuesCol] = [at('artist'), at('title'), at('gene_values')];
-  // First MGPHot row per key wins (file order), by the full credit and by the lead artist.
-  const exact = new Map<string, Genes>();
-  const lead = new Map<string, Genes>();
-  for (const r of valueRows) {
-    const artist = r[artistCol] ?? '';
-    const title = r[titleCol] ?? '';
-    const values = JSON.parse(r[valuesCol] ?? '[]') as number[];
-    const genes = Object.fromEntries(GENES.map((g) => [g, values[geneIndex.get(g)!] ?? NaN])) as Genes;
-    const own = songKey(artist, title);
-    if (!exact.has(own)) exact.set(own, genes);
-    const first = songKey(artist.split(/\s+(?:and|&|with)\s+|,\s+/i)[0] ?? artist, title);
-    if (!lead.has(first)) lead.set(first, genes);
+  const { values, positionals } = parseArgs({
+    allowPositionals: true,
+    options: { songs: { type: 'string' }, labels: { type: 'string', multiple: true }, ab: { type: 'string' } },
+  });
+  const [dir] = positionals;
+  const paths = values.labels ?? [];
+  if (!dir || !values.songs || !paths.length) {
+    throw new Error('Usage: moods-mgphot.ts <mgphot folder> --songs songs.json --labels run1.json [--labels run2.json ...] [--ab labels-acousticbrainz-v1.json]');
   }
+  const mgphot = readMgphot(await readFile(join(dir, 'mgphot_genes.tsv'), 'utf8'), await readFile(join(dir, 'mgphot_gene_values.tsv'), 'utf8'));
+  const keys = songsToLabel(JSON.parse(await readFile(values.songs, 'utf8'))).map((s) => s.key);
+  const gold = mgphotGold(keys, mgphot.byKey);
+  const { heldOut } = splitGold(gold.songs);
 
-  const run = parseLabelRun(await readFile(labelsPath, 'utf8'));
-  const matched: { key: string; genes: Genes; viaLead: boolean }[] = [];
-  for (const l of run.labels) {
-    const genes = exact.get(l.key) ?? lead.get(l.key);
-    if (genes) matched.push({ key: l.key, genes, viaLead: !exact.has(l.key) });
-  }
-  // Proxy labels live only in memory, as stand-in gold labels for scoreMood.
-  const proxyGold: GoldSong[] = matched.map((m) => ({
-    key: m.key,
-    artist: '',
-    title: '',
-    upbeat: PROXIES.upbeat.test(m.genes),
-    heartfelt: PROXIES.heartfelt.test(m.genes),
-  }));
-  const shipped = shippedMoods(run.labels);
-  const known = matched.filter((m) => shipped.has(m.key)).length;
-
-  console.log(`Labels: ${run.method}, ${run.labels.length} songs. MGPHot: ${valueRows.length} songs.`);
+  console.log('Reference: MGPHot proxy rules, a provisional reference. The hand-labelled gold set is the real gate.');
+  for (const m of MOODS) console.log(`  ${NAMES[m]}: ${MGPHOT_PROXIES[m].rule}`);
+  console.log(`Songs: ${new Set(keys).size} keys, ${gold.songs.length} of them in MGPHot; ${heldOut.length} held out (the gate), ${gold.songs.length - heldOut.length} to tune on.`);
+  console.log(`MGPHot says yes on the held-out half: ${MOODS.map((m) => `${NAMES[m]} ${pct(heldOut.filter((g) => g[m]).length, heldOut.length)}`).join(', ')}.`);
   console.log(
-    `Overlap: ${matched.length} labelled songs found in MGPHot (${matched.filter((m) => m.viaLead).length} of them by the first credited artist); ` +
-      `the model knew ${known} of them.`,
+    `A mood passes with held-out precision of at least ${GATE.minPrecision} and recall of at least ${GATE.minRecall} in each of ${GATE.minRuns} runs; ` +
+      'a song with no label counts as "no".',
   );
-  for (const mood of MOODS) {
-    const s = scoreMood(proxyGold, shipped, mood);
-    const proxyYes = s.tp + s.fn;
-    console.log(`\n${mood}: proxy ${PROXIES[mood].rule}`);
-    console.log(`  proxy says yes for ${proxyYes} of ${matched.length} (${pct(proxyYes, matched.length)}); the labels say yes for ${s.tp + s.fp}`);
-    console.log(
-      `  precision ${s.precision === null ? 'none' : s.precision.toFixed(2)} (${s.tp} of ${s.tp + s.fp}), ` +
-        `recall ${s.recall === null ? 'none' : s.recall.toFixed(2)} (${s.tp} of ${proxyYes})`,
-    );
+
+  const runs = await Promise.all(paths.map(async (p) => parseLabelRun(await readFile(p, 'utf8'))));
+  const methods = new Set(runs.map((r) => r.method));
+  if (methods.size > 1) throw new Error(`The runs use different methods (${[...methods].join(', ')})`);
+  const llm = runs.map((r) => shippedMoods(r.labels));
+  const runNames = runs.map((_, i) => `run ${i + 1}`);
+  runs.forEach((r, i) => console.log(`LLM run ${i + 1} knew ${gold.songs.filter((g) => llm[i]!.has(g.key)).length} of the ${gold.songs.length} songs.`));
+  printGate(`LLM ${runs[0]!.method}, ${runs.length} runs`, gateMoods(gold, llm), runNames);
+
+  if (values.ab) {
+    const abRows = readLabelsFile(await readFile(values.ab, 'utf8'));
+    const ab = toMap(abRows);
+    console.log(`\nAcousticBrainz (${abRows[0]?.method ?? 'no rows'}) has data for ${gold.songs.filter((g) => ab.has(g.key)).length} of the ${gold.songs.length} songs.`);
+    // Fixed rules over fixed data: one set of labels stands for every run.
+    printGate('AcousticBrainz (the same labels every run)', gateMoods(gold, runs.map(() => ab)), runNames);
+
+    const fallback = runs.map((r) => toMap(mergeMoodRows(new Map(), [...abRows, ...toMoodRecords(r.labels, r.model, PROVIDERS[r.provider].source)])));
+    printGate('AcousticBrainz, then the LLM where AcousticBrainz has no data (what the app shows by default)', gateMoods(gold, fallback), runNames);
+
+    const proxy = new Map(gold.songs.map((g) => [g.key, MOODS.filter((m) => g[m])]));
+    const names = ['MGPHot', 'AcousticBrainz', 'LLM run 1'];
+    console.log('\n== Agreement where all three label a song (the LLM run 1 knew it)');
+    for (const m of MOODS) {
+      const a = sourcesAgreement([proxy, ab, llm[0]!], m);
+      const pairs = a.pairs.map((p) => `${names[p.a]} and ${names[p.b]} ${pct(p.agree, a.songs)} (kappa ${p.kappa === null ? 'none' : p.kappa.toFixed(2)})`);
+      console.log(`  ${NAMES[m]}, ${a.songs} songs: all three agree on ${pct(a.allAgree, a.songs)}; ${pairs.join('; ')}`);
+    }
   }
 }
 
