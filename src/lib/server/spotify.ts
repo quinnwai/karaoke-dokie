@@ -69,7 +69,8 @@ interface SpotifyTrackObject {
   is_local?: boolean;
   artists: { id: string; name: string | null }[];
   external_urls?: { spotify?: string };
-  album?: { images?: SpotifyImage[] };
+  external_ids?: { isrc?: string | null };
+  album?: { images?: SpotifyImage[]; release_date?: string | null; album_type?: string | null };
   popularity?: number;
 }
 
@@ -97,7 +98,21 @@ export function mapTrack(t: SpotifyTrackObject | null | undefined, playRank: num
   const art = pickImage(t.album?.images);
   if (art) track.albumArtUrl = art;
   if (typeof t.popularity === 'number') track.popularity = t.popularity;
+  // A compilation's date is the compilation's ("Greatest Hits", 2004), not the song's.
+  const year = t.album?.album_type === 'compilation' ? undefined : releaseYear(t.album?.release_date);
+  if (year !== undefined) track.releaseYear = year;
+  if (t.external_ids?.isrc) track.isrc = t.external_ids.isrc;
   return track;
+}
+
+/**
+ * The year of an album's release_date ("1975", "1975-10" or "1975-10-31", by its precision), or
+ * undefined for anything else, such as the "0000" Spotify sends for an unknown date.
+ */
+function releaseYear(date: string | null | undefined): number | undefined {
+  const m = /^(\d{4})(?:-\d{2}){0,2}$/.exec(date ?? '');
+  const year = m ? Number(m[1]) : NaN;
+  return year >= 1900 && year <= new Date().getUTCFullYear() + 1 ? year : undefined;
 }
 
 export interface Listening {
@@ -135,13 +150,19 @@ export function buildLibrary({ top, recent, saved, playlists = [] }: Listening):
   const savedIds = new Set(saved.map((t) => t.id));
   const playlistIds = new Set(playlists.map((t) => t.id));
   const order: string[] = [];
+  // A song can come from several lists; facts one copy lacks are taken from another.
   const add = (t: Track) => {
-    if (!byId.has(t.id)) {
+    const kept = byId.get(t.id);
+    if (!kept) {
       byId.set(t.id, t);
       order.push(t.id);
-    } else if (t.popularity !== undefined && byId.get(t.id)!.popularity === undefined) {
-      byId.set(t.id, { ...byId.get(t.id)!, popularity: t.popularity });
+      return;
     }
+    const filled = { ...kept };
+    if (filled.popularity === undefined && t.popularity !== undefined) filled.popularity = t.popularity;
+    if (filled.releaseYear === undefined && t.releaseYear !== undefined) filled.releaseYear = t.releaseYear;
+    if (filled.isrc === undefined && t.isrc !== undefined) filled.isrc = t.isrc;
+    byId.set(t.id, filled);
   };
   for (const range of TIME_RANGES) {
     (top[range] ?? []).forEach((t, i) => {
