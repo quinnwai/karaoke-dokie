@@ -10,7 +10,7 @@
 // their typical note and their highest and lowest notes.
 // Familiarity (0-1): computed from Spotify listening (see server/spotify.ts buildLibrary).
 // Popularity (0-1): average of Spotify popularity, USDB karaoke popularity (views, stars) and
-// karaoke-video views, raised for Billboard Year-End hits (popularityScore).
+// KaraFun karaoke-video views, with a floor for Billboard Year-End hits (popularityScore).
 // Penalties lower a song without hiding it.
 
 import type { Label, Match, OctaveShift, ScoreParts, SongRange, Track, VocalRange } from '../contracts';
@@ -32,10 +32,10 @@ const USDB_VIEWS_FULL = 100_000;
  */
 export const KARAOKE_VIEWS_FULL = 5_500_000;
 /**
- * Least popularity of a song on a Billboard Year-End Hot 100, and of a top-20 one, which always
- * reads as a crowd favourite. The 955 charting songs KaraFun also has score 0.63 at their lower
- * quartile from karaoke views alone (0.72 median, much the same at every rank), so a chart entry
- * with nothing else puts a song about where most charting songs land.
+ * Least popularity of a song on a Billboard Year-End Hot 100, and of a top-20 one, which so always
+ * clears the 0.7 of "Crowd favourite". Year-End songs that KaraFun also has score 0.63 at their
+ * lower quartile from karaoke views alone (0.72 median, much the same at every rank), so a chart
+ * entry with nothing else puts a song about where most charting songs land.
  */
 export const CHART_FLOOR = { top100: 0.6, top20: 0.75 } as const;
 
