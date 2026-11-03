@@ -85,14 +85,6 @@
         "fastLyrics": false
       },
       "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data.",
-      "usdb": {
-        "id": 900006,
-        "views": 30000,
-        "rating": 3.9,
-        "year": 2010,
-        "genre": "Pop",
-        "language": "English"
-      },
       "moods": [
         "upbeat"
       ]

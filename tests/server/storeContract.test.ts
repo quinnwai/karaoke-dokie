@@ -205,6 +205,18 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     });
   });
 
+  it('reads back genre, year and language in the USDB index, and replaces them on update', async () => {
+    const s = make();
+    const full = { id: 1, key: 'queen|bohemian rhapsody', artist: 'Queen', title: 'Bohemian Rhapsody', views: 100, genre: 'Rock', year: 1975, language: 'English' };
+    const bare = { id: 2, key: 'abba|sos', artist: 'ABBA', title: 'SOS' };
+    await s.putUsdbSongs([full, bare]);
+    expect((await s.findUsdbSongs(['queen|bohemian rhapsody'])).get('queen|bohemian rhapsody')).toStrictEqual(full);
+    expect(await s.listUsdbSongs()).toStrictEqual([full, bare]);
+    // A newer list row is the whole truth: a cleared year or language goes, a changed genre replaces the old one.
+    await s.putUsdbSongs([{ id: 1, key: full.key, artist: 'Queen', title: 'Bohemian Rhapsody', views: 120, genre: 'Classic Rock' }]);
+    expect((await s.findUsdbSongs([full.key])).get(full.key)).toStrictEqual({ id: 1, key: full.key, artist: 'Queen', title: 'Bohemian Rhapsody', views: 120, genre: 'Classic Rock' });
+  });
+
   it('lists log entries newest first with a limit', async () => {
     const s = make();
     for (const n of [1, 3, 2]) await s.appendLog(logEntry(n, n === 2 ? 'skipped' : 'artist-typical'));
@@ -310,6 +322,19 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(read.size).toBe(250);
     expect(read.get('artist 249|song 249')).toEqual(many[249]);
   });
+
+  it('reads back the results view stored with feedback, and no view for a tap without one', async () => {
+    const s = make();
+    const filtered = { ...feedback('u1', 1), view: { sort: 'warmup' as const, decade: '80s' as const, mood: 'upbeat' as const, duetsOnly: true } };
+    const plain = { ...feedback('u1', 2), view: { sort: 'top' as const, decade: null, mood: null, duetsOnly: false } };
+    const older = feedback('u1', 3);
+    for (const f of [filtered, plain, older]) await s.saveFeedback(f);
+    const [o, p, f] = await s.listFeedback();
+    expect(f).toStrictEqual(filtered);
+    expect(p).toStrictEqual(plain);
+    expect(o).toStrictEqual(older);
+    expect(o).not.toHaveProperty('view');
+  });
 });
 
 describe('schema and store selection', () => {
@@ -342,9 +367,15 @@ describe('schema and store selection', () => {
     await migrate(q);
     await migrate(q);
     const s = createPostgresStore(q, { autoMigrate: false });
-    const fresh = { ...feedback('u1', 2), songRange: { source: 'audio-full' as const, method: 'm', low: 52, high: 65 } };
+    const fresh = {
+      ...feedback('u1', 2),
+      songRange: { source: 'audio-full' as const, method: 'm', low: 52, high: 65 },
+      view: { sort: 'showoff' as const, decade: '20s' as const, mood: null, duetsOnly: false },
+    };
     await s.saveFeedback(fresh);
     expect(await s.listFeedback()).toEqual([fresh, old]);
+    // A tap saved before the view column existed comes back with no view.
+    expect((await s.listFeedback())[1]).not.toHaveProperty('view');
   });
 
   it('picks memory unless a DATABASE_URL is set and KARAOKE_STORE is not memory', () => {

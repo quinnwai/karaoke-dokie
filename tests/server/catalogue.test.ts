@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { SongRange, VocalRange } from '../../src/lib/contracts';
 import {
   CATALOGUE_TTL_MS,
-  MAX_ALL_MATCHES,
   catalogueKey,
   catalogueTracks,
   createCatalogue,
@@ -10,6 +9,7 @@ import {
 } from '../../src/lib/server/catalogue';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import type { CatalogueSong, UsdbIndexEntry } from '../../src/lib/server/store';
+import { MAX_ALL_MATCHES } from '../../src/lib/server/songService';
 import { productionSongDeps } from '../../src/lib/server/wiring';
 import { UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
 
@@ -238,7 +238,8 @@ describe('all=1 size', () => {
     const all = recommendCatalogue(tracks, user, deps, { all: true });
     const paged = recommendCatalogue(tracks, user, deps, { offset: 0, limit: 5 });
     expect(all.matches).toHaveLength(MAX_ALL_MATCHES);
-    expect(all.complete).toBe(true);
+    // Trimmed, and nothing to ask again for: the client must not loop.
+    expect(all).toMatchObject({ complete: false, nextOffset: null });
     expect(all.matches.slice(0, 5).map((m) => m.track.id)).toEqual(paged.matches.map((m) => m.track.id));
     expect(Object.keys(all.sources)).toHaveLength(MAX_ALL_MATCHES);
   });

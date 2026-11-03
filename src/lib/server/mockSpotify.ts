@@ -5,45 +5,47 @@ import type { SpotifyClient } from './spotify';
 export const MOCK_USER = { id: 'mock-test-singer', displayName: 'Test Singer' };
 export const MOCK_CODE = 'mock-code';
 
-// [artist, title]. The first MOCK_TOP_COUNT are the "top tracks"; all are "saved".
-const MOCK_LIBRARY: [string, string][] = [
-  ['Queen', 'Bohemian Rhapsody'],
-  ['Omar Apollo', 'Evergreen'],
-  ['Whitney Houston', 'I Will Always Love You'],
-  ['Journey', "Don't Stop Believin'"],
-  ['Justin Bieber', 'Baby'],
-  ['Adele', 'Someone Like You'],
-  ['Bon Jovi', "Livin' on a Prayer"],
-  ['Elvis Presley', "Can't Help Falling in Love"],
-  ['ABBA', 'Dancing Queen'],
-  ['Frank Sinatra', 'My Way'],
-  ['Queen', "Don't Stop Me Now"],
-  ['Whitney Houston', 'I Wanna Dance with Somebody (Who Loves Me)'],
-  ['Journey', 'Any Way You Want It'],
-  ['Justin Bieber', 'Sorry'],
-  ['Mariah Carey', 'All I Want for Christmas Is You'],
-  ['Toto', 'Africa'],
-  ['a-ha', 'Take On Me'],
-  ['Lady Gaga', 'Shallow'],
-  ['Ed Sheeran', 'Perfect'],
-  ['Billy Joel', 'Piano Man'],
-  ['Spice Girls', 'Wannabe'],
-  ['Backstreet Boys', 'I Want It That Way'],
-  ['Cyndi Lauper', 'Girls Just Want to Have Fun'],
-  ['The Killers', 'Mr. Brightside'],
-  ['Gloria Gaynor', 'I Will Survive'],
+// [artist, title, year the recording first came out]. The first MOCK_TOP_COUNT are the "top tracks";
+// all are "saved". No popularity: Spotify stopped sending it to Development Mode apps in Feb 2026.
+const MOCK_LIBRARY: [string, string, number][] = [
+  ['Queen', 'Bohemian Rhapsody', 1975],
+  ['Omar Apollo', 'Evergreen', 2022],
+  ['Whitney Houston', 'I Will Always Love You', 1992],
+  ['Journey', "Don't Stop Believin'", 1981],
+  ['Justin Bieber', 'Baby', 2010],
+  ['Adele', 'Someone Like You', 2011],
+  ['Bon Jovi', "Livin' on a Prayer", 1986],
+  ['Elvis Presley', "Can't Help Falling in Love", 1961],
+  ['ABBA', 'Dancing Queen', 1976],
+  ['Frank Sinatra', 'My Way', 1969],
+  ['Queen', "Don't Stop Me Now", 1978],
+  ['Whitney Houston', 'I Wanna Dance with Somebody (Who Loves Me)', 1987],
+  ['Journey', 'Any Way You Want It', 1980],
+  ['Justin Bieber', 'Sorry', 2015],
+  ['Mariah Carey', 'All I Want for Christmas Is You', 1994],
+  ['Toto', 'Africa', 1982],
+  ['a-ha', 'Take On Me', 1985],
+  ['Lady Gaga', 'Shallow', 2018],
+  ['Ed Sheeran', 'Perfect', 2017],
+  ['Billy Joel', 'Piano Man', 1973],
+  ['Spice Girls', 'Wannabe', 1996],
+  ['Backstreet Boys', 'I Want It That Way', 1999],
+  ['Cyndi Lauper', 'Girls Just Want to Have Fun', 1983],
+  ['The Killers', 'Mr. Brightside', 2003],
+  ['Gloria Gaynor', 'I Will Survive', 1978],
 ];
 const MOCK_TOP_COUNT = 6;
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-export const MOCK_TRACKS: Track[] = MOCK_LIBRARY.map(([artist, title], i) => ({
+export const MOCK_TRACKS: Track[] = MOCK_LIBRARY.map(([artist, title, releaseYear], i) => ({
   id: `mock-${i + 1}-${slug(title)}`,
   title,
   artist,
   artistId: `mock-artist-${slug(artist)}`,
   spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(`${artist} ${title}`)}`,
   playRank: i,
+  releaseYear,
 }));
 
 export function createMockSpotifyClient(): SpotifyClient {
@@ -73,7 +75,7 @@ export function createMockSpotifyClient(): SpotifyClient {
     async getTopTracks(_token, timeRange = 'medium_term') {
       // Recent favourites shift a little between time spans, like real listening.
       const start = timeRange === 'short_term' ? 1 : timeRange === 'long_term' ? 2 : 0;
-      return MOCK_TRACKS.slice(start, start + MOCK_TOP_COUNT).map((t, i) => ({ ...t, playRank: i, popularity: 90 - i * 5 }));
+      return MOCK_TRACKS.slice(start, start + MOCK_TOP_COUNT).map((t, i) => ({ ...t, playRank: i }));
     },
     async getPlaylistTracks() {
       return [MOCK_TRACKS[10]!, MOCK_TRACKS[15]!].map((t, i) => ({ ...t, playRank: i }));

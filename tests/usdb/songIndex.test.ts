@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
+import { songKey } from '../../src/lib/songs/resolve';
 import type { UsdbSongRow } from '../../src/lib/usdb/client';
 import { updateUsdbIndex } from '../../src/lib/usdb/songIndex';
 
@@ -45,6 +46,20 @@ describe('updateUsdbIndex', () => {
     expect(list.calls).toHaveLength(2);
     expect((await store.usdbIndexStats()).count).toBe(400);
     expect((await store.findUsdbSongs(['artist 0|song 0'])).get('artist 0|song 0')?.lastChange).toBe(3000);
+  });
+
+  it('keeps each song\'s genre, year and language from the list', async () => {
+    const store = createMemoryStore();
+    const rows: UsdbSongRow[] = [
+      { id: 1, artist: 'Queen', title: 'Bohemian Rhapsody', views: 10, genre: 'Rock', year: 1975, language: 'English' },
+      { id: 2, artist: 'ABBA', title: 'SOS', views: 5 },
+    ];
+    await updateUsdbIndex({ store, usdb: { listSongs: async ({ start }) => (start === 0 ? rows : []) } });
+    const found = await store.findUsdbSongs([songKey('Queen', 'Bohemian Rhapsody'), songKey('ABBA', 'SOS')]);
+    expect(found.get(songKey('Queen', 'Bohemian Rhapsody'))).toEqual({
+      id: 1, key: songKey('Queen', 'Bohemian Rhapsody'), artist: 'Queen', title: 'Bohemian Rhapsody', views: 10, genre: 'Rock', year: 1975, language: 'English',
+    });
+    expect(found.get(songKey('ABBA', 'SOS'))).toStrictEqual({ id: 2, key: songKey('ABBA', 'SOS'), artist: 'ABBA', title: 'SOS', views: 5 });
   });
 
   it('can be told to read everything again', async () => {

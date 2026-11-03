@@ -22,6 +22,10 @@ export interface UsdbSongRow {
   rating?: number;
   /** USDB's last-changed time (epoch seconds), from the row's data-lastchange. */
   lastChange?: number;
+  /** Genre, year and language as USDB lists them (the note file's #GENRE, #YEAR, #LANGUAGE), from a full row. */
+  genre?: string;
+  year?: number;
+  language?: string;
 }
 
 export interface UsdbSong {
@@ -84,8 +88,18 @@ function decodeEntities(s: string): string {
 
 const stripTags = (s: string) => decodeEntities(s.replace(/<[^>]*>/g, '')).trim();
 
-/** Song rows from a search result page (rows carry data-songid; artist and title are cells 3 and 4). */
-export function parseSongList(html: string): UsdbSongRow[] {
+/**
+ * A list row with details: sample, cover, artist, title, genre, year, edition, golden notes,
+ * language, creator, rating, views. Genre, year and language are only read from a row with exactly
+ * this many cells, since their place in a different layout is unknown.
+ */
+const FULL_ROW_CELLS = 12;
+
+/**
+ * Song rows from a search result page (rows carry data-songid; artist and title are cells 3 and 4).
+ * `now` sets the latest year accepted (next year).
+ */
+export function parseSongList(html: string, now: Date = new Date()): UsdbSongRow[] {
   const rows: UsdbSongRow[] = [];
   const rowRe = /<tr([^>]*data-songid="(\d+)"[^>]*)>([\s\S]*?)<\/tr>/g;
   for (const m of html.matchAll(rowRe)) {
@@ -102,9 +116,15 @@ export function parseSongList(html: string): UsdbSongRow[] {
     }
     // A detailed row has 12 cells: sample, cover, artist, title, genre, year, edition, golden
     // notes, language, creator, rating, views.
-    if (cells.length >= 12) {
+    if (cells.length === FULL_ROW_CELLS) {
+      const genre = stripTags(cells[4]!);
+      const year = parseYear(cells[5]!, now);
       const edition = stripTags(cells[6]!);
+      const language = stripTags(cells[8]!);
+      if (genre) row.genre = genre;
+      if (year !== undefined) row.year = year;
       if (edition) row.edition = edition;
+      if (language) row.language = language;
     }
     rows.push(row);
   }
@@ -117,6 +137,14 @@ export function parseSongList(html: string): UsdbSongRow[] {
  */
 export function isDuetListing(row: { title: string; edition?: string }): boolean {
   return /duet/i.test(row.title) || /duet/i.test(row.edition ?? '');
+}
+
+/** A 4-digit year from 1900 to next year; undefined otherwise (the cell is whatever the note file's #YEAR says). */
+function parseYear(cell: string, now: Date): number | undefined {
+  const text = stripTags(cell);
+  if (!/^\d{4}$/.test(text)) return undefined;
+  const year = Number(text);
+  return year >= 1900 && year <= now.getUTCFullYear() + 1 ? year : undefined;
 }
 
 /** A whole number like "1000" or "1.234" (thousands separator); undefined when the cell is not one. */

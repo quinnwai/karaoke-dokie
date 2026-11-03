@@ -220,8 +220,9 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
     case 'allLoaded': {
       const { page } = event;
       const attempt = state.attempt + 1;
-      // The server stops its lookups at a budget on a very large first visit; ask again to finish.
-      const again = page.complete === false && attempt < MAX_LOAD_ATTEMPTS;
+      // The server stops its lookups at a budget on a very large first visit, and says so with a
+      // nextOffset; ask again to finish. A list trimmed to the best matches has no nextOffset.
+      const again = page.complete === false && page.nextOffset !== null && attempt < MAX_LOAD_ATTEMPTS;
       const sorts = availableSorts(state.mode, page.matches);
       const view = sorts.includes(state.view.sort) ? state.view : resetViewFor(state.view, sorts);
       return { ...state, loading: again, attempt, error: null, matches: page.matches, sources: page.sources, view };

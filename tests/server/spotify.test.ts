@@ -178,6 +178,32 @@ describe('Spotify library reads', () => {
     expect(mapTrack(null, 0)).toBeNull();
   });
 
+  const onAlbum = (album: { release_date?: string | null; album_type?: string }) => mapTrack({ ...sTrack(1), album: { ...sTrack(1).album, ...album } }, 0);
+
+  it('keeps the year of the album release date at any precision', () => {
+    expect(onAlbum({ release_date: '1975' })?.releaseYear).toBe(1975);
+    expect(onAlbum({ release_date: '1975-10' })?.releaseYear).toBe(1975);
+    expect(onAlbum({ release_date: '1975-10-31', album_type: 'album' })?.releaseYear).toBe(1975);
+    expect(onAlbum({ release_date: '2011-01-24', album_type: 'single' })?.releaseYear).toBe(2011);
+  });
+
+  it('leaves the year out for a junk date, a missing album or a compilation', () => {
+    for (const junk of ['0000', '0000-00-00', '', '75', 'n/a', '1975/10/31', '1975-10-31T00:00:00Z', '2999-01-01', null]) {
+      expect(onAlbum({ release_date: junk }), String(junk)).not.toHaveProperty('releaseYear');
+    }
+    const { album: _album, ...noAlbum } = sTrack(1);
+    expect(mapTrack(noAlbum, 0)).not.toHaveProperty('releaseYear');
+    // A greatest-hits album's date is the compilation's, not the song's.
+    expect(onAlbum({ release_date: '2004-11-08', album_type: 'compilation' })).not.toHaveProperty('releaseYear');
+  });
+
+  it('keeps the ISRC when Spotify sends one', () => {
+    expect(mapTrack({ ...sTrack(1), external_ids: { isrc: 'GBUM71029604' } }, 0)?.isrc).toBe('GBUM71029604');
+    expect(mapTrack({ ...sTrack(1), external_ids: { isrc: null } }, 0)).not.toHaveProperty('isrc');
+    expect(mapTrack({ ...sTrack(1), external_ids: {} }, 0)).not.toHaveProperty('isrc');
+    expect(mapTrack(sTrack(1), 0)).not.toHaveProperty('isrc');
+  });
+
   it('skips items without a title or artist name, which cannot be matched (they crashed recommendations on Oct 22)', () => {
     expect(mapTrack({ ...sTrack(1), name: null }, 0)).toBeNull();
     expect(mapTrack({ ...sTrack(1), name: '  ' }, 0)).toBeNull();
@@ -233,6 +259,17 @@ describe('familiarity', () => {
   it('keeps Spotify popularity from any list that has it', () => {
     const lib = buildLibrary({ top: { medium_term: [t('a')] }, recent: [], saved: [t('a', 0, { popularity: 70 })] });
     expect(lib[0]!.popularity).toBe(70);
+  });
+
+  it('fills a missing release year or ISRC from another copy of the same song, keeping the first one found', () => {
+    const lib = buildLibrary({
+      top: { medium_term: [t('a')] },
+      recent: [t('a', 0, { releaseYear: 1975 })],
+      saved: [t('a', 0, { releaseYear: 1999, isrc: 'GBUM71029604' })],
+    });
+    expect(lib).toHaveLength(1);
+    expect(lib[0]).toMatchObject({ releaseYear: 1975, isrc: 'GBUM71029604' });
+    expect(buildLibrary({ top: {}, recent: [], saved: [t('b')] })[0]).not.toHaveProperty('releaseYear');
   });
 
   it('counts songs in your playlists as known, at least 0.4, and saved-only songs as not known', () => {
@@ -343,5 +380,12 @@ describe('mock Spotify client', () => {
     for (const want of ['Queen - Bohemian Rhapsody', 'Omar Apollo - Evergreen', 'Whitney Houston', 'Journey', 'Justin Bieber']) {
       expect(names.some((n) => n.startsWith(want))).toBe(true);
     }
+  });
+
+  it('sends each song\'s release year and, like Spotify for Development Mode apps, no popularity', async () => {
+    const tracks = await getUserTracks(createMockSpotifyClient(), 'tok');
+    expect(tracks.every((x) => typeof x.releaseYear === 'number')).toBe(true);
+    expect(tracks.find((x) => x.title === 'Bohemian Rhapsody')?.releaseYear).toBe(1975);
+    expect(tracks.filter((x) => x.popularity !== undefined)).toEqual([]);
   });
 });

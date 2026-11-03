@@ -269,6 +269,41 @@ describe('recommendations', () => {
     }
   });
 
+  it('returns every match at once with all=1, with year, genre and USDB popularity, whatever offset and limit say', async () => {
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const africa = { low: 52, high: 69, tessitura: 60, source: 'audio-full' as const, confidence: 'high' as const, fastLyrics: false, pitchShare: [[55, 0.5], [64, 0.5]] as [number, number][] };
+    const log = { trackId: '', title: 'Africa', artist: 'Toto', outcome: 'audio-full' as const, reason: 'Measured.', at: '2026-10-18T00:00:00.000Z' };
+    await getStore().putSongRange(songKey('Toto', 'Africa'), { range: africa, log });
+    await getStore().putUsdbSongs([{ id: 7, key: songKey('Adele', 'Someone Like You'), artist: 'Adele', title: 'Someone Like You', views: 40_000, rating: 4.5, year: 2011, genre: 'Pop' }]);
+
+    const res = await recs.GET(req('/api/recommendations?all=1&offset=-1&limit=0', jar));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as RecommendationsResponse;
+    expect(body).toMatchObject({ complete: true, nextOffset: null });
+    // Every seeded library song fits WIDE (Africa is one of them; the put above replaced its range).
+    expect(body.matches).toHaveLength(SEED_SONGS.filter((x) => !x.catalogueOnly).length);
+
+    const paged = new Map<string, RecommendationsResponse['matches'][number]>();
+    for (let offset: number | null = 0, i = 0; offset !== null && i < 10; i++) {
+      const p = (await (await recs.GET(req(`/api/recommendations?offset=${offset}&limit=5`, jar))).json()) as RecommendationsResponse;
+      expect(p).not.toHaveProperty('complete');
+      for (const m of p.matches) paged.set(m.track.id, m);
+      offset = p.nextOffset;
+    }
+    expect(new Set(body.matches.map((m) => m.track.id))).toEqual(new Set(paged.keys()));
+    expect(paged.get('mock-16-africa')!.range.pitchShare).toEqual(africa.pitchShare); // pages keep the histogram
+
+    for (const m of body.matches) {
+      expect(body.sources[m.track.id]).toMatchObject({ trackId: m.track.id });
+      expect(m.range).not.toHaveProperty('pitchShare');
+    }
+    const byTitle = Object.fromEntries(body.matches.map((m) => [m.track.title, m]));
+    expect(byTitle['Someone Like You']).toMatchObject({ year: 2011, yearSource: 'usdb', genre: 'Pop', parts: { popularityKnown: true } });
+    expect(byTitle['Baby']).toMatchObject({ year: 2010, yearSource: 'spotify', parts: { popularityKnown: false } });
+    expect(byTitle['Baby']).not.toHaveProperty('genre');
+  });
+
   it('rejects bad paging params', async () => {
     const jar = await signIn();
     await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
@@ -321,6 +356,43 @@ describe('feedback', () => {
     expect(estimate).toMatchObject({ difficulty: 'maybe', songRange: { source: 'artist-external', low: 46, high: 70 } });
     expect(estimate!.songRange).not.toHaveProperty('method');
     expect(unknown!.songRange).toBeUndefined();
+  });
+
+  it('stores the results view the tap came from, and no view when the client sends none', async () => {
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const tap = { trackId: 'mock-1-bohemian-rhapsody', thumbs: 'up', difficulty: 'maybe', octave: 'none' };
+    const view = { sort: 'singalong', decade: '70s', mood: 'heartfelt', duetsOnly: false };
+    const post = async (json: unknown) => (await feedback.POST(req('/api/feedback', jar, { method: 'POST', json }))).status;
+    expect(await post({ ...tap, view: { ...view, chips: ['a'] } })).toBe(200); // fields it does not know are dropped
+    expect(await post({ ...tap, view: { sort: 'top', decade: null, mood: null, duetsOnly: true } })).toBe(200);
+    expect(await post(tap)).toBe(200);
+    const [older, plain, filtered] = await getStore().listFeedback({ userId: MOCK_USER.id });
+    expect(filtered!.view).toStrictEqual(view);
+    expect(plain!.view).toStrictEqual({ sort: 'top', decade: null, mood: null, duetsOnly: true });
+    expect(older).not.toHaveProperty('view');
+  });
+
+  const goodView = { sort: 'top', decade: null, mood: null, duetsOnly: false };
+  it.each([
+    ['null', null],
+    ['a string', 'top'],
+    ['an array', []],
+    ['unknown sort', { ...goodView, sort: 'newest' }],
+    ['no sort', { decade: null, mood: null, duetsOnly: false }],
+    ['unknown decade', { ...goodView, decade: '50s' }],
+    ['a year for a decade', { ...goodView, decade: 1980 }],
+    ['no decade', { sort: 'top', mood: null, duetsOnly: false }],
+    ['unknown mood', { ...goodView, mood: 'sad' }],
+    ['no mood', { sort: 'top', decade: null, duetsOnly: false }],
+    ['duetsOnly as a string', { ...goodView, duetsOnly: 'false' }],
+    ['no duetsOnly', { sort: 'top', decade: null, mood: null }],
+  ])('returns 400 on a bad view (%s)', async (_name, view) => {
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const body = { trackId: 't', thumbs: 'up', difficulty: 'easy', octave: 'none', view };
+    expect((await feedback.POST(req('/api/feedback', jar, { method: 'POST', json: body }))).status).toBe(400);
+    expect(await getStore().listFeedback()).toEqual([]);
   });
 
   it.each([

@@ -173,14 +173,18 @@ export async function recommendations(req: Request, ctx: AppContext): Promise<Re
   const user = await requireUser(req, ctx);
   if (user instanceof Response) return user;
   const params = new URL(req.url).searchParams;
-  const offset = intParam(params.get('offset'), 0, 0, 100_000);
-  const limit = intParam(params.get('limit'), 5, 1, 50);
+  // all=1: every match in one response, for the results screen to sort and filter; no paging.
+  const all = params.get('all') === '1';
+  const offset = all ? 0 : intParam(params.get('offset'), 0, 0, 100_000);
+  const limit = all ? 0 : intParam(params.get('limit'), 5, 1, 50);
   if (offset === null || limit === null) return errorJson(400, 'bad-request', 'offset must be >= 0 and limit 1..50');
   const range = await ctx.store.getRange(user.id);
   if (!range) return errorJson(409, 'no-range', 'Save a vocal range first (PUT /api/me/range)');
   const tracks = await loadTracks(user, ctx);
   if (tracks instanceof Response) return tracks;
-  const body: RecommendationsResponse = await ctx.songs.recommend(tracks, range, offset, limit);
+  const body: RecommendationsResponse = all
+    ? await ctx.songs.recommend(tracks, range, offset, limit, { all: true })
+    : await ctx.songs.recommend(tracks, range, offset, limit);
   return json(await withMoods(body, ctx));
 }
 

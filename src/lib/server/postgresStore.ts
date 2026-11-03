@@ -62,6 +62,9 @@ function toUsdbEntry(r: Row): UsdbIndexEntry {
   if (r.views !== null && r.views !== undefined) e.views = num(r.views);
   if (r.rating !== null && r.rating !== undefined) e.rating = num(r.rating);
   if (r.last_change !== null && r.last_change !== undefined) e.lastChange = num(r.last_change);
+  if (r.year !== null && r.year !== undefined) e.year = num(r.year);
+  if (r.genre !== null && r.genre !== undefined) e.genre = str(r.genre);
+  if (r.language !== null && r.language !== undefined) e.language = str(r.language);
   return e;
 }
 
@@ -99,6 +102,7 @@ function toFeedback(r: Row): FeedbackEntry {
     if (isSet(r.range_high)) s.high = num(r.range_high);
     f.songRange = s;
   }
+  if (isSet(r.view_json)) f.view = JSON.parse(str(r.view_json));
   return f;
 }
 
@@ -208,14 +212,16 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         const chunk = entries.slice(i, i + 100);
         const params: unknown[] = [];
         const rows = chunk.map((e) => {
-          params.push(e.id, e.key, e.artist, e.title, e.views ?? null, e.rating ?? null, e.lastChange ?? null);
-          const n = params.length;
-          return `($${n - 6}, $${n - 5}, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+          const values = [e.id, e.key, e.artist, e.title, e.views ?? null, e.rating ?? null, e.lastChange ?? null, e.year ?? null, e.genre ?? null, e.language ?? null];
+          const first = params.length + 1;
+          params.push(...values);
+          return `(${values.map((_, j) => `$${first + j}`).join(', ')})`;
         });
         await query(
-          `INSERT INTO usdb_songs (id, song_key, artist, title, views, rating, last_change) VALUES ${rows.join(', ')}
+          `INSERT INTO usdb_songs (id, song_key, artist, title, views, rating, last_change, year, genre, language) VALUES ${rows.join(', ')}
            ON CONFLICT (id) DO UPDATE SET song_key = EXCLUDED.song_key, artist = EXCLUDED.artist, title = EXCLUDED.title,
-             views = EXCLUDED.views, rating = EXCLUDED.rating, last_change = EXCLUDED.last_change`,
+             views = EXCLUDED.views, rating = EXCLUDED.rating, last_change = EXCLUDED.last_change,
+             year = EXCLUDED.year, genre = EXCLUDED.genre, language = EXCLUDED.language`,
           params,
         );
       }
@@ -256,11 +262,11 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       const s = f.songRange;
       await query(
         `INSERT INTO feedback (user_id, track_id, thumbs, user_low, user_high, user_range_source, difficulty, octave, at,
-           range_source, range_method, range_low, range_high)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+           range_source, range_method, range_low, range_high, view_json)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [
           f.userId, f.trackId, f.thumbs, f.userRange.low, f.userRange.high, f.userRange.source, f.difficulty, f.octave, f.at,
-          s?.source ?? null, s?.method ?? null, s?.low ?? null, s?.high ?? null,
+          s?.source ?? null, s?.method ?? null, s?.low ?? null, s?.high ?? null, f.view ? JSON.stringify(f.view) : null,
         ],
       );
     },

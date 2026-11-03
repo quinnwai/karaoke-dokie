@@ -8,13 +8,11 @@
 
 import type { DataSourceLogEntry, Match, RecommendationsResponse, SongRange, Track, VocalRange } from '../contracts';
 import { hasLittleSinging } from '../songs/resolve';
-import type { SongDeps } from './songService';
+import { MAX_ALL_MATCHES, type SongDeps } from './songService';
 import type { CatalogueSong, UsdbIndexEntry } from './store';
 
 /** How many songs are read from the store, most popular first. */
 export const CATALOGUE_SIZE = 6000;
-/** Most catalogue matches sent at once (all=1), best first. */
-export const MAX_ALL_MATCHES = 1000;
 /** One read of the catalogue serves every request in the process for this long. */
 export const CATALOGUE_TTL_MS = 60 * 60_000;
 
@@ -109,7 +107,8 @@ export function recommendCatalogue(
     // picks, which is plenty for every sort and chip and keeps the response small on a phone.
     const best = ranked.slice(0, MAX_ALL_MATCHES);
     const all = best.map((m) => ({ ...m, range: withoutPitchShare(m.range) }));
-    return { matches: all, nextOffset: null, sources: sources(best), complete: true };
+    // Same contract as the library's all=1: a trimmed list says so, with no offset to ask again from.
+    return { matches: all, nextOffset: null, sources: sources(best), complete: best.length === ranked.length };
   }
   const { items, nextOffset } = deps.paginate(ranked, page.offset, page.limit);
   return { matches: items, nextOffset, sources: sources(items) };

@@ -118,6 +118,11 @@ describe('results', () => {
     expect(stuck.loading).toBe(false);
   });
 
+  it('does not ask again for a list the server trimmed to its best matches', () => {
+    const trimmed = { ...allMatches(), complete: false, nextOffset: null };
+    expect(run([{ type: 'allLoaded', page: trimmed }], atResults)).toMatchObject({ loading: false, attempt: 1 });
+  });
+
   it('a failed load can be retried', () => {
     const failed = run([{ type: 'loadFailed' }], atResults);
     expect(failed).toMatchObject({ loading: false, error: 'load' });
