@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KaraokeApp } from '../../src/components/KaraokeApp';
 import type { Api } from '../../src/lib/client/api';
@@ -231,6 +231,42 @@ describe('KaraokeApp', () => {
     expect(api.allRecommendations).toHaveBeenCalledTimes(1);
   });
 
+  it('an untouched slider switches on when a tap ends, not when a touch starts a scroll or a right click', async () => {
+    const tracked: { name: string; props?: Record<string, unknown> }[] = [];
+    const track = { track: (name: string, props?: Record<string, unknown>) => void tracked.push({ name, props }), flush: async () => {} };
+    render(<KaraokeApp api={fakeApi(me({ low: 45, high: 72, source: 'test' }))} track={track} mic={fakeMic().mic} />);
+    await screen.findByText('Plastic Love');
+    const slider = screen.getByRole('slider', { name: 'Ease in to Whole range' });
+    const sliderEvents = () => tracked.filter((e) => e.name === 'slider_changed');
+
+    // A vertical scroll that starts on the track: the browser cancels the pointer.
+    fireEvent.pointerDown(slider);
+    fireEvent.pointerCancel(slider);
+    // A right click (jsdom has no PointerEvent, so the button is set by hand).
+    const rightClick = createEvent.pointerUp(slider);
+    Object.defineProperty(rightClick, 'button', { value: 2 });
+    fireEvent(slider, rightClick);
+    expect(slider.getAttribute('aria-valuetext')).toBe('not set');
+    expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
+    expect(sliderEvents()).toEqual([]);
+
+    // A tap on the thumb: nothing moves, and the slider switches on at the middle, recorded once.
+    fireEvent.pointerDown(slider);
+    fireEvent.pointerUp(slider);
+    expect(slider.getAttribute('aria-valuetext')).toBe('in between');
+    expect(lyrics()).toContain('A little stretch, not too much');
+    expect(sliderEvents()).toHaveLength(1);
+    expect(sliderEvents()[0]!.props).toMatchObject({ slider: 'difficulty', difficulty: 0.5 });
+
+    // Another tap on a slider that is already on records nothing.
+    fireEvent.pointerUp(slider);
+    expect(sliderEvents()).toHaveLength(1);
+
+    // Reset disappears once pressed, and focus moves to the Tune panel rather than the page.
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Tune' }));
+  });
+
   it('decade chips filter the list and show their counts', async () => {
     const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
     const years = [1984, 2017, 2020, 1957, 1975, 2004, 1975, 1985, 1987, 1963];
@@ -320,10 +356,11 @@ describe('KaraokeApp', () => {
     fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
     fireEvent.click(screen.getByRole('button', { name: 'Back to songs' }));
     const slider = screen.getByRole('slider', { name: 'Ease in to Whole range' });
-    // Dragging records nothing; letting go records one adjustment.
-    fireEvent.change(slider, { target: { value: '35' } });
-    fireEvent.change(slider, { target: { value: '20' } });
+    // Dragging (input events) records nothing; letting go (the browser's change event) records one adjustment.
+    fireEvent.input(slider, { target: { value: '35' } });
+    fireEvent.input(slider, { target: { value: '20' } });
     fireEvent.pointerUp(slider);
+    fireEvent.change(slider);
     expect(tracked.map((e) => e.name)).toEqual(['results_viewed', 'song_opened', 'spotify_link_pressed', 'feedback_tapped', 'slider_changed']);
     expect(tracked[1]!.props).toEqual({
       mode: 'library',

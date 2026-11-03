@@ -46,9 +46,12 @@ function funnel(events: StoredEvent[]): AdminEventsResponse['funnel'] {
 
 /**
  * The controls in use when an event happened, from its view props: each slider that was set
- * (a number), each chip row that had a pick, or 'none' when nothing was set.
+ * (a number), each chip row that had a pick, or 'none' when nothing was set. Empty for an event
+ * that carries no view.
  */
 export function controlsInUse(props: StoredEvent['props']): string[] {
+  // Events from before the sliders (a `sort` prop, no slider props) say nothing about these controls.
+  if (!props || !('difficulty' in props)) return [];
   const used: string[] = [];
   for (const slider of SLIDER_IDS) if (typeof props?.[slider] === 'number') used.push(slider);
   if (typeof props?.decade === 'string') used.push('decade');

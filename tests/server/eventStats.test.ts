@@ -99,15 +99,17 @@ describe('summarizeEvents: byControl', () => {
       ...[10, 1, 3, 2].map((position) => ev('device-c', 'song_opened', { ...none, familiarity: 1, decade: '80s', position })),
       // Thumbs with no opens: no median.
       ev('device-c', 'feedback_tapped', { ...none, popularity: 0.9, mood: 'upbeat', duetsOnly: true, thumbs: 'down' }),
-      // No view props, or a slider that is not a number: nothing in use.
-      ev('device-a', 'song_opened', { position: 7 }),
-      ev('device-a', 'song_opened', { difficulty: 'high', position: 7 }),
-      // Left out: events that are not about songs.
+      // A slider that is not a number is not in use.
+      ev('device-a', 'song_opened', { ...none, difficulty: 'high', position: 7 }),
+      // Left out: events with no view (from before the sliders, or with no props), and events that are not about songs.
+      ev('device-a', 'song_opened', { sort: 'top', decade: null, mood: null, duetsOnly: false, position: 9 }),
+      ev('device-a', 'song_opened', { position: 9 }),
+      ev('device-a', 'song_opened'),
       ev('device-a', 'slider_changed', { ...none, slider: 'difficulty', difficulty: 0.5 }),
       ev('device-a', 'results_viewed', { ...none, decade: '90s' }),
     ];
     expect(summarizeEvents(events).byControl).toEqual({
-      none: { opened: 5, spotify: 2, up: 2, down: 1, medianPosition: 4 },
+      none: { opened: 4, spotify: 2, up: 2, down: 1, medianPosition: 2.5 },
       difficulty: { opened: 2, spotify: 1, up: 0, down: 0, medianPosition: 2 },
       familiarity: { opened: 4, spotify: 0, up: 0, down: 0, medianPosition: 2.5 },
       decade: { opened: 4, spotify: 0, up: 0, down: 0, medianPosition: 2.5 },

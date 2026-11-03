@@ -74,6 +74,9 @@ export function Results(props: ResultsProps) {
   const maybeId = useId();
   const tuneId = useId();
   const pickId = useId();
+  // Reset and Clear disappear once pressed; focus moves to their panel instead of the page.
+  const tuneRef = useRef<HTMLElement>(null);
+  const pickRef = useRef<HTMLElement>(null);
 
   const sliders = useMemo(() => availableSliders(mode, matches), [mode, matches]);
   const facets = useMemo(() => availableFacets(matches), [matches]);
@@ -161,13 +164,20 @@ export function Results(props: ResultsProps) {
       {matches.length > 0 && (
         <div className={styles.controls}>
           {/* Sliders reorder: continuous preferences, pink. */}
-          <section className={styles.tune} aria-labelledby={tuneId}>
+          <section ref={tuneRef} tabIndex={-1} className={styles.tune} aria-labelledby={tuneId}>
             <div className={styles.controlsHead}>
               <h2 id={tuneId} className={styles.tuneLabel}>
                 Tune
               </h2>
               {tuned && (
-                <button type="button" className={styles.headAction} onClick={props.onResetSliders}>
+                <button
+                  type="button"
+                  className={styles.headAction}
+                  onClick={() => {
+                    props.onResetSliders();
+                    tuneRef.current?.focus();
+                  }}
+                >
                   Reset
                 </button>
               )}
@@ -185,7 +195,7 @@ export function Results(props: ResultsProps) {
 
           {/* Chips filter: discrete labels, one pick per row, cyan. */}
           {showPicks && (
-            <section className={styles.pick} aria-labelledby={pickId}>
+            <section ref={pickRef} tabIndex={-1} className={styles.pick} aria-labelledby={pickId}>
               <div className={styles.controlsHead}>
                 <h2 id={pickId} className={styles.pickLabel}>
                   Pick
@@ -194,7 +204,14 @@ export function Results(props: ResultsProps) {
                   {list.length} {list.length === 1 ? 'song' : 'songs'}
                 </span>
                 {hasFilters(view) && (
-                  <button type="button" className={styles.headAction} onClick={props.onClear}>
+                  <button
+                    type="button"
+                    className={styles.headAction}
+                    onClick={() => {
+                      props.onClear();
+                      pickRef.current?.focus();
+                    }}
+                  >
                     Clear
                   </button>
                 )}
@@ -304,8 +321,8 @@ export function Results(props: ResultsProps) {
 }
 
 /**
- * One continuous preference. Untouched it does nothing and sits dim in the middle; touching it
- * (a tap, a drag or an arrow key) sets a target, and the songs closest to it come first.
+ * One continuous preference. Untouched it does nothing and sits dim in the middle; moving it (a
+ * drag, a tap, a key or a screen-reader swipe) sets a target, and the songs closest to it come first.
  */
 function PreferenceSlider({
   def,
@@ -322,12 +339,27 @@ function PreferenceSlider({
   const position = Math.round((value ?? 0.5) * 100);
   const where = !active ? 'not set' : position < 34 ? `towards ${def.left}` : position > 66 ? `towards ${def.right}` : 'in between';
   const set = (raw: string) => onChange(Number(raw) / 100);
+  const ref = useRef<HTMLInputElement>(null);
+  const done = useRef(onDone);
+  useEffect(() => {
+    done.current = onDone;
+  });
+  // The browser's own change event marks the end of one adjustment: the thumb let go, a key step or
+  // a screen-reader swipe. React's onChange fires on every step of a drag instead.
+  useEffect(() => {
+    const input = ref.current;
+    if (!input) return;
+    const record = () => done.current();
+    input.addEventListener('change', record);
+    return () => input.removeEventListener('change', record);
+  }, []);
   return (
     <div className={styles.sliderRow} data-active={active || undefined}>
       <span className={styles.sliderEnd} aria-hidden>
         {def.left}
       </span>
       <input
+        ref={ref}
         type="range"
         min={0}
         max={100}
@@ -337,10 +369,13 @@ function PreferenceSlider({
         aria-label={`${def.left} to ${def.right}`}
         aria-valuetext={where}
         onChange={(e) => set(e.currentTarget.value)}
-        // A tap on the thumb itself does not change the value, so it switches the slider on here.
-        onPointerDown={(e) => !active && set(e.currentTarget.value)}
-        onPointerUp={() => onDone()}
-        onKeyUp={(e) => e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End' ? onDone() : undefined}
+        // A tap on the thumb of an untouched slider moves nothing, so no change event comes: it
+        // switches on when the tap ends. A scroll that starts on the track ends in pointercancel.
+        onPointerUp={(e) => {
+          if (active || e.button > 0) return; // not a right or middle click
+          set(e.currentTarget.value);
+          onDone();
+        }}
       />
       <span className={styles.sliderEnd} aria-hidden>
         {def.right}

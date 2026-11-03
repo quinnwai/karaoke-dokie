@@ -955,6 +955,11 @@
   box-shadow: inset 0 0 0 1px rgba(255, 46, 147, 0.12);
 }
 
+.tune:focus:not(:focus-visible),
+.pick:focus:not(:focus-visible) {
+  outline: none;
+}
+
 .pick {
   min-width: 0;
 }
@@ -1052,7 +1057,8 @@
   margin-top: -9px;
   border: 0;
   border-radius: 8px;
-  background: #4a4652;
+  /* 3.4:1 against the panel, so an untouched slider still reads as a control. */
+  background: #6b6675;
   transition: background 0.15s, box-shadow 0.15s;
 }
 
@@ -1061,7 +1067,7 @@
   height: 22px;
   border: 0;
   border-radius: 8px;
-  background: #4a4652;
+  background: #6b6675;
 }
 
 .sliderRow[data-active] .slider::-webkit-slider-runnable-track {

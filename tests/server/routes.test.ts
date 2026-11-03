@@ -722,13 +722,14 @@ describe('admin events', () => {
       { name: 'note_detected', at: at(40), props: { step: 'high' } },
       { name: 'range_shown', at: at(39) },
     ]);
-    const opened = { name: 'song_opened', at: at(15), props: { decade: '80s', position: 2 } };
+    const view = { difficulty: null, familiarity: null, popularity: null, decade: '80s', mood: null, duetsOnly: false };
+    const opened = { name: 'song_opened', at: at(15), props: { ...view, position: 2 } };
     await send('device-bbbb', [
       { name: 'landing_viewed', at: at(30) },
       { name: 'results_viewed', at: at(20) },
       opened,
-      { name: 'spotify_link_pressed', at: at(14), props: { decade: '80s' } },
-      { name: 'feedback_tapped', at: at(10), props: { decade: '80s', thumbs: 'up' } },
+      { name: 'spotify_link_pressed', at: at(14), props: view },
+      { name: 'feedback_tapped', at: at(10), props: { ...view, thumbs: 'up' } },
     ]);
     const res = await asAdmin();
     expect(res.status).toBe(200);
