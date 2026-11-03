@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Track } from '../../src/lib/contracts';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
+import { songRangeFromUltrastar } from '../../src/lib/songs/range';
 import { songKey } from '../../src/lib/songs/resolve';
 import { syncNoteFiles } from '../../src/lib/usdb/sync';
+import { STORES } from '../helpers/stores';
+import { fixture } from '../songs/fixture';
 
 const track = (id: string, artist: string, title: string): Track => ({
   id, artist, title, artistId: 'a', spotifyUrl: '', playRank: Number(id),
@@ -48,6 +51,15 @@ describe('syncNoteFiles', () => {
     expect((await store.getSongRange(songKey('Queen', 'Rare B-Side')))?.range).toMatchObject({ source: 'artist-typical' });
     expect((await store.getSongRange(songKey('Omar Apollo', 'Evergreen')))?.range).toBeNull();
     expect((await store.listLog()).map((e) => e.outcome).sort()).toEqual(['artist-typical', 'note-file', 'note-file', 'skipped']);
+  });
+
+  it.each(STORES)("stores both singers' parts of a duet note file (%s store)", async (_name, make) => {
+    const store = make();
+    const summary = await syncNoteFiles({ store, usdb: fakeUsdb(() => fixture('duet.txt')), tracks: [track('1', 'Duo', 'Duet Song')], now: () => new Date(0) });
+    expect(summary.noteFile).toBe(1);
+    const range = (await store.getSongRange(songKey('Duo', 'Duet Song')))!.range;
+    expect(range).toEqual({ ...songRangeFromUltrastar(fixture('duet.txt')), usdbViews: 2000, usdbRating: 4 });
+    expect(range?.parts?.map((p) => p.singer)).toEqual(['Singer One', 'Singer Two']);
   });
 
   it('skips songs that already have a note-file range and replaces earlier guesses', async () => {

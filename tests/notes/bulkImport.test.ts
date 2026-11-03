@@ -3,6 +3,7 @@ import type { SongRange } from '../../src/lib/contracts';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { decodeNoteFile, dedupeRanges, importBulkRanges, rangeFromNoteText, type BulkRange } from '../../src/lib/notes/bulkImport';
 import { songKey } from '../../src/lib/songs/resolve';
+import { STORES } from '../helpers/stores';
 import { fixture } from '../songs/fixture';
 
 const at = () => new Date('2026-10-15T00:00:00Z');
@@ -58,6 +59,20 @@ describe('rangeFromNoteText', () => {
   it('drops implausible ranges (over three octaves wide)', () => {
     const notes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => `: ${i * 4} 4 ${i < 5 ? -20 : 25} la`).join('\n');
     expect(rangeFromNoteText(`#ARTIST:A\n#TITLE:B\n#BPM:100\n${notes}\nE`, 't')).toBeNull();
+  });
+
+  it.each(STORES)("keeps both singers' parts of a duet through the import (%s store)", async (_name, make) => {
+    const duet = rangeFromNoteText(fixture('duet.txt'), 'c')!;
+    expect(duet.range).toMatchObject({
+      low: 60,
+      high: 62,
+      collection: 'c',
+      duet: true,
+      parts: [{ singer: 'Singer One', low: 60, high: 62 }, { singer: 'Singer Two', low: 67, high: 72 }],
+    });
+    const store = make();
+    await importBulkRanges(store, [duet], { now: at });
+    expect((await store.getSongRange(duet.key))!.range).toEqual(duet.range);
   });
 });
 
