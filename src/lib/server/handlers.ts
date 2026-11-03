@@ -9,6 +9,7 @@ import type {
   Track,
 } from '../contracts';
 import { songKey } from '../songs/resolve';
+import { catalogueKey } from './catalogue';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_S,
@@ -184,7 +185,47 @@ export async function knownSongs(req: Request, ctx: AppContext): Promise<Respons
 }
 
 // ---------- catalogue: results without Spotify (QWW-2 Track B) ----------
-// catalogueRecommendations and catalogueFeedback go here.
+// No session and no account: the range comes with every request, and feedback is stored under a
+// random device id, never a Spotify id.
+
+/** A query value of digits as a number; anything else as it is, so range validation rejects it. */
+const queryInt = (raw: string | null): unknown => (raw !== null && /^\d+$/.test(raw) ? Number(raw) : raw);
+
+/** 8 to 64 letters, digits or dashes, e.g. a random UUID kept on the device. */
+const ANON_ID = /^[A-Za-z0-9-]{8,64}$/;
+
+export async function catalogueRecommendations(req: Request, ctx: AppContext): Promise<Response> {
+  const params = new URL(req.url).searchParams;
+  const range = validateVocalRange({ low: queryInt(params.get('low')), high: queryInt(params.get('high')), source: 'test' });
+  if (!range.ok) return errorJson(400, 'bad-request', range.error);
+  if (params.get('all') === '1') return json(await ctx.catalogue.recommend(range.value, { all: true }));
+  const offset = intParam(params.get('offset'), 0, 0, 100_000);
+  const limit = intParam(params.get('limit'), 5, 1, 50);
+  if (offset === null || limit === null) return errorJson(400, 'bad-request', 'offset must be >= 0 and limit 1..50');
+  const body: RecommendationsResponse = await ctx.catalogue.recommend(range.value, { offset, limit });
+  return json(body);
+}
+
+export async function catalogueFeedback(req: Request, ctx: AppContext): Promise<Response> {
+  const parsed = await readJson(req);
+  if (!parsed.ok) return errorJson(400, 'bad-request', 'Body must be JSON');
+  const v = validateFeedback(parsed.body);
+  if (!v.ok) return errorJson(400, 'bad-request', v.error);
+  const { anonId, range } = parsed.body as Record<string, unknown>; // an object: validateFeedback checked
+  if (typeof anonId !== 'string' || !ANON_ID.test(anonId)) {
+    return errorJson(400, 'bad-request', 'anonId must be 8 to 64 letters, digits or dashes');
+  }
+  const r = typeof range === 'object' && range !== null ? (range as Record<string, unknown>) : {};
+  const userRange = validateVocalRange({ low: r.low, high: r.high, source: 'test' });
+  if (!userRange.ok) return errorJson(400, 'bad-request', userRange.error);
+  const key = catalogueKey(v.value.trackId);
+  if (key === null) return errorJson(400, 'bad-request', 'trackId must be a catalogue id (cat:...)');
+  const entry: FeedbackEntry = { userId: `anon:${anonId}`, ...v.value, userRange: userRange.value, at: new Date().toISOString() };
+  const songRange = await songRangeSnapshot(key, ctx);
+  if (songRange) entry.songRange = songRange;
+  await ctx.store.saveFeedback(entry);
+  return json({ ok: true });
+}
 
 // ---------- feedback ----------
 
@@ -194,7 +235,15 @@ export async function knownSongs(req: Request, ctx: AppContext): Promise<Respons
  */
 async function songRangeAtTap(userId: string, trackId: string, ctx: AppContext): Promise<FeedbackEntry['songRange']> {
   const track = ctx.tracks.peek(userId)?.find((t) => t.id === trackId);
-  const rec = track ? await ctx.store.getSongRange(songKey(track.artist, track.title)) : null;
+  return track ? songRangeSnapshot(songKey(track.artist, track.title), ctx) : undefined;
+}
+
+/**
+ * A copy of the song's stored range at tap time, so later imports cannot change what the tap was
+ * about: where it came from (the log outcome), how it was measured, its notes. Undefined when not stored.
+ */
+async function songRangeSnapshot(key: string, ctx: AppContext): Promise<FeedbackEntry['songRange']> {
+  const rec = await ctx.store.getSongRange(key);
   if (!rec) return undefined;
   const snapshot: NonNullable<FeedbackEntry['songRange']> = { source: rec.log.outcome };
   if (rec.range?.method !== undefined) snapshot.method = rec.range.method;
