@@ -63,6 +63,11 @@ export function popularityScore(track: Track, song: SongRange): number {
   return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : UNKNOWN_POPULARITY;
 }
 
+/** False when popularityScore had nothing to go on (no Spotify popularity, USDB views or stars) and gave the flat default. */
+export function popularityKnown(track: Track, song: SongRange): boolean {
+  return typeof track.popularity === 'number' || typeof song.usdbViews === 'number' || typeof song.usdbRating === 'number';
+}
+
 /** Familiarity for tracks that predate the familiarity field: falls with play rank. */
 export function familiarityScore(track: Track): number {
   if (typeof track.familiarity === 'number') return Math.min(1, Math.max(0, track.familiarity));
@@ -78,6 +83,7 @@ export function scoreParts(user: VocalRange, track: Track, song: SongRange, octa
     comfort: comfortScore(user, song, octave),
     familiarity: familiarityScore(track),
     popularity: popularityScore(track, song),
+    popularityKnown: popularityKnown(track, song),
     penalty,
   };
 }

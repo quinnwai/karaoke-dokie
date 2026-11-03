@@ -73,6 +73,15 @@ describe('familiarity and popularity', () => {
     expect(popularityScore(track('x', { popularity: 40 }), song(55, 65, { usdbRating: 4 }))).toBeCloseTo(0.6);
     expect(popularityScore(track('x'), song(55, 65))).toBe(UNKNOWN_POPULARITY);
   });
+
+  it('marks popularity as known when Spotify popularity, USDB views or USDB stars are there', () => {
+    const known = (t: Track, r: SongRange) => match(t, r).parts!.popularityKnown;
+    expect(known(track('x', { popularity: 0 }), song(55, 65))).toBe(true);
+    expect(known(track('x'), song(55, 65, { usdbViews: 0 }))).toBe(true);
+    expect(known(track('x'), song(55, 65, { usdbRating: 3 }))).toBe(true);
+    const unknown = match(track('x'), song(55, 65));
+    expect(unknown.parts).toMatchObject({ popularityKnown: false, popularity: UNKNOWN_POPULARITY });
+  });
 });
 
 describe('ranking', () => {
