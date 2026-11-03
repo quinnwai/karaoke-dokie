@@ -1,6 +1,7 @@
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
 import { isMeasured } from '../songs/sourceRank';
 import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
+import type { SongMoodsRecord } from './store';
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -12,6 +13,7 @@ export function createMemoryStore(): Store {
   const log: DataSourceLogEntry[] = [];
   const feedback: FeedbackEntry[] = [];
   const usdbSongs = new Map<number, UsdbIndexEntry>();
+  const songMoods = new Map<string, SongMoodsRecord>();
 
   const newestFirst = <T extends { at: string }>(items: T[]): T[] =>
     items
@@ -106,12 +108,17 @@ export function createMemoryStore(): Store {
       throw new Error('listEvents not implemented yet');
     },
 
-    // ---- mood labels (QWW-11): implemented by the mood-label work ----
-    async putSongMoods() {
-      throw new Error('putSongMoods not implemented yet');
+    // ---- mood labels (QWW-11) ----
+    async putSongMoods(entries) {
+      for (const e of entries) songMoods.set(e.key, clone(e));
     },
-    async getSongMoods() {
-      throw new Error('getSongMoods not implemented yet');
+    async getSongMoods(songKeys) {
+      const out = new Map<string, SongMoodsRecord>();
+      for (const k of songKeys) {
+        const m = songMoods.get(k);
+        if (m) out.set(k, clone(m));
+      }
+      return out;
     },
   };
 }
