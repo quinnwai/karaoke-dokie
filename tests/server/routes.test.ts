@@ -833,3 +833,31 @@ describe('shipped mood labels (QWW-11)', () => {
   });
 });
 
+
+describe('karaoke popularity (QWW-6)', () => {
+  it('scores the library whole list with it, and keeps a Spotify year over the chart year', async () => {
+    // Baby has no USDB row in the seeds, so nothing else gives it a popularity. Made-up chart numbers.
+    await getStore().putSongPopularity([{ key: songKey('Justin Bieber', 'Baby'), chartRank: 9, chartYear: 2011, source: 'billboard' }]);
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const all = (await (await recs.GET(req('/api/recommendations?all=1', jar))).json()) as RecommendationsResponse;
+    const baby = all.matches.find((m) => m.track.title === 'Baby')!;
+    expect(baby).toMatchObject({ year: 2010, yearSource: 'spotify', parts: { popularity: 0.75, popularityKnown: true } });
+    expect(baby.range).not.toHaveProperty('chartRank');
+    const page = (await (await recs.GET(req('/api/recommendations?offset=0&limit=50', jar))).json()) as RecommendationsResponse;
+    expect(page.matches.find((m) => m.track.title === 'Baby')!.parts).toMatchObject({ popularityKnown: false });
+  });
+
+  it('scores the catalogue with it and dates a song by its chart year when nothing else does', async () => {
+    const key = songKey('Chart Artist', 'Chart Only Song');
+    const range = { low: 55, high: 65, tessitura: 60, source: 'audio-full' as const, confidence: 'high' as const, fastLyrics: false };
+    const log = { trackId: '', title: 'Chart Only Song', artist: 'Chart Artist', outcome: 'audio-full' as const, reason: 'Measured.', at: '2026-10-18T00:00:00.000Z' };
+    await getStore().putSongRange(key, { range, log });
+    await getStore().putSongPopularity([{ key, chartRank: 3, chartYear: 1999, source: 'billboard' }]);
+    const body = (await (await catalogueRecs.GET(req('/api/catalogue/recommendations?low=45&high=80&all=1'))).json()) as RecommendationsResponse;
+    const song = body.matches.find((m) => m.track.id === `cat:${key}`)!;
+    expect(song).toMatchObject({ year: 1999, yearSource: 'chart', parts: { popularity: 0.75, popularityKnown: true } });
+    expect(song.reasons).toContain('Crowd favourite');
+    expect(song.range).toEqual(range);
+  });
+});

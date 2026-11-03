@@ -27,6 +27,8 @@ const ACCESS: Record<keyof Store, 'read' | 'write'> = {
   listEvents: 'read',
   putSongMoods: 'write',
   getSongMoods: 'read',
+  putSongPopularity: 'write',
+  getSongPopularity: 'read',
 };
 
 export function readOnlyStore(store: Store): Store {

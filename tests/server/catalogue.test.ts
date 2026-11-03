@@ -1,17 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SongRange, VocalRange } from '../../src/lib/contracts';
 import {
+  CATALOGUE_SIZE,
   CATALOGUE_TTL_MS,
   catalogueKey,
   catalogueTracks,
   createCatalogue,
+  loadCatalogue,
   recommendCatalogue,
 } from '../../src/lib/server/catalogue';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
-import type { CatalogueSong, UsdbIndexEntry } from '../../src/lib/server/store';
+import type { CatalogueSong, SongPopularityRecord, UsdbIndexEntry } from '../../src/lib/server/store';
 import { MAX_ALL_MATCHES } from '../../src/lib/server/songService';
 import { productionSongDeps } from '../../src/lib/server/wiring';
-import { UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
+import { CHART_FLOOR, KARAOKE_VIEWS_FULL, UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
 
 const user: VocalRange = { low: 48, high: 72, source: 'test' }; // C3-C5, centre C4
 /** The real matching, scoring and ranking, as the app injects them. */
@@ -169,6 +171,63 @@ describe('catalogue recommendations', () => {
     }
     expect(offset).toBeNull();
     expect(paged).toEqual(all);
+  });
+});
+
+describe('karaoke popularity (QWW-6)', () => {
+  const popularity = (s: CatalogueSong, extra: Omit<SongPopularityRecord, 'key' | 'source'>): SongPopularityRecord => ({ key: s.key, source: 'test', ...extra });
+
+  it('is read with the catalogue, once for all of its songs, and kept on the songs that have a row', async () => {
+    const store = createMemoryStore();
+    const a = song('A', 'Charted', range(57, 63));
+    const b = song('B', 'Plain', range(57, 63));
+    await store.putSongRange(a.key, { range: a.range, log: a.log });
+    await store.putSongRange(b.key, { range: b.range, log: b.log });
+    const row = popularity(a, { chartRank: 4, chartYear: 2001 });
+    await store.putSongPopularity([row, { key: 'nobody|else', karaokeViews: 1, source: 'test' }]);
+    const listCatalogue = vi.spyOn(store, 'listCatalogue');
+    const getSongPopularity = vi.spyOn(store, 'getSongPopularity');
+    const loaded = await loadCatalogue(store);
+    expect(listCatalogue).toHaveBeenCalledWith(CATALOGUE_SIZE);
+    expect(getSongPopularity).toHaveBeenCalledTimes(1);
+    expect([...getSongPopularity.mock.calls[0]![0]].sort()).toEqual([a.key, b.key]);
+    expect(loaded.find((s) => s.key === a.key)!.popularity).toEqual(row);
+    expect(loaded.find((s) => s.key === b.key)).not.toHaveProperty('popularity');
+  });
+
+  it('scores with it on every request, all=1 or a page, and returns the stored range', () => {
+    const plain = range(57, 63);
+    const charted = song('A', 'Charted', plain);
+    const viewed = song('B', 'Viewed', plain, { views: 10, rating: 1 });
+    const unknown = song('C', 'Unknown', plain);
+    const tracks = catalogueTracks([
+      { ...unknown },
+      { ...viewed, popularity: popularity(viewed, { karaokeViews: KARAOKE_VIEWS_FULL }) },
+      { ...charted, popularity: popularity(charted, { chartRank: 15, chartYear: 1997 }) },
+    ]);
+    const all = recommendCatalogue(tracks, user, deps, { all: true });
+    expect(all.matches.map((m) => m.track.title)).toEqual(['Charted', 'Viewed', 'Unknown']);
+    const [first, second, third] = all.matches;
+    expect(first!.parts).toMatchObject({ popularity: CHART_FLOOR.top20, popularityKnown: true });
+    expect(first!.reasons).toEqual(['In your sweet spot', 'Crowd favourite']);
+    expect(second!.parts!.popularity).toBeGreaterThan(UNKNOWN_POPULARITY); // its own low USDB numbers, averaged with many karaoke views
+    expect(third!.parts).toMatchObject({ popularity: UNKNOWN_POPULARITY, popularityKnown: false });
+    for (const m of all.matches) expect(m.range).toEqual(plain);
+    expect(tracks[2]!.range).toStrictEqual(plain);
+    expect(recommendCatalogue(tracks, user, deps, { offset: 0, limit: 3 }).matches.map((m) => m.track.id)).toEqual(all.matches.map((m) => m.track.id));
+  });
+
+  it('takes the chart year only for a song whose USDB row has no year', () => {
+    const withYear = song('A', 'Dated', range(57, 63), { year: 1975 });
+    const noYear = song('B', 'Undated', range(57, 63), { views: 100 });
+    const noRow = song('C', 'No row', range(57, 63));
+    const tracks = catalogueTracks([
+      { ...withYear, popularity: popularity(withYear, { chartRank: 50, chartYear: 1976 }) },
+      { ...noYear, popularity: popularity(noYear, { chartRank: 50, chartYear: 1988 }) },
+      { ...noRow, popularity: popularity(noRow, { chartRank: 50, chartYear: 2003 }) },
+    ]);
+    const byTitle = Object.fromEntries(recommendCatalogue(tracks, user, deps, { all: true }).matches.map((m) => [m.track.title, [m.year, m.yearSource]]));
+    expect(byTitle).toEqual({ Dated: [1975, 'usdb'], Undated: [1988, 'chart'], 'No row': [2003, 'chart'] });
   });
 });
 

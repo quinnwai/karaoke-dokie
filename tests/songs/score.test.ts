@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { Match, SongRange, Track, VocalRange } from '../../src/lib/contracts';
-import { matchSong } from '../../src/lib/songs/match';
+import { matchSong, toMatch } from '../../src/lib/songs/match';
 import { rankMatches } from '../../src/lib/songs/rank';
 import {
+  CHART_FLOOR,
   comfortScore,
   familiarityScore,
+  KARAOKE_VIEWS_FULL,
   pitchComfort,
+  popularityKnown,
   popularityScore,
   reasonsFor,
   scoreMatch,
   UNKNOWN_POPULARITY,
+  withKaraokePopularity,
 } from '../../src/lib/songs/score';
 import { songRangeFromUltrastar } from '../../src/lib/songs/range';
 
@@ -81,6 +85,73 @@ describe('familiarity and popularity', () => {
     expect(known(track('x'), song(55, 65, { usdbRating: 3 }))).toBe(true);
     const unknown = match(track('x'), song(55, 65));
     expect(unknown.parts).toMatchObject({ popularityKnown: false, popularity: UNKNOWN_POPULARITY });
+  });
+});
+
+describe('karaoke popularity (KaraFun views, Billboard Year-End charts)', () => {
+  const plain = song(55, 65);
+  const karaoke = (views?: number, chartRank?: number, extra: Partial<SongRange> = {}) =>
+    withKaraokePopularity(song(55, 65, extra), { karaokeViews: views, chartRank });
+
+  it('scores karaoke views on a log scale that is full at KARAOKE_VIEWS_FULL', () => {
+    expect(popularityScore(track('x'), karaoke(KARAOKE_VIEWS_FULL))).toBeCloseTo(1);
+    expect(popularityScore(track('x'), karaoke(KARAOKE_VIEWS_FULL * 20))).toBe(1);
+    expect(popularityScore(track('x'), karaoke(56_000))).toBeCloseTo(0.7, 2); // the median KaraFun song
+    expect(popularityScore(track('x'), karaoke(1_000))).toBeCloseTo(0.445, 3);
+    expect(popularityScore(track('x'), karaoke(0))).toBe(0);
+  });
+
+  it('averages karaoke views with Spotify and USDB, whichever are there', () => {
+    const full = karaoke(KARAOKE_VIEWS_FULL, undefined, { usdbRating: 4 });
+    expect(popularityScore(track('x'), full)).toBeCloseTo((0.8 + 1) / 2);
+    expect(popularityScore(track('x', { popularity: 40 }), full)).toBeCloseTo((0.4 + 0.8 + 1) / 3);
+  });
+
+  it('gives a Year-End song at least 0.6, and a top-20 one at least 0.75, without ever lowering a song', () => {
+    expect(popularityScore(track('x'), karaoke(undefined, 20))).toBe(CHART_FLOOR.top20);
+    expect(popularityScore(track('x'), karaoke(undefined, 21))).toBe(CHART_FLOOR.top100);
+    expect(popularityScore(track('x'), karaoke(undefined, 100))).toBe(CHART_FLOOR.top100);
+    expect(CHART_FLOOR).toEqual({ top100: 0.6, top20: 0.75 });
+    // Few karaoke views (0.445) are raised to the floor; many (1) stay as they are.
+    expect(popularityScore(track('x'), karaoke(1_000, 50))).toBe(0.6);
+    expect(popularityScore(track('x'), karaoke(KARAOKE_VIEWS_FULL, 90))).toBeCloseTo(1);
+    expect(popularityScore(track('x', { popularity: 10 }), karaoke(undefined, 3))).toBe(0.75);
+  });
+
+  it('marks popularity as known with karaoke views or a chart entry alone', () => {
+    expect(popularityKnown(track('x'), karaoke(0))).toBe(true);
+    expect(popularityKnown(track('x'), karaoke(undefined, 100))).toBe(true);
+    expect(popularityKnown(track('x'), karaoke())).toBe(false);
+    expect(match(track('x'), karaoke(undefined, 100)).parts).toMatchObject({ popularityKnown: true, popularity: 0.6 });
+  });
+
+  it('calls a top-20 Year-End song a crowd favourite, and not one that only made the top 100', () => {
+    const catalogue = track('cat', { familiarity: 1, known: false });
+    expect(match(catalogue, karaoke(undefined, 12)).reasons).toEqual(['In your sweet spot', 'Crowd favourite']);
+    expect(match(catalogue, karaoke(undefined, 60)).reasons).toEqual(['In your sweet spot']);
+    expect(match(catalogue, karaoke(KARAOKE_VIEWS_FULL)).reasons).toEqual(['In your sweet spot', 'Crowd favourite']);
+  });
+
+  it('scores on a copy: the range passed in is left alone, and nothing to add means no copy', () => {
+    const record = { key: 'the examples|first song', karaokeViews: 9_000, chartRank: 7, chartYear: 2004, source: 'karafun+billboard' };
+    const scored = withKaraokePopularity(plain, record);
+    expect(scored).toStrictEqual({ ...plain, karaokeViews: 9_000, chartRank: 7 });
+    expect(plain).toStrictEqual(song(55, 65));
+    expect(withKaraokePopularity(plain, undefined)).toBe(plain);
+    expect(withKaraokePopularity(plain, { karaokeViews: undefined })).toBe(plain);
+  });
+
+  it('keeps the karaoke popularity when a duet is scored on one singer’s part', () => {
+    const duet = karaoke(undefined, 5, {
+      duet: true,
+      parts: [
+        { low: 56, high: 64, tessitura: 60, fastLyrics: false },
+        { low: 40, high: 80, tessitura: 60, fastLyrics: false },
+      ],
+    });
+    const m = scoreMatch(user, toMatch(track('d'), duet, matchSong(user, duet)!));
+    expect(m.part).toBe(1);
+    expect(m.parts).toMatchObject({ popularity: CHART_FLOOR.top20, popularityKnown: true });
   });
 });
 

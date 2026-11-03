@@ -4,12 +4,14 @@
 //
 // Catalogue songs are shown as tracks nobody has played. Familiarity is 1, so comfort alone
 // decides the fit part of the score, and known is false, so no reason says "You play this a lot"
-// (score.ts). Popularity comes from the song's USDB views and stars, whatever measured its range.
+// (score.ts). Popularity comes from the song's USDB views and stars and from our karaoke
+// popularity (KaraFun views, Billboard Year-End rank), whatever measured its range.
 
 import type { DataSourceLogEntry, Match, RecommendationsResponse, SongRange, Track, VocalRange } from '../contracts';
 import { hasLittleSinging } from '../songs/resolve';
+import { withKaraokePopularity } from '../songs/score';
 import { MAX_ALL_MATCHES, type SongDeps } from './songService';
-import type { CatalogueSong, UsdbIndexEntry } from './store';
+import type { CatalogueSong, SongPopularityRecord, Store, UsdbIndexEntry } from './store';
 
 /** How many songs are read from the store, most popular first. */
 export const CATALOGUE_SIZE = 6000;
@@ -18,9 +20,30 @@ export const CATALOGUE_TTL_MS = 60 * 60_000;
 
 const ID_PREFIX = 'cat:';
 
+/** A catalogue song as the cache keeps it: with its karaoke popularity row (QWW-6), when it has one. */
+export interface CatalogueEntry extends CatalogueSong {
+  popularity?: SongPopularityRecord;
+}
+
 /** A catalogue song and the track it is shown as. Its log line carries the track id. */
-export interface CatalogueTrack extends CatalogueSong {
+export interface CatalogueTrack extends CatalogueEntry {
   track: Track;
+}
+
+/**
+ * Reads the catalogue, most popular first, and its songs' karaoke popularity in one batched read.
+ * The cache keeps both, so requests read neither.
+ */
+export async function loadCatalogue(
+  store: Pick<Store, 'listCatalogue' | 'getSongPopularity'>,
+  size: number = CATALOGUE_SIZE,
+): Promise<CatalogueEntry[]> {
+  const songs = await store.listCatalogue(size);
+  const popularity = await store.getSongPopularity(songs.map((s) => s.key));
+  return songs.map((s) => {
+    const p = popularity.get(s.key);
+    return p ? { ...s, popularity: p } : s;
+  });
 }
 
 /** The song key in a catalogue track id ("cat:<songKey>"), or null for any other id. */
@@ -32,7 +55,7 @@ export function catalogueKey(trackId: string): string | null {
  * Catalogue songs as tracks, in catalogue order (playRank). The stored log line keeps whatever
  * track id wrote it, which can be a tester's Spotify track, so it is replaced with the catalogue id.
  */
-export function catalogueTracks(songs: CatalogueSong[]): CatalogueTrack[] {
+export function catalogueTracks(songs: CatalogueEntry[]): CatalogueTrack[] {
   return songs.map((song, i) => {
     const id = ID_PREFIX + song.key;
     const track: Track = {
@@ -86,12 +109,17 @@ export function recommendCatalogue(
   const logs = new Map<string, DataSourceLogEntry>();
   for (const song of songs) {
     if (hasLittleSinging(song.title)) continue; // a dub or karaoke version shares the original's key
-    const fit = deps.matchSong(song.track, scoringRange(song.range, song.usdb), userRange);
+    const scored = withKaraokePopularity(scoringRange(song.range, song.usdb), song.popularity);
+    const fit = deps.matchSong(song.track, scored, userRange);
     if (!fit) continue;
     const m: Match = { ...fit, range: song.range };
     if (song.usdb?.year !== undefined) {
       m.year = song.usdb.year;
       m.yearSource = 'usdb';
+    } else if (song.popularity?.chartYear !== undefined) {
+      // A Year-End chart year can be a year after release, so only when USDB has no year.
+      m.year = song.popularity.chartYear;
+      m.yearSource = 'chart';
     }
     if (song.usdb?.genre) m.genre = song.usdb.genre;
     matches.push(m);
@@ -120,9 +148,9 @@ export interface Catalogue {
   recommend(userRange: VocalRange, page: CataloguePage): Promise<RecommendationsResponse>;
 }
 
-/** The catalogue cached per process. `load` reads it from the store (CATALOGUE_SIZE songs). */
+/** The catalogue cached per process. `load` reads it from the store (loadCatalogue). */
 export function createCatalogue(
-  load: () => Promise<CatalogueSong[]>,
+  load: () => Promise<CatalogueEntry[]>,
   deps: CatalogueDeps,
   opts: { ttlMs?: number; now?: () => number } = {},
 ): Catalogue {

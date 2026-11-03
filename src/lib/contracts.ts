@@ -96,7 +96,10 @@ export interface ScoreParts {
   familiarity: number;
   /** 0-1: how well known the song is. */
   popularity: number;
-  /** False when popularity is the flat default because we know nothing (no Spotify popularity, no USDB views or stars). */
+  /**
+   * False when popularity is the flat default because we know nothing (no Spotify popularity, no
+   * USDB views or stars, no karaoke views, no Billboard Year-End entry).
+   */
   popularityKnown?: boolean;
   /** Total subtracted for octave shift, artist-estimated range and fast lyrics. */
   penalty: number;
@@ -116,9 +119,12 @@ export interface Match {
   parts?: ScoreParts;
   /** One or two short reasons for the rank, e.g. "In your sweet spot". */
   reasons?: string[];
-  /** Release year: the earliest of USDB's year for the song and Spotify's album year. */
+  /**
+   * Release year: the earliest of USDB's year for the song and Spotify's album year. A song with
+   * neither gets the year of its best Billboard Year-End rank ('chart'), which can be a year late.
+   */
   year?: number;
-  yearSource?: 'usdb' | 'spotify';
+  yearSource?: 'usdb' | 'spotify' | 'chart';
   /** Genre as USDB lists it (free text, e.g. "Rock"). */
   genre?: string;
   /** For a duet matched on one singer's part: which part (1 = P1, 2 = P2) and that singer's name. */

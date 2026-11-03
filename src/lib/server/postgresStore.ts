@@ -9,6 +9,7 @@ import {
   MAX_EVENTS_LIMIT,
   type CatalogueSong,
   type SongMoodsRecord,
+  type SongPopularityRecord,
   type SongRangeRecord,
   type Store,
   type StoredEvent,
@@ -124,6 +125,14 @@ function toSongMoods(r: Row): SongMoodsRecord {
     method: str(r.method),
     source: str(r.source),
   };
+}
+
+function toSongPopularity(r: Row): SongPopularityRecord {
+  const p: SongPopularityRecord = { key: str(r.song_key), source: str(r.source) };
+  if (isSet(r.karaoke_views)) p.karaokeViews = num(r.karaoke_views);
+  if (isSet(r.chart_rank)) p.chartRank = num(r.chart_rank);
+  if (isSet(r.chart_year)) p.chartYear = num(r.chart_year);
+  return p;
 }
 
 export interface PostgresStoreOptions {
@@ -367,6 +376,38 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
         const rows = await query(`SELECT * FROM song_moods WHERE song_key IN (${placeholders})`, chunk);
         for (const r of rows) out.set(str(r.song_key), toSongMoods(r));
+      }
+      return out;
+    },
+
+    // ---- song popularity (QWW-6) ----
+    async putSongPopularity(entries) {
+      // One row per key, the last entry winning, as for mood labels.
+      const unique = [...new Map(entries.map((e) => [e.key, e])).values()];
+      for (let i = 0; i < unique.length; i += 100) {
+        const params: unknown[] = [];
+        const rows = unique.slice(i, i + 100).map((e) => {
+          params.push(e.key, e.karaokeViews ?? null, e.chartYear ?? null, e.chartRank ?? null, e.source);
+          const n = params.length;
+          return `($${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(
+          `INSERT INTO song_popularity (song_key, karaoke_views, chart_year, chart_rank, source) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET karaoke_views = EXCLUDED.karaoke_views, chart_year = EXCLUDED.chart_year,
+             chart_rank = EXCLUDED.chart_rank, source = EXCLUDED.source`,
+          params,
+        );
+      }
+    },
+    async getSongPopularity(songKeys) {
+      // 1,000 keys a query: the catalogue asks for all of its songs at once.
+      const out = new Map<string, SongPopularityRecord>();
+      const unique = [...new Set(songKeys)];
+      for (let i = 0; i < unique.length; i += 1000) {
+        const chunk = unique.slice(i, i + 1000);
+        const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
+        const rows = await query(`SELECT * FROM song_popularity WHERE song_key IN (${placeholders})`, chunk);
+        for (const r of rows) out.set(str(r.song_key), toSongPopularity(r));
       }
       return out;
     },

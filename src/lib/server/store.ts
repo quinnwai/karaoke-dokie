@@ -69,6 +69,23 @@ export interface SongMoodsRecord {
   source: string;
 }
 
+/**
+ * How well known one song is, from our own karaoke data (QWW-6): the YouTube views of its KaraFun
+ * karaoke videos and its best Billboard Year-End Hot 100 rank. Only for scoring; never stored with
+ * the song's range.
+ */
+export interface SongPopularityRecord {
+  /** songKey(artist, title). */
+  key: string;
+  /** Total YouTube views of the song's KaraFun karaoke videos. */
+  karaokeViews?: number;
+  /** The song's best (lowest) Billboard Year-End Hot 100 rank, 1 to 100, and the year of that chart. */
+  chartRank?: number;
+  chartYear?: number;
+  /** Which files the numbers came from: "karafun", "billboard" or "karafun+billboard". */
+  source: string;
+}
+
 export interface Store {
   getUser(id: string): Promise<UserRecord | null>;
   upsertUser(user: UserRecord): Promise<void>;
@@ -120,6 +137,12 @@ export interface Store {
   putSongMoods(entries: SongMoodsRecord[]): Promise<void>;
   /** The map only has keys that have a label. */
   getSongMoods(songKeys: string[]): Promise<Map<string, SongMoodsRecord>>;
+
+  // ---- song popularity from karaoke data (QWW-6) ----
+  /** Adds rows, or replaces a key's whole row; within one call the last entry for a key wins. */
+  putSongPopularity(entries: SongPopularityRecord[]): Promise<void>;
+  /** Batch read; the map only has keys that have a row. */
+  getSongPopularity(songKeys: string[]): Promise<Map<string, SongPopularityRecord>>;
 }
 
 export const DEFAULT_LIST_LIMIT = 200;

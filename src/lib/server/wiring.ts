@@ -3,7 +3,7 @@
 // Seed ranges are used only with SPOTIFY_MOCK=1, so the offline demo and e2e tests have data.
 import type { DataSourceLogEntry, Mood, SongRange, Track } from '../contracts';
 import seedFile from '../../../data/seed-song-ranges.json';
-import { CATALOGUE_SIZE, createCatalogue, type Catalogue } from './catalogue';
+import { createCatalogue, loadCatalogue, type Catalogue } from './catalogue';
 import { configProblems, readConfig, type ServerConfig } from './config';
 import { getStore, pickStoreKind, resetStoreForTests } from './getStore';
 import { createMockSpotifyClient } from './mockSpotify';
@@ -155,7 +155,7 @@ export function getAppContext(): AppContext {
       tracks: createTrackCache(),
       catalogue: createCatalogue(async () => {
         await seeded;
-        return store.listCatalogue(CATALOGUE_SIZE);
+        return loadCatalogue(store);
       }, deps),
       problems: configProblems(config),
     };

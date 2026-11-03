@@ -26,6 +26,7 @@ describe('readOnlyStore', () => {
     await ro.saveFeedback({ userId: 'u1', trackId: 't1', thumbs: 'up', userRange: { low: 48, high: 72, source: 'test' }, difficulty: 'easy', octave: 'none', at: log.at });
     await ro.appendEvents('device', [{ name: 'landing_viewed', at: log.at }]);
     await ro.putSongMoods([{ key: 'band|song', moods: ['upbeat'], method: 'm', source: 'hand' }]);
+    await ro.putSongPopularity([{ key: 'band|song', karaokeViews: 100, source: 'karafun' }]);
 
     expect(await store.getUser('u1')).toMatchObject({ displayName: 'Ann', spotify: tokens });
     expect(await store.getRange('u1')).toBeNull();
@@ -33,6 +34,7 @@ describe('readOnlyStore', () => {
     expect(await store.usdbIndexStats()).toEqual({ count: 0, newestChange: null });
     expect(await store.listLog()).toEqual([]);
     expect(await store.listFeedback()).toEqual([]);
+    expect((await store.getSongPopularity(['band|song'])).size).toBe(0);
   });
 
   it('lets the song service look songs up without caching or logging them', async () => {
