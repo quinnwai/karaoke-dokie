@@ -99,6 +99,37 @@ export function allMatches(count = TOTAL): RecommendationsResponse {
   };
 }
 
+/** Release years and genres for the fixture songs, by index. */
+const FACTS: [number, string][] = [
+  [1984, 'City pop'],
+  [2018, 'J-pop'],
+  [2019, 'J-pop'],
+  [1964, 'Jazz'],
+  [1976, 'Pop'],
+  [2003, 'Rock'],
+  [1975, 'Rock'],
+  [1985, 'Pop'],
+  [1987, 'Punk'],
+  [1961, 'Pop'],
+];
+
+/** Every match with a year, genre and known popularity, as the server sends them once QWW-6 data is in. */
+export function allMatchesWithFacts(): RecommendationsResponse {
+  const page = allMatches();
+  page.matches = page.matches.map((m, i) => {
+    const [year, genre] = FACTS[i % FACTS.length]!;
+    const popularity = [0.55, 0.8, 0.7, 0.6, 0.95, 0.85, 0.9, 0.75, 0.4, 0.5][i % 10]!;
+    return {
+      ...m,
+      year,
+      yearSource: 'usdb' as const,
+      genre,
+      parts: { comfort: 1 - (i % 5) * 0.15, familiarity: 0.9 - i * 0.07, popularity, popularityKnown: true, penalty: 0 },
+    };
+  });
+  return page;
+}
+
 export function me(range: MeResponse['range'] = null): MeResponse {
   return { userId: 'u1', displayName: 'Quinn', range };
 }

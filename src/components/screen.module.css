@@ -4,6 +4,9 @@
   min-height: 100vh;
   min-height: 100svh;
   display: grid;
+  /* minmax(0, 1fr) and min-width: 0 below keep wide content (the sideways-scrolling pill rows)
+     from stretching the TV past the screen; the rows scroll instead. */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   padding: 16px;
   background: radial-gradient(ellipse 70% 55% at 50% 45%, rgba(255, 46, 147, 0.07), transparent 70%), var(--bg);
@@ -11,6 +14,7 @@
 
 .tv {
   width: min(100%, 880px);
+  min-width: 0;
   height: min(calc(100svh - 32px), 660px);
   display: flex;
   flex-direction: column;
@@ -934,6 +938,7 @@
 
 .controls {
   width: 100%;
+  min-width: 0;
   max-width: 560px;
   display: flex;
   flex-direction: column;
@@ -942,6 +947,7 @@
 
 /* One row of pills; it scrolls sideways on a phone instead of the page. */
 .chipRow {
+  min-width: 0;
   display: flex;
   gap: 6px;
   overflow-x: auto;

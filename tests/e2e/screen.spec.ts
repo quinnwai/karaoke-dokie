@@ -7,8 +7,8 @@
 import { chromium, devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { FeedbackRequest, MeResponse, VocalRange } from '../../src/lib/contracts';
-import { knownSongs, me, recommendationsPage } from '../fixtures/screen';
+import type { CatalogueFeedbackRequest, FeedbackRequest, MeResponse, VocalRange } from '../../src/lib/contracts';
+import { allMatches, allMatchesWithFacts, knownSongs, me } from '../fixtures/screen';
 
 const SCREENS = path.resolve('test-results/screens');
 const AUDIO = path.resolve('test-results/audio');
@@ -61,7 +61,11 @@ interface ApiState {
   user: MeResponse | null;
   savedRanges: VocalRange[];
   feedback: FeedbackRequest[];
-  recommendationOffsets: number[];
+  catalogueFeedback: CatalogueFeedbackRequest[];
+  /** Query strings of every recommendations request, library and catalogue. */
+  recommendationCalls: string[];
+  /** Serve songs with years, genres and known popularity. */
+  facts?: boolean;
 }
 
 async function mockApi(context: BrowserContext, state: ApiState) {
@@ -82,11 +86,17 @@ async function mockApi(context: BrowserContext, state: ApiState) {
         if (state.user) state.user = { ...state.user, range };
         return json({ ok: true });
       }
-      case 'GET /api/recommendations': {
-        const offset = Number(url.searchParams.get('offset') ?? 0);
-        state.recommendationOffsets.push(offset);
-        return json(recommendationsPage(offset, Number(url.searchParams.get('limit') ?? 5)));
-      }
+      case 'GET /api/recommendations':
+        state.recommendationCalls.push(`library ${url.search}`);
+        return json(state.facts ? allMatchesWithFacts() : allMatches());
+      case 'GET /api/catalogue/recommendations':
+        state.recommendationCalls.push(`catalogue ${url.search}`);
+        return json(state.facts ? allMatchesWithFacts() : allMatches());
+      case 'POST /api/catalogue/feedback':
+        state.catalogueFeedback.push(req.postDataJSON() as CatalogueFeedbackRequest);
+        return json({ ok: true });
+      case 'POST /api/events':
+        return route.fulfill({ status: 204 });
       case 'GET /api/songs/known':
         return json(knownSongs());
       case 'POST /api/feedback':
@@ -116,7 +126,8 @@ async function holdButton(page: Page, name: RegExp, ms: number, midway?: () => P
   await page.mouse.up();
 }
 
-const freshState = (): ApiState => ({ user: null, savedRanges: [], feedback: [], recommendationOffsets: [] });
+const freshState = (): ApiState => ({ user: null, savedRanges: [], feedback: [], catalogueFeedback: [], recommendationCalls: [] });
+const DEFAULT_VIEW = { sort: 'top', decade: null, mood: null, duetsOnly: false };
 
 test('full flow: test, sign in, results, song detail, feedback', async ({ baseURL }) => {
   test.setTimeout(120_000);
@@ -179,16 +190,28 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   expect(box.y + box.height / 2).toBeGreaterThan(view.height / 2);
   await expect(page.getByTestId('range-low')).toHaveText('A2');
   await expect(page.getByTestId('range-high')).toHaveText('C5');
+  await expect(page.getByRole('button', { name: 'or use songs from your Spotify' })).toBeVisible();
   await page.waitForTimeout(900);
-  await shot(page, '06-sign-in-arrow');
+  await shot(page, '06-range-arrow');
 
-  // ---- Sign in (mocked redirect back to /?signedIn=1) ----
+  // ---- No Spotify: the arrow goes straight to catalogue songs ----
   // The arrow bounces forever, so it is never "stable" for Playwright; with
   // reduced motion it stands still (which also checks that setting).
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await arrow.click();
   await expect(page.getByRole('button', { name: /^Plastic Love/ })).toBeVisible();
+  expect(api.recommendationCalls).toEqual(['catalogue ?low=45&high=72&all=1']);
+  expect(api.savedRanges).toEqual([]);
+  expect(await page.evaluate(() => localStorage.getItem('kd.range'))).toBe(JSON.stringify({ low: 45, high: 72 }));
+  await expect(page.getByRole('button', { name: 'Most played' })).toHaveCount(0);
+  await page.waitForTimeout(800);
+  await shot(page, '07-catalogue-results');
+
+  // ---- Connect Spotify (mocked redirect back to /?signedIn=1): the range carries over ----
+  await page.getByRole('button', { name: 'Connect Spotify' }).first().click();
+  await expect(page.getByRole('button', { name: 'Most played' })).toBeVisible();
   expect(api.savedRanges).toEqual([{ low: 45, high: 72, source: 'test' }]);
+  expect(api.recommendationCalls.at(-1)).toBe('library ?all=1');
   await expect(page).toHaveURL(/\/$/);
   await expect(page.locator('ol li')).toHaveCount(5);
   await page.waitForTimeout(1000);
@@ -207,7 +230,8 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
 
   await page.getByRole('button', { name: 'Generate more songs' }).click();
   await expect(page.locator('ol li')).toHaveCount(10);
-  expect(api.recommendationOffsets).toEqual([0, 5]);
+  // More songs come from memory: still one library request.
+  expect(api.recommendationCalls.filter((c) => c.startsWith('library'))).toHaveLength(1);
   await expect(page.getByRole('button', { name: 'Generate more songs' })).toHaveCount(0);
   // Low-confidence songs come last, under Maybe, without a difficulty label.
   const maybe = page.getByRole('region', { name: 'Maybe' });
@@ -234,7 +258,7 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
 
   await page.getByRole('button', { name: 'It went well' }).click();
   await expect(page.getByText('Thanks! That helps.')).toBeVisible();
-  await expect.poll(() => api.feedback).toEqual([{ trackId: 't2', thumbs: 'up', difficulty: 'hard', octave: 'down' }]);
+  await expect.poll(() => api.feedback).toEqual([{ trackId: 't2', thumbs: 'up', difficulty: 'hard', octave: 'down', view: DEFAULT_VIEW }]);
   await shot(page, '11-feedback-thanks');
 
   await highBrowser.close();
@@ -281,7 +305,7 @@ test('a Maybe song has no difficulty, and its info says the range is an estimate
   await shot(page, '18-maybe-detail');
 
   await page.getByRole('button', { name: "It didn't go well" }).click();
-  await expect.poll(() => api.feedback).toEqual([{ trackId: 't9', thumbs: 'down', difficulty: 'maybe', octave: 'none' }]);
+  await expect.poll(() => api.feedback).toEqual([{ trackId: 't9', thumbs: 'down', difficulty: 'maybe', octave: 'none', view: DEFAULT_VIEW }]);
   await context.close();
 });
 
@@ -332,3 +356,60 @@ test('desktop layout', async ({ browser, baseURL }) => {
   await shot(page, '16-desktop-detail');
   await context.close();
 });
+
+test('sorts and decade chips: each sort reorders, chips filter with counts, all on a small phone', async ({ browser, baseURL }) => {
+  const api = freshState();
+  api.user = me({ low: 45, high: 72, source: 'test' });
+  api.facts = true;
+  // iPhone SE size: the smallest screen the controls must fit on with songs visible.
+  const context = await browser.newContext({ ...iPhone, viewport: { width: 375, height: 667 }, baseURL, reducedMotion: 'reduce' });
+  await mockApi(context, api);
+  const page = await context.newPage();
+  await page.goto('/');
+  await expect(page.locator('ol li')).toHaveCount(5);
+
+  // The range bar, the sort row, the filter row and at least three songs fit on screen together.
+  const view = page.viewportSize()!;
+  const inView = async (locator: ReturnType<Page['locator']>) => {
+    const b = (await locator.boundingBox())!;
+    return b.y >= 0 && b.y + b.height <= view.height;
+  };
+  expect(await inView(page.getByRole('group', { name: 'Sort songs' }))).toBe(true);
+  expect(await inView(page.getByRole('group', { name: 'Filter songs' }))).toBe(true);
+  for (let i = 0; i < 3; i++) expect(await inView(page.locator('ol li').nth(i))).toBe(true);
+  // No sideways scroll for the page; the pill rows scroll on their own.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  const first = () => page.locator('ol li').first().locator('[class*="songTitle"]').textContent();
+  const seen = new Set<string | null>();
+  for (const [label, file] of [
+    ['Top picks', '19-sort-top-picks'],
+    ['Most played', '20-sort-most-played'],
+    ['Warm-up', '21-sort-warm-up'],
+    ['Show-off', '22-sort-show-off'],
+    ['Singalongs', '23-sort-singalongs'],
+  ] as const) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+    await expect(page.getByRole('button', { name: label, exact: true })).toHaveAttribute('aria-pressed', 'true');
+    seen.add(await first());
+    await page.waitForTimeout(300);
+    await shot(page, file);
+  }
+  // Sorting reorders: not every sort leads with the same song.
+  expect(seen.size).toBeGreaterThan(1);
+  expect(api.recommendationCalls).toHaveLength(1);
+
+  // Decade chips: counts, a disabled empty decade, filtering, and clearing.
+  await page.getByRole('button', { name: 'Top picks', exact: true }).click();
+  await expect(page.getByRole('button', { name: '80s, 3 songs' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '90s, 0 songs' })).toBeDisabled();
+  await page.getByRole('button', { name: '80s, 3 songs' }).click();
+  await expect(page.locator('ol li')).toHaveCount(3);
+  await expect(page.locator('ol li').first()).toContainText('1984');
+  await page.waitForTimeout(300);
+  await shot(page, '24-decade-80s');
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await expect(page.locator('ol li')).toHaveCount(5);
+  await context.close();
+});
+
