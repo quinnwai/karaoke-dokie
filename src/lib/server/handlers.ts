@@ -2,13 +2,16 @@
 // so integration tests can call the route files directly with the memory store and mock Spotify.
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type {
+  AdminEventsResponse,
   FeedbackEntry,
   KnownSongsResponse,
   MeResponse,
   RecommendationsResponse,
   Track,
 } from '../contracts';
+import { withoutForbiddenProps } from '../eventRules';
 import { songKey } from '../songs/resolve';
+import { summarizeEvents } from './eventStats';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_S,
@@ -20,8 +23,8 @@ import {
   signSession,
 } from './session';
 import { ensureFreshTokens, getUserTracks, SpotifyError } from './spotify';
-import type { UserRecord } from './store';
-import { intParam, validateFeedback, validateVocalRange } from './validate';
+import { DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT, type UserRecord } from './store';
+import { intParam, validateEvents, validateFeedback, validateVocalRange } from './validate';
 import type { AppContext } from './wiring';
 
 const STATE_MAX_AGE_S = 600;
@@ -222,7 +225,23 @@ export async function postFeedback(req: Request, ctx: AppContext): Promise<Respo
 }
 
 // ---------- beta event log (QWW-16, QWW-20) ----------
-// postEvents goes here.
+
+/**
+ * A batch of beta events from one device. No session: events are keyed by the device's random
+ * id, never by who is signed in. Bad input gets a 400 even while collection is off, so wiring
+ * mistakes show up in local dev. req.json() ignores the content type, so the text/plain body
+ * navigator.sendBeacon sends parses like any other.
+ */
+export async function postEvents(req: Request, ctx: AppContext): Promise<Response> {
+  const parsed = await readJson(req);
+  if (!parsed.ok) return errorJson(400, 'bad-request', 'Body must be JSON');
+  const v = validateEvents(parsed.body);
+  if (!v.ok) return errorJson(400, 'bad-request', v.error);
+  if (ctx.config.collectEvents) {
+    await ctx.store.appendEvents(v.value.anonId, v.value.events.map(withoutForbiddenProps));
+  }
+  return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+}
 
 // ---------- admin ----------
 
@@ -232,13 +251,28 @@ function safeEqual(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-export async function adminLog(req: Request, ctx: AppContext): Promise<Response> {
+/** A 403 unless the x-admin-token header matches ADMIN_TOKEN (always, when it is unset); null when it does. */
+function adminDenied(req: Request, ctx: AppContext): Response | null {
   const token = req.headers.get('x-admin-token') ?? '';
-  if (!ctx.config.adminToken || !safeEqual(token, ctx.config.adminToken)) return errorJson(403, 'forbidden');
+  return ctx.config.adminToken && safeEqual(token, ctx.config.adminToken) ? null : errorJson(403, 'forbidden');
+}
+
+export async function adminLog(req: Request, ctx: AppContext): Promise<Response> {
+  const denied = adminDenied(req, ctx);
+  if (denied) return denied;
   const limit = intParam(new URL(req.url).searchParams.get('limit'), 200, 1, 1000);
   if (limit === null) return errorJson(400, 'bad-request', 'limit must be 1..1000');
   return json({ entries: await ctx.store.listLog(limit) });
 }
 
 // ---------- admin: beta events (QWW-16) ----------
-// adminEvents goes here.
+
+/** Funnel, per-sort numbers and session replays, from the newest `limit` events. */
+export async function adminEvents(req: Request, ctx: AppContext): Promise<Response> {
+  const denied = adminDenied(req, ctx);
+  if (denied) return denied;
+  const limit = intParam(new URL(req.url).searchParams.get('limit'), DEFAULT_EVENTS_LIMIT, 1, MAX_EVENTS_LIMIT);
+  if (limit === null) return errorJson(400, 'bad-request', `limit must be 1..${MAX_EVENTS_LIMIT}`);
+  const body: AdminEventsResponse = summarizeEvents(await ctx.store.listEvents({ limit }));
+  return json(body);
+}

@@ -134,6 +134,48 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(await s.listLog(1)).toEqual([logEntry(3, 'artist-typical')]);
   });
 
+  it('reads back beta events: the newest `limit`, oldest first, optionally for one device', async () => {
+    const s = make();
+    const at = (n: number) => new Date(Date.UTC(2026, 10, 3, 0, 0, n)).toISOString();
+    const opened = { name: 'song_opened', at: at(1), props: { sort: 'top', position: 2, fits: true, mood: null } };
+    // An anonId inside the event must not override the device the call is for.
+    const spoofed = { name: 'results_viewed', at: at(4), anonId: 'device-zzzz' };
+    await s.appendEvents('device-aaaa', [opened, spoofed]);
+    await s.appendEvents('device-bbbb', [{ name: 'range_shown', at: at(3) }, { name: 'landing_viewed', at: at(2) }]);
+    const all = await s.listEvents();
+    expect(all).toEqual([
+      { anonId: 'device-aaaa', ...opened },
+      { anonId: 'device-bbbb', name: 'landing_viewed', at: at(2) },
+      { anonId: 'device-bbbb', name: 'range_shown', at: at(3) },
+      { anonId: 'device-aaaa', name: 'results_viewed', at: at(4) },
+    ]);
+    expect(all[1]).not.toHaveProperty('props');
+    expect((await s.listEvents({ limit: 2 })).map((e) => e.name)).toEqual(['range_shown', 'results_viewed']);
+    expect((await s.listEvents({ anonId: 'device-aaaa' })).map((e) => e.name)).toEqual(['song_opened', 'results_viewed']);
+    expect(await s.listEvents({ anonId: 'device-aaaa', limit: 1 })).toEqual([{ anonId: 'device-aaaa', name: 'results_viewed', at: at(4) }]);
+    expect(await s.listEvents({ anonId: 'device-zzzz' })).toEqual([]);
+  });
+
+  it('keeps beta events with the same time in the order they arrived', async () => {
+    const s = make();
+    const at = '2026-11-03T00:00:00.000Z';
+    await s.appendEvents('device-aaaa', [{ name: 'first', at }, { name: 'second', at }]);
+    await s.appendEvents('device-bbbb', [{ name: 'third', at }]);
+    expect((await s.listEvents()).map((e) => e.name)).toEqual(['first', 'second', 'third']);
+    expect((await s.listEvents({ limit: 2 })).map((e) => e.name)).toEqual(['second', 'third']);
+  });
+
+  it('lists 5,000 beta events unless asked, and never more than 20,000', async () => {
+    const s = make();
+    const start = Date.UTC(2026, 10, 1);
+    const many = Array.from({ length: 20_005 }, (_, i) => ({ name: 'tap', at: new Date(start + i * 1000).toISOString() }));
+    await s.appendEvents('device-aaaa', many);
+    const latest = await s.listEvents();
+    expect(latest).toHaveLength(5_000);
+    expect([latest[0]!.at, latest.at(-1)!.at]).toEqual([many[15_005]!.at, many[20_004]!.at]);
+    expect(await s.listEvents({ limit: 50_000 })).toHaveLength(20_000);
+  }, 30_000); // pg-mem takes a few seconds to insert 20,005 rows
+
   it('reads back feedback, newest first, filtered by user', async () => {
     const s = make();
     await s.saveFeedback(feedback('u1', 1));

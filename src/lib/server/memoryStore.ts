@@ -1,6 +1,15 @@
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
 import { isMeasured } from '../songs/sourceRank';
-import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
+import {
+  DEFAULT_EVENTS_LIMIT,
+  DEFAULT_LIST_LIMIT,
+  MAX_EVENTS_LIMIT,
+  type SongRangeRecord,
+  type Store,
+  type StoredEvent,
+  type UsdbIndexEntry,
+  type UserRecord,
+} from './store';
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -12,6 +21,7 @@ export function createMemoryStore(): Store {
   const log: DataSourceLogEntry[] = [];
   const feedback: FeedbackEntry[] = [];
   const usdbSongs = new Map<number, UsdbIndexEntry>();
+  const events: StoredEvent[] = [];
 
   const newestFirst = <T extends { at: string }>(items: T[]): T[] =>
     items
@@ -98,12 +108,19 @@ export function createMemoryStore(): Store {
       throw new Error('listCatalogue not implemented yet');
     },
 
-    // ---- beta event log (QWW-16): implemented by the event-log work ----
-    async appendEvents() {
-      throw new Error('appendEvents not implemented yet');
+    // ---- beta event log (QWW-16) ----
+    async appendEvents(anonId, list) {
+      // Only the fields the Postgres table keeps, so both stores read back the same thing.
+      for (const e of list) {
+        const stored: StoredEvent = { anonId, name: e.name, at: e.at };
+        if (e.props) stored.props = clone(e.props);
+        events.push(stored);
+      }
     },
-    async listEvents() {
-      throw new Error('listEvents not implemented yet');
+    async listEvents(opts = {}) {
+      const items = opts.anonId ? events.filter((e) => e.anonId === opts.anonId) : events;
+      const limit = Math.min(opts.limit ?? DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
+      return newestFirst(items).slice(0, limit).reverse().map(clone);
     },
 
     // ---- mood labels (QWW-11): implemented by the mood-label work ----

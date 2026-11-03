@@ -9,7 +9,10 @@ import * as recs from '../../app/api/recommendations/route';
 import * as known from '../../app/api/songs/known/route';
 import * as feedback from '../../app/api/feedback/route';
 import * as adminLog from '../../app/api/admin/log/route';
+import * as events from '../../app/api/events/route';
+import * as adminEvents from '../../app/api/admin/events/route';
 import type {
+  AdminEventsResponse,
   DataSourceLogEntry,
   KnownSongsResponse,
   MeResponse,
@@ -344,6 +347,160 @@ describe('admin log', () => {
     const times = entries.map((e) => e.at);
     expect([...times].sort().reverse()).toEqual(times);
     expect(entries.some((e) => e.title === 'Bohemian Rhapsody')).toBe(true);
+  });
+});
+
+describe('beta event log', () => {
+  const ANON = 'device-0001';
+  const secondsAgo = (s: number) => new Date(Date.now() - s * 1000).toISOString();
+  const event = (name: string, props?: Record<string, unknown>, at = secondsAgo(1)) => ({ name, at, ...(props ? { props } : {}) });
+  const post = (body: unknown, jar?: Jar) => events.POST(req('/api/events', jar, { method: 'POST', json: body }));
+  const collect = () => {
+    process.env.EVENTS = 'on';
+    resetAppContextForTests();
+  };
+
+  it('returns 204 and stores nothing while collection is off (the default outside production)', async () => {
+    delete process.env.EVENTS;
+    resetAppContextForTests();
+    const body = { anonId: ANON, events: [event('landing_viewed')] };
+    const res = await post(body);
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe('');
+    expect(await getStore().listEvents()).toEqual([]);
+
+    process.env.EVENTS = 'off';
+    resetAppContextForTests();
+    expect((await post(body)).status).toBe(204);
+    expect(await getStore().listEvents()).toEqual([]);
+  });
+
+  it('stores events with forbidden props stripped, keyed by the device id even when signed in', async () => {
+    collect();
+    const jar = await signIn();
+    const viewed = event('results_viewed', undefined, secondsAgo(2));
+    const opened = event('song_opened', {
+      sort: 'top',
+      position: 3,
+      trackId: 'mock-1-bohemian-rhapsody',
+      SpotifyId: 'spotify:track:x',
+      display_name: 'Test Singer',
+      EMAIL: 'singer@example.com',
+      userId: MOCK_USER.id,
+    });
+    const res = await post({ anonId: ANON, events: [viewed, opened] }, jar);
+    expect(res.status).toBe(204);
+    const stored = await getStore().listEvents();
+    expect(stored).toEqual([
+      { anonId: ANON, ...viewed },
+      { anonId: ANON, name: 'song_opened', at: opened.at, props: { sort: 'top', position: 3 } },
+    ]);
+    expect(JSON.stringify(stored)).not.toMatch(/mock-|spotify:|Test Singer|example\.com/);
+  });
+
+  it.each([
+    ['a bad anonId', { anonId: 'short', events: [event('tap')] }],
+    ['too many events', { anonId: ANON, events: Array.from({ length: 51 }, () => event('tap')) }],
+    ['a bad name', { anonId: ANON, events: [event('Song Opened')] }],
+    ['a bad prop value', { anonId: ANON, events: [event('song_opened', { view: { sort: 'top' } })] }],
+    ['a far-future at', { anonId: ANON, events: [event('tap', undefined, secondsAgo(-8 * 86_400))] }],
+  ])('returns 400 and stores nothing for %s', async (_name, body) => {
+    collect();
+    const res = await post(body);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'bad-request' });
+    expect(await getStore().listEvents()).toEqual([]);
+  });
+
+  it('returns 400 for a body that is not JSON', async () => {
+    collect();
+    expect((await events.POST(req('/api/events', undefined, { method: 'POST', body: '{oops' }))).status).toBe(400);
+  });
+
+  it('accepts a text/plain body, as navigator.sendBeacon sends it', async () => {
+    collect();
+    const body = JSON.stringify({ anonId: ANON, events: [event('landing_viewed')] });
+    const res = await events.POST(
+      new Request(`${BASE}/api/events`, { method: 'POST', body, headers: { 'content-type': 'text/plain;charset=UTF-8' } }),
+    );
+    expect(res.status).toBe(204);
+    expect((await getStore().listEvents()).map((e) => [e.anonId, e.name])).toEqual([[ANON, 'landing_viewed']]);
+  });
+});
+
+describe('admin events', () => {
+  const asAdmin = (path = '/api/admin/events') => adminEvents.GET(req(path, undefined, { headers: { 'x-admin-token': 'admin-token-123' } }));
+  const send = (anonId: string, list: { name: string; at: string; props?: Record<string, unknown> }[]) =>
+    events.POST(req('/api/events', undefined, { method: 'POST', json: { anonId, events: list } }));
+  const at = (s: number) => new Date(Date.now() - s * 1000).toISOString();
+
+  beforeEach(() => {
+    process.env.EVENTS = 'on';
+    resetAppContextForTests();
+  });
+
+  it('is forbidden without the right token, and when ADMIN_TOKEN is unset', async () => {
+    expect((await adminEvents.GET(req('/api/admin/events'))).status).toBe(403);
+    expect((await adminEvents.GET(req('/api/admin/events', undefined, { headers: { 'x-admin-token': 'wrong' } }))).status).toBe(403);
+    delete process.env.ADMIN_TOKEN;
+    resetAppContextForTests();
+    expect((await adminEvents.GET(req('/api/admin/events', undefined, { headers: { 'x-admin-token': '' } }))).status).toBe(403);
+  });
+
+  it('returns the funnel, per-sort numbers and sessions', async () => {
+    await send('device-aaaa', [
+      { name: 'landing_viewed', at: at(60) },
+      { name: 'start_pressed', at: at(59) },
+      { name: 'note_detected', at: at(50), props: { step: 'low' } },
+      { name: 'note_detected', at: at(40), props: { step: 'high' } },
+      { name: 'range_shown', at: at(39) },
+    ]);
+    const opened = { name: 'song_opened', at: at(15), props: { sort: 'top', position: 2 } };
+    await send('device-bbbb', [
+      { name: 'landing_viewed', at: at(30) },
+      { name: 'results_viewed', at: at(20) },
+      opened,
+      { name: 'spotify_link_pressed', at: at(14), props: { sort: 'top' } },
+      { name: 'feedback_tapped', at: at(10), props: { sort: 'top', thumbs: 'up' } },
+    ]);
+    const res = await asAdmin();
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = (await res.json()) as AdminEventsResponse;
+    expect(body.funnel).toEqual([
+      { name: 'landing_viewed', devices: 2 },
+      { name: 'start_pressed', devices: 1 },
+      { name: 'low_note_detected', devices: 1 },
+      { name: 'high_note_detected', devices: 1 },
+      { name: 'range_shown', devices: 1 },
+      { name: 'results_viewed', devices: 1 },
+      { name: 'song_opened', devices: 1 },
+      { name: 'spotify_link_pressed', devices: 1 },
+      { name: 'spotify_connect_pressed', devices: 0 },
+    ]);
+    expect(body.bySort).toEqual({ top: { opened: 1, spotify: 1, up: 1, down: 0, medianPosition: 2 } });
+    expect(body.sessions.map((s) => s.anonId)).toEqual(['device-bbbb', 'device-aaaa']);
+    const names = (i: number) => body.sessions[i]!.events.map((e) => e.name);
+    expect(names(0)).toEqual(['landing_viewed', 'results_viewed', 'song_opened', 'spotify_link_pressed', 'feedback_tapped']);
+    expect(names(1)).toEqual(['landing_viewed', 'start_pressed', 'note_detected', 'note_detected', 'range_shown']);
+    expect(body.sessions[0]!.events[2]).toEqual(opened);
+  });
+
+  it('reads only the newest `limit` events, and rejects a bad limit', async () => {
+    await send('device-aaaa', [
+      { name: 'landing_viewed', at: at(30) },
+      { name: 'start_pressed', at: at(20) },
+      { name: 'range_shown', at: at(10) },
+    ]);
+    const body = (await (await asAdmin('/api/admin/events?limit=2')).json()) as AdminEventsResponse;
+    expect(body.funnel.slice(0, 2)).toEqual([
+      { name: 'landing_viewed', devices: 0 },
+      { name: 'start_pressed', devices: 1 },
+    ]);
+    expect(body.sessions[0]!.events.map((e) => e.name)).toEqual(['start_pressed', 'range_shown']);
+    for (const q of ['limit=0', 'limit=20001', 'limit=abc']) {
+      expect((await asAdmin(`/api/admin/events?${q}`)).status).toBe(400);
+    }
   });
 });
 
