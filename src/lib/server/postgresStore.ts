@@ -1,12 +1,13 @@
 // Postgres store using raw SQL through an injected query function, so the same code
 // runs on Neon (production) and pg-mem (tests).
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
-import { isMeasured } from '../songs/sourceRank';
+import { isMeasured, MEASURED_RANK, SOURCE_RANK } from '../songs/sourceRank';
 import { SCHEMA_SQL } from './schema';
 import {
   DEFAULT_EVENTS_LIMIT,
   DEFAULT_LIST_LIMIT,
   MAX_EVENTS_LIMIT,
+  type CatalogueSong,
   type SongRangeRecord,
   type Store,
   type StoredEvent,
@@ -105,6 +106,11 @@ function toEvent(r: Row): StoredEvent {
   if (isSet(r.props_json)) e.props = JSON.parse(str(r.props_json));
   return e;
 }
+
+/** Range sources measured from the song itself (note files, recordings): the catalogue's rows. */
+const MEASURED_SOURCES = Object.entries(SOURCE_RANK)
+  .filter(([, rank]) => rank >= MEASURED_RANK)
+  .map(([source]) => source);
 
 export interface PostgresStoreOptions {
   /** Run migrate() before the first query (default true). */
@@ -255,9 +261,43 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         : await query('SELECT * FROM feedback ORDER BY at DESC, id DESC LIMIT $1', [limit]);
       return rows.map(toFeedback);
     },
-    // ---- catalogue (QWW-2 Track B): implemented by the catalogue work ----
-    async listCatalogue() {
-      throw new Error('listCatalogue not implemented yet');
+    // ---- catalogue (QWW-2 Track B) ----
+    async listCatalogue(limit) {
+      // Two steps, so no response carries thousands of ranges (the table can hold tens of
+      // thousands; one query for 6,000 songs would be about 6 MB). First the order: each measured
+      // song's key and most-viewed USDB row (DISTINCT ON; a tie goes to the lower id), sorted and
+      // cut in the database. Then those songs' ranges and log lines, 1,000 keys a query. Artist
+      // estimates stay out: they exist only because a tester's library had the song. The key
+      // tie-break uses the database's collation. The join is on `b.song_key || ''` because pg-mem
+      // otherwise reads usdb_songs through its song_key index and skips the DISTINCT ON.
+      const sources = MEASURED_SOURCES.map((_, i) => `$${i + 1}`).join(', ');
+      const listed = await query(
+        `SELECT b.*, s.song_key AS range_key
+         FROM song_ranges s
+         LEFT JOIN (SELECT DISTINCT ON (song_key) * FROM usdb_songs ORDER BY song_key, COALESCE(views, 0) DESC, id) b
+           ON (b.song_key || '') = s.song_key
+         WHERE s.skipped = false AND (s.range_json::json ->> 'source') IN (${sources})
+         ORDER BY (b.id IS NULL), COALESCE(b.views, 0) DESC, COALESCE(b.rating, 0) DESC, s.song_key
+         LIMIT $${MEASURED_SOURCES.length + 1}`,
+        [...MEASURED_SOURCES, limit],
+      );
+      const records = new Map<string, SongRangeRecord>();
+      for (let i = 0; i < listed.length; i += 1000) {
+        const keys = listed.slice(i, i + 1000).map((r) => str(r.range_key));
+        const placeholders = keys.map((_, j) => `$${j + 1}`).join(', ');
+        const rows = await query(`SELECT * FROM song_ranges WHERE song_key IN (${placeholders})`, keys);
+        for (const r of rows) records.set(str(r.song_key), toSongRecord(r));
+      }
+      const out: CatalogueSong[] = [];
+      for (const r of listed) {
+        const key = str(r.range_key);
+        const { range, log } = records.get(key) ?? {};
+        if (!range || !log || !isMeasured(range)) continue; // replaced between the two reads
+        const song: CatalogueSong = { key, artist: log.artist, title: log.title, range, log };
+        if (isSet(r.id)) song.usdb = toUsdbEntry(r);
+        out.push(song);
+      }
+      return out;
     },
 
     // ---- beta event log (QWW-16) ----

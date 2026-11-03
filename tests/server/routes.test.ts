@@ -11,6 +11,8 @@ import * as feedback from '../../app/api/feedback/route';
 import * as adminLog from '../../app/api/admin/log/route';
 import * as events from '../../app/api/events/route';
 import * as adminEvents from '../../app/api/admin/events/route';
+import * as catalogueRecs from '../../app/api/catalogue/recommendations/route';
+import * as catalogueFeedback from '../../app/api/catalogue/feedback/route';
 import type {
   AdminEventsResponse,
   DataSourceLogEntry,
@@ -21,8 +23,9 @@ import type {
 import { getStore } from '../../src/lib/server/getStore';
 import { MOCK_USER } from '../../src/lib/server/mockSpotify';
 import { songKey } from '../../src/lib/songs/resolve';
+import { isMeasured } from '../../src/lib/songs/sourceRank';
 import { SESSION_COOKIE, STATE_COOKIE } from '../../src/lib/server/session';
-import { getAppContext, resetAppContextForTests } from '../../src/lib/server/wiring';
+import { getAppContext, resetAppContextForTests, SEED_SONGS } from '../../src/lib/server/wiring';
 
 const BASE = 'http://127.0.0.1:3000';
 const savedEnv = { ...process.env };
@@ -321,6 +324,180 @@ describe('feedback', () => {
     expect((await feedback.POST(req('/api/feedback', jar, { method: 'POST', json: body }))).status).toBe(400);
     expect((await feedback.POST(req('/api/feedback', jar, { method: 'POST', body: '{oops' }))).status).toBe(400);
     expect(await getStore().listFeedback()).toEqual([]);
+  });
+});
+
+describe('catalogue (no Spotify)', () => {
+  const catalogueGet = async (query: string) => {
+    const res = await catalogueRecs.GET(req(`/api/catalogue/recommendations?${query}`));
+    expect(res.status).toBe(200);
+    return (await res.json()) as RecommendationsResponse;
+  };
+  const ids = (body: RecommendationsResponse) => body.matches.map((m) => m.track.id);
+  const measuredSeeds = SEED_SONGS.filter((s) => isMeasured(s.range));
+
+  it('holds the measured seed songs and their USDB rows in mock mode, and none of the estimates', async () => {
+    const songs = await getAppContext().catalogue.get();
+    expect(songs.length).toBeGreaterThan(0);
+    expect(songs.map((s) => s.key).sort()).toEqual(measuredSeeds.map((s) => songKey(s.artist, s.title)).sort());
+    for (const seed of measuredSeeds.filter((s) => s.usdb)) {
+      expect(songs.find((s) => s.key === songKey(seed.artist, seed.title))!.usdb).toMatchObject(seed.usdb!);
+    }
+  });
+
+  it('is not seeded outside mock mode', async () => {
+    delete process.env.SPOTIFY_MOCK;
+    resetAppContextForTests();
+    expect(await getAppContext().catalogue.get()).toEqual([]);
+    expect(await getStore().listLog()).toEqual([]);
+  });
+
+  it('recommends catalogue songs with no cookie, and keeps no account or cookie', async () => {
+    const res = await catalogueRecs.GET(req('/api/catalogue/recommendations?low=45&high=80'));
+    expect(res.status).toBe(200);
+    expect(res.headers.getSetCookie()).toEqual([]);
+    const body = (await res.json()) as RecommendationsResponse;
+    expect(body.matches.length).toBeGreaterThan(0);
+    expect(body.matches.length).toBeLessThanOrEqual(5);
+    for (const m of body.matches) {
+      expect(m.track).toMatchObject({ id: `cat:${songKey(m.track.artist, m.track.title)}`, known: false, familiarity: 1 });
+      expect(m.track.spotifyUrl).toMatch(/^https:\/\/open\.spotify\.com\/search\//);
+      expect(isMeasured(m.range)).toBe(true);
+      expect(m.reasons).not.toContain('You play this a lot');
+      expect(body.sources[m.track.id]).toMatchObject({ trackId: m.track.id, outcome: m.range.source });
+    }
+    expect(await getStore().listUserIds()).toEqual([]);
+  });
+
+  it.each([
+    ['no range', ''],
+    ['no high note', 'low=48'],
+    ['not a number', 'low=abc&high=72'],
+    ['non-integer', 'low=48.5&high=72'],
+    ['negative', 'low=-48&high=72'],
+    ['low >= high', 'low=72&high=72'],
+    ['span too small', 'low=60&high=64'],
+    ['span too large', 'low=30&high=79'],
+    ['below MIDI 28', 'low=27&high=50'],
+    ['above MIDI 96', 'low=80&high=97'],
+    ['bad offset', 'low=48&high=72&offset=-1'],
+    ['bad limit', 'low=48&high=72&limit=51'],
+  ])('rejects a bad request (%s) with 400', async (_name, query) => {
+    const res = await catalogueRecs.GET(req(`/api/catalogue/recommendations?${query}`));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'bad-request' });
+  });
+
+  it('accepts the range limits', async () => {
+    await catalogueGet('low=28&high=76');
+    await catalogueGet('low=91&high=96&all=1');
+  });
+
+  it('all=1 returns every match, complete, with year and genre from the USDB row', async () => {
+    const all = await catalogueGet('low=45&high=80&all=1');
+    expect(all.complete).toBe(true);
+    expect(all.nextOffset).toBeNull();
+    expect(all.matches.length).toBeGreaterThan(0);
+    expect(Object.keys(all.sources).sort()).toEqual(ids(all).sort());
+    const firstPage = await catalogueGet('low=45&high=80');
+    expect(firstPage.complete).toBeUndefined();
+    expect(ids(firstPage)).toEqual(ids(all).slice(0, 5));
+    let withYear = 0;
+    for (const seed of SEED_SONGS) {
+      const m = all.matches.find((x) => x.track.id === `cat:${songKey(seed.artist, seed.title)}`);
+      if (!m || !seed.usdb?.year) continue;
+      expect(m).toMatchObject({ year: seed.usdb.year, yearSource: 'usdb', genre: seed.usdb.genre });
+      withYear++;
+    }
+    expect(withYear).toBeGreaterThan(0);
+  });
+
+  it('pages never repeat or skip a song', async () => {
+    const all = ids(await catalogueGet('low=45&high=80&all=1'));
+    const paged: string[] = [];
+    let offset: number | null = 0;
+    for (let i = 0; offset !== null && i < 100; i++) {
+      const page = await catalogueGet(`low=45&high=80&offset=${offset}&limit=2`);
+      expect(Object.keys(page.sources).sort()).toEqual(ids(page).sort());
+      paged.push(...ids(page));
+      offset = page.nextOffset;
+    }
+    expect(offset).toBeNull();
+    expect(paged).toEqual(all);
+    expect(new Set(paged).size).toBe(paged.length);
+  });
+
+  describe('feedback', () => {
+    const queen = SEED_SONGS.find((s) => s.title === 'Dancing Queen')!;
+    const tap = {
+      anonId: '6f1c2a9e-3b4d-4e5f-8a7b-9c0d1e2f3a4b',
+      range: { low: 45, high: 80 },
+      trackId: `cat:${songKey(queen.artist, queen.title)}`,
+      thumbs: 'up',
+      difficulty: 'easy',
+      octave: 'none',
+    };
+    const post = (json: unknown) => catalogueFeedback.POST(req('/api/catalogue/feedback', undefined, { method: 'POST', json }));
+
+    it('stores the tap under the device id, with the range it came with and the song range at the tap', async () => {
+      const res = await post(tap);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      expect(res.headers.getSetCookie()).toEqual([]);
+      const stored = await getStore().listFeedback({ userId: `anon:${tap.anonId}` });
+      expect(stored).toEqual([
+        {
+          userId: `anon:${tap.anonId}`,
+          trackId: tap.trackId,
+          thumbs: 'up',
+          difficulty: 'easy',
+          octave: 'none',
+          userRange: { low: 45, high: 80, source: 'test' },
+          songRange: { source: queen.range.source, low: queen.range.low, high: queen.range.high },
+          at: expect.any(String),
+        },
+      ]);
+      expect(await getStore().listUserIds()).toEqual([]);
+    });
+
+    it('stores a tap on a song with no stored range without a snapshot', async () => {
+      expect((await post({ ...tap, trackId: 'cat:nobody|unknown' })).status).toBe(200);
+      const [stored] = await getStore().listFeedback({ userId: `anon:${tap.anonId}` });
+      expect(stored!.songRange).toBeUndefined();
+    });
+
+    it('accepts device ids of 8 and 64 characters', async () => {
+      expect((await post({ ...tap, anonId: 'abcd-123' })).status).toBe(200);
+      expect((await post({ ...tap, anonId: 'A1-'.repeat(21) + 'z' })).status).toBe(200);
+    });
+
+    it.each([
+      ['no device id', { anonId: undefined }],
+      ['a short device id', { anonId: 'abc-123' }],
+      ['a long device id', { anonId: 'a'.repeat(65) }],
+      ['other characters in the device id', { anonId: 'device id!' }],
+      ['a numeric device id', { anonId: 12345678 }],
+      ['a track id not from the catalogue', { trackId: 'mock-1-bohemian-rhapsody' }],
+      ['a bare cat: prefix', { trackId: 'cat:' }],
+      ['no range', { range: undefined }],
+      ['a range that is not an object', { range: '45-80' }],
+      ['a range too narrow', { range: { low: 60, high: 64 } }],
+      ['a non-integer range', { range: { low: 45.5, high: 80 } }],
+      ['bad thumbs', { thumbs: 'sideways' }],
+      ['a bad difficulty', { difficulty: 'trivial' }],
+      ['a bad octave', { octave: 'two' }],
+    ])('rejects %s with 400 and stores nothing', async (_name, change) => {
+      const res = await post({ ...tap, ...change });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: 'bad-request' });
+      expect(await getStore().listFeedback()).toEqual([]);
+    });
+
+    it('rejects a body that is not JSON', async () => {
+      const res = await catalogueFeedback.POST(req('/api/catalogue/feedback', undefined, { method: 'POST', body: '{oops' }));
+      expect(res.status).toBe(400);
+      expect(await getStore().listFeedback()).toEqual([]);
+    });
   });
 });
 

@@ -125,6 +125,85 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect((await s.findUsdbSongs(['queen|bohemian rhapsody'])).get('queen|bohemian rhapsody')).not.toHaveProperty('rating');
   });
 
+  describe('catalogue', () => {
+    const recording = { ...songRange, source: 'audio-full' as const, method: 'pyin-v1/app-range-v1' };
+    const estimate = (source: 'artist-typical' | 'artist-external') => ({ ...songRange, source, confidence: 'low' as const });
+    /** A stored row whose log line has the display names, as a library lookup or import writes it. */
+    const row = (artist: string, title: string, range: SongRange | null) => ({
+      range,
+      log: { trackId: 'spotify-track-id', title, artist, outcome: range?.source ?? ('skipped' as const), reason: 'r', at: '2026-01-01T00:00:00.000Z' },
+    });
+    const rows = {
+      'queen|bohemian rhapsody': row('Queen', 'Bohemian Rhapsody - Remastered 2011', songRange),
+      'abba|sos': row('ABBA', 'SOS', recording),
+      'abba|waterloo': row('ABBA', 'Waterloo', songRange),
+      'toto|africa': row('Toto', 'Africa', recording),
+      'a-ha|take on me': row('a-ha', 'Take On Me', songRange),
+      'queen|rough': row('Queen', 'Rough', { ...recording, confidence: 'low' as const }),
+      'queen|guess': row('Queen', 'Guess', estimate('artist-typical')),
+      'queen|published': row('Queen', 'Published', estimate('artist-external')),
+      'nobody|skipped': row('Nobody', 'Skipped', null),
+    };
+    const usdb = {
+      bohemianStudio: { id: 1, key: 'queen|bohemian rhapsody', artist: 'Queen', title: 'Bohemian Rhapsody', views: 100, rating: 4.5 },
+      bohemianLive: { id: 2, key: 'queen|bohemian rhapsody', artist: 'Queen', title: 'Bohemian Rhapsody (Live)', views: 900 },
+      sos: { id: 3, key: 'abba|sos', artist: 'ABBA', title: 'SOS', views: 900, rating: 3 },
+      waterlooLater: { id: 7, key: 'abba|waterloo', artist: 'ABBA', title: 'Waterloo (Duet)', views: 50, rating: 5 },
+      waterloo: { id: 6, key: 'abba|waterloo', artist: 'ABBA', title: 'Waterloo', views: 50, rating: 2 },
+      guess: { id: 4, key: 'queen|guess', artist: 'Queen', title: 'Guess', views: 99_999 },
+      skipped: { id: 5, key: 'nobody|skipped', artist: 'Nobody', title: 'Skipped', views: 99_999 },
+    };
+    async function filled(): Promise<Store> {
+      const s = make();
+      for (const [key, rec] of Object.entries(rows)) await s.putSongRange(key, rec);
+      await s.putUsdbSongs(Object.values(usdb));
+      return s;
+    }
+
+    it('is empty with no song ranges', async () => {
+      expect(await make().listCatalogue(10)).toEqual([]);
+    });
+
+    it('has one row per song with its most-viewed USDB row (a tie goes to the lower id)', async () => {
+      const all = await (await filled()).listCatalogue(100);
+      expect(new Set(all.map((c) => c.key)).size).toBe(all.length);
+      const byKey = new Map(all.map((c) => [c.key, c]));
+      expect(byKey.get('queen|bohemian rhapsody')!.usdb).toEqual(usdb.bohemianLive);
+      expect(byKey.get('abba|sos')!.usdb).toEqual(usdb.sos);
+      expect(byKey.get('abba|waterloo')!.usdb).toEqual(usdb.waterloo);
+      expect(byKey.get('toto|africa')).not.toHaveProperty('usdb');
+    });
+
+    it('leaves out skipped songs and artist estimates, even with a USDB row, and keeps rough recordings', async () => {
+      const keys = (await (await filled()).listCatalogue(100)).map((c) => c.key);
+      for (const left of ['queen|guess', 'queen|published', 'nobody|skipped']) expect(keys).not.toContain(left);
+      expect(keys).toContain('queen|rough');
+    });
+
+    it('orders by USDB views, then stars, then songs without a USDB row by key, and cuts to the limit', async () => {
+      const s = await filled();
+      const order = ['abba|sos', 'queen|bohemian rhapsody', 'abba|waterloo', 'a-ha|take on me', 'queen|rough', 'toto|africa'];
+      expect((await s.listCatalogue(100)).map((c) => c.key)).toEqual(order);
+      expect((await s.listCatalogue(2)).map((c) => c.key)).toEqual(order.slice(0, 2));
+      expect(await s.listCatalogue(0)).toEqual([]);
+    });
+
+    it('takes display names from the log line and returns the stored range and log as they are', async () => {
+      const all = await (await filled()).listCatalogue(100);
+      const queen = all.find((c) => c.key === 'queen|bohemian rhapsody')!;
+      expect(queen).toEqual({
+        key: 'queen|bohemian rhapsody',
+        artist: 'Queen',
+        title: 'Bohemian Rhapsody - Remastered 2011',
+        range: songRange,
+        log: rows['queen|bohemian rhapsody'].log,
+        usdb: usdb.bohemianLive,
+      });
+      expect(all.find((c) => c.key === 'a-ha|take on me')).toMatchObject({ artist: 'a-ha', title: 'Take On Me', range: songRange });
+      expect(all.find((c) => c.key === 'abba|sos')!.range).toEqual(recording);
+    });
+  });
+
   it('lists log entries newest first with a limit', async () => {
     const s = make();
     for (const n of [1, 3, 2]) await s.appendLog(logEntry(n, n === 2 ? 'skipped' : 'artist-typical'));

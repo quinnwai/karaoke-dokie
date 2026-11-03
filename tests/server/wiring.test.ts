@@ -8,6 +8,8 @@ import {
   productionSongDeps,
   realResolver,
   SEED_SONGS,
+  seedStore,
+  type SeedSong,
 } from '../../src/lib/server/wiring';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { MOCK_TRACKS } from '../../src/lib/server/mockSpotify';
@@ -38,6 +40,28 @@ describe('seed song ranges', () => {
   it('every seed is in the mock library', () => {
     const keys = new Set(MOCK_TRACKS.map((t) => songKey(t.artist, t.title)));
     for (const s of SEED_SONGS) expect(keys.has(songKey(s.artist, s.title))).toBe(true);
+  });
+
+  it('seeds a store with every seed, its log line and USDB row, however many seeds there are', async () => {
+    const seeds: SeedSong[] = Array.from({ length: 300 }, (_, i) => ({
+      artist: `Artist ${i}`,
+      title: `Song ${i}`,
+      range: { low: 50, high: 70, tessitura: 60, source: i % 3 ? 'audio-full' : 'artist-typical', confidence: i % 3 ? 'high' : 'low', fastLyrics: false },
+      provenance: `Placeholder ${i}`,
+      ...(i % 2 ? { usdb: { id: 1000 + i, views: i, year: 1960 + (i % 60), genre: 'Pop' } } : {}),
+    }));
+    const store = createMemoryStore();
+    await seedStore(store, seeds, () => new Date(0));
+    const key = songKey('Artist 7', 'Song 7');
+    expect(await store.getSongRange(key)).toEqual({
+      range: seeds[7]!.range,
+      log: { trackId: '', title: 'Song 7', artist: 'Artist 7', outcome: 'audio-full', reason: 'Placeholder 7', at: '1970-01-01T00:00:00.000Z' },
+    });
+    expect((await store.findUsdbSongs([key])).get(key)).toEqual({ id: 1007, key, artist: 'Artist 7', title: 'Song 7', views: 7, year: 1967, genre: 'Pop' });
+    expect(await store.listLog(1000)).toHaveLength(300);
+    expect((await store.usdbIndexStats()).count).toBe(150);
+    // The estimates (every third seed) stay out of the catalogue.
+    expect(await store.listCatalogue(6000)).toHaveLength(200);
   });
 
   it('resolves seeded songs and skips the rest with a reason', async () => {

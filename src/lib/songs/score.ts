@@ -96,8 +96,11 @@ export interface FitNote {
  * The one or two biggest contributors, in words. With a FitNote the range reason follows the
  * difficulty label, so a Hard song never says "In your sweet spot"; a Hard song always says why.
  * A Maybe song's range is only an estimate, so it gets no range reason.
+ * A song the user does not know (`known` false) never says they play or know it: catalogue songs
+ * carry familiarity 1 only so that comfort alone decides their fit. Saved-only songs are also
+ * not known, but their familiarity is below both thresholds anyway.
  */
-export function reasonsFor(p: ScoreParts, fit?: FitNote): string[] {
+export function reasonsFor(p: ScoreParts, fit?: FitNote, known?: boolean): string[] {
   const candidates: { text: string; weight: number }[] = [];
   const comfortWeight = REASON_WEIGHTS.comfort * p.comfort;
   const edge = fit?.side === 'bottom' ? 'low end' : 'top';
@@ -111,8 +114,10 @@ export function reasonsFor(p: ScoreParts, fit?: FitNote): string[] {
   } else if (fit.difficulty === 'hard') {
     candidates.push({ text: `Spends time at your ${edge}`, weight: Infinity });
   }
-  if (p.familiarity >= 0.6) candidates.push({ text: 'You play this a lot', weight: REASON_WEIGHTS.familiarity * p.familiarity });
-  else if (p.familiarity >= 0.3) candidates.push({ text: 'You know this one', weight: REASON_WEIGHTS.familiarity * p.familiarity });
+  if (known !== false) {
+    if (p.familiarity >= 0.6) candidates.push({ text: 'You play this a lot', weight: REASON_WEIGHTS.familiarity * p.familiarity });
+    else if (p.familiarity >= 0.3) candidates.push({ text: 'You know this one', weight: REASON_WEIGHTS.familiarity * p.familiarity });
+  }
   if (p.popularity >= 0.7) candidates.push({ text: 'Crowd favourite', weight: REASON_WEIGHTS.popularity * p.popularity });
   return candidates
     .sort((a, b) => b.weight - a.weight)
@@ -124,5 +129,5 @@ export function reasonsFor(p: ScoreParts, fit?: FitNote): string[] {
 export function scoreMatch(user: VocalRange, m: Match): Match {
   const parts = scoreParts(user, m.track, m.range, m.octave);
   const { side } = edgeTime(user, m.range, shiftOf(m.octave));
-  return { ...m, parts, score: totalScore(parts), reasons: reasonsFor(parts, { difficulty: m.difficulty, side }) };
+  return { ...m, parts, score: totalScore(parts), reasons: reasonsFor(parts, { difficulty: m.difficulty, side }, m.track.known) };
 }

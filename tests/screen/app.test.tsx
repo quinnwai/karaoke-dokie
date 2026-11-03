@@ -298,7 +298,7 @@ describe('KaraokeApp', () => {
 
   it('records the beta funnel without any Spotify id or library song', async () => {
     const tracked: { name: string; props?: Record<string, unknown> }[] = [];
-    const track = { track: (name: string, props?: Record<string, unknown>) => void tracked.push({ name, props }), flush: () => {} };
+    const track = { track: (name: string, props?: Record<string, unknown>) => void tracked.push({ name, props }), flush: async () => {} };
     const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
     const navigate = vi.fn();
     render(<KaraokeApp api={api} track={track} mic={fakeMic().mic} navigate={navigate} />);

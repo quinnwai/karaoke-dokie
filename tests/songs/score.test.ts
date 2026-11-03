@@ -157,6 +157,30 @@ describe('reasons', () => {
     expect(rough.parts!.penalty).toBeCloseTo(0.1);
   });
 
+  it('never says you play or know a song you do not know, such as a catalogue song', () => {
+    const p = { comfort: 0.9, familiarity: 1, popularity: 0.9, penalty: 0 };
+    const easy = { difficulty: 'easy' as const, side: 'top' as const };
+    expect(reasonsFor(p, easy, false)).toEqual(['In your sweet spot', 'Crowd favourite']);
+    expect(reasonsFor({ ...p, familiarity: 0.4 }, easy, false)).toEqual(['In your sweet spot', 'Crowd favourite']);
+    expect(reasonsFor(p, easy, true)).toEqual(['In your sweet spot', 'You play this a lot']);
+    expect(reasonsFor(p, easy)).toEqual(['In your sweet spot', 'You play this a lot']);
+
+    // A catalogue track has familiarity 1 so comfort alone decides its fit, and is not known.
+    const popular = song(57, 63, { usdbViews: 99_999, usdbRating: 5 });
+    const catalogue = match(track('cat', { familiarity: 1, known: false }), popular);
+    const library = match(track('lib', { familiarity: 1, known: true }), popular);
+    expect(catalogue.reasons).toEqual(['In your sweet spot', 'Crowd favourite']);
+    expect(library.reasons).toEqual(['In your sweet spot', 'You play this a lot']);
+    expect(catalogue.score).toBeCloseTo(library.score!);
+  });
+
+  it('keeps the reasons of saved-only songs, whose familiarity is below both thresholds', () => {
+    const savedOnly = match(track('saved', { familiarity: 0.15, known: false }), song(57, 63));
+    const unflagged = match(track('old', { familiarity: 0.15 }), song(57, 63));
+    expect(savedOnly.reasons).toEqual(['In your sweet spot']);
+    expect(unflagged.reasons).toEqual(savedOnly.reasons);
+  });
+
   it('gives a scored match reasons that match its label', () => {
     const hard = match(track('h', { familiarity: 0.9 }), song(60, 71, { pitchShare: [[60, 0.85], [71, 0.15]] }));
     expect(hard.difficulty).toBe('hard');
