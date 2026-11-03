@@ -24,11 +24,41 @@ const html = (body: string, cookie?: string) =>
   new Response(body, { status: 200, headers: cookie ? { 'set-cookie': cookie } : {} });
 
 describe('USDB page parsing', () => {
-  it('reads song rows from a search result page', () => {
+  it('reads song rows from a search result page, with genre, year and language', () => {
     expect(parseSongList(fixture('list.html'))).toEqual([
-      { id: 1234, artist: 'Queen', title: 'Bohemian Rhapsody', rating: 5, views: 1000, lastChange: 1700000000 },
-      { id: 5678, artist: 'Queen & David Bowie', title: 'Under Pressure', rating: 4, views: 500, lastChange: 1700000001 },
+      { id: 1234, artist: 'Queen', title: 'Bohemian Rhapsody', rating: 5, views: 1000, lastChange: 1700000000, genre: 'Rock', year: 1975, language: 'English' },
+      { id: 5678, artist: 'Queen & David Bowie', title: 'Under Pressure', rating: 4, views: 500, lastChange: 1700000001, genre: 'Rock', year: 1981, language: 'English' },
     ]);
+  });
+
+  /** A full 12-cell row: sample, cover, artist, title, genre, year, edition, golden notes, language, creator, rating, views. */
+  const fullRow = ({ genre = 'Pop', year = '1999', language = 'English' } = {}) =>
+    `<tr data-songid="9"><td></td><td></td><td>A</td><td>B</td><td>${genre}</td><td>${year}</td><td></td><td>No</td><td>${language}</td><td>me</td><td>4</td><td>10</td></tr>`;
+  const NOW = new Date('2026-11-03T12:00:00Z');
+  const parsedYear = (year: string) => parseSongList(fullRow({ year }), NOW)[0]!.year;
+
+  it('keeps a 4-digit year from 1900 to next year and drops anything else', () => {
+    expect(parsedYear('1900')).toBe(1900);
+    expect(parsedYear(' <b>1975</b> ')).toBe(1975);
+    expect(parsedYear('2027')).toBe(2027); // next year: a song announced ahead of release
+    for (const junk of ['1899', '2028', '0000', '75', '19755', '1975-10', 'ca. 1975', 'unknown', '']) {
+      expect(parsedYear(junk), junk).toBeUndefined();
+    }
+  });
+
+  it('strips tags and entities from genre and language, and leaves empty cells out', () => {
+    expect(parseSongList(fullRow({ genre: '<a href="?genre=rnb">R&amp;B</a>', language: '<span>Fran&#231;ais</span> ' }), NOW)[0]).toMatchObject({
+      genre: 'R&B',
+      language: 'Français',
+    });
+    const empty = parseSongList(fullRow({ genre: ' ', year: '', language: '' }), NOW)[0]!;
+    expect(empty).toEqual({ id: 9, artist: 'A', title: 'B', rating: 4, views: 10 });
+  });
+
+  it('reads no genre, year or language from a row without the full layout', () => {
+    // 7 cells: cell 5 is the rating here, not the year.
+    const short = parseSongList('<tr data-songid="9"><td></td><td></td><td>A</td><td>B</td><td>Rock</td><td>1975</td><td>12</td></tr>', NOW)[0]!;
+    expect(short).toEqual({ id: 9, artist: 'A', title: 'B', views: 12 });
   });
 
   it('returns no rows for an empty result page', () => {

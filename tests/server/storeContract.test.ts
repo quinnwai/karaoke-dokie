@@ -125,6 +125,18 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect((await s.findUsdbSongs(['queen|bohemian rhapsody'])).get('queen|bohemian rhapsody')).not.toHaveProperty('rating');
   });
 
+  it('reads back genre, year and language in the USDB index, and replaces them on update', async () => {
+    const s = make();
+    const full = { id: 1, key: 'queen|bohemian rhapsody', artist: 'Queen', title: 'Bohemian Rhapsody', views: 100, genre: 'Rock', year: 1975, language: 'English' };
+    const bare = { id: 2, key: 'abba|sos', artist: 'ABBA', title: 'SOS' };
+    await s.putUsdbSongs([full, bare]);
+    expect((await s.findUsdbSongs(['queen|bohemian rhapsody'])).get('queen|bohemian rhapsody')).toStrictEqual(full);
+    expect(await s.listUsdbSongs()).toStrictEqual([full, bare]);
+    // A newer list row is the whole truth: a cleared year or language goes, a changed genre replaces the old one.
+    await s.putUsdbSongs([{ id: 1, key: full.key, artist: 'Queen', title: 'Bohemian Rhapsody', views: 120, genre: 'Classic Rock' }]);
+    expect((await s.findUsdbSongs([full.key])).get(full.key)).toStrictEqual({ id: 1, key: full.key, artist: 'Queen', title: 'Bohemian Rhapsody', views: 120, genre: 'Classic Rock' });
+  });
+
   it('lists log entries newest first with a limit', async () => {
     const s = make();
     for (const n of [1, 3, 2]) await s.appendLog(logEntry(n, n === 2 ? 'skipped' : 'artist-typical'));
