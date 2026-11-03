@@ -20,11 +20,35 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    their own "Maybe" list after the main one, without a difficulty pill.
 7. **Song detail**: range bar (song in neon pink over the user's range, note names at the
    ends), difficulty (or a quiet "Maybe"), "Fast lyrics", an "i" button explaining where the
-   data came from (for Maybe songs, also that the range is an estimate), Open in Spotify, and
-   "How'd it go?" thumbs that POST `/api/feedback`.
+   data came from (for Maybe songs, also that the range is an estimate), Open in Spotify (the
+   app first, then the web player; see below), and "How'd it go?" thumbs that POST `/api/feedback`.
 8. **Returning user** with a saved range lands on results; "redo" restarts the test.
 9. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
    low and highest high become the range (`source: 'songs'`). Signed-out users sign in first.
+
+## Open in Spotify
+
+The link keeps its real `https://open.spotify.com/...` address, so it still works as a link
+with JavaScript off, on middle-click, cmd/ctrl-click and long-press. Only a plain click on a
+computer (a mouse or trackpad: `(hover: hover) and (pointer: fine)`) is taken over
+(`src/lib/client/spotifyLink.ts`):
+
+1. The address becomes a `spotify:` link (`/track/ID` to `spotify:track:ID`; the offline mock's
+   `/search/...` links work too) and the page navigates to it. The browser asks "Open Spotify?".
+2. If the page loses focus, hides or unloads within 1.5 s, the app (or its prompt) took over and
+   nothing more happens.
+3. Otherwise (no app, or the prompt was declined) the web player opens in a new tab, or in this
+   tab if the browser blocks the popup.
+
+Phones and tablets keep the plain link: it already opens the Spotify app when it is installed
+(universal links on iPhone, app links on Android), and a `spotify:` address is the riskier route
+there (iPhone asks first; Chrome on Android shows an error page if the app is missing).
+
+Browsers give a page no "declined" event, so step 3 is a timer: someone who sits on the prompt for
+more than 1.5 s without the page losing focus may get the web tab as well. Links that aren't
+`open.spotify.com` addresses (for example an empty one) are left to the browser. Only desktop
+Chrome has been tried; Firefox and Safari deal with a `spotify:` address that nothing handles in
+their own ways, and are untested.
 
 ## Code
 
@@ -35,6 +59,7 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
 | `src/lib/client/api.ts` | The only HTTP client (paths and shapes from `contracts.ts`). |
 | `src/lib/client/mic.ts` | `Mic`/`MicRecorder` interface; AudioWorklet with ScriptProcessor fallback. |
 | `src/lib/client/storage.ts` | Guarded `sessionStorage` for test progress and the pick-songs intent. |
+| `src/lib/client/spotifyLink.ts` | "Open in Spotify": `open.spotify.com` link to `spotify:` link, try the app, fall back to the web player. |
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,Results,SongDetail,PickSongs}.tsx` | The screen pieces. |
 | `src/components/screen.module.css`, `app/globals.css` | Styles; `prefers-reduced-motion` stops all animation. |
