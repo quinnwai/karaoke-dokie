@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createUsdbClient, parseDownloadWait, parseSongList, parseNoteText } from '../../src/lib/usdb/client';
+import { createUsdbClient, isDuetListing, parseDownloadWait, parseSongList, parseNoteText } from '../../src/lib/usdb/client';
 
 const fixture = (name: string) => readFileSync(join(__dirname, '../fixtures/usdb', name), 'utf8');
 
@@ -53,6 +53,18 @@ describe('USDB page parsing', () => {
 
   it('returns null when the page has no notes', () => {
     expect(parseNoteText('<html>please log in</html>')).toBeNull();
+  });
+
+  it("reads a detailed row's edition, when it has one", () => {
+    const withEdition = fixture('list.html').replace('<td>1975</td>\n<td></td>', '<td>1975</td>\n<td>[SC]-Duets &amp; More</td>');
+    expect(parseSongList(withEdition).map((r) => r.edition)).toEqual(['[SC]-Duets & More', undefined]);
+  });
+
+  it('knows a duet listing by "duet" in its title or edition, any case, bracketed or not', () => {
+    for (const title of ['Song [DUET]', 'Song (Duet)', 'Song - duet version', 'Song [Duett]']) expect(isDuetListing({ title })).toBe(true);
+    expect(isDuetListing({ title: 'Song', edition: 'SingStar Duets' })).toBe(true);
+    expect(isDuetListing({ title: 'Song', edition: '[SC]-Songs' })).toBe(false);
+    expect(isDuetListing({ title: 'Song' })).toBe(false);
   });
 });
 
@@ -202,6 +214,36 @@ describe('USDB client', () => {
     const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
     expect(await client.findSong('Queen', 'Bohemian Rhapsody', { download: false })).toEqual({ id: 1234, noteText: null, rating: 5, views: 1000 });
     expect(calls.some((c) => c.url.includes('link=gettxt'))).toBe(false);
+  });
+
+  it('with duet, takes the upload listed as a duet and downloads it after the countdown', async () => {
+    // A detailed list row: sample, cover, artist, title, genre, year, edition, golden notes, language, creator, rating, views.
+    const row = (id: number, title: string, edition = '') =>
+      `<tr data-songid="${id}"><td></td><td></td><td>Duo</td><td><a href="?link=detail&id=${id}">${title}</a></td>` +
+      `<td>Pop</td><td>1983</td><td>${edition}</td><td>No</td><td>English</td><td>x</td><td>4</td><td>${id * 100}</td></tr>`;
+    const usdb = (rows: string[]) => {
+      const { fetch, calls } = fakeFetch({
+        'link=list': () => html(`<table>${rows.join('')}</table>`),
+        'link=gettxt': (method) => html(method === 'GET' ? fixture('gettxt-countdown.html') : fixture('gettxt.html')),
+        'index.php': () => html('<a href="?link=logout">Logout</a>', 'PHPSESSID=abc123; path=/'),
+      });
+      const slept: number[] = [];
+      const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async (ms) => { slept.push(ms); } });
+      return { client, calls, slept };
+    };
+
+    const both = usdb([row(1, 'Islands in the Stream'), row(2, 'Islands in the Stream [DUET]')]);
+    expect(await both.client.findSong('Duo', 'Islands in the Stream', { duet: true })).toMatchObject({ id: 2, views: 200 });
+    expect(both.calls.filter((c) => c.url.includes('link=gettxt')).map((c) => `${c.method} ${new URL(c.url).searchParams.get('id')}`)).toEqual(['GET 2', 'POST 2']);
+    expect(both.slept).toContain(25_000);
+    // Without duet, the first match as before.
+    expect(await both.client.findSong('Duo', 'Islands in the Stream', { download: false })).toMatchObject({ id: 1 });
+
+    const byEdition = usdb([row(3, 'Islands in the Stream'), row(4, 'Islands in the Stream', 'SingStar Duets')]);
+    expect(await byEdition.client.findSong('Duo', 'Islands in the Stream', { download: false, duet: true })).toMatchObject({ id: 4 });
+    const soloOnly = usdb([row(5, 'Islands in the Stream')]);
+    expect(await soloOnly.client.findSong('Duo', 'Islands in the Stream', { duet: true })).toBeNull();
+    expect(soloOnly.calls.some((c) => c.url.includes('link=gettxt'))).toBe(false);
   });
 
   it('reads the countdown from the gettxt page', () => {

@@ -10,13 +10,20 @@ import { fixture } from '../songs/fixture';
 const track = (id: string, artist: string, title: string): Track => ({
   id, artist, title, artistId: 'a', spotifyUrl: '', playRank: Number(id),
 });
-/** A fake USDB: note text by "artist|title"; every hit has 2000 views and 4 stars. */
-const fakeUsdb = (lookup: (artist: string, title: string) => string | null, calls: { title: string; download: boolean }[] = []) => ({
-  findSong: async (artist: string, title: string, opts: { download?: boolean } = {}) => {
+/**
+ * A fake USDB: note text by "artist|title"; every hit has 2000 views and 4 stars. `duets` answers
+ * searches for an upload listed as a duet (findSong with duet: true); those hits are id 77.
+ */
+const fakeUsdb = (
+  lookup: (artist: string, title: string) => string | null,
+  calls: { title: string; download: boolean; duet?: boolean }[] = [],
+  duets: (artist: string, title: string) => string | null = () => null,
+) => ({
+  findSong: async (artist: string, title: string, opts: { download?: boolean; duet?: boolean } = {}) => {
     const download = opts.download ?? true;
-    calls.push({ title, download });
-    const text = lookup(artist, title);
-    return text === null ? null : { noteText: download ? text : null, views: 2000, rating: 4 };
+    calls.push(opts.duet ? { title, download, duet: true } : { title, download });
+    const text = (opts.duet ? duets : lookup)(artist, title);
+    return text === null ? null : { ...(opts.duet ? { id: 77 } : {}), noteText: download ? text : null, views: 2000, rating: 4 };
   },
 });
 const noteFile = (pitches: number[]) =>
@@ -108,6 +115,47 @@ describe('syncNoteFiles', () => {
     await syncNoteFiles({ store, usdb: fakeUsdb(() => noteFile([0, 4]), calls), tracks: [track('1', 'A', 'Old')], rescan: true });
     expect(calls).toEqual([{ title: 'Old', download: true }]);
     expect((await store.getSongRange(songKey('A', 'Old')))?.range).toMatchObject({ low: 60, high: 64, pitchShare: [[60, 0.5], [64, 0.5]], usdbViews: 2000 });
+  });
+
+  it('with rescanDuets, re-reads songs USDB lists as a duet to add each part, once', async () => {
+    const store = createMemoryStore();
+    const old = { low: 60, high: 62, tessitura: 61, source: 'note-file' as const, confidence: 'high' as const, fastLyrics: false, pitchShare: [[60, 0.5], [62, 0.5]] as [number, number][], usdbViews: 5 };
+    const log = (title: string) => ({ trackId: '', title, artist: 'Duo', outcome: 'note-file' as const, reason: 'Used the UltraStar note file for this song (public collection c, originally from USDB).', at: 'x' });
+    const withParts = { ...songRangeFromUltrastar(fixture('duet.txt')), usdbViews: 5 };
+    for (const title of ['Duet Song', 'Solo Song', 'Listed As Duet']) await store.putSongRange(songKey('Duo', title), { range: old, log: log(title) });
+    await store.putSongRange(songKey('Duo', 'Has Parts'), { range: withParts, log: log('Has Parts') });
+    const calls: { title: string; download: boolean; duet?: boolean }[] = [];
+    // USDB lists "Duet Song" as a duet, and "Listed As Duet" too, though its file has one sung part.
+    const duetUploads: Record<string, string> = { 'Duet Song': fixture('duet.txt'), 'Listed As Duet': noteFile([0, 4]) };
+    const usdb = fakeUsdb(() => noteFile([0, 4]), calls, (_a, t) => duetUploads[t] ?? null);
+    const tracks = ['Duet Song', 'Solo Song', 'Listed As Duet', 'Has Parts'].map((t, i) => track(String(i + 1), 'Duo', t));
+
+    await syncNoteFiles({ store, usdb, tracks });
+    expect(calls).toEqual([]);
+
+    const summary = await syncNoteFiles({ store, usdb, tracks, rescanDuets: true, now: () => new Date(0) });
+    expect(calls).toEqual(['Duet Song', 'Solo Song', 'Listed As Duet'].map((title) => ({ title, download: true, duet: true })));
+    expect(summary).toMatchObject({ alreadyKnown: 4, updated: 1, errors: 0 });
+    const upgraded = (await store.getSongRange(songKey('Duo', 'Duet Song')))!;
+    expect(upgraded.range).toEqual({ ...songRangeFromUltrastar(fixture('duet.txt')), usdbId: 77, usdbViews: 2000, usdbRating: 4 });
+    expect(upgraded.log).toEqual({ ...log('Duet Song'), reason: 'Used the UltraStar note file for this song (from USDB).', at: '1970-01-01T00:00:00.000Z' });
+    for (const title of ['Solo Song', 'Listed As Duet']) expect((await store.getSongRange(songKey('Duo', title)))!.range).toEqual(old);
+    expect((await store.getSongRange(songKey('Duo', 'Has Parts')))!.range).toEqual(withParts);
+
+    // A song that has its parts is not asked about again.
+    calls.length = 0;
+    await syncNoteFiles({ store, usdb, tracks, rescanDuets: true });
+    expect(calls.map((c) => c.title)).toEqual(['Solo Song', 'Listed As Duet']);
+  });
+
+  it('with rescanDuets, still backfills views and stars for a song USDB does not list as a duet', async () => {
+    const store = createMemoryStore();
+    const old = { low: 50, high: 60, tessitura: 55, source: 'note-file' as const, confidence: 'high' as const, fastLyrics: false };
+    await store.putSongRange(songKey('A', 'Old'), { range: old, log: {} as never });
+    const calls: { title: string; download: boolean; duet?: boolean }[] = [];
+    await syncNoteFiles({ store, usdb: fakeUsdb(() => noteFile([0, 4]), calls), tracks: [track('1', 'A', 'Old')], rescanDuets: true });
+    expect(calls).toEqual([{ title: 'Old', download: true, duet: true }, { title: 'Old', download: false }]);
+    expect((await store.getSongRange(songKey('A', 'Old')))!.range).toEqual({ ...old, usdbViews: 2000, usdbRating: 4 });
   });
 
   it('logs in before the first song and stops the run when login fails', async () => {
@@ -233,6 +281,38 @@ describe('syncNoteFiles with the USDB song index', () => {
     const range = (await store.getSongRange(songKey('Queen', 'Bohemian Rhapsody')))!.range!;
     expect(range).toMatchObject({ usdbId: 42, usdbViews: 5000, usdbRating: 4.5 });
     expect((await store.getSongRange(songKey('Queen', 'Not On USDB')))!.range?.source).toBe('artist-typical');
+  });
+
+  it('with rescanDuets, downloads the upload titled as a duet when USDB also has a solo one', async () => {
+    const store = createMemoryStore();
+    const key = songKey('Duo', 'Islands in the Stream');
+    await store.putUsdbSongs([
+      { id: 1, key, artist: 'Duo', title: 'Islands in the Stream', views: 900, rating: 4 },
+      { id: 2, key, artist: 'Duo', title: 'Islands in the Stream [DUET]', views: 100, rating: 5 },
+      { id: 3, key, artist: 'Duo', title: 'Islands in the Stream (duet)', views: 50 },
+      { id: 4, key: songKey('Duo', 'Solo Song'), artist: 'Duo', title: 'Solo Song', views: 10 },
+    ]);
+    const old = { low: 60, high: 62, tessitura: 61, source: 'note-file' as const, confidence: 'high' as const, fastLyrics: false, usdbId: 1, usdbViews: 900, usdbRating: 4 };
+    const log = { trackId: '1', title: 'Islands in the Stream', artist: 'Duo', outcome: 'note-file' as const, reason: 'r', at: 'x' };
+    await store.putSongRange(key, { range: old, log });
+    await store.putSongRange(songKey('Duo', 'Solo Song'), { range: { ...old, usdbId: 4, usdbViews: 10 }, log });
+    const downloads: number[] = [];
+    const usdb = {
+      findSong: async () => {
+        throw new Error('the index answers without a search');
+      },
+      downloadById: async (id: number) => (downloads.push(id), fixture('duet.txt')),
+    };
+    const tracks = [track('1', 'Duo', 'Islands in the Stream'), track('2', 'Duo', 'Solo Song')];
+
+    await syncNoteFiles({ store, usdb, tracks });
+    expect(downloads).toEqual([]);
+
+    const summary = await syncNoteFiles({ store, usdb, tracks, rescanDuets: true });
+    // The most-viewed upload titled as a duet, not the most-viewed upload (the solo one).
+    expect(downloads).toEqual([2]);
+    expect(summary).toMatchObject({ updated: 1, errors: 0 });
+    expect((await store.getSongRange(key))!.range).toMatchObject({ duet: true, low: 60, high: 62, usdbId: 2, usdbViews: 100, usdbRating: 5 });
   });
 
   it('backfills views and stars from the index with no request', async () => {

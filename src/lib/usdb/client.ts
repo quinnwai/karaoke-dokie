@@ -15,6 +15,8 @@ export interface UsdbSongRow {
   id: number;
   artist: string;
   title: string;
+  /** The edition cell of a detailed list row, when filled in (e.g. "[DUET]" or "SingStar Duets"). */
+  edition?: string;
   /** Page views (last cell) and star rating 0-5 (cell before it), when the row has them. */
   views?: number;
   rating?: number;
@@ -51,8 +53,12 @@ export interface UsdbClient {
   login(): Promise<void>;
   /** Searches by artist and title and returns the note file text, or null when USDB has no match. */
   findNoteFile(artist: string, title: string): Promise<string | null>;
-  /** Like findNoteFile, plus the song's views and rating. `download: false` only searches (fast). */
-  findSong(artist: string, title: string, opts?: { download?: boolean }): Promise<UsdbSong | null>;
+  /**
+   * Like findNoteFile, plus the song's views and rating. `download: false` only searches (fast).
+   * `duet: true` only takes a row listed as a duet (isDuetListing), so when USDB has a song both
+   * as "Song" and "Song [DUET]" (one songKey) it gets the duet upload.
+   */
+  findSong(artist: string, title: string, opts?: { download?: boolean; duet?: boolean }): Promise<UsdbSong | null>;
   /** One page (100 rows) of USDB's song list, by id or by last change. Empty past the end. */
   listSongs(opts: { order: 'id' | 'lastchange'; descending?: boolean; start: number }): Promise<UsdbSongRow[]>;
   /** The note file for a known USDB id (waits out the countdown), or null. */
@@ -94,9 +100,23 @@ export function parseSongList(html: string): UsdbSongRow[] {
       if (views !== undefined) row.views = views;
       if (rating !== undefined) row.rating = rating;
     }
+    // A detailed row has 12 cells: sample, cover, artist, title, genre, year, edition, golden
+    // notes, language, creator, rating, views.
+    if (cells.length >= 12) {
+      const edition = stripTags(cells[6]!);
+      if (edition) row.edition = edition;
+    }
     rows.push(row);
   }
   return rows;
+}
+
+/**
+ * True when USDB lists a song as a duet: "duet" anywhere in its title or edition, any case, with
+ * or without brackets ("Song [DUET]", "Song (Duet)", "SingStar Duets", German "Duett").
+ */
+export function isDuetListing(row: { title: string; edition?: string }): boolean {
+  return /duet/i.test(row.title) || /duet/i.test(row.edition ?? '');
 }
 
 /** A whole number like "1000" or "1.234" (thousands separator); undefined when the cell is not one. */
@@ -192,12 +212,12 @@ export function createUsdbClient(opts: UsdbClientOptions): UsdbClient {
     return parseNoteText(await request(params, { wd: '1' }));
   }
 
-  async function findSong(artist: string, title: string, { download: fetchNotes = true } = {}): Promise<UsdbSong | null> {
+  async function findSong(artist: string, title: string, { download: fetchNotes = true, duet = false } = {}): Promise<UsdbSong | null> {
     await login();
     const cleanTitle = searchTitle(title);
     const list = await request({ link: 'list' }, { interpret: artist, title: cleanTitle, details: '1', limit: '30', start: '0' });
     const want = songKey(artist, cleanTitle);
-    const hit = parseSongList(list).find((row) => songKey(row.artist, row.title) === want);
+    const hit = parseSongList(list).find((row) => songKey(row.artist, row.title) === want && (!duet || isDuetListing(row)));
     if (!hit) return null;
     const song: UsdbSong = { id: hit.id, noteText: fetchNotes ? await download(hit.id) : null };
     if (hit.views !== undefined) song.views = hit.views;
