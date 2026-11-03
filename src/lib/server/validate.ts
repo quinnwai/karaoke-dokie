@@ -1,4 +1,4 @@
-import type { FeedbackRequest, VocalRange } from '../contracts';
+import { MOODS, type Decade, type FeedbackRequest, type ResultsView, type SortId, type VocalRange } from '../contracts';
 
 export const MIDI_MIN = 28;
 export const MIDI_MAX = 96;
@@ -29,14 +29,35 @@ export function validateVocalRange(body: unknown): Validated<VocalRange> {
 
 export function validateFeedback(body: unknown): Validated<FeedbackRequest> {
   if (!isObj(body)) return { ok: false, error: 'Body must be a JSON object' };
-  const { trackId, thumbs, difficulty, octave } = body;
+  const { trackId, thumbs, difficulty, octave, view } = body;
   if (typeof trackId !== 'string' || !trackId.trim() || trackId.length > 200) {
     return { ok: false, error: 'trackId must be a non-empty string' };
   }
   if (!oneOf(thumbs, ['up', 'down'] as const)) return { ok: false, error: "thumbs must be 'up' or 'down'" };
   if (!oneOf(difficulty, ['easy', 'medium', 'hard', 'maybe'] as const)) return { ok: false, error: 'difficulty is invalid' };
   if (!oneOf(octave, ['none', 'up', 'down'] as const)) return { ok: false, error: 'octave is invalid' };
-  return { ok: true, value: { trackId, thumbs, difficulty, octave } };
+  const value: FeedbackRequest = { trackId, thumbs, difficulty, octave };
+  // Older clients send no view; a view that is sent must be a whole, known one.
+  if (view !== undefined) {
+    const v = validateView(view);
+    if (!v.ok) return v;
+    value.view = v.value;
+  }
+  return { ok: true, value };
+}
+
+const SORTS: readonly SortId[] = ['top', 'played', 'warmup', 'showoff', 'singalong'];
+const DECADES: readonly Decade[] = ['60s', '70s', '80s', '90s', '00s', '10s', '20s'];
+
+/** The results view a tap came from. Only the four known fields are kept, so the stored view is just them. */
+function validateView(view: unknown): Validated<ResultsView> {
+  if (!isObj(view)) return { ok: false, error: 'view must be an object' };
+  const { sort, decade, mood, duetsOnly } = view;
+  if (!oneOf(sort, SORTS)) return { ok: false, error: `view.sort must be one of ${SORTS.join(', ')}` };
+  if (decade !== null && !oneOf(decade, DECADES)) return { ok: false, error: `view.decade must be null or one of ${DECADES.join(', ')}` };
+  if (mood !== null && !oneOf(mood, MOODS)) return { ok: false, error: `view.mood must be null or one of ${MOODS.join(', ')}` };
+  if (typeof duetsOnly !== 'boolean') return { ok: false, error: 'view.duetsOnly must be true or false' };
+  return { ok: true, value: { sort, decade, mood, duetsOnly } };
 }
 
 /** Optional non-negative integer query param within [min, max]. */

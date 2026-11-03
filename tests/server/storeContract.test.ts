@@ -164,6 +164,19 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     for (const f of [measured, estimate, skipped]) await s.saveFeedback(f);
     expect(await s.listFeedback()).toEqual([skipped, estimate, measured]);
   });
+
+  it('reads back the results view stored with feedback, and no view for a tap without one', async () => {
+    const s = make();
+    const filtered = { ...feedback('u1', 1), view: { sort: 'warmup' as const, decade: '80s' as const, mood: 'upbeat' as const, duetsOnly: true } };
+    const plain = { ...feedback('u1', 2), view: { sort: 'top' as const, decade: null, mood: null, duetsOnly: false } };
+    const older = feedback('u1', 3);
+    for (const f of [filtered, plain, older]) await s.saveFeedback(f);
+    const [o, p, f] = await s.listFeedback();
+    expect(f).toStrictEqual(filtered);
+    expect(p).toStrictEqual(plain);
+    expect(o).toStrictEqual(older);
+    expect(o).not.toHaveProperty('view');
+  });
 });
 
 describe('schema and store selection', () => {
@@ -196,9 +209,15 @@ describe('schema and store selection', () => {
     await migrate(q);
     await migrate(q);
     const s = createPostgresStore(q, { autoMigrate: false });
-    const fresh = { ...feedback('u1', 2), songRange: { source: 'audio-full' as const, method: 'm', low: 52, high: 65 } };
+    const fresh = {
+      ...feedback('u1', 2),
+      songRange: { source: 'audio-full' as const, method: 'm', low: 52, high: 65 },
+      view: { sort: 'showoff' as const, decade: '20s' as const, mood: null, duetsOnly: false },
+    };
     await s.saveFeedback(fresh);
     expect(await s.listFeedback()).toEqual([fresh, old]);
+    // A tap saved before the view column existed comes back with no view.
+    expect((await s.listFeedback())[1]).not.toHaveProperty('view');
   });
 
   it('picks memory unless a DATABASE_URL is set and KARAOKE_STORE is not memory', () => {

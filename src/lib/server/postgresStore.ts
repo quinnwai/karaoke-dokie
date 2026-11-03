@@ -91,6 +91,7 @@ function toFeedback(r: Row): FeedbackEntry {
     if (isSet(r.range_high)) s.high = num(r.range_high);
     f.songRange = s;
   }
+  if (isSet(r.view_json)) f.view = JSON.parse(str(r.view_json));
   return f;
 }
 
@@ -230,11 +231,11 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       const s = f.songRange;
       await query(
         `INSERT INTO feedback (user_id, track_id, thumbs, user_low, user_high, user_range_source, difficulty, octave, at,
-           range_source, range_method, range_low, range_high)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+           range_source, range_method, range_low, range_high, view_json)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [
           f.userId, f.trackId, f.thumbs, f.userRange.low, f.userRange.high, f.userRange.source, f.difficulty, f.octave, f.at,
-          s?.source ?? null, s?.method ?? null, s?.low ?? null, s?.high ?? null,
+          s?.source ?? null, s?.method ?? null, s?.low ?? null, s?.high ?? null, f.view ? JSON.stringify(f.view) : null,
         ],
       );
     },

@@ -339,6 +339,43 @@ describe('feedback', () => {
     expect(unknown!.songRange).toBeUndefined();
   });
 
+  it('stores the results view the tap came from, and no view when the client sends none', async () => {
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const tap = { trackId: 'mock-1-bohemian-rhapsody', thumbs: 'up', difficulty: 'maybe', octave: 'none' };
+    const view = { sort: 'singalong', decade: '70s', mood: 'heartfelt', duetsOnly: false };
+    const post = async (json: unknown) => (await feedback.POST(req('/api/feedback', jar, { method: 'POST', json }))).status;
+    expect(await post({ ...tap, view: { ...view, chips: ['a'] } })).toBe(200); // fields it does not know are dropped
+    expect(await post({ ...tap, view: { sort: 'top', decade: null, mood: null, duetsOnly: true } })).toBe(200);
+    expect(await post(tap)).toBe(200);
+    const [older, plain, filtered] = await getStore().listFeedback({ userId: MOCK_USER.id });
+    expect(filtered!.view).toStrictEqual(view);
+    expect(plain!.view).toStrictEqual({ sort: 'top', decade: null, mood: null, duetsOnly: true });
+    expect(older).not.toHaveProperty('view');
+  });
+
+  const goodView = { sort: 'top', decade: null, mood: null, duetsOnly: false };
+  it.each([
+    ['null', null],
+    ['a string', 'top'],
+    ['an array', []],
+    ['unknown sort', { ...goodView, sort: 'newest' }],
+    ['no sort', { decade: null, mood: null, duetsOnly: false }],
+    ['unknown decade', { ...goodView, decade: '50s' }],
+    ['a year for a decade', { ...goodView, decade: 1980 }],
+    ['no decade', { sort: 'top', mood: null, duetsOnly: false }],
+    ['unknown mood', { ...goodView, mood: 'sad' }],
+    ['no mood', { sort: 'top', decade: null, duetsOnly: false }],
+    ['duetsOnly as a string', { ...goodView, duetsOnly: 'false' }],
+    ['no duetsOnly', { sort: 'top', decade: null, mood: null }],
+  ])('returns 400 on a bad view (%s)', async (_name, view) => {
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const body = { trackId: 't', thumbs: 'up', difficulty: 'easy', octave: 'none', view };
+    expect((await feedback.POST(req('/api/feedback', jar, { method: 'POST', json: body }))).status).toBe(400);
+    expect(await getStore().listFeedback()).toEqual([]);
+  });
+
   it.each([
     ['empty', {}],
     ['bad thumbs', { trackId: 't', thumbs: 'sideways', difficulty: 'easy', octave: 'none' }],
