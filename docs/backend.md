@@ -14,7 +14,7 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | PUT | `/api/me/range` | `VocalRange` | `{ ok: true }`; 400 unless `low`/`high` are integers, 28 <= low < high <= 96, span 5..48, `source` is `test` or `songs` |
 | GET | `/api/recommendations` | `offset` (default 0), `limit` (1..50, default 5), or `all=1` | `RecommendationsResponse`; songs with a low-confidence range come last with `difficulty: 'maybe'` (the Maybe group); 409 `{ error: 'no-range' }` before a range is saved. `all=1` ignores `offset` and `limit` and sends every match (at most 1,000, the best-ranked) with its `year` and `yearSource` (the earlier of USDB's and Spotify's album year), `genre` (USDB's), USDB views and stars for songs whose range has none, and no pitch histograms; `complete: true` when that is every match. `complete: false` with a `nextOffset` means lookups ran out of budget (a first visit to a very large library): ask `all=1` again to carry on, not a page from `nextOffset`, since pages rank without the USDB popularity. `complete: false` with `nextOffset: null` means the list was cut at 1,000 |
 | GET | `/api/songs/known` | | `KnownSongsResponse` (up to 50 library songs with a known range, play order) |
-| POST | `/api/feedback` | `FeedbackRequest` (`difficulty` may be `maybe`; optional `view`, the results view the song was found in) | `{ ok: true }`; 400 on bad input, including a `view` without a known `sort`, a `decade` and `mood` that are known or null, and a boolean `duetsOnly`; 409 before a range is saved. Stored with the user's current range, the view (`view_json`) and, when the song is in the cached library, its range at that moment (`range_source` = the log outcome, `range_method`, `range_low`, `range_high`); the tap never loads the library from Spotify |
+| POST | `/api/feedback` | `FeedbackRequest` (`difficulty` may be `maybe`; optional `view`, the results view the song was found in) | `{ ok: true }`; 400 on bad input, including a `view` without `difficulty`, `familiarity` and `popularity` that are each null or a number from 0 to 1, a `decade` and `mood` that are known or null, and a boolean `duetsOnly`; 409 before a range is saved. Stored with the user's current range, the view (`view_json`) and, when the song is in the cached library, its range at that moment (`range_source` = the log outcome, `range_method`, `range_low`, `range_high`); the tap never loads the library from Spotify |
 | GET | `/api/admin/log` | header `x-admin-token`, `limit` (1..1000, default 200) | `{ entries: DataSourceLogEntry[] }`, newest first; 403 on a wrong token or when `ADMIN_TOKEN` is unset |
 | GET | `/api/catalogue/recommendations` | `low`, `high` (the range: integers, 28 <= low < high <= 96, span 5..48), then `all=1` or `offset`/`limit`; no session | `RecommendationsResponse` from the public catalogue (QWW-2 Track B): every song with a note-file or recording range, most-viewed USDB row attached, cached per process for an hour (6,000 songs). Tracks have `cat:<songKey>` ids and Spotify search links, `known: false`, so no familiarity reasons. `all=1` sends at most the best 1,000 matches with year and genre; `complete: false` and `nextOffset: null` when trimmed. 400 on a bad range |
 | POST | `/api/catalogue/feedback` | `CatalogueFeedbackRequest`: the feedback fields plus `anonId` (8 to 64 of `[A-Za-z0-9-]`) and `range`; no session | `{ ok: true }`; stored with `user_id = 'anon:' + anonId`, the range, and the song's range snapshot looked up by key. 400 on bad input or a `trackId` that is not `cat:` |
@@ -77,9 +77,11 @@ these names and props:
   `step: 'low'` and with `step: 'high'`, `range_shown`, `results_viewed`, `song_opened`,
   `spotify_link_pressed`, `spotify_connect_pressed`. Each step counts on its own, so a returning
   tester who lands on results still counts there.
-- **By sort**, keyed by the `sort` prop: `song_opened` (count, and the median of its `position`
-  prop), `spotify_link_pressed` (count), `feedback_tapped` (its `thumbs` prop, `up` or `down`).
-  Events without a string `sort` are left out.
+- **By control**, keyed by each control in use when the event happened: `difficulty`,
+  `familiarity` or `popularity` when that slider prop is a number, `decade` or `mood` when one is
+  picked, `duets` when `duetsOnly` is true, else `none`. An event with several controls in use
+  counts toward each. Per control: `song_opened` (count, and the median of its `position` prop),
+  `spotify_link_pressed` (count), `feedback_tapped` (its `thumbs` prop, `up` or `down`).
 - **Sessions**: each device's events in time order, the 50 most recently active devices first.
 
 ## Swap points

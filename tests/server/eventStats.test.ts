@@ -20,7 +20,7 @@ describe('summarizeEvents: funnel', () => {
   it('lists every step in funnel order, with zeros when nothing happened', () => {
     expect(summarizeEvents([])).toEqual({
       funnel: FUNNEL.map((s) => ({ name: s.label, devices: 0 })),
-      bySort: {},
+      byControl: {},
       sessions: [],
     });
     expect(FUNNEL.map((s) => s.label)).toEqual([
@@ -76,52 +76,53 @@ describe('summarizeEvents: funnel', () => {
   });
 });
 
-describe('summarizeEvents: bySort', () => {
-  it('counts opens, Spotify opens and thumbs per sort, with the median position opened', () => {
+describe('summarizeEvents: byControl', () => {
+  const none = { difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false };
+
+  it('counts opens, Spotify opens and thumbs per control in use, with the median position opened', () => {
     const ev = timeline();
     const events = [
-      ev('device-a', 'song_opened', { sort: 'top', position: 0 }),
-      ev('device-a', 'song_opened', { sort: 'top', position: 4 }),
-      ev('device-b', 'song_opened', { sort: 'top', position: 1 }),
-      ev('device-a', 'spotify_link_pressed', { sort: 'top' }),
-      ev('device-b', 'spotify_link_pressed', { sort: 'top' }),
-      ev('device-a', 'feedback_tapped', { sort: 'top', thumbs: 'up' }),
-      ev('device-b', 'feedback_tapped', { sort: 'top', thumbs: 'up' }),
-      ev('device-b', 'feedback_tapped', { sort: 'top', thumbs: 'down' }),
-      ev('device-b', 'feedback_tapped', { sort: 'top', thumbs: 'sideways' }),
+      ev('device-a', 'song_opened', { ...none, position: 0 }),
+      ev('device-a', 'song_opened', { ...none, position: 4 }),
+      ev('device-b', 'song_opened', { ...none, position: 1 }),
+      ev('device-a', 'spotify_link_pressed', none),
+      ev('device-b', 'spotify_link_pressed', none),
+      ev('device-a', 'feedback_tapped', { ...none, thumbs: 'up' }),
+      ev('device-b', 'feedback_tapped', { ...none, thumbs: 'up' }),
+      ev('device-b', 'feedback_tapped', { ...none, thumbs: 'down' }),
+      ev('device-b', 'feedback_tapped', { ...none, thumbs: 'sideways' }),
       // An open without a position counts as an open but not toward the median.
-      ev('device-a', 'song_opened', { sort: 'warmup', position: 2 }),
-      ev('device-a', 'song_opened', { sort: 'warmup' }),
-      ev('device-a', 'spotify_link_pressed', { sort: 'warmup' }),
-      // An even number of positions: the mean of the middle two.
-      ...[10, 1, 3, 2].map((position) => ev('device-c', 'song_opened', { sort: 'played', position })),
+      ev('device-a', 'song_opened', { ...none, difficulty: 0.2, position: 2 }),
+      ev('device-a', 'song_opened', { ...none, difficulty: 0.2 }),
+      ev('device-a', 'spotify_link_pressed', { ...none, difficulty: 0.2 }),
+      // Two controls in use count toward both. An even number of positions: the mean of the middle two.
+      ...[10, 1, 3, 2].map((position) => ev('device-c', 'song_opened', { ...none, familiarity: 1, decade: '80s', position })),
       // Thumbs with no opens: no median.
-      ev('device-c', 'feedback_tapped', { sort: 'singalong', thumbs: 'down' }),
-      // Left out: no sort, a sort that is not a string, and events that are not about songs.
+      ev('device-c', 'feedback_tapped', { ...none, popularity: 0.9, mood: 'upbeat', duetsOnly: true, thumbs: 'down' }),
+      // No view props, or a slider that is not a number: nothing in use.
       ev('device-a', 'song_opened', { position: 7 }),
-      ev('device-a', 'song_opened', { sort: 3, position: 7 }),
-      ev('device-a', 'sort_selected', { sort: 'showoff' }),
-      ev('device-a', 'results_viewed', { sort: 'showoff' }),
+      ev('device-a', 'song_opened', { difficulty: 'high', position: 7 }),
+      // Left out: events that are not about songs.
+      ev('device-a', 'slider_changed', { ...none, slider: 'difficulty', difficulty: 0.5 }),
+      ev('device-a', 'results_viewed', { ...none, decade: '90s' }),
     ];
-    expect(summarizeEvents(events).bySort).toEqual({
-      top: { opened: 3, spotify: 2, up: 2, down: 1, medianPosition: 1 },
-      warmup: { opened: 2, spotify: 1, up: 0, down: 0, medianPosition: 2 },
-      played: { opened: 4, spotify: 0, up: 0, down: 0, medianPosition: 2.5 },
-      singalong: { opened: 0, spotify: 0, up: 0, down: 1, medianPosition: null },
+    expect(summarizeEvents(events).byControl).toEqual({
+      none: { opened: 5, spotify: 2, up: 2, down: 1, medianPosition: 4 },
+      difficulty: { opened: 2, spotify: 1, up: 0, down: 0, medianPosition: 2 },
+      familiarity: { opened: 4, spotify: 0, up: 0, down: 0, medianPosition: 2.5 },
+      decade: { opened: 4, spotify: 0, up: 0, down: 0, medianPosition: 2.5 },
+      popularity: { opened: 0, spotify: 0, up: 0, down: 1, medianPosition: null },
+      mood: { opened: 0, spotify: 0, up: 0, down: 1, medianPosition: null },
+      duets: { opened: 0, spotify: 0, up: 0, down: 1, medianPosition: null },
     });
   });
 
-  it('keeps sorts named like Object.prototype members as plain entries', () => {
+  it('keys are only the fixed control names, whatever strings the props carry', () => {
     const ev = timeline();
-    const sorts = ['__proto__', 'constructor', 'hasOwnProperty', 'toString'];
-    const { bySort } = summarizeEvents(sorts.map((sort) => ev('device-a', 'song_opened', { sort, position: 1 })));
-    expect(Object.keys(bySort).sort()).toEqual([...sorts].sort());
-    for (const sort of sorts) {
-      expect(Object.getOwnPropertyDescriptor(bySort, sort)?.value).toEqual({ opened: 1, spotify: 0, up: 0, down: 0, medianPosition: 1 });
-    }
-    expect(Object.getPrototypeOf(bySort)).toBe(Object.prototype);
+    const { byControl } = summarizeEvents([ev('device-a', 'song_opened', { ...none, decade: '__proto__', mood: 'constructor', position: 1 })]);
+    expect(Object.keys(byControl).sort()).toEqual(['decade', 'mood']);
+    expect(Object.getPrototypeOf(byControl)).toBe(Object.prototype);
     expect(({} as Record<string, unknown>).opened).toBeUndefined();
-    expect(Object.keys(JSON.parse(JSON.stringify(bySort))).sort()).toEqual([...sorts].sort());
   });
 });
 

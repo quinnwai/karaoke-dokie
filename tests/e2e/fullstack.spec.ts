@@ -28,7 +28,8 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   await page.getByRole('button', { name: 'Continue' }).click();
   const songs = page.locator('ol li');
   await expect(songs).toHaveCount(5, { timeout: 20_000 });
-  await expect(page.getByRole('button', { name: 'Most played' })).toHaveCount(0);
+  await expect(page.getByRole('slider', { name: 'Ease in to Whole range' })).toBeVisible();
+  await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toHaveCount(0);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-01-catalogue.png') });
 
   // The catalogue route needs no session, and every song it lists fits A2 to C5 (as written or an
@@ -70,7 +71,7 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
 
   // ---- Connect Spotify (mock): the range carries over and library songs load ----
   await page.getByRole('button', { name: 'Connect Spotify' }).first().click();
-  await expect(page.getByRole('button', { name: 'Most played' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toBeVisible({ timeout: 20_000 });
   await expect(songs).toHaveCount(5);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-04-library.png') });
 

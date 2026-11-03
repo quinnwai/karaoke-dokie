@@ -130,14 +130,24 @@ export interface Match {
 
 // ---------- results view (QWW-9, QWW-13, QWW-22, QWW-23) ----------
 
-/** How the results are ordered. 'played' needs listening data, so catalogue mode has no 'played'. */
-export type SortId = 'top' | 'played' | 'warmup' | 'showoff' | 'singalong';
+/**
+ * The continuous controls: a slider each. 'familiarity' needs listening data, so catalogue mode
+ * has none; 'popularity' needs real popularity data for most songs.
+ */
+export type SliderId = 'difficulty' | 'familiarity' | 'popularity';
+export const SLIDER_IDS: SliderId[] = ['difficulty', 'familiarity', 'popularity'];
 /** Decade buckets; '60s' means "60s and earlier". */
 export type Decade = '60s' | '70s' | '80s' | '90s' | '00s' | '10s' | '20s';
 
-/** What the singer has picked on the results screen. One pick per row; null = nothing picked. */
+/**
+ * What the singer has set on the results screen. Sliders are preferences, not filters: null until
+ * touched, then a target from 0 (left end) to 1 (right end), and the songs closest to every set
+ * target come first. Chips are filters: one pick per row, null = nothing picked.
+ */
 export interface ResultsView {
-  sort: SortId;
+  difficulty: number | null;
+  familiarity: number | null;
+  popularity: number | null;
   decade: Decade | null;
   mood: Mood | null;
   duetsOnly: boolean;
@@ -238,7 +248,7 @@ export type EventValue = string | number | boolean | null;
 
 /** One thing a tester did. Never carries a Spotify id or a song from someone's Spotify library. */
 export interface AppEvent {
-  /** e.g. 'landing_viewed', 'range_shown', 'results_viewed', 'sort_selected', 'song_opened'. */
+  /** e.g. 'landing_viewed', 'range_shown', 'results_viewed', 'slider_changed', 'song_opened'. */
   name: string;
   /** ISO time on the device. */
   at: string;
@@ -253,8 +263,11 @@ export interface EventsRequest {
 export interface AdminEventsResponse {
   /** How many distinct devices reached each funnel step, in funnel order. */
   funnel: { name: string; devices: number }[];
-  /** Per sort: songs opened, Spotify opens, thumbs up and down, and the median list position opened. */
-  bySort: Record<string, { opened: number; spotify: number; up: number; down: number; medianPosition: number | null }>;
+  /**
+   * Per control that was in use when it happened (a slider that was set, a chip that was picked, or
+   * 'none'): songs opened, Spotify opens, thumbs up and down, and the median list position opened.
+   */
+  byControl: Record<string, { opened: number; spotify: number; up: number; down: number; medianPosition: number | null }>;
   /** Each device's events in time order, newest devices first, so a session reads as a replay. */
   sessions: { anonId: string; events: AppEvent[] }[];
 }

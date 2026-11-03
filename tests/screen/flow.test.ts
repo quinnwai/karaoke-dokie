@@ -129,23 +129,36 @@ describe('results', () => {
     expect(run([{ type: 'retryLoad' }], failed)).toMatchObject({ loading: true, error: null });
   });
 
-  it('changing the sort or a chip shows the new list from its first song', () => {
-    let s = run([{ type: 'loadMore' }, { type: 'setSort', sort: 'warmup' }], loaded);
-    expect(s.view.sort).toBe('warmup');
+  it('moving a slider or tapping a chip shows the new list from its first song', () => {
+    let s = run([{ type: 'loadMore' }, { type: 'setSlider', slider: 'difficulty', value: 0.2 }], loaded);
+    expect(s.view.difficulty).toBe(0.2);
+    expect(s.leadSlider).toBe('difficulty');
     expect(s.shown).toBe(5);
     s = run([{ type: 'loadMore' }, { type: 'pickDecade', decade: '80s' }], s);
-    expect(s.view).toMatchObject({ sort: 'warmup', decade: '80s' });
+    expect(s.view).toMatchObject({ difficulty: 0.2, decade: '80s' });
     expect(s.shown).toBe(5);
     s = run([{ type: 'pickDecade', decade: '90s' }, { type: 'pickMood', mood: 'upbeat' }, { type: 'toggleDuets' }], s);
-    expect(s.view).toEqual({ sort: 'warmup', decade: '90s', mood: 'upbeat', duetsOnly: true });
+    expect(s.view).toEqual({ difficulty: 0.2, familiarity: null, popularity: null, decade: '90s', mood: 'upbeat', duetsOnly: true });
     s = run([{ type: 'clearFilters' }], s);
-    expect(s.view).toEqual({ sort: 'warmup', decade: null, mood: null, duetsOnly: false });
+    expect(s.view).toEqual({ difficulty: 0.2, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false });
   });
 
-  it('a sort the new list cannot offer falls back to Top picks', () => {
-    // No song in the fixtures has known popularity, so Singalongs is not offered.
-    const s = run([{ type: 'setSort', sort: 'singalong' }, { type: 'allLoaded', page: allMatches() }], atResults);
-    expect(s.view.sort).toBe('top');
+  it('a slider is clamped to its track, the last one moved leads, and Reset unsets them all', () => {
+    let s = run([{ type: 'setSlider', slider: 'difficulty', value: -3 }, { type: 'setSlider', slider: 'familiarity', value: 9 }], loaded);
+    expect(s.view).toMatchObject({ difficulty: 0, familiarity: 1 });
+    expect(s.leadSlider).toBe('familiarity');
+    expect(run([{ type: 'sliderDone', slider: 'familiarity' }], s)).toBe(s);
+    expect(run([{ type: 'setSlider', slider: 'familiarity', value: null }], s).leadSlider).toBeNull();
+    s = run([{ type: 'pickDecade', decade: '80s' }, { type: 'resetSliders' }], s);
+    expect(s.view).toEqual({ difficulty: null, familiarity: null, popularity: null, decade: '80s', mood: null, duetsOnly: false });
+    expect(s.leadSlider).toBeNull();
+  });
+
+  it('a slider the new list cannot offer is unset', () => {
+    // No song in the fixtures has known popularity, so the popularity slider is not offered.
+    const s = run([{ type: 'setSlider', slider: 'popularity', value: 0.9 }, { type: 'allLoaded', page: allMatches() }], atResults);
+    expect(s.view.popularity).toBeNull();
+    expect(s.leadSlider).toBeNull();
   });
 
   it('opens and closes a song, and remembers feedback', () => {
@@ -172,10 +185,10 @@ describe('results', () => {
     expect(s).toMatchObject({ step: 'saving', range: { low: 45, high: 70 } });
   });
 
-  it('redo restarts the test, clears results and filters, and keeps the sort', () => {
-    const s = run([{ type: 'setSort', sort: 'warmup' }, { type: 'pickDecade', decade: '80s' }, { type: 'redo' }], loaded);
+  it('redo restarts the test, clears results and filters, and keeps the sliders', () => {
+    const s = run([{ type: 'setSlider', slider: 'difficulty', value: 0.8 }, { type: 'pickDecade', decade: '80s' }, { type: 'redo' }], loaded);
     expect(s).toMatchObject({ step: 'quiet', low: null, high: null, matches: [], signedIn: true });
-    expect(s.view).toEqual({ sort: 'warmup', decade: null, mood: null, duetsOnly: false });
+    expect(s.view).toEqual({ difficulty: 0.8, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false });
   });
 });
 

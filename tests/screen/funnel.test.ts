@@ -32,13 +32,24 @@ describe('funnel events', () => {
     const empty = { ...allMatches(0) };
     expect(names(atResults, { type: 'allLoaded', page: empty })).toEqual(['results_viewed', 'results_empty']);
     const loaded = run([{ type: 'allLoaded', page: allMatches() }], atResults);
-    expect(eventsFor(loaded, { type: 'setSort', sort: 'warmup' })).toEqual([
-      { name: 'sort_selected', props: { mode: 'library', sort: 'warmup', decade: null, mood: null, duetsOnly: false } },
+    // Dragging records nothing; letting go records the adjustment once, with the view it left.
+    expect(names(loaded, { type: 'setSlider', slider: 'difficulty', value: 0.333 })).toEqual([]);
+    const tuned = run([{ type: 'setSlider', slider: 'difficulty', value: 0.333 }], loaded);
+    expect(eventsFor(tuned, { type: 'sliderDone', slider: 'difficulty' })).toEqual([
+      {
+        name: 'slider_changed',
+        props: { slider: 'difficulty', mode: 'library', difficulty: 0.33, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false },
+      },
     ]);
-    expect(names(loaded, { type: 'setSort', sort: 'top' })).toEqual([]);
+    expect(eventsFor(tuned, { type: 'resetSliders' })).toEqual([
+      { name: 'sliders_reset', props: { mode: 'library', difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false } },
+    ]);
     expect(eventsFor(loaded, { type: 'pickDecade', decade: '80s' })[0]!.props).toMatchObject({ kind: 'decade', value: '80s', on: true, decade: '80s' });
     expect(eventsFor(loaded, { type: 'select', trackId: 't3', position: 4 })).toEqual([
-      { name: 'song_opened', props: { mode: 'library', sort: 'top', decade: null, mood: null, duetsOnly: false, position: 4 } },
+      {
+        name: 'song_opened',
+        props: { mode: 'library', difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false, position: 4 },
+      },
     ]);
     expect(eventsFor(loaded, { type: 'feedback', trackId: 't3', thumbs: 'down' })[0]).toMatchObject({ name: 'feedback_tapped', props: { thumbs: 'down' } });
   });

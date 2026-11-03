@@ -99,8 +99,9 @@ describe('KaraokeApp', () => {
     expect(JSON.parse(localStorage.getItem('kd.range')!)).toEqual({ low: 45, high: 72 });
     expect(sessionStorage.getItem('kd.test')).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Connect Spotify' })).toHaveLength(2);
-    // Catalogue songs are nobody's library, so there is no Most played.
-    expect(screen.queryByRole('button', { name: 'Most played' })).toBeNull();
+    // Catalogue songs are nobody's library, so there is no on-repeat slider.
+    expect(screen.getByRole('slider', { name: 'Ease in to Whole range' })).toBeTruthy();
+    expect(screen.queryByRole('slider', { name: 'Deep cuts to On repeat' })).toBeNull();
   });
 
   it('after the test, "or use songs from your Spotify" keeps the range and goes to sign-in', async () => {
@@ -204,17 +205,29 @@ describe('KaraokeApp', () => {
     expect(screen.queryByRole('button', { name: 'Generate more songs' })).toBeNull();
   });
 
-  it('the sort row reorders the songs without asking the server again', async () => {
+  it('a slider reorders the songs without asking the server again, and Reset puts them back', async () => {
     const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
     render(<KaraokeApp api={api} mic={fakeMic().mic} />);
     await screen.findByText('Plastic Love');
     const titles = () => Array.from(document.querySelectorAll('ol li')).map((li) => li.querySelector('[class*="songTitle"]')?.textContent);
     const before = titles();
-    expect(screen.getByRole('button', { name: 'Top picks' }).getAttribute('aria-pressed')).toBe('true');
-    fireEvent.click(screen.getByRole('button', { name: 'Show-off' }));
-    expect(screen.getByRole('button', { name: 'Show-off' }).getAttribute('aria-pressed')).toBe('true');
-    expect(lyrics()).toContain('Uses your whole range');
-    expect(titles()).not.toEqual(before);
+    const slider = screen.getByRole('slider', { name: 'Ease in to Whole range' });
+    expect(slider.getAttribute('aria-valuetext')).toBe('not set');
+    expect(lyrics()).toContain('Our best guess for you');
+    expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
+
+    fireEvent.change(slider, { target: { value: '100' } });
+    expect(slider.getAttribute('aria-valuetext')).toBe('towards Whole range');
+    expect(lyrics()).toContain('Using your whole range');
+    const wholeRange = titles();
+    expect(wholeRange).not.toEqual(before);
+    fireEvent.change(slider, { target: { value: '0' } });
+    expect(lyrics()).toContain('Comfortable tunes to ease into');
+    expect(titles()).not.toEqual(wholeRange);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    expect(slider.getAttribute('aria-valuetext')).toBe('not set');
+    expect(titles()).toEqual(before);
     expect(api.allRecommendations).toHaveBeenCalledTimes(1);
   });
 
@@ -306,9 +319,23 @@ describe('KaraokeApp', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Open in Spotify' }));
     fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
     fireEvent.click(screen.getByRole('button', { name: 'Back to songs' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Warm-up' }));
-    expect(tracked.map((e) => e.name)).toEqual(['results_viewed', 'song_opened', 'spotify_link_pressed', 'feedback_tapped', 'sort_selected']);
-    expect(tracked[1]!.props).toEqual({ mode: 'library', sort: 'top', decade: null, mood: null, duetsOnly: false, position: 3 });
+    const slider = screen.getByRole('slider', { name: 'Ease in to Whole range' });
+    // Dragging records nothing; letting go records one adjustment.
+    fireEvent.change(slider, { target: { value: '35' } });
+    fireEvent.change(slider, { target: { value: '20' } });
+    fireEvent.pointerUp(slider);
+    expect(tracked.map((e) => e.name)).toEqual(['results_viewed', 'song_opened', 'spotify_link_pressed', 'feedback_tapped', 'slider_changed']);
+    expect(tracked[1]!.props).toEqual({
+      mode: 'library',
+      difficulty: null,
+      familiarity: null,
+      popularity: null,
+      decade: null,
+      mood: null,
+      duetsOnly: false,
+      position: 3,
+    });
+    expect(tracked[4]!.props).toMatchObject({ slider: 'difficulty', difficulty: 0.2 });
     expect(JSON.stringify(tracked)).not.toMatch(/"t\d"|Yoru|YOASOBI|open\.spotify/);
   });
 });

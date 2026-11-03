@@ -26,7 +26,7 @@ export interface Api {
   me(): Promise<MeResponse | null>;
   saveRange(range: VocalRange): Promise<void>;
   recommendations(offset: number, limit?: number): Promise<RecommendationsResponse>;
-  /** Every match in the signed-in user's library, ranked (the phone sorts and filters from here). */
+  /** Every match in the signed-in user's library, ranked (the phone orders and filters from here). */
   allRecommendations(): Promise<RecommendationsResponse>;
   /** Every catalogue match for a range, with no Spotify and no session (QWW-2 Track B). */
   catalogue(range: { low: number; high: number }): Promise<RecommendationsResponse>;

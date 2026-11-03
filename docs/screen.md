@@ -18,10 +18,11 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    (`localStorage` `kd.range`). The text button keeps the range in `sessionStorage` (`kd.test`) and
    goes to `/api/auth/login`.
 6. **Results**: one request for every match (`/api/catalogue/recommendations?...&all=1` without
-   Spotify, `/api/recommendations?all=1` with it), then the phone sorts, filters and pages them
-   (`src/lib/songs/browse.ts`), 5 at a time. A row of sort pills (one picked) and a row of chips
-   (decades, moods, duets; one pick per row, a count on each, disabled at zero) sit above the list;
-   the lyric line says what the sort does. Songs whose range is only an estimate
+   Spotify, `/api/recommendations?all=1` with it), then the phone orders, filters and pages them
+   (`src/lib/songs/browse.ts`), 5 at a time. Two panels sit above the list: **Tune** (pink), sliders
+   that reorder and never remove a song, untouched until moved, with Reset; and **Pick** (cyan),
+   chips for decades, moods and duets (one pick per row, a count on each, disabled at zero). The
+   lyric line says what the slider moved last does. Songs whose range is only an estimate
    (`difficulty: 'maybe'`) show last in their own "Maybe" list, without a difficulty pill. In
    catalogue mode "Connect Spotify" saves the range for the sign-in round trip; back from Spotify,
    it is PUT to `/api/me/range` and library results load.
@@ -43,7 +44,7 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
 | `src/lib/client/api.ts` | The only HTTP client (paths and shapes from `contracts.ts`). |
 | `src/lib/client/mic.ts` | `Mic`/`MicRecorder` interface; AudioWorklet with ScriptProcessor fallback. |
 | `src/lib/client/storage.ts` | Guarded `sessionStorage` for test progress and the pick-songs intent; `localStorage` for a range kept on the device. |
-| `src/lib/songs/browse.ts` | Sorts, chips, counts and the "Saved, not played lately" divider, as pure functions over every match. |
+| `src/lib/songs/browse.ts` | Sliders, chips, counts and the "Saved, not played lately" divider, as pure functions over every match. |
 | `src/lib/client/funnel.ts`, `events.ts` | What each action records in the beta event log, and the batching tracker that sends it. |
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,Results,SongDetail,PickSongs}.tsx` | The screen pieces. |

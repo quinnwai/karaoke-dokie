@@ -463,7 +463,7 @@
 
 .redo {
   border: 1px solid var(--faint);
-  border-radius: 999px;
+  border-radius: var(--squircle);
   background: none;
   padding: 4px 12px;
   font-size: 12px;
@@ -591,7 +591,7 @@
   flex: none;
   display: inline-block;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -612,7 +612,7 @@
 .more {
   min-width: 160px;
   padding: 12px 22px;
-  border-radius: 999px;
+  border-radius: 16px;
   border: 1.5px solid var(--pink);
   background: rgba(255, 46, 147, 0.08);
   color: var(--ink);
@@ -841,7 +841,7 @@
   color: var(--ink);
   text-decoration: none;
   padding: 10px 20px;
-  border-radius: 999px;
+  border-radius: 16px;
   border: 1px solid var(--faint);
 }
 
@@ -918,7 +918,7 @@
   color: var(--ink);
 }
 
-/* ---- results view: sort row, filter row (QWW-3) ---- */
+/* ---- results view: Tune (sliders, pink) and Pick (chips, cyan) (QWW-3) ---- */
 
 .barActions {
   display: flex;
@@ -928,10 +928,11 @@
 
 .connect {
   border: 1px solid var(--pink);
-  border-radius: 999px;
-  background: rgba(255, 46, 147, 0.08);
-  padding: 4px 12px;
+  border-radius: var(--squircle);
+  background: rgba(255, 46, 147, 0.1);
+  padding: 5px 12px;
   font-size: 12px;
+  font-weight: 600;
   color: var(--ink);
   cursor: pointer;
 }
@@ -942,10 +943,152 @@
   max-width: 560px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
-/* One row of pills; it scrolls sideways on a phone instead of the page. */
+/* Two clearly different blocks: a quiet panel of sliders, then a row of chips. */
+.tune {
+  min-width: 0;
+  padding: 8px 12px 6px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 0 0 1px rgba(255, 46, 147, 0.12);
+}
+
+.pick {
+  min-width: 0;
+}
+
+.controlsHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.tuneLabel,
+.pickLabel {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.tuneLabel {
+  color: var(--pink);
+}
+
+.pickLabel {
+  color: var(--cyan);
+}
+
+.controlsCount {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.headAction {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.sliderRow {
+  display: grid;
+  grid-template-columns: 76px 1fr 76px;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+}
+
+.sliderEnd {
+  font-size: 11px;
+  line-height: 1.1;
+  color: var(--dim);
+}
+
+.sliderEnd:last-child {
+  text-align: right;
+}
+
+.sliderRow[data-active] .sliderEnd {
+  color: var(--ink);
+}
+
+/* The range input, drawn by hand: a thin track and a squircle thumb that lights up once set. */
+.slider {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--faint);
+}
+
+.slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--faint);
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -9px;
+  border: 0;
+  border-radius: 8px;
+  background: #4a4652;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 8px;
+  background: #4a4652;
+}
+
+.sliderRow[data-active] .slider::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, rgba(255, 46, 147, 0.25), rgba(255, 46, 147, 0.6));
+}
+
+.sliderRow[data-active] .slider::-moz-range-track {
+  background: linear-gradient(90deg, rgba(255, 46, 147, 0.25), rgba(255, 46, 147, 0.6));
+}
+
+.sliderRow[data-active] .slider::-webkit-slider-thumb {
+  background: var(--pink);
+  box-shadow: 0 0 14px -2px var(--pink-glow);
+}
+
+.sliderRow[data-active] .slider::-moz-range-thumb {
+  background: var(--pink);
+  box-shadow: 0 0 14px -2px var(--pink-glow);
+}
+
+.slider:focus-visible {
+  outline: 2px solid var(--pink);
+  outline-offset: 2px;
+  border-radius: var(--squircle);
+}
+
+/* One row of chips; it scrolls sideways on a phone instead of the page. */
 .chipRow {
   min-width: 0;
   display: flex;
@@ -953,72 +1096,62 @@
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  padding: 2px 1px;
+  padding: 3px 1px;
 }
 
 .chipRow::-webkit-scrollbar {
   display: none;
 }
 
-.sortPill,
-.chip,
-.clearChip {
+.chip {
   flex: none;
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--faint);
-  background: none;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: var(--squircle);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--ink);
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
-}
-
-.sortPill[data-selected] {
-  background: var(--pink);
-  border-color: var(--pink);
-  color: var(--bg);
-  box-shadow: 0 0 14px -4px var(--pink-glow);
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
 
 .chip[aria-pressed='true'] {
-  border-color: var(--pink);
-  color: var(--pink);
+  background: var(--cyan);
+  color: var(--bg);
+  box-shadow: 0 0 16px -4px var(--cyan-glow);
 }
 
 .chip:disabled {
-  opacity: 0.35;
+  opacity: 0.3;
   cursor: default;
 }
 
-.sortPill:focus-visible,
 .chip:focus-visible,
-.clearChip:focus-visible,
-.connect:focus-visible {
-  outline: 2px solid var(--pink);
+.connect:focus-visible,
+.headAction:focus-visible {
+  outline: 2px solid var(--cyan);
   outline-offset: 2px;
 }
 
 .chipCount {
-  margin-left: 2px;
+  margin-left: 3px;
   font-weight: 500;
   opacity: 0.6;
+}
+
+.chip[aria-pressed='true'] .chipCount {
+  opacity: 0.75;
 }
 
 .chipDivider {
   flex: none;
   width: 1px;
-  margin: 4px 2px;
+  margin: 6px 2px;
   background: var(--faint);
 }
 
-.clearChip {
-  border-style: dashed;
-  color: var(--dim);
-}
-
-/* Between the songs you know and the ones you only saved: the one ranking rule we keep. */
 .savedDivider {
   display: block;
   padding: 14px 4px 2px;
@@ -1045,4 +1178,36 @@
   margin: 4px 0 0;
   font-size: 13px;
   color: var(--dim);
+}
+
+/* Squircles: where the browser can draw them (corner-shape), corners become continuous curves like
+   Apple's; elsewhere the same elements keep plain rounded corners. */
+@supports (corner-shape: squircle) {
+  .chip,
+  .connect,
+  .redo,
+  .more,
+  .spotify,
+  .pill,
+  .pillQuiet,
+  .slider::-webkit-slider-thumb,
+  .tune {
+    corner-shape: squircle;
+  }
+  .more,
+  .spotify {
+    border-radius: 22px;
+  }
+  .chip,
+  .connect,
+  .redo {
+    border-radius: 16px;
+  }
+  .pill,
+  .pillQuiet {
+    border-radius: 12px;
+  }
+  .tune {
+    border-radius: 26px;
+  }
 }

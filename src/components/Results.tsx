@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Decade, Match, Mood, ResultsMode, ResultsView, SortId, VocalRange } from '../lib/contracts';
+import type { Decade, Match, Mood, ResultsMode, ResultsView, SliderId, VocalRange } from '../lib/contracts';
 import { midiToNoteName } from '../lib/audio/notes';
 import {
   artistLine,
@@ -8,20 +8,23 @@ import {
   duetPartLine,
   MAYBE_NOTE,
   octaveWording,
-  reasonsForSort,
+  reasonsForSlider,
 } from '../lib/client/display';
 import { rangeWarning } from '../lib/client/rangeCheck';
 import { isRangeKept, keepRange } from '../lib/client/storage';
 import {
+  activeSliders,
   availableFacets,
-  availableSorts,
+  availableSliders,
   chipCounts,
   DECADES,
   hasFilters,
+  lyricFor,
   MOOD_LABELS,
   savedDividerIndex,
-  SORTS,
+  SLIDERS,
   viewMatches,
+  type SliderDef,
 } from '../lib/songs/browse';
 import { FastLyricsIcon, OctaveIcon } from './Icon';
 import { Lyric } from './Lyric';
@@ -33,6 +36,8 @@ interface ResultsProps {
   /** Every match, in the server's Top picks order. */
   matches: Match[];
   view: ResultsView;
+  /** The slider moved last; it leads the lyric line and the reasons. */
+  leadSlider: SliderId | null;
   /** How many songs of the view are on screen. */
   shown: number;
   loading: boolean;
@@ -44,7 +49,10 @@ interface ResultsProps {
   onRedo(): void;
   /** Re-sing just the low or the high note, keeping the other. */
   onRedoEnd(end: 'low' | 'high'): void;
-  onSort(sort: SortId): void;
+  onSlider(slider: SliderId, value: number): void;
+  /** The thumb was let go (for the event log). */
+  onSliderDone(slider: SliderId): void;
+  onResetSliders(): void;
   onDecade(decade: Decade): void;
   onMood(mood: Mood): void;
   onDuets(): void;
@@ -54,7 +62,7 @@ interface ResultsProps {
 }
 
 export function Results(props: ResultsProps) {
-  const { range, mode, matches, view, shown, loading, error } = props;
+  const { range, mode, matches, view, leadSlider, shown, loading, error } = props;
   const low = midiToNoteName(range.low);
   const high = midiToNoteName(range.high);
   const warning = rangeWarning(range);
@@ -64,23 +72,25 @@ export function Results(props: ResultsProps) {
     setKept(true);
   };
   const maybeId = useId();
+  const tuneId = useId();
+  const pickId = useId();
 
-  const sorts = useMemo(() => availableSorts(mode, matches), [mode, matches]);
+  const sliders = useMemo(() => availableSliders(mode, matches), [mode, matches]);
   const facets = useMemo(() => availableFacets(matches), [matches]);
   const counts = useMemo(() => chipCounts(matches, view), [matches, view]);
   const list = useMemo(() => viewMatches(matches, view, range, mode), [matches, view, range, mode]);
   const visible = list.slice(0, shown);
-  // Maybe songs (estimated ranges) sort last in every view and get their own list, without a label.
+  // Maybe songs (estimated ranges) come last in every view and get their own list, without a label.
   const sure = visible.filter((m) => m.difficulty !== 'maybe');
   const maybe = visible.filter((m) => m.difficulty === 'maybe');
-  const divider = savedDividerIndex(visible, mode);
-  const sortDef = SORTS.find((s) => s.id === view.sort) ?? SORTS[0]!;
-  const showFilters = facets.decades || facets.moods.length > 0 || facets.duets;
+  const divider = savedDividerIndex(visible, mode, view);
+  const showPicks = facets.decades || facets.moods.length > 0 || facets.duets;
+  const tuned = activeSliders(view).length > 0;
 
   const row = (m: Match, position: number) => {
     const octave = octaveWording(m.octave);
     const duet = duetPartLine(m);
-    const reasons = [...(duet ? [duet] : []), ...reasonsForSort(m.reasons, view.sort)].slice(0, 2);
+    const reasons = [...(duet ? [duet] : []), ...reasonsForSlider(m.reasons, leadSlider)].slice(0, 2);
     const yearText = typeof m.year === 'number' ? `, ${m.year}` : '';
     return (
       <button
@@ -150,61 +160,81 @@ export function Results(props: ResultsProps) {
 
       {matches.length > 0 && (
         <div className={styles.controls}>
-          <ChipRow label="Sort songs" selected={view.sort}>
-            {SORTS.filter((s) => sorts.includes(s.id)).map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                className={styles.sortPill}
-                aria-pressed={view.sort === s.id}
-                data-selected={view.sort === s.id || undefined}
-                onClick={() => props.onSort(s.id)}
-              >
-                {s.label}
-              </button>
-            ))}
-          </ChipRow>
-          {showFilters && (
-            <ChipRow label="Filter songs" selected={view.decade ?? view.mood ?? (view.duetsOnly ? 'duets' : null)}>
-              {facets.decades &&
-                DECADES.map((d) => (
-                  <Chip
-                    key={d.id}
-                    id={d.id}
-                    label={d.label}
-                    count={counts.decades[d.id]}
-                    on={view.decade === d.id}
-                    onClick={() => props.onDecade(d.id)}
-                  />
-                ))}
-              {facets.moods.length > 0 && <span className={styles.chipDivider} aria-hidden />}
-              {facets.moods.map((mood) => (
-                <Chip
-                  key={mood}
-                  id={mood}
-                  label={MOOD_LABELS[mood]}
-                  count={counts.moods[mood]}
-                  on={view.mood === mood}
-                  onClick={() => props.onMood(mood)}
-                />
-              ))}
-              {facets.duets && (
-                <>
-                  <span className={styles.chipDivider} aria-hidden />
-                  <Chip id="duets" label="Duets" count={counts.duets} on={view.duetsOnly} onClick={props.onDuets} />
-                </>
-              )}
-              {hasFilters(view) && (
-                <button type="button" className={styles.clearChip} onClick={props.onClear}>
-                  Clear
+          {/* Sliders reorder: continuous preferences, pink. */}
+          <section className={styles.tune} aria-labelledby={tuneId}>
+            <div className={styles.controlsHead}>
+              <h2 id={tuneId} className={styles.tuneLabel}>
+                Tune
+              </h2>
+              {tuned && (
+                <button type="button" className={styles.headAction} onClick={props.onResetSliders}>
+                  Reset
                 </button>
               )}
-            </ChipRow>
+            </div>
+            {SLIDERS.filter((s) => sliders.includes(s.id)).map((s) => (
+              <PreferenceSlider
+                key={s.id}
+                def={s}
+                value={view[s.id]}
+                onChange={(v) => props.onSlider(s.id, v)}
+                onDone={() => props.onSliderDone(s.id)}
+              />
+            ))}
+          </section>
+
+          {/* Chips filter: discrete labels, one pick per row, cyan. */}
+          {showPicks && (
+            <section className={styles.pick} aria-labelledby={pickId}>
+              <div className={styles.controlsHead}>
+                <h2 id={pickId} className={styles.pickLabel}>
+                  Pick
+                </h2>
+                <span className={styles.controlsCount} aria-live="polite">
+                  {list.length} {list.length === 1 ? 'song' : 'songs'}
+                </span>
+                {hasFilters(view) && (
+                  <button type="button" className={styles.headAction} onClick={props.onClear}>
+                    Clear
+                  </button>
+                )}
+              </div>
+              <ChipRow label="Filter songs" selected={view.decade ?? view.mood ?? (view.duetsOnly ? 'duets' : null)}>
+                {facets.decades &&
+                  DECADES.map((d) => (
+                    <Chip
+                      key={d.id}
+                      id={d.id}
+                      label={d.label}
+                      count={counts.decades[d.id]}
+                      on={view.decade === d.id}
+                      onClick={() => props.onDecade(d.id)}
+                    />
+                  ))}
+                {facets.moods.length > 0 && <span className={styles.chipDivider} aria-hidden />}
+                {facets.moods.map((mood) => (
+                  <Chip
+                    key={mood}
+                    id={mood}
+                    label={MOOD_LABELS[mood]}
+                    count={counts.moods[mood]}
+                    on={view.mood === mood}
+                    onClick={() => props.onMood(mood)}
+                  />
+                ))}
+                {facets.duets && (
+                  <>
+                    <span className={styles.chipDivider} aria-hidden />
+                    <Chip id="duets" label="Duets" count={counts.duets} on={view.duetsOnly} onClick={props.onDuets} />
+                  </>
+                )}
+              </ChipRow>
+            </section>
           )}
         </div>
       )}
 
-      <Lyric text={matches.length > 0 ? sortDef.lyric : 'Songs for your voice'} />
+      <Lyric text={matches.length > 0 ? lyricFor(view, leadSlider) : 'Songs for your voice'} />
 
       {sure.length > 0 && (
         <ol className={styles.songList}>
@@ -273,7 +303,53 @@ export function Results(props: ResultsProps) {
   );
 }
 
-/** A horizontally scrolling row of pills that keeps the picked one in view. */
+/**
+ * One continuous preference. Untouched it does nothing and sits dim in the middle; touching it
+ * (a tap, a drag or an arrow key) sets a target, and the songs closest to it come first.
+ */
+function PreferenceSlider({
+  def,
+  value,
+  onChange,
+  onDone,
+}: {
+  def: SliderDef;
+  value: number | null;
+  onChange(value: number): void;
+  onDone(): void;
+}) {
+  const active = value !== null;
+  const position = Math.round((value ?? 0.5) * 100);
+  const where = !active ? 'not set' : position < 34 ? `towards ${def.left}` : position > 66 ? `towards ${def.right}` : 'in between';
+  const set = (raw: string) => onChange(Number(raw) / 100);
+  return (
+    <div className={styles.sliderRow} data-active={active || undefined}>
+      <span className={styles.sliderEnd} aria-hidden>
+        {def.left}
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={position}
+        className={styles.slider}
+        aria-label={`${def.left} to ${def.right}`}
+        aria-valuetext={where}
+        onChange={(e) => set(e.currentTarget.value)}
+        // A tap on the thumb itself does not change the value, so it switches the slider on here.
+        onPointerDown={(e) => !active && set(e.currentTarget.value)}
+        onPointerUp={() => onDone()}
+        onKeyUp={(e) => e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End' ? onDone() : undefined}
+      />
+      <span className={styles.sliderEnd} aria-hidden>
+        {def.right}
+      </span>
+    </div>
+  );
+}
+
+/** A horizontally scrolling row of chips that keeps the picked one in view. */
 function ChipRow({ label, selected, children }: { label: string; selected: string | null; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {

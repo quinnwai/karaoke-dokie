@@ -1,6 +1,6 @@
 // Plain-words text and geometry for the screen. No music jargon reaches the user.
 
-import type { DataSourceLogEntry, Label, LogOutcome, Match, Midi, OctaveShift, SongRange, SortId, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, Label, LogOutcome, Match, Midi, OctaveShift, SliderId, SongRange, VocalRange } from '../contracts';
 import { midiToNoteName } from '../audio/notes';
 
 export function difficultyLabel(d: Label): string {
@@ -88,20 +88,18 @@ export function scalePosition(midi: number): number {
 
 // ---- results view (QWW-3) ----
 
-/** Which reasons speak to each sort, so the reason line leads with why the song is where it is. */
-const SORT_REASONS: Record<SortId, RegExp | null> = {
-  top: null,
-  played: /^You (play this a lot|know this one)/,
-  warmup: /^(In your sweet spot|Mostly comfortable)/,
-  showoff: /^(Spends time at|A few notes near) your/,
-  singalong: /^Crowd favourite/,
+/** Which reasons speak to each slider, so the reason line leads with why the song is where it is. */
+const SLIDER_REASONS: Record<SliderId, RegExp> = {
+  difficulty: /^(In your sweet spot|Mostly comfortable|Spends time at your|A few notes near your)/,
+  familiarity: /^You (play this a lot|know this one)/,
+  popularity: /^Crowd favourite/,
 };
 
-/** The song's reasons with the one that matches the active sort first. */
-export function reasonsForSort(reasons: string[] | undefined, sort: SortId): string[] {
+/** The song's reasons with the one that matches the leading slider first (unchanged when no slider leads). */
+export function reasonsForSlider(reasons: string[] | undefined, lead: SliderId | null): string[] {
   const list = reasons ?? [];
-  const re = SORT_REASONS[sort];
-  if (!re) return list;
+  if (!lead) return list;
+  const re = SLIDER_REASONS[lead];
   return [...list.filter((r) => re.test(r)), ...list.filter((r) => !re.test(r))];
 }
 

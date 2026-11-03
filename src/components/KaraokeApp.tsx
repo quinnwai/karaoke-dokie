@@ -124,7 +124,7 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
     };
   }, [api, step, range, error]);
 
-  // Every match at once: the phone sorts, filters and pages them (src/lib/songs/browse.ts).
+  // Every match at once: the phone orders, filters and pages them (src/lib/songs/browse.ts).
   const { loading, mode, attempt } = state;
   useEffect(() => {
     if (step !== 'results' || !loading || !range) return;
@@ -351,7 +351,10 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
           onRetry={() => dispatch({ type: 'retryLoad' })}
           onRedo={redo}
           onRedoEnd={(end) => dispatch({ type: 'redoEnd', end })}
-          onSort={(sort) => dispatch({ type: 'setSort', sort })}
+          leadSlider={state.leadSlider}
+          onSlider={(slider, value) => dispatch({ type: 'setSlider', slider, value })}
+          onSliderDone={(slider) => dispatch({ type: 'sliderDone', slider })}
+          onResetSliders={() => dispatch({ type: 'resetSliders' })}
           onDecade={(decade) => dispatch({ type: 'pickDecade', decade })}
           onMood={(mood) => dispatch({ type: 'pickMood', mood })}
           onDuets={() => dispatch({ type: 'toggleDuets' })}
@@ -368,7 +371,17 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
           source={state.sources[selected.track.id]}
           feedback={state.feedback[selected.track.id]}
           onFeedback={(thumbs) => sendFeedback(selected.track.id, thumbs)}
-          onSpotify={() => tracker.track('spotify_link_pressed', { mode: state.mode, sort: state.view.sort })}
+          onSpotify={() =>
+            tracker.track('spotify_link_pressed', {
+              mode: state.mode,
+              difficulty: state.view.difficulty,
+              familiarity: state.view.familiarity,
+              popularity: state.view.popularity,
+              decade: state.view.decade,
+              mood: state.view.mood,
+              duetsOnly: state.view.duetsOnly,
+            })
+          }
           onBack={() => dispatch({ type: 'deselect' })}
         />
       )}

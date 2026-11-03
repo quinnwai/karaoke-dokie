@@ -1,7 +1,7 @@
 // The admin page's view of the beta event log (GET /api/admin/events). Pure: listEvents output
-// in, AdminEventsResponse out. Every grouping uses a Map, because prop values are free text and
-// a plain object keyed by a sort named "__proto__" or "constructor" would hit its prototype.
-import type { AdminEventsResponse, AppEvent } from '../contracts';
+// in, AdminEventsResponse out. Every grouping uses a Map, because device ids are free text and
+// a plain object keyed by "__proto__" or "constructor" would hit its prototype.
+import { SLIDER_IDS, type AdminEventsResponse, type AppEvent } from '../contracts';
 import type { StoredEvent } from './store';
 
 /**
@@ -23,10 +23,10 @@ export const FUNNEL: { label: string; name: string; step?: 'low' | 'high' }[] = 
 /** The replay lists this many devices, the most recently active ones. */
 export const MAX_SESSIONS = 50;
 
-type SortStats = AdminEventsResponse['bySort'][string];
+type ControlStats = AdminEventsResponse['byControl'][string];
 
 export function summarizeEvents(events: StoredEvent[]): AdminEventsResponse {
-  return { funnel: funnel(events), bySort: bySort(events), sessions: sessions(events) };
+  return { funnel: funnel(events), byControl: byControl(events), sessions: sessions(events) };
 }
 
 /**
@@ -44,25 +44,40 @@ function funnel(events: StoredEvent[]): AdminEventsResponse['funnel'] {
   });
 }
 
-/** Per results sort: opens, Spotify opens and thumbs. Events without a string `sort` prop are left out. */
-function bySort(events: StoredEvent[]): AdminEventsResponse['bySort'] {
-  const acc = new Map<string, { stats: SortStats; positions: number[] }>();
+/**
+ * The controls in use when an event happened, from its view props: each slider that was set
+ * (a number), each chip row that had a pick, or 'none' when nothing was set.
+ */
+export function controlsInUse(props: StoredEvent['props']): string[] {
+  const used: string[] = [];
+  for (const slider of SLIDER_IDS) if (typeof props?.[slider] === 'number') used.push(slider);
+  if (typeof props?.decade === 'string') used.push('decade');
+  if (typeof props?.mood === 'string') used.push('mood');
+  if (props?.duetsOnly === true) used.push('duets');
+  return used.length ? used : ['none'];
+}
+
+/**
+ * Per control in use: opens, Spotify opens and thumbs. An event with several controls in use
+ * counts toward each, so the numbers say which controls the songs people liked came through.
+ */
+function byControl(events: StoredEvent[]): AdminEventsResponse['byControl'] {
+  const acc = new Map<string, { stats: ControlStats; positions: number[] }>();
   for (const e of events) {
     if (e.name !== 'song_opened' && e.name !== 'spotify_link_pressed' && e.name !== 'feedback_tapped') continue;
-    const sort = e.props?.sort;
-    if (typeof sort !== 'string') continue;
-    let a = acc.get(sort);
-    if (!a) acc.set(sort, (a = { stats: { opened: 0, spotify: 0, up: 0, down: 0, medianPosition: null }, positions: [] }));
-    if (e.name === 'song_opened') {
-      a.stats.opened++;
-      const position = e.props?.position;
-      if (typeof position === 'number' && Number.isFinite(position)) a.positions.push(position);
-    } else if (e.name === 'spotify_link_pressed') a.stats.spotify++;
-    else if (e.props?.thumbs === 'up') a.stats.up++;
-    else if (e.props?.thumbs === 'down') a.stats.down++;
+    for (const control of controlsInUse(e.props)) {
+      let a = acc.get(control);
+      if (!a) acc.set(control, (a = { stats: { opened: 0, spotify: 0, up: 0, down: 0, medianPosition: null }, positions: [] }));
+      if (e.name === 'song_opened') {
+        a.stats.opened++;
+        const position = e.props?.position;
+        if (typeof position === 'number' && Number.isFinite(position)) a.positions.push(position);
+      } else if (e.name === 'spotify_link_pressed') a.stats.spotify++;
+      else if (e.props?.thumbs === 'up') a.stats.up++;
+      else if (e.props?.thumbs === 'down') a.stats.down++;
+    }
   }
-  // fromEntries makes own keys, so a "__proto__" sort is an ordinary entry here too.
-  return Object.fromEntries([...acc].map(([sort, a]) => [sort, { ...a.stats, medianPosition: median(a.positions) }]));
+  return Object.fromEntries([...acc].map(([control, a]) => [control, { ...a.stats, medianPosition: median(a.positions) }]));
 }
 
 export function median(xs: number[]): number | null {

@@ -362,31 +362,37 @@ describe('feedback', () => {
     const jar = await signIn();
     await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
     const tap = { trackId: 'mock-1-bohemian-rhapsody', thumbs: 'up', difficulty: 'maybe', octave: 'none' };
-    const view = { sort: 'singalong', decade: '70s', mood: 'heartfelt', duetsOnly: false };
+    const view = { difficulty: 0.25, familiarity: null, popularity: 1, decade: '70s', mood: 'heartfelt', duetsOnly: false };
     const post = async (json: unknown) => (await feedback.POST(req('/api/feedback', jar, { method: 'POST', json }))).status;
     expect(await post({ ...tap, view: { ...view, chips: ['a'] } })).toBe(200); // fields it does not know are dropped
-    expect(await post({ ...tap, view: { sort: 'top', decade: null, mood: null, duetsOnly: true } })).toBe(200);
+    const duetsOnly = { difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: true };
+    expect(await post({ ...tap, view: duetsOnly })).toBe(200);
     expect(await post(tap)).toBe(200);
     const [older, plain, filtered] = await getStore().listFeedback({ userId: MOCK_USER.id });
     expect(filtered!.view).toStrictEqual(view);
-    expect(plain!.view).toStrictEqual({ sort: 'top', decade: null, mood: null, duetsOnly: true });
+    expect(plain!.view).toStrictEqual(duetsOnly);
     expect(older).not.toHaveProperty('view');
   });
 
-  const goodView = { sort: 'top', decade: null, mood: null, duetsOnly: false };
+  const goodView = { difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false };
+  const without = (key: keyof typeof goodView) => Object.fromEntries(Object.entries(goodView).filter(([k]) => k !== key));
   it.each([
     ['null', null],
     ['a string', 'top'],
     ['an array', []],
-    ['unknown sort', { ...goodView, sort: 'newest' }],
-    ['no sort', { decade: null, mood: null, duetsOnly: false }],
+    ['an old sort view', { sort: 'top', decade: null, mood: null, duetsOnly: false }],
+    ['a slider above 1', { ...goodView, difficulty: 1.5 }],
+    ['a slider below 0', { ...goodView, familiarity: -0.1 }],
+    ['a slider as a string', { ...goodView, popularity: '0.5' }],
+    ['no difficulty', without('difficulty')],
+    ['no popularity', without('popularity')],
     ['unknown decade', { ...goodView, decade: '50s' }],
     ['a year for a decade', { ...goodView, decade: 1980 }],
-    ['no decade', { sort: 'top', mood: null, duetsOnly: false }],
+    ['no decade', without('decade')],
     ['unknown mood', { ...goodView, mood: 'sad' }],
-    ['no mood', { sort: 'top', decade: null, duetsOnly: false }],
+    ['no mood', without('mood')],
     ['duetsOnly as a string', { ...goodView, duetsOnly: 'false' }],
-    ['no duetsOnly', { sort: 'top', decade: null, mood: null }],
+    ['no duetsOnly', without('duetsOnly')],
   ])('returns 400 on a bad view (%s)', async (_name, view) => {
     const jar = await signIn();
     await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
@@ -641,7 +647,7 @@ describe('beta event log', () => {
     const jar = await signIn();
     const viewed = event('results_viewed', undefined, secondsAgo(2));
     const opened = event('song_opened', {
-      sort: 'top',
+      difficulty: 0.5,
       position: 3,
       trackId: 'mock-1-bohemian-rhapsody',
       SpotifyId: 'spotify:track:x',
@@ -654,7 +660,7 @@ describe('beta event log', () => {
     const stored = await getStore().listEvents();
     expect(stored).toEqual([
       { anonId: ANON, ...viewed },
-      { anonId: ANON, name: 'song_opened', at: opened.at, props: { sort: 'top', position: 3 } },
+      { anonId: ANON, name: 'song_opened', at: opened.at, props: { difficulty: 0.5, position: 3 } },
     ]);
     expect(JSON.stringify(stored)).not.toMatch(/mock-|spotify:|Test Singer|example\.com/);
   });
@@ -663,7 +669,7 @@ describe('beta event log', () => {
     ['a bad anonId', { anonId: 'short', events: [event('tap')] }],
     ['too many events', { anonId: ANON, events: Array.from({ length: 51 }, () => event('tap')) }],
     ['a bad name', { anonId: ANON, events: [event('Song Opened')] }],
-    ['a bad prop value', { anonId: ANON, events: [event('song_opened', { view: { sort: 'top' } })] }],
+    ['a bad prop value', { anonId: ANON, events: [event('song_opened', { view: { difficulty: 0.5 } })] }],
     ['a far-future at', { anonId: ANON, events: [event('tap', undefined, secondsAgo(-8 * 86_400))] }],
   ])('returns 400 and stores nothing for %s', async (_name, body) => {
     collect();
@@ -708,7 +714,7 @@ describe('admin events', () => {
     expect((await adminEvents.GET(req('/api/admin/events', undefined, { headers: { 'x-admin-token': '' } }))).status).toBe(403);
   });
 
-  it('returns the funnel, per-sort numbers and sessions', async () => {
+  it('returns the funnel, per-control numbers and sessions', async () => {
     await send('device-aaaa', [
       { name: 'landing_viewed', at: at(60) },
       { name: 'start_pressed', at: at(59) },
@@ -716,13 +722,13 @@ describe('admin events', () => {
       { name: 'note_detected', at: at(40), props: { step: 'high' } },
       { name: 'range_shown', at: at(39) },
     ]);
-    const opened = { name: 'song_opened', at: at(15), props: { sort: 'top', position: 2 } };
+    const opened = { name: 'song_opened', at: at(15), props: { decade: '80s', position: 2 } };
     await send('device-bbbb', [
       { name: 'landing_viewed', at: at(30) },
       { name: 'results_viewed', at: at(20) },
       opened,
-      { name: 'spotify_link_pressed', at: at(14), props: { sort: 'top' } },
-      { name: 'feedback_tapped', at: at(10), props: { sort: 'top', thumbs: 'up' } },
+      { name: 'spotify_link_pressed', at: at(14), props: { decade: '80s' } },
+      { name: 'feedback_tapped', at: at(10), props: { decade: '80s', thumbs: 'up' } },
     ]);
     const res = await asAdmin();
     expect(res.status).toBe(200);
@@ -739,7 +745,7 @@ describe('admin events', () => {
       { name: 'spotify_link_pressed', devices: 1 },
       { name: 'spotify_connect_pressed', devices: 0 },
     ]);
-    expect(body.bySort).toEqual({ top: { opened: 1, spotify: 1, up: 1, down: 0, medianPosition: 2 } });
+    expect(body.byControl).toEqual({ decade: { opened: 1, spotify: 1, up: 1, down: 0, medianPosition: 2 } });
     expect(body.sessions.map((s) => s.anonId)).toEqual(['device-bbbb', 'device-aaaa']);
     const names = (i: number) => body.sessions[i]!.events.map((e) => e.name);
     expect(names(0)).toEqual(['landing_viewed', 'results_viewed', 'song_opened', 'spotify_link_pressed', 'feedback_tapped']);

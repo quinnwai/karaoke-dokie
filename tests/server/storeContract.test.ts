@@ -325,8 +325,11 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
 
   it('reads back the results view stored with feedback, and no view for a tap without one', async () => {
     const s = make();
-    const filtered = { ...feedback('u1', 1), view: { sort: 'warmup' as const, decade: '80s' as const, mood: 'upbeat' as const, duetsOnly: true } };
-    const plain = { ...feedback('u1', 2), view: { sort: 'top' as const, decade: null, mood: null, duetsOnly: false } };
+    const filtered = {
+      ...feedback('u1', 1),
+      view: { difficulty: 0.1, familiarity: null, popularity: 0.75, decade: '80s' as const, mood: 'upbeat' as const, duetsOnly: true },
+    };
+    const plain = { ...feedback('u1', 2), view: { difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false } };
     const older = feedback('u1', 3);
     for (const f of [filtered, plain, older]) await s.saveFeedback(f);
     const [o, p, f] = await s.listFeedback();
@@ -370,7 +373,7 @@ describe('schema and store selection', () => {
     const fresh = {
       ...feedback('u1', 2),
       songRange: { source: 'audio-full' as const, method: 'm', low: 52, high: 65 },
-      view: { sort: 'showoff' as const, decade: '20s' as const, mood: null, duetsOnly: false },
+      view: { difficulty: 1, familiarity: 0.5, popularity: null, decade: '20s' as const, mood: null, duetsOnly: false },
     };
     await s.saveFeedback(fresh);
     expect(await s.listFeedback()).toEqual([fresh, old]);

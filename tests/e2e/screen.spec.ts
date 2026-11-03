@@ -127,7 +127,7 @@ async function holdButton(page: Page, name: RegExp, ms: number, midway?: () => P
 }
 
 const freshState = (): ApiState => ({ user: null, savedRanges: [], feedback: [], catalogueFeedback: [], recommendationCalls: [] });
-const DEFAULT_VIEW = { sort: 'top', decade: null, mood: null, duetsOnly: false };
+const DEFAULT_VIEW = { difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false };
 
 test('full flow: test, sign in, results, song detail, feedback', async ({ baseURL }) => {
   test.setTimeout(120_000);
@@ -203,13 +203,15 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   expect(api.recommendationCalls).toEqual(['catalogue ?low=45&high=72&all=1']);
   expect(api.savedRanges).toEqual([]);
   expect(await page.evaluate(() => localStorage.getItem('kd.range'))).toBe(JSON.stringify({ low: 45, high: 72 }));
-  await expect(page.getByRole('button', { name: 'Most played' })).toHaveCount(0);
+  // Catalogue songs are nobody's library: a difficulty slider, but no on-repeat one.
+  await expect(page.getByRole('slider', { name: 'Ease in to Whole range' })).toBeVisible();
+  await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toHaveCount(0);
   await page.waitForTimeout(800);
   await shot(page, '07-catalogue-results');
 
   // ---- Connect Spotify (mocked redirect back to /?signedIn=1): the range carries over ----
   await page.getByRole('button', { name: 'Connect Spotify' }).first().click();
-  await expect(page.getByRole('button', { name: 'Most played' })).toBeVisible();
+  await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toBeVisible();
   expect(api.savedRanges).toEqual([{ low: 45, high: 72, source: 'test' }]);
   expect(api.recommendationCalls.at(-1)).toBe('library ?all=1');
   await expect(page).toHaveURL(/\/$/);
@@ -357,7 +359,7 @@ test('desktop layout', async ({ browser, baseURL }) => {
   await context.close();
 });
 
-test('sorts and decade chips: each sort reorders, chips filter with counts, all on a small phone', async ({ browser, baseURL }) => {
+test('sliders and decade chips: sliders reorder, chips filter with counts, all on a small phone', async ({ browser, baseURL }) => {
   const api = freshState();
   api.user = me({ low: 45, high: 72, source: 'test' });
   api.facts = true;
@@ -368,39 +370,64 @@ test('sorts and decade chips: each sort reorders, chips filter with counts, all 
   await page.goto('/');
   await expect(page.locator('ol li')).toHaveCount(5);
 
-  // The range bar, the sort row, the filter row and at least three songs fit on screen together.
+  // The range bar, both control panels and at least three songs fit on screen together.
   const view = page.viewportSize()!;
   const inView = async (locator: ReturnType<Page['locator']>) => {
     const b = (await locator.boundingBox())!;
     return b.y >= 0 && b.y + b.height <= view.height;
   };
-  expect(await inView(page.getByRole('group', { name: 'Sort songs' }))).toBe(true);
+  expect(await inView(page.getByRole('region', { name: 'Tune' }))).toBe(true);
   expect(await inView(page.getByRole('group', { name: 'Filter songs' }))).toBe(true);
   for (let i = 0; i < 3; i++) expect(await inView(page.locator('ol li').nth(i))).toBe(true);
-  // No sideways scroll for the page; the pill rows scroll on their own.
+  // No sideways scroll for the page; the chip row scrolls on its own.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.waitForTimeout(300);
+  await shot(page, '19-controls');
 
-  const first = () => page.locator('ol li').first().locator('[class*="songTitle"]').textContent();
-  const seen = new Set<string | null>();
-  for (const [label, file] of [
-    ['Top picks', '19-sort-top-picks'],
-    ['Most played', '20-sort-most-played'],
-    ['Warm-up', '21-sort-warm-up'],
-    ['Show-off', '22-sort-show-off'],
-    ['Singalongs', '23-sort-singalongs'],
+  const titles = () => page.locator('ol li [class*="songTitle"]').allTextContents();
+  const lyric = page.locator('[data-lyric]');
+  const before = await titles();
+  await expect(lyric).toHaveText('Our best guess for you');
+
+  // A real drag: the thumb starts in the middle; pulling it to the right end switches the slider on.
+  const difficulty = page.getByRole('slider', { name: 'Ease in to Whole range' });
+  await expect(difficulty).toHaveAttribute('aria-valuetext', 'not set');
+  const box = (await difficulty.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect(difficulty).toHaveAttribute('aria-valuetext', 'towards Whole range');
+  await expect(lyric).toHaveText('Using your whole range');
+  await page.waitForTimeout(300);
+  await shot(page, '20-slider-whole-range');
+
+  // Each slider, from the keyboard, to each end; every move reorders and says what it does.
+  const orders = new Set([JSON.stringify(before)]);
+  for (const [name, leftLyric, rightLyric] of [
+    ['Ease in to Whole range', 'Comfortable tunes to ease into', 'Using your whole range'],
+    ['Deep cuts to On repeat', 'Saved songs you haven’t played in a while', 'The songs you’ve got on repeat'],
+    ['Hidden gems to Big hits', 'Hidden gems for your voice', 'Songs the whole room knows'],
   ] as const) {
-    await page.getByRole('button', { name: label, exact: true }).click();
-    await expect(page.getByRole('button', { name: label, exact: true })).toHaveAttribute('aria-pressed', 'true');
-    seen.add(await first());
-    await page.waitForTimeout(300);
-    await shot(page, file);
+    const slider = page.getByRole('slider', { name });
+    await slider.press('Home');
+    await expect(lyric).toHaveText(leftLyric);
+    orders.add(JSON.stringify(await titles()));
+    await slider.press('End');
+    await expect(lyric).toHaveText(rightLyric);
+    orders.add(JSON.stringify(await titles()));
   }
-  // Sorting reorders: not every sort leads with the same song.
-  expect(seen.size).toBeGreaterThan(1);
+  expect(orders.size).toBeGreaterThan(2);
+  await page.waitForTimeout(300);
+  await shot(page, '21-sliders-set');
+
+  // Reset unsets every slider and brings back the first order.
+  await page.getByRole('button', { name: 'Reset' }).click();
+  for (const s of await page.getByRole('slider').all()) await expect(s).toHaveAttribute('aria-valuetext', 'not set');
+  expect(await titles()).toEqual(before);
   expect(api.recommendationCalls).toHaveLength(1);
 
   // Decade chips: counts, a disabled empty decade, filtering, and clearing.
-  await page.getByRole('button', { name: 'Top picks', exact: true }).click();
   await expect(page.getByRole('button', { name: '80s, 3 songs' })).toBeVisible();
   await expect(page.getByRole('button', { name: '90s, 0 songs' })).toBeDisabled();
   await page.getByRole('button', { name: '80s, 3 songs' }).click();

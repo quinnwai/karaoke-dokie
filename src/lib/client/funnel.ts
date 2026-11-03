@@ -13,9 +13,19 @@ export interface FunnelEvent {
   props?: Record<string, EventValue>;
 }
 
-/** The view a song was found in, as event props. */
+/** The view a song was found in, as event props: each slider's target (null = not set) and the picks. */
 function viewProps(s: FlowState): Record<string, EventValue> {
-  return { mode: s.mode, sort: s.view.sort, decade: s.view.decade, mood: s.view.mood, duetsOnly: s.view.duetsOnly };
+  const v = s.view;
+  const round = (n: number | null) => (n === null ? null : Math.round(n * 100) / 100);
+  return {
+    mode: s.mode,
+    difficulty: round(v.difficulty),
+    familiarity: round(v.familiarity),
+    popularity: round(v.popularity),
+    decade: v.decade,
+    mood: v.mood,
+    duetsOnly: v.duetsOnly,
+  };
 }
 
 /** The catalogue key of a catalogue song ("cat:<key>"), or null for a library song. */
@@ -60,8 +70,12 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
     case 'loadMore':
       out.push({ name: 'generate_more_pressed', props: { shown: prev.shown, ...viewProps(prev) } });
       break;
-    case 'setSort':
-      if (action.sort !== prev.view.sort) out.push({ name: 'sort_selected', props: viewProps(next) });
+    case 'sliderDone':
+      // One record per adjustment, when the thumb is let go; dragging itself records nothing.
+      out.push({ name: 'slider_changed', props: { slider: action.slider, ...viewProps(prev) } });
+      break;
+    case 'resetSliders':
+      out.push({ name: 'sliders_reset', props: viewProps(next) });
       break;
     case 'pickDecade':
       out.push({ name: 'chip_toggled', props: { kind: 'decade', value: action.decade, on: next.view.decade === action.decade, ...viewProps(next) } });
