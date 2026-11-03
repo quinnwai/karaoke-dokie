@@ -8,7 +8,7 @@ import { createPostgresStore, migrate, schemaStatements, type QueryFn } from '..
 import { SCHEMA_SQL } from '../../src/lib/server/schema';
 import { pickStoreKind } from '../../src/lib/server/getStore';
 import type { Store } from '../../src/lib/server/store';
-import type { SongMoodsRecord } from '../../src/lib/server/store';
+import type { SongMoodsRecord, SongPopularityRecord } from '../../src/lib/server/store';
 
 function pgMemQuery(opts: Parameters<typeof newDb>[0] = {}): QueryFn {
   const db = newDb(opts);
@@ -323,6 +323,40 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(read.get('artist 249|song 249')).toEqual(many[249]);
   });
 
+  it('reads back song popularity by key, and a new row replaces the whole old one', async () => {
+    const s = make();
+    // Views past 2^31 (karaoke_views is a BIGINT) and rows with only one file's numbers.
+    const both: SongPopularityRecord = { key: 'the examples|first song', karaokeViews: 3_200_000_000, chartRank: 12, chartYear: 2004, source: 'karafun+billboard' };
+    const views: SongPopularityRecord = { key: 'the examples|second song', karaokeViews: 4_100, source: 'karafun' };
+    const chart: SongPopularityRecord = { key: 'lead singer|duet song', chartRank: 97, chartYear: 1999, source: 'billboard' };
+    expect((await s.getSongPopularity([both.key])).size).toBe(0);
+    await s.putSongPopularity([both, views, chart]);
+    const read = await s.getSongPopularity([both.key, views.key, chart.key, 'nobody|missing', both.key]);
+    expect([...read.keys()].sort()).toEqual([chart.key, both.key, views.key]);
+    expect(read.get(both.key)).toStrictEqual(both);
+    expect(read.get(views.key)).toStrictEqual(views);
+    expect(read.get(chart.key)).toStrictEqual(chart);
+
+    // Upsert by key, replacing the whole row; within one call the last entry for a key wins.
+    const rechart: SongPopularityRecord = { key: both.key, chartRank: 3, chartYear: 2005, source: 'billboard' };
+    await s.putSongPopularity([{ ...views, karaokeViews: 1 }, rechart, { ...views, karaokeViews: 9_000 }]);
+    const again = await s.getSongPopularity([both.key, views.key, chart.key]);
+    expect(again.get(both.key)).toStrictEqual(rechart);
+    expect(again.get(views.key)).toStrictEqual({ ...views, karaokeViews: 9_000 });
+    expect(again.get(chart.key)).toStrictEqual(chart);
+    expect((await s.getSongPopularity([])).size).toBe(0);
+    await s.putSongPopularity([]);
+  });
+
+  it('writes and reads song popularity in bulk', async () => {
+    const s = make();
+    const many: SongPopularityRecord[] = Array.from({ length: 2_500 }, (_, i) => ({ key: `artist ${i}|song ${i}`, karaokeViews: 1_000 + i, source: 'karafun' }));
+    await s.putSongPopularity(many);
+    const read = await s.getSongPopularity(many.map((p) => p.key));
+    expect(read.size).toBe(2_500);
+    expect(read.get('artist 2499|song 2499')).toStrictEqual(many[2_499]);
+  });
+
   it('reads back the results view stored with feedback, and no view for a tap without one', async () => {
     const s = make();
     const filtered = { ...feedback('u1', 1), view: { sort: 'warmup' as const, decade: '80s' as const, mood: 'upbeat' as const, duetsOnly: true } };
@@ -347,7 +381,7 @@ describe('schema and store selection', () => {
     const q = pgMemQuery();
     await migrate(q);
     expect(schemaStatements().length).toBeGreaterThanOrEqual(5);
-    for (const t of ['users', 'vocal_ranges', 'song_ranges', 'source_log', 'feedback']) {
+    for (const t of ['users', 'vocal_ranges', 'song_ranges', 'source_log', 'feedback', 'song_popularity']) {
       await expect(q(`SELECT * FROM ${t}`)).resolves.toEqual([]);
     }
   });

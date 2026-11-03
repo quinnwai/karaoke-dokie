@@ -81,3 +81,12 @@ CREATE TABLE IF NOT EXISTS song_moods (
   method TEXT NOT NULL,
   source TEXT NOT NULL
 );
+-- Song popularity from our own karaoke data (QWW-6): KaraFun karaoke-video views and the best
+-- Billboard Year-End Hot 100 rank and its year, written by npm run popularity:import.
+CREATE TABLE IF NOT EXISTS song_popularity (
+  song_key TEXT PRIMARY KEY,
+  karaoke_views BIGINT,
+  chart_year INTEGER,
+  chart_rank INTEGER,
+  source TEXT NOT NULL
+);

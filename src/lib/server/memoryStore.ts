@@ -6,6 +6,7 @@ import {
   MAX_EVENTS_LIMIT,
   type CatalogueSong,
   type SongMoodsRecord,
+  type SongPopularityRecord,
   type SongRangeRecord,
   type Store,
   type StoredEvent,
@@ -35,6 +36,7 @@ export function createMemoryStore(): Store {
   const usdbSongs = new Map<number, UsdbIndexEntry>();
   const events: StoredEvent[] = [];
   const songMoods = new Map<string, SongMoodsRecord>();
+  const songPopularity = new Map<string, SongPopularityRecord>();
 
   const newestFirst = <T extends { at: string }>(items: T[]): T[] =>
     items
@@ -161,6 +163,19 @@ export function createMemoryStore(): Store {
       for (const k of songKeys) {
         const m = songMoods.get(k);
         if (m) out.set(k, clone(m));
+      }
+      return out;
+    },
+
+    // ---- song popularity (QWW-6) ----
+    async putSongPopularity(entries) {
+      for (const e of entries) songPopularity.set(e.key, clone(e));
+    },
+    async getSongPopularity(songKeys) {
+      const out = new Map<string, SongPopularityRecord>();
+      for (const k of songKeys) {
+        const p = songPopularity.get(k);
+        if (p) out.set(k, clone(p));
       }
       return out;
     },
