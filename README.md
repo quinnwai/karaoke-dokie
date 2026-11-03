@@ -75,6 +75,7 @@ Screenshots of every step land in `test-results/screens/`.
 | Pitch detection | YIN: de Cheveigné and Kawahara, 2002, [doi:10.1121/1.1458024](https://doi.org/10.1121/1.1458024) |
 | Labeled sung-note test audio | [NSynth dataset](https://magenta.tensorflow.org/datasets/nsynth), Google Magenta, CC BY 4.0 ([list](tests/fixtures/vocals/SOURCES.md)) |
 | Fast-lyrics threshold (speech is about 5 to 8 syllables per second) | Pellegrino, Coupé and Marsico, 2011, "A cross-language perspective on speech information rate", *Language* 87(3) |
+| Song popularity (karaoke video views; chart positions, and a year when no other source has one) | [KaraFun](https://www.karafun.com/) karaoke videos' YouTube views; [Billboard Year-End Hot 100](https://www.billboard.com/charts/year-end/hot-100-songs/) |
 | Spotify API limits for new apps | [Spotify developer blog, Nov 2024](https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api) |
 | Offline check of the mood labels (nothing from it is stored or shown) | MGPHot: Oramas, Gouyon, Hogan, Landau and Ehmann, 2025, "MGPHot: A Dataset of Musicological Annotations for Popular Music (1958-2022)", *TISMIR* 8(1), [doi:10.5334/tismir.236](https://doi.org/10.5334/tismir.236), CC BY-NC-ND 4.0, © SiriusXM 2025 |
 | Live pitch line during the test | SingStar (game) |

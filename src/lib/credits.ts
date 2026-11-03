@@ -48,6 +48,16 @@ export const CREDITS: Credit[] = [
     what: 'The fast-lyrics icon (Apache 2.0).',
   },
   {
+    name: 'KaraFun',
+    url: 'https://www.karafun.com/',
+    what: 'How often KaraFun’s karaoke video of a song has been watched on YouTube, one of the signs of how well known a song is.',
+  },
+  {
+    name: 'Billboard Year-End Hot 100',
+    url: 'https://www.billboard.com/charts/year-end/hot-100-songs/',
+    what: 'Each song’s best year-end chart position, which marks it as widely known, and its year when we have no other.',
+  },
+  {
     name: 'Spotify',
     url: 'https://developer.spotify.com/',
     what: 'Your saved songs, top tracks and recent plays.',
