@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SongRange, VocalRange } from '../../src/lib/contracts';
 import {
   CATALOGUE_TTL_MS,
+  MAX_ALL_MATCHES,
   catalogueKey,
   catalogueTracks,
   createCatalogue,
@@ -227,3 +228,19 @@ describe('catalogue cache', () => {
     expect(await catalogue.get()).toHaveLength(1);
   });
 });
+
+describe('all=1 size', () => {
+  it('sends at most MAX_ALL_MATCHES songs, the best by Top picks', () => {
+    const many = Array.from({ length: MAX_ALL_MATCHES + 50 }, (_, i) =>
+      song(`Artist ${i}`, `Song ${i}`, range(55, 65), { views: MAX_ALL_MATCHES + 50 - i }),
+    );
+    const tracks = catalogueTracks(many);
+    const all = recommendCatalogue(tracks, user, deps, { all: true });
+    const paged = recommendCatalogue(tracks, user, deps, { offset: 0, limit: 5 });
+    expect(all.matches).toHaveLength(MAX_ALL_MATCHES);
+    expect(all.complete).toBe(true);
+    expect(all.matches.slice(0, 5).map((m) => m.track.id)).toEqual(paged.matches.map((m) => m.track.id));
+    expect(Object.keys(all.sources)).toHaveLength(MAX_ALL_MATCHES);
+  });
+});
+

@@ -228,7 +228,8 @@ describe('recommendations', () => {
       offset = p.nextOffset;
     }
     expect(offset).toBeNull();
-    expect(ids.size).toBe(10); // the 10 seeded songs in the mock library all fit a wide range
+    // Every seeded song in the mock library fits a wide range; catalogue-only seeds are not in the library.
+    expect(ids.size).toBe(SEED_SONGS.filter((x) => !x.catalogueOnly).length);
 
     // Skipped songs were logged but never matched.
     const log = await getStore().listLog(500);
@@ -241,7 +242,12 @@ describe('recommendations', () => {
     const jar = await signIn();
     await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
     const wide = ((await (await recs.GET(req('/api/recommendations?offset=0&limit=50', jar))).json()) as RecommendationsResponse).matches;
-    expect(wide.map((m) => m.difficulty === 'maybe')).toEqual([false, false, false, false, false, true, true, true, true, true]);
+    const library = SEED_SONGS.filter((x) => !x.catalogueOnly);
+    const estimates = library.filter((x) => x.range.confidence === 'low').length;
+    expect(wide.map((m) => m.difficulty === 'maybe')).toEqual([
+      ...Array<boolean>(library.length - estimates).fill(false),
+      ...Array<boolean>(estimates).fill(true),
+    ]);
     for (const m of wide) expect(m.difficulty === 'maybe').toBe(m.range.confidence === 'low');
 
     // A2 to C5: estimates within 2 semitones of it are Maybe (Whitney Houston only an octave down); the rest stay hidden.
@@ -253,8 +259,14 @@ describe('recommendations', () => {
       "Don't Stop Believin' none",
       'I Will Always Love You down',
     ]);
-    expect(page.matches.slice(0, 5).every((m) => m.difficulty !== 'maybe')).toBe(true);
-    expect(page.matches).toHaveLength(8);
+    const sure = page.matches.filter((m) => m.difficulty !== 'maybe');
+    expect(page.matches.slice(0, sure.length)).toEqual(sure);
+    expect(sure.length).toBeGreaterThanOrEqual(5);
+    for (const m of sure) {
+      const shift = m.octave === 'down' ? -12 : m.octave === 'up' ? 12 : 0;
+      expect(m.range.low + shift).toBeGreaterThanOrEqual(45);
+      expect(m.range.high + shift).toBeLessThanOrEqual(72);
+    }
   });
 
   it('rejects bad paging params', async () => {
@@ -272,7 +284,7 @@ describe('known songs', () => {
     const res = await known.GET(req('/api/songs/known', jar));
     expect(res.status).toBe(200);
     const body = (await res.json()) as KnownSongsResponse;
-    expect(body.songs.length).toBe(10);
+    expect(body.songs.length).toBe(SEED_SONGS.filter((x) => !x.catalogueOnly).length);
     expect(body.songs.map((s) => s.track.title)).toContain('Bohemian Rhapsody');
   });
 });
@@ -710,3 +722,35 @@ describe('request origin', () => {
     expect(res.headers.getSetCookie()[0]).toMatch(/Secure/);
   });
 });
+
+describe('shipped mood labels (QWW-11)', () => {
+  const catalogueAll = async () =>
+    ((await (await catalogueRecs.GET(req('/api/catalogue/recommendations?low=40&high=84&all=1'))).json()) as RecommendationsResponse).matches;
+
+  it('no mood reaches the screen until MOODS_SHIPPED lists it', async () => {
+    const matches = await catalogueAll();
+    expect(matches.length).toBeGreaterThan(5);
+    expect(matches.some((m) => m.moods)).toBe(false);
+  });
+
+  it('shows only the listed moods, from the seeded labels', async () => {
+    process.env.MOODS_SHIPPED = 'heartfelt';
+    resetAppContextForTests();
+    const matches = await catalogueAll();
+    const labelled = matches.filter((m) => m.moods);
+    expect(labelled.length).toBeGreaterThan(0);
+    for (const m of labelled) expect(m.moods).toEqual(['heartfelt']);
+    const seed = SEED_SONGS.find((x) => x.title === 'Stand By Me')!;
+    expect(matches.find((m) => m.track.title === seed.title)?.moods).toEqual(['heartfelt']);
+  });
+
+  it('library results carry shipped moods too', async () => {
+    process.env.MOODS_SHIPPED = 'upbeat,heartfelt';
+    resetAppContextForTests();
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const page = (await (await recs.GET(req('/api/recommendations?offset=0&limit=50', jar))).json()) as RecommendationsResponse;
+    expect(page.matches.find((m) => m.track.title === 'Dancing Queen')?.moods).toEqual(['upbeat']);
+  });
+});
+

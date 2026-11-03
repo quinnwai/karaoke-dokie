@@ -26,20 +26,28 @@ const track = (artist: string, title: string): Track => ({
 });
 
 describe('seed song ranges', () => {
-  it('has 10 valid, clearly marked placeholder entries: five stand in for recordings, five for estimates', () => {
-    expect(SEED_SONGS).toHaveLength(10);
+  it('has valid, clearly marked placeholder entries: recordings and note files are sure, estimates are not', () => {
+    expect(SEED_SONGS.length).toBeGreaterThanOrEqual(25);
     for (const s of SEED_SONGS) {
       expect(s.range.low).toBeLessThan(s.range.tessitura);
       expect(s.range.tessitura).toBeLessThan(s.range.high);
       expect(s.provenance).toMatch(/Placeholder/);
-      expect(s.range.confidence).toBe(s.range.source === 'audio-full' ? 'high' : 'low');
+      expect(s.range.confidence).toBe(s.range.source === 'audio-full' || s.range.source === 'note-file' ? 'high' : 'low');
+      for (const p of s.range.parts ?? []) {
+        expect(p.low).toBeLessThan(p.tessitura);
+        expect(p.tessitura).toBeLessThan(p.high);
+      }
     }
-    expect(SEED_SONGS.filter((s) => s.range.confidence === 'high')).toHaveLength(5);
+    // The demo has a few duets, each with both singers' parts, and moods on most songs.
+    const duets = SEED_SONGS.filter((s) => s.range.duet);
+    expect(duets.length).toBeGreaterThanOrEqual(2);
+    for (const d of duets) expect(d.range.parts?.map((p) => p.singer)).toHaveLength(2);
+    expect(SEED_SONGS.filter((s) => s.moods?.length).length).toBeGreaterThan(SEED_SONGS.length / 2);
   });
 
-  it('every seed is in the mock library', () => {
+  it('every seed not marked catalogue-only is in the mock library, and the catalogue-only ones are not', () => {
     const keys = new Set(MOCK_TRACKS.map((t) => songKey(t.artist, t.title)));
-    for (const s of SEED_SONGS) expect(keys.has(songKey(s.artist, s.title))).toBe(true);
+    for (const s of SEED_SONGS) expect(keys.has(songKey(s.artist, s.title))).toBe(!s.catalogueOnly);
   });
 
   it('seeds a store with every seed, its log line and USDB row, however many seeds there are', async () => {

@@ -13,6 +13,7 @@ import { withoutForbiddenProps } from '../eventRules';
 import { songKey } from '../songs/resolve';
 import { summarizeEvents } from './eventStats';
 import { catalogueKey } from './catalogue';
+import { attachMoods } from './moods';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_S,
@@ -163,6 +164,11 @@ export async function putRange(req: Request, ctx: AppContext): Promise<Response>
 
 // ---------- songs ----------
 
+/** Shipped mood labels on the matches (QWW-11); nothing changes until MOODS_SHIPPED lists a mood. */
+async function withMoods(body: RecommendationsResponse, ctx: AppContext): Promise<RecommendationsResponse> {
+  return { ...body, matches: await attachMoods(body.matches, ctx.store, ctx.config.moodsShipped) };
+}
+
 export async function recommendations(req: Request, ctx: AppContext): Promise<Response> {
   const user = await requireUser(req, ctx);
   if (user instanceof Response) return user;
@@ -175,7 +181,7 @@ export async function recommendations(req: Request, ctx: AppContext): Promise<Re
   const tracks = await loadTracks(user, ctx);
   if (tracks instanceof Response) return tracks;
   const body: RecommendationsResponse = await ctx.songs.recommend(tracks, range, offset, limit);
-  return json(body);
+  return json(await withMoods(body, ctx));
 }
 
 export async function knownSongs(req: Request, ctx: AppContext): Promise<Response> {
@@ -201,12 +207,12 @@ export async function catalogueRecommendations(req: Request, ctx: AppContext): P
   const params = new URL(req.url).searchParams;
   const range = validateVocalRange({ low: queryInt(params.get('low')), high: queryInt(params.get('high')), source: 'test' });
   if (!range.ok) return errorJson(400, 'bad-request', range.error);
-  if (params.get('all') === '1') return json(await ctx.catalogue.recommend(range.value, { all: true }));
+  if (params.get('all') === '1') return json(await withMoods(await ctx.catalogue.recommend(range.value, { all: true }), ctx));
   const offset = intParam(params.get('offset'), 0, 0, 100_000);
   const limit = intParam(params.get('limit'), 5, 1, 50);
   if (offset === null || limit === null) return errorJson(400, 'bad-request', 'offset must be >= 0 and limit 1..50');
   const body: RecommendationsResponse = await ctx.catalogue.recommend(range.value, { offset, limit });
-  return json(body);
+  return json(await withMoods(body, ctx));
 }
 
 export async function catalogueFeedback(req: Request, ctx: AppContext): Promise<Response> {

@@ -1,7 +1,7 @@
 // The one place that decides which implementations the running app uses.
 // Song logic comes from src/lib/songs. Note files come from noteFileSource (the USDB fetcher).
 // Seed ranges are used only with SPOTIFY_MOCK=1, so the offline demo and e2e tests have data.
-import type { DataSourceLogEntry, SongRange, Track } from '../contracts';
+import type { DataSourceLogEntry, Mood, SongRange, Track } from '../contracts';
 import seedFile from '../../../data/seed-song-ranges.json';
 import { CATALOGUE_SIZE, createCatalogue, type Catalogue } from './catalogue';
 import { configProblems, readConfig, type ServerConfig } from './config';
@@ -13,7 +13,7 @@ import { scoreMatch } from '../songs/score';
 import { resolveSongRange, songKey } from '../songs/resolve';
 import { createSongService, type ResolveResult, type SongDeps, type SongService } from './songService';
 import { createSpotifyClient, type SpotifyClient } from './spotify';
-import type { Store, UsdbIndexEntry } from './store';
+import type { SongMoodsRecord, Store, UsdbIndexEntry } from './store';
 import { createTrackCache, type TrackCache } from './trackCache';
 
 /** Where UltraStar note files come from. */
@@ -39,6 +39,10 @@ export interface SeedSong {
   provenance: string;
   /** The song's USDB index row (placeholder numbers), for the catalogue's popularity, year and genre. */
   usdb?: { id: number; views?: number; rating?: number; year?: number; genre?: string; language?: string };
+  /** Placeholder mood labels, for the mood chips in the offline demo. */
+  moods?: Mood[];
+  /** Not in the mock Spotify library: only the no-Spotify catalogue shows it. */
+  catalogueOnly?: boolean;
 }
 
 export const SEED_SONGS: SeedSong[] = (seedFile as { songs: SeedSong[] }).songs;
@@ -53,13 +57,15 @@ export async function seedStore(store: Store, seeds: SeedSong[], now: () => Date
   // so it is fully seeded before any request reads it, including feedback, which never waits.
   const writes: Promise<void>[] = [];
   const usdb: UsdbIndexEntry[] = [];
+  const moods: SongMoodsRecord[] = [];
   for (const s of seeds) {
     const key = songKey(s.artist, s.title);
     const log: DataSourceLogEntry = { trackId: '', title: s.title, artist: s.artist, outcome: s.range.source, reason: s.provenance, at: now().toISOString() };
     writes.push(store.putSongRange(key, { range: s.range, log }), store.appendLog(log));
     if (s.usdb) usdb.push({ ...s.usdb, key, artist: s.artist, title: s.title });
+    if (s.moods?.length) moods.push({ key, moods: s.moods, method: 'placeholder-seed', source: 'seed' });
   }
-  writes.push(store.putUsdbSongs(usdb));
+  writes.push(store.putUsdbSongs(usdb), store.putSongMoods(moods));
   await Promise.all(writes);
 }
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "PLACEHOLDER seed song ranges (MIDI, C4 = 60) so the app works before the USDB fetcher exists. Every entry is approximate and must be replaced by note-file data. Five stand in for measured recordings (high confidence, the main list) and five for estimates (low confidence, the Maybe group), so the offline demo shows both.",
+  "_comment": "PLACEHOLDER seed song ranges (MIDI, C4 = 60) for the offline demo and e2e tests (SPOTIFY_MOCK=1 with the memory store). Every range is approximate, from general knowledge, and must never reach production: real ranges come from USDB note files and the vocal-range pipeline. The first 24 are from the mock Spotify library (one library song, All I Want for Christmas Is You, has no seed, so the skipped-song path stays covered): the high-confidence ones stand in for measured recordings or note files, the low-confidence ones for artist estimates (the Maybe group). Songs marked catalogueOnly are not in the mock library; they give the no-Spotify catalogue mode songs from every decade, plus two more duets. The usdb rows (views, stars, year, genre) and moods are placeholders too; years and genres are the real ones.",
   "songs": [
     {
       "artist": "Queen",
@@ -13,7 +13,17 @@
         "fastLyrics": false
       },
       "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
-      "usdb": { "id": 900003, "views": 90000, "rating": 4.8, "year": 1975, "genre": "Rock", "language": "English" }
+      "usdb": {
+        "id": 900003,
+        "views": 120000,
+        "rating": 4.8,
+        "year": 1975,
+        "genre": "Rock",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ]
     },
     {
       "artist": "Whitney Houston",
@@ -26,7 +36,18 @@
         "confidence": "low",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900004,
+        "views": 90000,
+        "rating": 4.6,
+        "year": 1992,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ]
     },
     {
       "artist": "Journey",
@@ -39,7 +60,18 @@
         "confidence": "low",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900005,
+        "views": 95000,
+        "rating": 4.7,
+        "year": 1981,
+        "genre": "Rock",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
     },
     {
       "artist": "Justin Bieber",
@@ -52,7 +84,18 @@
         "confidence": "high",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data."
+      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data.",
+      "usdb": {
+        "id": 900006,
+        "views": 30000,
+        "rating": 3.9,
+        "year": 2010,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
     },
     {
       "artist": "Omar Apollo",
@@ -65,7 +108,18 @@
         "confidence": "low",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900007,
+        "views": 2000,
+        "rating": 4.2,
+        "year": 2022,
+        "genre": "R&B",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ]
     },
     {
       "artist": "Adele",
@@ -78,7 +132,18 @@
         "confidence": "high",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data."
+      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data.",
+      "usdb": {
+        "id": 900008,
+        "views": 80000,
+        "rating": 4.7,
+        "year": 2011,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ]
     },
     {
       "artist": "Bon Jovi",
@@ -91,7 +156,18 @@
         "confidence": "low",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900009,
+        "views": 85000,
+        "rating": 4.6,
+        "year": 1986,
+        "genre": "Rock",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
     },
     {
       "artist": "Elvis Presley",
@@ -104,7 +180,18 @@
         "confidence": "high",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data."
+      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data.",
+      "usdb": {
+        "id": 900010,
+        "views": 45000,
+        "rating": 4.5,
+        "year": 1961,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ]
     },
     {
       "artist": "ABBA",
@@ -118,7 +205,17 @@
         "fastLyrics": false
       },
       "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data.",
-      "usdb": { "id": 900001, "views": 48000, "rating": 4.6, "year": 1976, "genre": "Pop", "language": "English" }
+      "usdb": {
+        "id": 900001,
+        "views": 100000,
+        "rating": 4.8,
+        "year": 1976,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
     },
     {
       "artist": "Frank Sinatra",
@@ -132,7 +229,780 @@
         "fastLyrics": false
       },
       "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data.",
-      "usdb": { "id": 900002, "views": 12000, "rating": 4.1, "year": 1969, "genre": "Pop", "language": "English" }
+      "usdb": {
+        "id": 900002,
+        "views": 35000,
+        "rating": 4.4,
+        "year": 1969,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ]
+    },
+    {
+      "artist": "Queen",
+      "title": "Don't Stop Me Now",
+      "range": {
+        "low": 55,
+        "high": 77,
+        "tessitura": 66,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900011,
+        "views": 98000,
+        "rating": 4.8,
+        "year": 1978,
+        "genre": "Rock",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
+    },
+    {
+      "artist": "Whitney Houston",
+      "title": "I Wanna Dance with Somebody (Who Loves Me)",
+      "range": {
+        "low": 57,
+        "high": 74,
+        "tessitura": 66,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900012,
+        "views": 76000,
+        "rating": 4.6,
+        "year": 1987,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
+    },
+    {
+      "artist": "Journey",
+      "title": "Any Way You Want It",
+      "range": {
+        "low": 57,
+        "high": 76,
+        "tessitura": 67,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900013,
+        "views": 41000,
+        "rating": 4.4,
+        "year": 1980,
+        "genre": "Rock",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
+    },
+    {
+      "artist": "Justin Bieber",
+      "title": "Sorry",
+      "range": {
+        "low": 57,
+        "high": 72,
+        "tessitura": 64,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900014,
+        "views": 33000,
+        "rating": 4.1,
+        "year": 2015,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
+    },
+    {
+      "artist": "Toto",
+      "title": "Africa",
+      "range": {
+        "low": 54,
+        "high": 73,
+        "tessitura": 64,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900016,
+        "views": 69000,
+        "rating": 4.6,
+        "year": 1982,
+        "genre": "Rock",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
+    },
+    {
+      "artist": "a-ha",
+      "title": "Take On Me",
+      "range": {
+        "low": 52,
+        "high": 78,
+        "tessitura": 64,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900017,
+        "views": 72000,
+        "rating": 4.5,
+        "year": 1985,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
+    },
+    {
+      "artist": "Lady Gaga",
+      "title": "Shallow",
+      "range": {
+        "low": 45,
+        "high": 64,
+        "tessitura": 55,
+        "source": "note-file",
+        "confidence": "high",
+        "fastLyrics": false,
+        "duet": true,
+        "parts": [
+          {
+            "singer": "Bradley Cooper",
+            "low": 45,
+            "high": 64,
+            "tessitura": 55,
+            "fastLyrics": false
+          },
+          {
+            "singer": "Lady Gaga",
+            "low": 57,
+            "high": 79,
+            "tessitura": 67,
+            "fastLyrics": false
+          }
+        ]
+      },
+      "provenance": "Placeholder seed: approximate ranges of each singer's part from general knowledge, not measured from a note file. Demo only.",
+      "usdb": {
+        "id": 900018,
+        "views": 64000,
+        "rating": 4.7,
+        "year": 2018,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ]
+    },
+    {
+      "artist": "Ed Sheeran",
+      "title": "Perfect",
+      "range": {
+        "low": 52,
+        "high": 71,
+        "tessitura": 62,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900019,
+        "views": 47000,
+        "rating": 4.5,
+        "year": 2017,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ]
+    },
+    {
+      "artist": "Billy Joel",
+      "title": "Piano Man",
+      "range": {
+        "low": 50,
+        "high": 67,
+        "tessitura": 59,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900020,
+        "views": 52000,
+        "rating": 4.6,
+        "year": 1973,
+        "genre": "Rock",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ]
+    },
+    {
+      "artist": "Spice Girls",
+      "title": "Wannabe",
+      "range": {
+        "low": 55,
+        "high": 72,
+        "tessitura": 64,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": true
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900021,
+        "views": 58000,
+        "rating": 4.4,
+        "year": 1996,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
+    },
+    {
+      "artist": "Backstreet Boys",
+      "title": "I Want It That Way",
+      "range": {
+        "low": 54,
+        "high": 71,
+        "tessitura": 64,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900022,
+        "views": 61000,
+        "rating": 4.6,
+        "year": 1999,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ]
+    },
+    {
+      "artist": "Cyndi Lauper",
+      "title": "Girls Just Want to Have Fun",
+      "range": {
+        "low": 57,
+        "high": 76,
+        "tessitura": 67,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900023,
+        "views": 54000,
+        "rating": 4.5,
+        "year": 1983,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
+    },
+    {
+      "artist": "The Killers",
+      "title": "Mr. Brightside",
+      "range": {
+        "low": 52,
+        "high": 68,
+        "tessitura": 61,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": true
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900024,
+        "views": 73000,
+        "rating": 4.7,
+        "year": 2003,
+        "genre": "Rock",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ]
+    },
+    {
+      "artist": "Gloria Gaynor",
+      "title": "I Will Survive",
+      "range": {
+        "low": 53,
+        "high": 74,
+        "tessitura": 63,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900025,
+        "views": 59000,
+        "rating": 4.6,
+        "year": 1978,
+        "genre": "Disco",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat",
+        "heartfelt"
+      ]
+    },
+    {
+      "artist": "Chuck Berry",
+      "title": "Johnny B. Goode",
+      "range": {
+        "low": 50,
+        "high": 64,
+        "tessitura": 57,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": true
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900026,
+        "views": 12000,
+        "rating": 4.2,
+        "year": 1958,
+        "genre": "Rock",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Ben E. King",
+      "title": "Stand By Me",
+      "range": {
+        "low": 52,
+        "high": 64,
+        "tessitura": 58,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900027,
+        "views": 40000,
+        "rating": 4.6,
+        "year": 1961,
+        "genre": "Soul",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "The Temptations",
+      "title": "My Girl",
+      "range": {
+        "low": 53,
+        "high": 69,
+        "tessitura": 60,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900028,
+        "views": 22000,
+        "rating": 4.4,
+        "year": 1964,
+        "genre": "Soul",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Neil Diamond",
+      "title": "Sweet Caroline",
+      "range": {
+        "low": 47,
+        "high": 66,
+        "tessitura": 57,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900029,
+        "views": 50000,
+        "rating": 4.6,
+        "year": 1969,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Elton John & Kiki Dee",
+      "title": "Don't Go Breaking My Heart",
+      "range": {
+        "low": 52,
+        "high": 69,
+        "tessitura": 61,
+        "source": "note-file",
+        "confidence": "high",
+        "fastLyrics": false,
+        "duet": true,
+        "parts": [
+          {
+            "singer": "Elton John",
+            "low": 52,
+            "high": 69,
+            "tessitura": 61,
+            "fastLyrics": false
+          },
+          {
+            "singer": "Kiki Dee",
+            "low": 57,
+            "high": 72,
+            "tessitura": 65,
+            "fastLyrics": false
+          }
+        ]
+      },
+      "provenance": "Placeholder seed: approximate ranges of each singer's part from general knowledge, not measured from a note file. Demo only.",
+      "usdb": {
+        "id": 900030,
+        "views": 21000,
+        "rating": 4.3,
+        "year": 1976,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Kenny Rogers & Dolly Parton",
+      "title": "Islands in the Stream",
+      "range": {
+        "low": 45,
+        "high": 64,
+        "tessitura": 55,
+        "source": "note-file",
+        "confidence": "high",
+        "fastLyrics": false,
+        "duet": true,
+        "parts": [
+          {
+            "singer": "Kenny Rogers",
+            "low": 45,
+            "high": 64,
+            "tessitura": 55,
+            "fastLyrics": false
+          },
+          {
+            "singer": "Dolly Parton",
+            "low": 57,
+            "high": 74,
+            "tessitura": 66,
+            "fastLyrics": false
+          }
+        ]
+      },
+      "provenance": "Placeholder seed: approximate ranges of each singer's part from general knowledge, not measured from a note file. Demo only.",
+      "usdb": {
+        "id": 900031,
+        "views": 18000,
+        "rating": 4.4,
+        "year": 1983,
+        "genre": "Country",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Oasis",
+      "title": "Wonderwall",
+      "range": {
+        "low": 50,
+        "high": 67,
+        "tessitura": 59,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900032,
+        "views": 70000,
+        "rating": 4.6,
+        "year": 1995,
+        "genre": "Rock",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Natalie Imbruglia",
+      "title": "Torn",
+      "range": {
+        "low": 55,
+        "high": 72,
+        "tessitura": 63,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900033,
+        "views": 30000,
+        "rating": 4.4,
+        "year": 1997,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "OutKast",
+      "title": "Hey Ya!",
+      "range": {
+        "low": 55,
+        "high": 71,
+        "tessitura": 63,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": true
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900034,
+        "views": 26000,
+        "rating": 4.3,
+        "year": 2003,
+        "genre": "Hip-Hop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Rihanna",
+      "title": "Umbrella",
+      "range": {
+        "low": 52,
+        "high": 69,
+        "tessitura": 61,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900035,
+        "views": 24000,
+        "rating": 4.2,
+        "year": 2007,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Carly Rae Jepsen",
+      "title": "Call Me Maybe",
+      "range": {
+        "low": 57,
+        "high": 72,
+        "tessitura": 64,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900036,
+        "views": 31000,
+        "rating": 4.3,
+        "year": 2012,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Bruno Mars",
+      "title": "Just the Way You Are",
+      "range": {
+        "low": 53,
+        "high": 70,
+        "tessitura": 62,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900037,
+        "views": 42000,
+        "rating": 4.5,
+        "year": 2010,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Olivia Rodrigo",
+      "title": "drivers license",
+      "range": {
+        "low": 55,
+        "high": 74,
+        "tessitura": 64,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900038,
+        "views": 25000,
+        "rating": 4.4,
+        "year": 2021,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "heartfelt"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Miley Cyrus",
+      "title": "Flowers",
+      "range": {
+        "low": 50,
+        "high": 67,
+        "tessitura": 58,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900039,
+        "views": 20000,
+        "rating": 4.3,
+        "year": 2023,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ],
+      "catalogueOnly": true
+    },
+    {
+      "artist": "Sabrina Carpenter",
+      "title": "Espresso",
+      "range": {
+        "low": 55,
+        "high": 72,
+        "tessitura": 63,
+        "source": "audio-full",
+        "confidence": "high",
+        "fastLyrics": false
+      },
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": {
+        "id": 900040,
+        "views": 15000,
+        "rating": 4.2,
+        "year": 2024,
+        "genre": "Pop",
+        "language": "English"
+      },
+      "moods": [
+        "upbeat"
+      ],
+      "catalogueOnly": true
     }
   ]
 }

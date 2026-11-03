@@ -1,3 +1,5 @@
+import type { Mood } from '../contracts';
+import { parseShippedMoods } from './moods';
 import { pickStoreKind } from './getStore';
 import type { SpotifyConfig } from './spotify';
 
@@ -9,6 +11,8 @@ export interface ServerConfig {
   spotify: SpotifyConfig;
   /** Whether POST /api/events stores the beta events it is sent (EVENTS; see eventsOn). */
   collectEvents: boolean;
+  /** Moods allowed on screen (MOODS_SHIPPED), once they pass the QWW-11 gate. Empty = no mood chips. */
+  moodsShipped: Mood[];
 }
 
 export function readConfig(env: Record<string, string | undefined> = process.env): ServerConfig {
@@ -22,6 +26,7 @@ export function readConfig(env: Record<string, string | undefined> = process.env
       redirectUri: env.SPOTIFY_REDIRECT_URI ?? '',
     },
     collectEvents: eventsOn(env),
+    moodsShipped: parseShippedMoods(env.MOODS_SHIPPED),
   };
 }
 

@@ -13,6 +13,8 @@ import type { CatalogueSong, UsdbIndexEntry } from './store';
 
 /** How many songs are read from the store, most popular first. */
 export const CATALOGUE_SIZE = 6000;
+/** Most catalogue matches sent at once (all=1), best first. */
+export const MAX_ALL_MATCHES = 1000;
 /** One read of the catalogue serves every request in the process for this long. */
 export const CATALOGUE_TTL_MS = 60 * 60_000;
 
@@ -103,8 +105,11 @@ export function recommendCatalogue(
   const ranked = deps.rankMatches(matches);
   const sources = (items: Match[]) => Object.fromEntries(items.map((m) => [m.track.id, logs.get(m.track.id)!]));
   if ('all' in page) {
-    const all = ranked.map((m) => ({ ...m, range: withoutPitchShare(m.range) }));
-    return { matches: all, nextOffset: null, sources: sources(ranked), complete: true };
+    // A wide range can match thousands of catalogue songs; the phone gets the best ones by Top
+    // picks, which is plenty for every sort and chip and keeps the response small on a phone.
+    const best = ranked.slice(0, MAX_ALL_MATCHES);
+    const all = best.map((m) => ({ ...m, range: withoutPitchShare(m.range) }));
+    return { matches: all, nextOffset: null, sources: sources(best), complete: true };
   }
   const { items, nextOffset } = deps.paginate(ranked, page.offset, page.limit);
   return { matches: items, nextOffset, sources: sources(items) };
