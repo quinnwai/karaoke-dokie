@@ -17,6 +17,12 @@
 // women routinely do it with each other's songs) and keeps the melody; other
 // transpositions need a karaoke key-change, so we do not offer them.
 //
+// A duet is sung as a pair, each singer on their own part, so a duet with
+// parts (range.ts) is offered when one part fits the user, and matched on the
+// part that suits them best: one that fits as written over one that needs an
+// octave shift, then the easier one, then P1. The match then shows and scores
+// that part's own notes (toMatch).
+//
 // All of that is for confident ranges. A low-confidence range (an artist
 // estimate, or a mostly-rap or thinly sung recording) is too rough for a
 // label: it goes in the Maybe group, shown after the other songs without a
@@ -26,7 +32,7 @@
 // 93% of the estimated songs that really fit (maybe_group.py in the
 // vocal-range pipeline).
 
-import type { Difficulty, Label, OctaveShift, SongRange, VocalRange } from '../contracts';
+import type { Difficulty, Label, Match, OctaveShift, SongRange, Track, VocalRange } from '../contracts';
 
 /** Distance from the centre, as a fraction of the half-range, where the outer and edge eighths start. */
 export const OUTER_FROM = 0.5;
@@ -43,6 +49,8 @@ const EPSILON = 1e-9;
 export interface SongFit {
   difficulty: Label;
   octave: OctaveShift;
+  /** For a duet, the part the user sings (1 = P1, 2 = P2). Unset for solo songs and the Maybe group. */
+  part?: number;
 }
 
 export interface EdgeTime {
@@ -105,6 +113,12 @@ export const SHIFTS: { octave: OctaveShift; semitones: number }[] = [
 
 export function matchSong(userRange: VocalRange, song: SongRange): SongFit | null {
   if (song.confidence === 'low') return maybeFit(userRange, song);
+  if (song.parts?.length) return duetFit(userRange, song);
+  return strictFit(userRange, song);
+}
+
+/** As written, else an octave down, else an octave up: the first that fits, with its difficulty. */
+function strictFit(userRange: VocalRange, song: SongRange): SongFit | null {
   for (const { octave, semitones } of SHIFTS) {
     const low = song.low + semitones;
     const high = song.high + semitones;
@@ -113,6 +127,46 @@ export function matchSong(userRange: VocalRange, song: SongRange): SongFit | nul
     }
   }
   return null;
+}
+
+const DIFFICULTY_ORDER: Record<Label, number> = { easy: 0, medium: 1, hard: 2, maybe: 3 };
+
+/** The duet part that suits the user best: fits as written, then easier; a tie goes to the earlier part. */
+function duetFit(userRange: VocalRange, song: SongRange): SongFit | null {
+  const shifted = (f: SongFit) => (f.octave === 'none' ? 0 : 1);
+  const fitting = (song.parts ?? []).flatMap((_, i) => {
+    const fit = strictFit(userRange, partRange(song, i + 1));
+    return fit ? [{ ...fit, part: i + 1 }] : [];
+  });
+  // Sorting is stable, so parts that tie stay in order.
+  fitting.sort((a, b) => shifted(a) - shifted(b) || DIFFICULTY_ORDER[a.difficulty] - DIFFICULTY_ORDER[b.difficulty]);
+  return fitting[0] ?? null;
+}
+
+/**
+ * A duet as one singer sings it: that part's range, typical note, pitch histogram and fast-lyrics
+ * flag, with the song's other details (source, USDB facts, `duet`, `parts`) kept.
+ */
+export function partRange(song: SongRange, part: number): SongRange {
+  const p = song.parts?.[part - 1];
+  if (!p) throw new Error(`Song has no part ${part}`);
+  const { pitchShare: _wholeSong, ...rest } = song;
+  const range: SongRange = { ...rest, low: p.low, high: p.high, tessitura: p.tessitura, fastLyrics: p.fastLyrics };
+  if (p.pitchShare) range.pitchShare = p.pitchShare;
+  return range;
+}
+
+/**
+ * The (unscored) match for a fit. A duet matched on one part is shown and scored as that part:
+ * its range is the part's, so the range bar shows the singer's own notes, and it says which part
+ * and who sings it.
+ */
+export function toMatch(track: Track, song: SongRange, fit: SongFit): Match {
+  if (fit.part === undefined) return { track, range: song, ...fit };
+  const match: Match = { track, range: partRange(song, fit.part), ...fit };
+  const singer = song.parts?.[fit.part - 1]?.singer;
+  if (singer) match.partSinger = singer;
+  return match;
 }
 
 /** A low-confidence range that fits the user's range give or take MAYBE_SLACK: the Maybe group. */

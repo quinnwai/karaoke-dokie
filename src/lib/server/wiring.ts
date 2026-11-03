@@ -6,7 +6,7 @@ import seedFile from '../../../data/seed-song-ranges.json';
 import { configProblems, readConfig, type ServerConfig } from './config';
 import { getStore, resetStoreForTests } from './getStore';
 import { createMockSpotifyClient } from './mockSpotify';
-import { matchSong as fitSong } from '../songs/match';
+import { matchSong as fitSong, toMatch } from '../songs/match';
 import { paginate, rankMatches } from '../songs/rank';
 import { scoreMatch } from '../songs/score';
 import { resolveSongRange, songKey } from '../songs/resolve';
@@ -88,7 +88,8 @@ export function productionSongDeps(store: Store, mock: boolean): SongDeps {
       : realResolver(store, noteFileSource),
     matchSong: (track, range, userRange) => {
       const fit = fitSong(userRange, range);
-      return fit ? scoreMatch(userRange, { track, range, ...fit }) : null;
+      // A duet is scored and shown on the part the user sings: toMatch swaps in that part's range.
+      return fit ? scoreMatch(userRange, toMatch(track, range, fit)) : null;
     },
     rankMatches,
     paginate,

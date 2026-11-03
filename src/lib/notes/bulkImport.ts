@@ -8,7 +8,7 @@ import type { DataSourceLogEntry, LogOutcome, SongRange } from '../contracts';
 import type { Store } from '../server/store';
 import { songRangeFromUltrastar } from '../songs/range';
 import { songKey } from '../songs/resolve';
-import { importReplaces, isKnownSource, SOURCE_RANK } from '../songs/sourceRank';
+import { addsDuetParts, importReplaces, isKnownSource, SOURCE_RANK } from '../songs/sourceRank';
 import { parseUltrastar } from '../songs/ultrastar';
 
 export interface BulkRange {
@@ -58,6 +58,15 @@ export function rangeFromNoteText(text: string, collection: string): BulkRange |
   }
 }
 
+/** `range` with the stored range's USDB link, views and stars, which belong to the song rather than the file. */
+function keepUsdbFacts(range: SongRange, stored: SongRange): SongRange {
+  const out = { ...range };
+  if (stored.usdbId !== undefined) out.usdbId = stored.usdbId;
+  if (stored.usdbViews !== undefined) out.usdbViews = stored.usdbViews;
+  if (stored.usdbRating !== undefined) out.usdbRating = stored.usdbRating;
+  return out;
+}
+
 /** Keeps the first range seen for each song key, so earlier collections win. */
 export function dedupeRanges(ranges: Iterable<BulkRange>): BulkRange[] {
   const byKey = new Map<string, BulkRange>();
@@ -77,9 +86,10 @@ export interface ImportSummary {
  * Writes bulk ranges to the store, going by the source rank (sourceRank.ts): a row is written
  * over a lower-ranked one, or over the same source from another export; anything else is kept
  * as it is (with recheckFast, a kept note file only gets its fast-lyrics flag corrected). So
- * estimates and skips are upgraded, and note files are never replaced. A replaced row keeps the
- * time the USDB sync last found nothing for the song. A file with a source this app does not
- * know, or a log outcome that is not the row's source, is refused before anything is written.
+ * estimates and skips are upgraded, and note files are only replaced by the same song's duet
+ * read with each singer's part, which keeps the stored USDB link, views and stars. A replaced row
+ * keeps the time the USDB sync last found nothing for the song. A file with a source this app does
+ * not know, or a log outcome that is not the row's source, is refused before anything is written.
  * No log rows are appended.
  */
 export async function importBulkRanges(
@@ -126,7 +136,8 @@ export async function importBulkRanges(
         at: now().toISOString(),
       };
       if (old?.log.usdbMissAt) log.usdbMissAt = old.log.usdbMissAt;
-      await store.putSongRange(r.key, { range: r.range, log });
+      const range = old?.range && addsDuetParts(r.range, old.range) ? keepUsdbFacts(r.range, old.range) : r.range;
+      await store.putSongRange(r.key, { range, log });
       summary.imported++;
     }
     opts.onProgress?.(Math.min(i + batchSize, ranges.length));
