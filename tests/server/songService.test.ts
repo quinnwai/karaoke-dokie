@@ -3,7 +3,7 @@ import type { DataSourceLogEntry, Match, SongRange, Track, VocalRange } from '..
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { createSongService, MAX_ALL_MATCHES, type SongDeps } from '../../src/lib/server/songService';
 import { matchSong as fitSong } from '../../src/lib/songs/match';
-import { scoreMatch, UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
+import { CHART_FLOOR, KARAOKE_VIEWS_FULL, scoreMatch, UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
 
 const track = (n: number): Track => ({
   id: `t${n}`,
@@ -348,6 +348,66 @@ describe('song service whole list (all)', () => {
     // Pages score as before, without the index.
     const page = await createSongService(store, deps).recommend(lib, user, 0, 5);
     expect(page.matches.find((m) => m.track.id === 't2')!.parts).toMatchObject({ popularityKnown: false, popularity: UNKNOWN_POPULARITY });
+  });
+
+  describe('karaoke popularity (QWW-6)', () => {
+    const popular = (n: number, extra: { karaokeViews?: number; chartRank?: number; chartYear?: number }) => ({ key: key(n), source: 'test', ...extra });
+
+    it('is read once for the whole list, for the songs that have a range, and never for pages', async () => {
+      const store = createMemoryStore();
+      const getSongPopularity = vi.spyOn(store, 'getSongPopularity');
+      const svc = createSongService(store, fakeDeps().deps);
+      await svc.recommend(tracks, user, 0, 5);
+      expect(getSongPopularity).not.toHaveBeenCalled();
+      await svc.recommend(tracks, user, 0, 0, { all: true });
+      expect(getSongPopularity).toHaveBeenCalledTimes(1);
+      const withRange = tracks.map((t) => Number(t.id.slice(1))).filter((n) => n % 3 !== 0);
+      expect([...getSongPopularity.mock.calls[0]![0]].sort()).toEqual(withRange.map(key).sort());
+    });
+
+    it('scores with karaoke views and chart rank on a copy, never stores or sends them, and leaves pages as they were', async () => {
+      const store = createMemoryStore();
+      await store.putSongPopularity([popular(2, { chartRank: 12, chartYear: 1999 }), popular(4, { karaokeViews: KARAOKE_VIEWS_FULL })]);
+      await store.putUsdbSongs([indexRow(4, { rating: 4 })]);
+      const matchSong = vi.fn(scoring);
+      const { deps } = fakeDeps({ matchSong, resolveSongRange: everyone(range(56, 64)) });
+      const lib = [track(2), track(4), track(8)];
+      const res = await createSongService(store, deps).recommend(lib, user, 0, 0, { all: true });
+
+      const scored = Object.fromEntries(matchSong.mock.calls.map(([t, r]) => [t.id, r]));
+      expect(scored.t2).toStrictEqual({ ...range(56, 64), chartRank: 12 });
+      expect(scored.t4).toStrictEqual({ ...range(56, 64), usdbRating: 4, karaokeViews: KARAOKE_VIEWS_FULL });
+      expect(scored.t8).toStrictEqual(range(56, 64));
+      const parts = Object.fromEntries(res.matches.map((m) => [m.track.id, m.parts!]));
+      expect(parts.t2).toMatchObject({ popularity: CHART_FLOOR.top20, popularityKnown: true });
+      expect(parts.t4!.popularity).toBeCloseTo((0.8 + 1) / 2);
+      expect(parts.t8).toMatchObject({ popularity: UNKNOWN_POPULARITY, popularityKnown: false });
+
+      for (const m of res.matches) {
+        expect(m.range).not.toHaveProperty('karaokeViews');
+        expect(m.range).not.toHaveProperty('chartRank');
+      }
+      expect(res.matches.find((m) => m.track.id === 't4')!.range).toMatchObject({ usdbRating: 4 }); // USDB stars still go out
+      expect((await store.getSongRange(key(2)))!.range).toStrictEqual(range(56, 64));
+      const page = await createSongService(store, deps).recommend(lib, user, 0, 5);
+      expect(page.matches.find((m) => m.track.id === 't2')!.parts).toMatchObject({ popularity: UNKNOWN_POPULARITY, popularityKnown: false });
+    });
+
+    it('takes the chart year only for songs with neither a USDB nor a Spotify year', async () => {
+      const store = createMemoryStore();
+      await store.putUsdbSongs([indexRow(2, { year: 1975 })]);
+      await store.putSongPopularity([
+        popular(2, { chartRank: 40, chartYear: 1976 }),
+        popular(4, { chartRank: 40, chartYear: 1991 }),
+        popular(8, { chartRank: 40, chartYear: 2001 }),
+        popular(10, { karaokeViews: 5_000 }),
+      ]);
+      const lib = [track(2), { ...track(4), releaseYear: 1990 }, track(8), track(10)];
+      const res = await createSongService(store, fakeDeps().deps).recommend(lib, user, 0, 0, { all: true });
+      const years = Object.fromEntries(res.matches.map((m) => [m.track.id, [m.year, m.yearSource]]));
+      expect(years).toEqual({ t2: [1975, 'usdb'], t4: [1990, 'spotify'], t8: [2001, 'chart'], t10: [undefined, undefined] });
+      expect(res.matches.find((m) => m.track.id === 't10')).not.toHaveProperty('yearSource');
+    });
   });
 
   it('leaves pitch histograms out of the whole list, duet parts included, without touching the stored range', async () => {

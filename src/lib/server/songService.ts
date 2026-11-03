@@ -10,8 +10,9 @@ import type {
   Track,
   VocalRange,
 } from '../contracts';
-import type { SongRangeRecord, Store, UsdbIndexEntry } from './store';
+import type { SongPopularityRecord, SongRangeRecord, Store, UsdbIndexEntry } from './store';
 import { hasLittleSinging } from '../songs/resolve';
+import { withKaraokePopularity, type KaraokePopularity } from '../songs/score';
 
 export interface ResolveResult {
   /** null = skipped (no usable data). */
@@ -46,8 +47,8 @@ export const MAX_ALL_MATCHES = 1000;
 export interface SongService {
   /**
    * One page of the ranked library. With `all`, every match in one response instead (offset and
-   * limit are ignored), with its year, genre and USDB popularity, for the results screen to sort
-   * and filter on the phone.
+   * limit are ignored), with its year and genre, and scored with its USDB and karaoke popularity,
+   * for the results screen to sort and filter on the phone.
    */
   recommend(
     tracks: Track[],
@@ -81,9 +82,14 @@ function withIndexPopularity(range: SongRange, row: UsdbIndexEntry | undefined):
 /**
  * Year and genre for the decade filter and the song info. The year is the earlier of USDB's (the
  * note file's #YEAR) and Spotify's album year, since a reissue only ever makes a date later; a tie
- * counts as USDB's.
+ * counts as USDB's. A song with neither gets the year of its best Billboard Year-End rank, which
+ * can be a year after release (a hit from late in a year charts in the next), so only then.
  */
-function songFacts(track: Track, row: UsdbIndexEntry | undefined): Pick<Match, 'year' | 'yearSource' | 'genre'> {
+function songFacts(
+  track: Track,
+  row: UsdbIndexEntry | undefined,
+  popularity: SongPopularityRecord | undefined,
+): Pick<Match, 'year' | 'yearSource' | 'genre'> {
   const facts: Pick<Match, 'year' | 'yearSource' | 'genre'> = {};
   const usdb = row?.year;
   const spotify = track.releaseYear;
@@ -93,6 +99,9 @@ function songFacts(track: Track, row: UsdbIndexEntry | undefined): Pick<Match, '
   } else if (spotify !== undefined) {
     facts.year = spotify;
     facts.yearSource = 'spotify';
+  } else if (popularity?.chartYear !== undefined) {
+    facts.year = popularity.chartYear;
+    facts.yearSource = 'chart';
   }
   if (row?.genre !== undefined) facts.genre = row.genre;
   return facts;
@@ -105,9 +114,13 @@ function withoutPitchShare<T extends { pitchShare?: [number, number][] }>(x: T):
   return copy;
 }
 
-/** The match as the whole-list response sends it: no pitch histograms, for the song or its duet parts. */
+/**
+ * The match as the whole-list response sends it: no pitch histograms, for the song or its duet
+ * parts, and none of the karaoke popularity it was scored with.
+ */
 function compact(m: Match): Match {
-  const range = withoutPitchShare(m.range);
+  const scored: SongRange & KaraokePopularity = m.range;
+  const { karaokeViews: _views, chartRank: _rank, ...range } = withoutPitchShare(scored);
   if (range.parts) range.parts = range.parts.map(withoutPitchShare);
   return { ...m, range };
 }
@@ -196,16 +209,19 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         return false;
       });
 
-      // The whole list also carries song facts from our USDB index, read once for every candidate.
-      // Pages leave it out, so they stay exactly as they were.
-      const index = all ? await store.findUsdbSongs(candidates.map((c) => c.key)) : null;
+      // The whole list also carries song facts from our USDB index and is scored with our karaoke
+      // popularity (QWW-6), each read once for every candidate. Pages leave both out, so they stay
+      // exactly as they were.
+      const keys = candidates.map((c) => c.key);
+      const [index, popularity] = all ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys)]) : [null, null];
       const matches: Match[] = [];
       const logs = new Map<string, DataSourceLogEntry>();
       for (const { track, key, range, log } of candidates) {
         const row = index?.get(key);
-        const m = deps.matchSong(track, index ? withIndexPopularity(range, row) : range, userRange);
+        const pop = popularity?.get(key);
+        const m = deps.matchSong(track, index ? withKaraokePopularity(withIndexPopularity(range, row), pop) : range, userRange);
         if (!m) continue;
-        matches.push(index ? { ...m, ...songFacts(track, row) } : m);
+        matches.push(index ? { ...m, ...songFacts(track, row, pop) } : m);
         logs.set(track.id, log);
       }
       const sourcesOf = (items: Match[]) => {
@@ -224,8 +240,8 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         const items = ranked.slice(0, MAX_ALL_MATCHES).map(compact);
         // Not complete while lookups have run out of budget: nextOffset is then set, and asking for
         // the whole list again carries on with them. Paging on from it would not line up, since
-        // pages rank without the index's popularity. A list cut at MAX_ALL_MATCHES is not complete
-        // either, but has nothing more to ask for: nextOffset is null.
+        // pages rank without the index's or karaoke popularity. A list cut at MAX_ALL_MATCHES is
+        // not complete either, but has nothing more to ask for: nextOffset is null.
         const complete = exhausted && items.length === ranked.length;
         return { matches: items, nextOffset: exhausted ? null : items.length, sources: sourcesOf(items), complete };
       }
