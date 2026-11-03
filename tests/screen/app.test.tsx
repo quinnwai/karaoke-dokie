@@ -154,6 +154,27 @@ describe('KaraokeApp', () => {
     expect(api.feedback).not.toHaveBeenCalled();
   });
 
+  it('holds a growled low note to E2 and never asks the singer to fix it', async () => {
+    const { mic, sing } = fakeMic();
+    const api = fakeApi(me());
+    render(<KaraokeApp api={api} mic={mic} quietMs={0} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+    await screen.findByRole('button', { name: /lowest note/ });
+    sing(73.42); // D2, lower than almost any pop song goes
+    await hold(/lowest note/);
+    await screen.findByTestId('low-note');
+    sing(523.25); // C5
+    await hold(/highest note/);
+
+    await screen.findByText('Plastic Love');
+    expect(api.saveRange).toHaveBeenCalledWith({ low: 40, high: 72, source: 'test' });
+    expect(screen.getByLabelText('Your range E2 to C5')).toBeTruthy();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Keep it' })).toBeNull();
+    expect(screen.queryByText(/growl|vocal fry/i)).toBeNull();
+  });
+
   it('asks to try again when nothing was held', async () => {
     const { mic, sing } = fakeMic();
     render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);

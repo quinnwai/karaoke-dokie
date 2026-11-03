@@ -21,6 +21,7 @@ import type {
   VocalRange,
 } from '../contracts';
 import { availableSliders, DEFAULT_VIEW, fitViewTo, pickDecade, pickMood, toggleDuets } from '../songs/browse';
+import { plausibleNote } from './rangeCheck';
 
 export type Step =
   | 'boot' // asking /api/me who this is
@@ -148,7 +149,8 @@ export type FlowEvent =
   | { type: 'togglePick'; trackId: string }
   | { type: 'pickDone' };
 
-const testRange = (low: Midi, high: Midi): VocalRange => ({ low, high, source: 'test' });
+/** A sung range, each note held to where pop songs go, so a growl or whistle never stretches it. */
+const testRange = (low: Midi, high: Midi): VocalRange => ({ low: plausibleNote(low), high: plausibleNote(high), source: 'test' });
 
 /** Clears everything about results so a new range starts from the top, keeping only the sliders. */
 function freshResults(state: FlowState) {

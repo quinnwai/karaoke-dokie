@@ -9,8 +9,6 @@ import {
   octaveWording,
   reasonsForSlider,
 } from '../lib/client/display';
-import { rangeWarning } from '../lib/client/rangeCheck';
-import { isRangeKept, keepRange } from '../lib/client/storage';
 import {
   activeSliders,
   availableFacets,
@@ -66,12 +64,6 @@ export function Results(props: ResultsProps) {
   const { range, mode, matches, view, leadSlider, shown, loading, error } = props;
   const low = midiToNoteName(range.low);
   const high = midiToNoteName(range.high);
-  const warning = rangeWarning(range);
-  const [kept, setKept] = useState(() => isRangeKept(range.low, range.high));
-  const keep = () => {
-    keepRange(range.low, range.high);
-    setKept(true);
-  };
   const maybeId = useId();
   const tuneId = useId();
   const pickId = useId();
@@ -149,23 +141,6 @@ export function Results(props: ResultsProps) {
         )}
         {mode === 'library' && <SpotifyAccount name={props.displayName} onLogout={props.onLogout} />}
       </div>
-
-      {warning && !kept && (
-        <div className={styles.rangeWarning} role="status">
-          <p>{warning.message}</p>
-          <div className={styles.rangeWarningActions}>
-            <button type="button" className={warning.end === 'low' ? styles.more : styles.redo} onClick={() => props.onRedoEnd('low')}>
-              Redo low note
-            </button>
-            <button type="button" className={warning.end === 'high' ? styles.more : styles.redo} onClick={() => props.onRedoEnd('high')}>
-              Redo high note
-            </button>
-            <button type="button" className={styles.textButton} onClick={keep}>
-              Keep it
-            </button>
-          </div>
-        </div>
-      )}
 
       {matches.length > 0 && (
         <div className={styles.controls}>

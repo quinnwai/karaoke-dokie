@@ -24,6 +24,12 @@ describe('boot', () => {
     expect(s.range).toEqual({ low: 45, high: 72, source: 'test' });
   });
 
+  it('after sign-in, a growled or whistled note in storage is held to E2 to C6 too', () => {
+    const s = run([{ type: 'booted', me: me(), progress: { low: 38, high: 90 }, wantsPick: false }]);
+    expect(s.step).toBe('saving');
+    expect(s.range).toEqual({ low: 40, high: 84, source: 'test' });
+  });
+
   it('a fresh test result wins over an older saved range', () => {
     const s = run([{ type: 'booted', me: me({ low: 40, high: 60, source: 'songs' }), progress: { low: 45, high: 72 }, wantsPick: false }]);
     expect(s.step).toBe('saving');
@@ -65,6 +71,13 @@ describe('the singing test', () => {
     expect(s).toMatchObject({ step: 'high', low: 45, hold: 'ready' });
     s = run([{ type: 'holdStart' }, { type: 'holdEnd', midi: 72 }], s);
     expect(s).toMatchObject({ step: 'signin', high: 72, range: { low: 45, high: 72, source: 'test' } });
+  });
+
+  it('holds a growled low note and a whistled high note to where pop songs go, without asking', () => {
+    let s = run([...toLow, { type: 'holdStart' }, { type: 'holdEnd', midi: 38 }]);
+    expect(s).toMatchObject({ step: 'high', hold: 'ready' });
+    s = run([{ type: 'holdStart' }, { type: 'holdEnd', midi: 90 }], s);
+    expect(s).toMatchObject({ step: 'signin', range: { low: 40, high: 84, source: 'test' } });
   });
 
   it('asks again when nothing was held long enough', () => {
