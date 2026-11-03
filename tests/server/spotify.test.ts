@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createSpotifyClient,
   ensureFreshTokens,
+  getUserListening,
   getUserTracks,
   mapTrack,
   buildLibrary,
@@ -114,6 +115,7 @@ describe('Spotify library reads', () => {
       spotifyUrl: 'https://open.spotify.com/track/id0',
       albumArtUrl: 'mid0',
       playRank: 0,
+      artists: [{ id: 'a0', name: 'Artist 0' }],
     });
     expect(tracks[499]!.playRank).toBe(499);
   });
@@ -173,6 +175,30 @@ describe('Spotify library reads', () => {
     await expect(createSpotifyClient(cfg, f).getMe('tok')).rejects.toMatchObject({ status: 401 });
   });
 
+  it('keeps the ISRC, length and every credited artist, which tell the listings of one song apart', () => {
+    const t = mapTrack(
+      {
+        ...sTrack(1),
+        external_ids: { isrc: 'us-at2-15-00390' },
+        duration_ms: 188_400,
+        artists: [{ id: 'a1', name: 'Artist 1' }, { id: 'a2', name: 'Guest' }, { id: 'a3', name: null }],
+      },
+      0,
+    )!;
+    expect(t).toMatchObject({
+      isrc: 'USAT21500390',
+      durationMs: 188_400,
+      artist: 'Artist 1',
+      artistId: 'a1',
+      artists: [{ id: 'a1', name: 'Artist 1' }, { id: 'a2', name: 'Guest' }],
+    });
+    const bare = mapTrack(sTrack(1), 0)!;
+    expect(bare).not.toHaveProperty('isrc');
+    expect(bare).not.toHaveProperty('durationMs');
+    expect(bare.artists).toEqual([{ id: 'a1', name: 'Artist 1' }]);
+    expect(mapTrack({ ...sTrack(1), duration_ms: 0 }, 0)).not.toHaveProperty('durationMs');
+  });
+
   it('maps tracks without art', () => {
     expect(mapTrack({ ...sTrack(1), album: { images: [] } }, 3)).not.toHaveProperty('albumArtUrl');
     expect(mapTrack(null, 0)).toBeNull();
@@ -198,6 +224,35 @@ describe('familiarity', () => {
     ...extra,
   });
   const fam = (lib: Track[]) => Object.fromEntries(lib.map((x) => [x.id, x.familiarity]));
+
+  it('keeps the listing details (ISRC, length, credited artists) of each song in the library', () => {
+    const detailed = t('d', 0, { isrc: 'USAT21500390', durationMs: 188_400, artists: [{ id: 'a', name: 'A' }] });
+    const [d] = buildLibrary({ top: { medium_term: [detailed] }, recent: [], saved: [{ ...detailed }] });
+    expect(d).toMatchObject({ isrc: 'USAT21500390', durationMs: 188_400, artists: [{ id: 'a', name: 'A' }] });
+  });
+
+  it('fills in the listing details a track lacked in the first list that had it from a later list', () => {
+    const [d] = buildLibrary({
+      top: { medium_term: [t('d', 0)] },
+      recent: [],
+      saved: [t('d', 0, { isrc: 'USAT21500390', durationMs: 188_400, artists: [{ id: 'a', name: 'A' }], popularity: 70 })],
+    });
+    expect(d).toMatchObject({ isrc: 'USAT21500390', durationMs: 188_400, artists: [{ id: 'a', name: 'A' }], popularity: 70 });
+  });
+
+  it('reads the library as one list per source, and builds the library from them', async () => {
+    const listening = await getUserListening(createMockSpotifyClient(), 'token');
+    expect(Object.keys(listening.top).sort()).toEqual(['long_term', 'medium_term', 'short_term']);
+    expect(listening.saved.length).toBeGreaterThan(0);
+    expect((await getUserTracks(createMockSpotifyClient(), 'token')).map((x) => x.id).sort()).toEqual(buildLibrary(listening).map((x) => x.id).sort());
+  });
+
+  it('keeps each span of the top tracks under its own name, which the audit\'s "4 weeks" and "6 months" labels rely on', async () => {
+    const tagged = (range: string): Track[] => [{ id: range, title: range, artist: 'A', artistId: 'a', spotifyUrl: '', playRank: 0 }];
+    const client = { ...createMockSpotifyClient(), getTopTracks: async (_token: string, range = 'medium_term') => tagged(range) };
+    const { top } = await getUserListening(client, 'token');
+    expect([top.short_term?.[0]?.id, top.medium_term?.[0]?.id, top.long_term?.[0]?.id]).toEqual(['short_term', 'medium_term', 'long_term']);
+  });
 
   it('scores top-list position from 1.0 at #1 to 0.2 at #50, and saved-only songs at 0.15', () => {
     const fifty = Array.from({ length: 50 }, (_, i) => t(`m${i}`, i));

@@ -146,6 +146,14 @@ describe('song service recommendations', () => {
     expect(await store.getSongRange('artist 1|song 1')).toBeNull();
   });
 
+  it('keeps ISRC, length and credited artists out of the response', async () => {
+    const detailed: Track = { ...track(2), isrc: 'USAT21500390', durationMs: 188_400, artists: [{ id: 'a2', name: 'Artist 2' }] };
+    const svc = createSongService(createMemoryStore(), fakeDeps().deps, { concurrency: 1 });
+    const res = await svc.recommend([detailed], user, 0, 5);
+    expect(res.matches[0]!.track).toEqual(track(2));
+    expect((await svc.knownSongs([detailed])).songs[0]!.track).toEqual(track(2));
+  });
+
   it('shares cached ranges between tracks with the same song key', async () => {
     const store = createMemoryStore();
     const { deps, resolveSongRange } = fakeDeps();

@@ -69,6 +69,8 @@ interface SpotifyTrackObject {
   is_local?: boolean;
   artists: { id: string; name: string | null }[];
   external_urls?: { spotify?: string };
+  external_ids?: { isrc?: string };
+  duration_ms?: number;
   album?: { images?: SpotifyImage[] };
   popularity?: number;
 }
@@ -97,6 +99,13 @@ export function mapTrack(t: SpotifyTrackObject | null | undefined, playRank: num
   const art = pickImage(t.album?.images);
   if (art) track.albumArtUrl = art;
   if (typeof t.popularity === 'number') track.popularity = t.popularity;
+  // Listing details for src/lib/songs/identity.ts. Spotify documents them on every track (the identity audit checks each
+  // library list), so they cost no extra requests.
+  const isrc = t.external_ids?.isrc?.replace(/-/g, '').trim().toUpperCase();
+  if (isrc) track.isrc = isrc;
+  if (typeof t.duration_ms === 'number' && t.duration_ms > 0) track.durationMs = Math.round(t.duration_ms);
+  const credited = t.artists.flatMap((a) => (a?.id && a.name?.trim() ? [{ id: a.id, name: a.name }] : []));
+  if (credited.length) track.artists = credited;
   return track;
 }
 
@@ -139,8 +148,15 @@ export function buildLibrary({ top, recent, saved, playlists = [] }: Listening):
     if (!byId.has(t.id)) {
       byId.set(t.id, t);
       order.push(t.id);
-    } else if (t.popularity !== undefined && byId.get(t.id)!.popularity === undefined) {
-      byId.set(t.id, { ...byId.get(t.id)!, popularity: t.popularity });
+    } else {
+      // The same track can come from several lists; keep what any of them carried.
+      const have = byId.get(t.id)!;
+      const missing: Partial<Track> = {};
+      if (t.popularity !== undefined && have.popularity === undefined) missing.popularity = t.popularity;
+      if (t.isrc !== undefined && have.isrc === undefined) missing.isrc = t.isrc;
+      if (t.durationMs !== undefined && have.durationMs === undefined) missing.durationMs = t.durationMs;
+      if (t.artists !== undefined && have.artists === undefined) missing.artists = t.artists;
+      if (Object.keys(missing).length) byId.set(t.id, { ...have, ...missing });
     }
   };
   for (const range of TIME_RANGES) {
@@ -322,8 +338,8 @@ export async function ensureFreshTokens(
   return updated;
 }
 
-/** The user's library as contract Tracks with familiarity, ordered by playRank. */
-export async function getUserTracks(client: SpotifyClient, accessToken: string): Promise<Track[]> {
+/** The user's listening as Spotify returns it, one list per source, before buildLibrary merges them. */
+export async function getUserListening(client: SpotifyClient, accessToken: string): Promise<Listening> {
   // Recently played and playlists need permissions that users who signed in before they were added
   // have not granted; without them we skip that signal rather than fail.
   const optional = (p: Promise<Track[]>) =>
@@ -339,5 +355,10 @@ export async function getUserTracks(client: SpotifyClient, accessToken: string):
     client.getSavedTracks(accessToken),
     optional(client.getPlaylistTracks(accessToken)),
   ]);
-  return buildLibrary({ top: { short_term: short, medium_term: medium, long_term: long }, recent: plays, saved, playlists });
+  return { top: { short_term: short, medium_term: medium, long_term: long }, recent: plays, saved, playlists };
+}
+
+/** The user's library as contract Tracks with familiarity, ordered by playRank. */
+export async function getUserTracks(client: SpotifyClient, accessToken: string): Promise<Track[]> {
+  return buildLibrary(await getUserListening(client, accessToken));
 }

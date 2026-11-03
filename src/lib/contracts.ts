@@ -65,6 +65,14 @@ export interface Track {
   known?: boolean;
   /** Spotify's 0-100 track popularity, when Spotify returns it. */
   popularity?: number;
+  // Listing details for telling whether two Spotify listings are one song (src/lib/songs/identity.ts).
+  // They live in memory with the library only: the app never stores them and removes them before a response.
+  /** ISRC: every listing of one recording (single, album, compilation) shares it. */
+  isrc?: string;
+  /** Length in milliseconds. */
+  durationMs?: number;
+  /** Every credited artist, the first one included (`artist` and `artistId` are the first). */
+  artists?: { id: string; name: string }[];
 }
 
 export interface ScoreParts {

@@ -10,6 +10,7 @@ import type {
   VocalRange,
 } from '../contracts';
 import type { SongRangeRecord, Store } from './store';
+import { withoutListingDetails } from '../songs/identity';
 import { hasLittleSinging } from '../songs/resolve';
 
 export interface ResolveResult {
@@ -141,7 +142,11 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       // tracks, same cached ranges), so pages never repeat or skip a song.
       const ranked = deps.rankMatches(matches);
       const page = deps.paginate(ranked, offset, limit);
-      const items = page.items;
+      // ISRC, length and credited artists stay on the server (see songs/identity.ts).
+      const items = page.items.map((m) => {
+        const track = withoutListingDetails(m.track);
+        return track === m.track ? m : { ...m, track };
+      });
       // Lookup budget spent before the end of the library (only on a first visit to a very large
       // library): let the client ask again, which continues the lookups.
       const nextOffset = page.nextOffset ?? (exhausted ? null : offset + items.length);
@@ -157,7 +162,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
     async knownSongs(tracks) {
       const songs: KnownSongsResponse['songs'] = [];
       await walk(tracks, ({ track, record }) => {
-        if (record.range && !hasLittleSinging(track.title)) songs.push({ track, range: record.range });
+        if (record.range && !hasLittleSinging(track.title)) songs.push({ track: withoutListingDetails(track), range: record.range });
         return songs.length >= maxKnown;
       });
       return { songs };

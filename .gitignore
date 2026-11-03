@@ -8,3 +8,5 @@ playwright-report/
 *.tsbuildinfo
 next-env.d.ts
 .vercel
+# Identity audit output holds a person's library (npm run audit:identity)
+/identity-audit/
