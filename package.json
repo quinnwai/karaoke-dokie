@@ -20,7 +20,8 @@
     "moods:label": "tsx scripts/moods-label.ts",
     "moods:report": "tsx scripts/moods-report.ts",
     "moods:import": "tsx scripts/moods-import.ts",
-    "moods:gold": "tsx scripts/moods-gold.ts"
+    "moods:gold": "tsx scripts/moods-gold.ts",
+    "popularity:import": "tsx scripts/popularity-import.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
