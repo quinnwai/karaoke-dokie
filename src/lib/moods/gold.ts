@@ -64,12 +64,29 @@ export function goldFromCsv(text: string, by: { labelledBy: string; labelledAt: 
     if (!key) throw new Error(`Line ${line}: no key`);
     if (seen.has(key)) throw new Error(`Line ${line}: ${key} is listed twice`);
     seen.add(key);
-    const song: GoldSong = { key, artist: cell(at.artist), title: cell(at.title), upbeat: yesNo(up, 'upbeat'), heartfelt: yesNo(heart, 'heartfelt') };
     const year = Number(cell(at.year));
-    if (at.year >= 0 && cell(at.year) && Number.isInteger(year)) song.year = year;
-    songs.push(song);
+    songs.push({
+      key,
+      artist: cell(at.artist),
+      title: cell(at.title),
+      ...(at.year >= 0 && cell(at.year) && Number.isInteger(year) ? { year } : {}),
+      upbeat: yesNo(up, 'upbeat'),
+      heartfelt: yesNo(heart, 'heartfelt'),
+    });
   });
   return { gold: { ...by, songs }, skipped };
+}
+
+/** Reads a gold-set JSON file (as moods:gold writes it), refusing anything else. */
+export function parseGoldSet(text: string): GoldSet {
+  const data = JSON.parse(text) as Partial<GoldSet>;
+  const ok =
+    typeof data.labelledBy === 'string' &&
+    typeof data.labelledAt === 'string' &&
+    Array.isArray(data.songs) &&
+    data.songs.every((s) => typeof s?.key === 'string' && typeof s.upbeat === 'boolean' && typeof s.heartfelt === 'boolean');
+  if (!ok) throw new Error('Not a gold set (needs labelledBy, labelledAt and songs with key, upbeat and heartfelt; make one with moods:gold)');
+  return data as GoldSet;
 }
 
 export interface GoldCandidate extends SongToLabel {

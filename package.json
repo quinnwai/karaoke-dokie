@@ -15,7 +15,11 @@
     "usdb:fill": "tsx scripts/usdb-fill.ts",
     "report:coverage": "tsx scripts/coverage-report.ts",
     "ranges:build": "tsx scripts/note-ranges-build.ts",
-    "ranges:import": "tsx scripts/note-ranges-import.ts"
+    "ranges:import": "tsx scripts/note-ranges-import.ts",
+    "moods:label": "tsx scripts/moods-label.ts",
+    "moods:report": "tsx scripts/moods-report.ts",
+    "moods:import": "tsx scripts/moods-import.ts",
+    "moods:gold": "tsx scripts/moods-gold.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",

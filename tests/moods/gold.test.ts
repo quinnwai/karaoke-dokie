@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseCsv, toCsv } from '../../src/lib/moods/csv';
-import { goldFromCsv, goldTemplateCsv, pickGoldSongs, type GoldCandidate } from '../../src/lib/moods/gold';
+import { goldFromCsv, goldTemplateCsv, parseGoldSet, pickGoldSongs, type GoldCandidate } from '../../src/lib/moods/gold';
 
 describe('csv', () => {
   it('reads quoted commas, doubled quotes, line breaks in quotes, CRLF, a byte-order mark and blank lines', () => {
@@ -61,6 +61,13 @@ describe('gold set sheet', () => {
     const twice = toCsv([['key', 'artist', 'title', 'year', 'upbeat', 'heartfelt'], ['a|1', 'A', '1', '', 'y', 'n'], ['a|1', 'A', '1', '', 'n', 'n']]);
     expect(() => goldFromCsv(twice, by)).toThrow('Line 3: a|1 is listed twice');
     expect(() => goldFromCsv('key,artist,title\na|1,A,1\n', by)).toThrow('The sheet has no "upbeat" column');
+  });
+
+  it('parseGoldSet reads the JSON back and refuses other files', () => {
+    const { gold } = goldFromCsv(filled([['y', 'n']]), by);
+    expect(parseGoldSet(JSON.stringify({ _comment: 'hand labels', ...gold }))).toEqual({ _comment: 'hand labels', ...gold });
+    expect(() => parseGoldSet(JSON.stringify({ model: 'm', labels: [] }))).toThrow('Not a gold set');
+    expect(() => parseGoldSet(JSON.stringify({ ...gold, songs: [{ key: 'a|1', upbeat: 'y', heartfelt: 'n' }] }))).toThrow('Not a gold set');
   });
 });
 
