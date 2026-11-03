@@ -6,7 +6,7 @@
 //   - AcousticBrainz, whose labels are the same every run (fixed rules over fixed data);
 //   - AcousticBrainz with the LLM where it has no data: what the app shows under the import's
 //     precedence (everywhere by default; with MGPHot opted in, on songs MGPHot does not cover);
-// then how far the three sources agree where all three label a song.
+// then how far the sources agree where all of them label a song.
 // MGPHot is CC BY-NC-ND 4.0 (SiriusXM) and the repo is public: its files are read from a folder
 // you pass, and the proxy labels stay in memory. Only the counts printed here go in the README.
 // Usage: npm run moods:mgphot-check -- <mgphot folder> --songs songs.json --labels run1.json --labels run2.json --labels run3.json [--ab labels-acousticbrainz-v1.json]
@@ -73,24 +73,29 @@ async function main() {
   runs.forEach((r, i) => console.log(`LLM run ${i + 1} knew ${gold.songs.filter((g) => llm[i]!.has(g.key)).length} of the ${gold.songs.length} songs.`));
   printGate(`LLM ${runs[0]!.method}, ${runs.length} runs`, gateMoods(gold, llm), runNames);
 
+  const proxy = new Map(gold.songs.map((g) => [g.key, MOODS.filter((m) => g[m])]));
+  const sources: [string, ReadonlyMap<string, readonly Mood[]>][] = [
+    ['MGPHot', proxy],
+    ['LLM run 1', llm[0]!],
+  ];
   if (values.ab) {
     const abRows = readLabelsFile(await readFile(values.ab, 'utf8'));
     const ab = toMap(abRows);
+    sources.splice(1, 0, ['AcousticBrainz', ab]);
     console.log(`\nAcousticBrainz (${abRows[0]?.method ?? 'no rows'}) has data for ${gold.songs.filter((g) => ab.has(g.key)).length} of the ${gold.songs.length} songs.`);
     // Fixed rules over fixed data: one set of labels stands for every run.
     printGate('AcousticBrainz (the same labels every run)', gateMoods(gold, runs.map(() => ab)), runNames);
 
     const fallback = runs.map((r) => toMap(mergeMoodRows(new Map(), [...abRows, ...toMoodRecords(r.labels, r.model, PROVIDERS[r.provider].source)])));
     printGate('AcousticBrainz, then the LLM where AcousticBrainz has no data (what the app shows by default)', gateMoods(gold, fallback), runNames);
+  }
 
-    const proxy = new Map(gold.songs.map((g) => [g.key, MOODS.filter((m) => g[m])]));
-    const names = ['MGPHot', 'AcousticBrainz', 'LLM run 1'];
-    console.log('\n== Agreement where all three label a song (the LLM run 1 knew it)');
-    for (const m of MOODS) {
-      const a = sourcesAgreement([proxy, ab, llm[0]!], m);
-      const pairs = a.pairs.map((p) => `${names[p.a]} and ${names[p.b]} ${pct(p.agree, a.songs)} (kappa ${p.kappa === null ? 'none' : p.kappa.toFixed(2)})`);
-      console.log(`  ${NAMES[m]}, ${a.songs} songs: all three agree on ${pct(a.allAgree, a.songs)}; ${pairs.join('; ')}`);
-    }
+  console.log(`\n== Agreement where ${sources.map(([n]) => n).join(', ')} all label a song (the LLM knew it)`);
+  for (const m of MOODS) {
+    const a = sourcesAgreement(sources.map(([, s]) => s), m);
+    const name = (i: number) => sources[i]![0];
+    const pairs = a.pairs.map((p) => `${name(p.a)} and ${name(p.b)} ${pct(p.agree, a.songs)} (kappa ${p.kappa === null ? 'none' : p.kappa.toFixed(2)})`);
+    console.log(`  ${NAMES[m]}, ${a.songs} songs: all agree on ${pct(a.allAgree, a.songs)}; ${pairs.join('; ')}`);
   }
 }
 
