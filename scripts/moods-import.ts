@@ -6,12 +6,13 @@
 import { readFile } from 'node:fs/promises';
 import { getStore, pickStoreKind } from '../src/lib/server/getStore';
 import { parseLabelRun, toMoodRecords } from '../src/lib/moods/label';
+import { PROVIDERS } from '../src/lib/moods/providers';
 
 async function main() {
   const path = process.argv[2];
   if (!path) throw new Error('Usage: npm run moods:import -- labels.json');
   const run = parseLabelRun(await readFile(path, 'utf8'));
-  const records = toMoodRecords(run.labels, run.model);
+  const records = toMoodRecords(run.labels, run.model, PROVIDERS[run.provider].source);
   if (pickStoreKind() === 'memory') console.error('No DATABASE_URL: writing to an in-memory store, which is thrown away.');
   const store = getStore();
   for (let i = 0; i < records.length; i += 500) {

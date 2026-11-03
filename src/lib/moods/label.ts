@@ -1,16 +1,17 @@
-// Mood labels from Claude (QWW-11), made offline and stored; nothing calls the model at request
-// time. Claude gets a batch of about 25 songs (artist and title, plus year and genre when known;
-// no lyrics, no audio), answers yes or no per mood, and may say it does not know a song. Code
+// Mood labels from a language model (QWW-11): Claude, GPT or Gemini (providers.ts), made offline
+// and stored; nothing calls the model at request time. The model gets a batch of about 25 songs
+// (artist and title, plus year and genre when known; no lyrics, no audio), answers yes or no per
+// mood, and may say it does not know a song. Code
 // decides what ships: replies are parsed strictly, songs it does not know get no label, and the
 // gate (gate.ts) decides which moods are right often enough to show as chips.
 
 import { MOODS, type Mood } from '../contracts';
 import type { SongMoodsRecord } from '../server/store';
-import type { Ask, AskRequest } from './anthropic';
+import type { Ask, AskRequest } from './ask';
+import { isProvider, type Provider } from './providers';
 
 /** Bump when the prompt or the request changes: the method names it, so a relabel replaces older rows. */
 export const PROMPT_VERSION = 'moods-v1';
-export const DEFAULT_MODEL = 'claude-haiku-5-5';
 export const BATCH_SIZE = 25;
 /** Room for the model's thinking (on by default in Claude 5 models) as well as 25 short answers. */
 const MAX_TOKENS = 16_000;
@@ -137,11 +138,14 @@ export function parseLabels(text: string, batchKeys: readonly string[]): ParsedL
   return { labels, dropped: body.labels.length - labels.length };
 }
 
-/** Store rows for the labels: one per song the model knew (moods may be empty); none for the rest. */
-export function toMoodRecords(labels: readonly MoodLabel[], model: string): SongMoodsRecord[] {
+/**
+ * Store rows for the labels: one per song the model knew (moods may be empty); none for the rest.
+ * The source is the provider's (PROVIDERS[p].source), which the import's precedence reads.
+ */
+export function toMoodRecords(labels: readonly MoodLabel[], model: string, source: string): SongMoodsRecord[] {
   return labels
     .filter((l) => l.known)
-    .map((l) => ({ key: l.key, moods: moodsOf(l), method: moodsMethod(model), source: 'claude' }));
+    .map((l) => ({ key: l.key, moods: moodsOf(l), method: moodsMethod(model), source }));
 }
 
 /** Songs to label from moods:label's input: a list of songs, or a gold set (its songs, without the hand labels). */
@@ -162,6 +166,7 @@ export function songsToLabel(data: unknown): SongToLabel[] {
 // ---------- a labelling run, as moods:label saves it ----------
 
 export interface LabelRun {
+  provider: Provider;
   model: string;
   method: string;
   /** API calls made, and tokens in and out (thinking included), for the cost. */
@@ -182,7 +187,8 @@ export interface BatchResult {
   stopReason: string | null;
 }
 
-export const newLabelRun = (model: string): LabelRun => ({
+export const newLabelRun = (model: string, provider: Provider = 'anthropic'): LabelRun => ({
+  provider,
   model,
   method: moodsMethod(model),
   calls: 0,
@@ -211,14 +217,16 @@ export function formatLabelRun(run: LabelRun): string {
   return `${top},\n  "labels": [\n${rows}\n  ]\n}\n`;
 }
 
+/** Reads a labels file. Files from before there were providers have none and came from Claude. */
 export function parseLabelRun(text: string): LabelRun {
   const run = JSON.parse(text) as Partial<LabelRun>;
   const counts = [run.calls, run.inputTokens, run.outputTokens, run.dropped];
   if (typeof run.model !== 'string' || typeof run.method !== 'string' || counts.some((n) => typeof n !== 'number')) {
     throw new Error('Not a labels file from moods:label (no model, method or token counts)');
   }
+  if (run.provider !== undefined && !isProvider(run.provider)) throw new Error(`Not a labels file from moods:label (unknown provider ${String(run.provider)})`);
   if (!Array.isArray(run.labels) || !run.labels.every(isLabel)) throw new Error('Not a labels file from moods:label (bad labels)');
-  return run as LabelRun;
+  return { ...run, provider: run.provider ?? 'anthropic' } as LabelRun;
 }
 
 /**
