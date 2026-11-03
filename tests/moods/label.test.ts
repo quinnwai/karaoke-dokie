@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Ask, AskRequest } from '../../src/lib/moods/anthropic';
+import type { Ask, AskRequest } from '../../src/lib/moods/ask';
 import {
   addBatch,
   formatLabelRun,
@@ -80,14 +80,14 @@ describe('parseLabels', () => {
 });
 
 describe('toMoodRecords', () => {
-  it('gives a row to each song the model knew, moods in chip order, and none to unknown songs', () => {
+  it("gives a row to each song the model knew, moods in chip order, under the provider's source, and none to unknown songs", () => {
     const labels = [
       label('a|both', { upbeat: true, heartfelt: true }),
       label('a|none'),
       label('a|heart', { heartfelt: true }),
       label('a|unknown', { known: false, upbeat: true }),
     ];
-    expect(toMoodRecords(labels, 'claude-haiku-5-5')).toEqual([
+    expect(toMoodRecords(labels, 'claude-haiku-5-5', 'claude')).toEqual([
       { key: 'a|both', moods: ['upbeat', 'heartfelt'], method: 'claude-haiku-5-5/moods-v1', source: 'claude' },
       { key: 'a|none', moods: [], method: 'claude-haiku-5-5/moods-v1', source: 'claude' },
       { key: 'a|heart', moods: ['heartfelt'], method: 'claude-haiku-5-5/moods-v1', source: 'claude' },
@@ -119,6 +119,15 @@ describe('labels file', () => {
     expect(parseLabelRun(text)).toEqual(run);
     expect(text).toContain('\n    {"key":"a|1","known":true,"upbeat":true,"heartfelt":false},\n');
     expect(parseLabelRun(formatLabelRun(newLabelRun('m')))).toEqual(newLabelRun('m'));
+  });
+
+  it('records the provider; a file from before providers came from Claude', () => {
+    const run = newLabelRun('gpt-6-luna', 'openai');
+    expect(run).toMatchObject({ provider: 'openai', model: 'gpt-6-luna', method: 'gpt-6-luna/moods-v1' });
+    expect(parseLabelRun(formatLabelRun(run)).provider).toBe('openai');
+    const { provider: _provider, ...old } = newLabelRun('claude-haiku-5-5');
+    expect(parseLabelRun(JSON.stringify(old)).provider).toBe('anthropic');
+    expect(() => parseLabelRun(JSON.stringify({ ...run, provider: 'mistral' }))).toThrow('unknown provider mistral');
   });
 
   it('refuses files that are not a labels file', () => {

@@ -104,4 +104,11 @@ describe('sources', () => {
     expect(mgphot?.what).toContain('offline only, to check our mood labels');
     expect(mgphot?.what).toContain('CC BY-NC-ND 4.0');
   });
+
+  it('credits the AI model behind the mood labels', async () => {
+    const { CREDITS } = await import('../../src/lib/credits');
+    const model = CREDITS.find((c) => c.name.startsWith('OpenAI'));
+    expect(model?.name).toBe('OpenAI GPT-6 Luna');
+    expect(model?.what).toContain('Upbeat and Heartfelt');
+  });
 });

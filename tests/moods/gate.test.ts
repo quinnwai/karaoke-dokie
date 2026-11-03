@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Mood } from '../../src/lib/contracts';
-import { GATE, gateMoods, labellerAgreement, runAgreement, scoreMood, seededOrder, shippedMoods, splitGold } from '../../src/lib/moods/gate';
+import { GATE, gateMoods, labellerAgreement, runAgreement, scoreMood, seededOrder, shippedMoods, sourcesAgreement, splitGold } from '../../src/lib/moods/gate';
 import type { GoldSet, GoldSong } from '../../src/lib/moods/gold';
 import type { MoodLabel } from '../../src/lib/moods/label';
 
@@ -147,5 +147,26 @@ describe('runAgreement', () => {
       shownByMood: { upbeat: [1, 2, 1], heartfelt: [1, 1, 1] },
     });
     expect(runAgreement([])).toEqual({ songs: 0, same: 0, sameByMood: { upbeat: 0, heartfelt: 0 }, shownByMood: { upbeat: [], heartfelt: [] } });
+  });
+});
+
+describe('sourcesAgreement', () => {
+  const said = (rows: [string, Mood[]][]) => new Map(rows);
+
+  it('counts songs all sources agree on, and pairwise agreement beyond chance (kappa), over songs every source labels', () => {
+    const a = said([['s1', ['upbeat']], ['s2', ['upbeat']], ['s3', []], ['s4', []], ['only-a', ['upbeat']]]);
+    const b = said([['s1', ['upbeat']], ['s2', []], ['s3', []], ['s4', ['heartfelt']]]);
+    const c = said([['s1', ['upbeat']], ['s2', ['upbeat']], ['s3', []], ['s4', ['upbeat']], ['only-c', []]]);
+    const r = sourcesAgreement([a, b, c], 'upbeat');
+    expect(r.songs).toBe(4);
+    expect(r.allAgree).toBe(2);
+    expect(r.pairs.map((p) => [p.a, p.b, p.agree])).toEqual([[0, 1, 3], [0, 2, 3], [1, 2, 2]]);
+    expect(r.pairs.map((p) => p.kappa)).toEqual([0.5, 0.5, expect.closeTo(0.2, 10)]);
+  });
+
+  it('has no kappa when both sources say the same thing about every song', () => {
+    const same = said([['s1', []], ['s2', []]]);
+    expect(sourcesAgreement([same, same], 'heartfelt').pairs[0]).toEqual({ a: 0, b: 1, agree: 2, kappa: null });
+    expect(sourcesAgreement([same, said([])], 'heartfelt')).toEqual({ songs: 0, allAgree: 0, pairs: [{ a: 0, b: 1, agree: 0, kappa: null }] });
   });
 });

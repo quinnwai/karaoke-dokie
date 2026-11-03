@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { API_VERSION, createClaude, MESSAGES_URL, type AskRequest } from '../../src/lib/moods/anthropic';
+import { API_VERSION, createClaude, MESSAGES_URL } from '../../src/lib/moods/anthropic';
+import type { AskRequest } from '../../src/lib/moods/ask';
 
 const request: AskRequest = { model: 'claude-haiku-5-5', system: 'Label songs.', user: 'Label these 1 songs', maxTokens: 1000, schema: { type: 'object' } };
 

@@ -163,3 +163,35 @@ export function runAgreement(runs: readonly (readonly MoodLabel[])[]): RunAgreem
   ) as Record<Mood, number[]>;
   return { songs: keys.length, same, sameByMood, shownByMood };
 }
+
+export interface SourcesAgreement {
+  /** Songs every source labels. */
+  songs: number;
+  /** Of those, songs where every source says the same about the mood. */
+  allAgree: number;
+  /**
+   * Each pair of sources (indexes into the input): songs they agree on, and Cohen's kappa, their
+   * agreement beyond what their yes rates alone would give (1 is full agreement, 0 is chance;
+   * null when undefined, as when both say the same thing about every song).
+   */
+  pairs: { a: number; b: number; agree: number; kappa: number | null }[];
+}
+
+/** How far label sources agree on a mood, over the songs every one of them labels. */
+export function sourcesAgreement(sources: readonly ReadonlyMap<string, readonly Mood[]>[], mood: Mood): SourcesAgreement {
+  const keys = [...(sources[0]?.keys() ?? [])].filter((k) => sources.every((s) => s.has(k)));
+  const says = sources.map((s) => keys.map((k) => s.get(k)!.includes(mood)));
+  const allAgree = keys.filter((_, i) => new Set(says.map((v) => v[i])).size === 1).length;
+  const n = keys.length;
+  const pairs: SourcesAgreement['pairs'] = [];
+  for (let a = 0; a < says.length; a++) {
+    for (let b = a + 1; b < says.length; b++) {
+      const [x, y] = [says[a]!, says[b]!];
+      const agree = x.filter((v, i) => v === y[i]).length;
+      const [px, py] = [x.filter(Boolean).length / n, y.filter(Boolean).length / n];
+      const chance = px * py + (1 - px) * (1 - py);
+      pairs.push({ a, b, agree, kappa: n && chance < 1 ? (agree / n - chance) / (1 - chance) : null });
+    }
+  }
+  return { songs: n, allAgree, pairs };
+}
