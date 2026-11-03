@@ -247,29 +247,41 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
     },
     // ---- catalogue (QWW-2 Track B) ----
     async listCatalogue(limit) {
-      // One query: the most-viewed USDB row per key (DISTINCT ON; a tie goes to the lower id) joined
-      // to the measured ranges, then ordered and cut in the database, so only `limit` range_json
-      // values come back out of tens of thousands. Artist estimates stay out: they exist only
-      // because a tester's library had the song. The key tie-break uses the database's collation.
-      // The join is on `b.song_key || ''` because pg-mem otherwise reads usdb_songs through its
-      // song_key index and skips the DISTINCT ON, returning every row per key; Postgres is the same either way.
+      // Two steps, so no response carries thousands of ranges (the table can hold tens of
+      // thousands; one query for 6,000 songs would be about 6 MB). First the order: each measured
+      // song's key and most-viewed USDB row (DISTINCT ON; a tie goes to the lower id), sorted and
+      // cut in the database. Then those songs' ranges and log lines, 1,000 keys a query. Artist
+      // estimates stay out: they exist only because a tester's library had the song. The key
+      // tie-break uses the database's collation. The join is on `b.song_key || ''` because pg-mem
+      // otherwise reads usdb_songs through its song_key index and skips the DISTINCT ON.
       const sources = MEASURED_SOURCES.map((_, i) => `$${i + 1}`).join(', ');
-      const rows = await query(
-        `SELECT b.*, s.song_key AS range_key, s.range_json, s.log_json
+      const listed = await query(
+        `SELECT b.*, s.song_key AS range_key
          FROM song_ranges s
          LEFT JOIN (SELECT DISTINCT ON (song_key) * FROM usdb_songs ORDER BY song_key, COALESCE(views, 0) DESC, id) b
            ON (b.song_key || '') = s.song_key
-         WHERE s.skipped = false AND (s.range_json::jsonb ->> 'source') IN (${sources})
+         WHERE s.skipped = false AND (s.range_json::json ->> 'source') IN (${sources})
          ORDER BY (b.id IS NULL), COALESCE(b.views, 0) DESC, COALESCE(b.rating, 0) DESC, s.song_key
          LIMIT $${MEASURED_SOURCES.length + 1}`,
         [...MEASURED_SOURCES, limit],
       );
-      return rows.map((r) => {
-        const log: DataSourceLogEntry = JSON.parse(str(r.log_json));
-        const song: CatalogueSong = { key: str(r.range_key), artist: log.artist, title: log.title, range: JSON.parse(str(r.range_json)), log };
+      const records = new Map<string, SongRangeRecord>();
+      for (let i = 0; i < listed.length; i += 1000) {
+        const keys = listed.slice(i, i + 1000).map((r) => str(r.range_key));
+        const placeholders = keys.map((_, j) => `$${j + 1}`).join(', ');
+        const rows = await query(`SELECT * FROM song_ranges WHERE song_key IN (${placeholders})`, keys);
+        for (const r of rows) records.set(str(r.song_key), toSongRecord(r));
+      }
+      const out: CatalogueSong[] = [];
+      for (const r of listed) {
+        const key = str(r.range_key);
+        const { range, log } = records.get(key) ?? {};
+        if (!range || !log || !isMeasured(range)) continue; // replaced between the two reads
+        const song: CatalogueSong = { key, artist: log.artist, title: log.title, range, log };
         if (isSet(r.id)) song.usdb = toUsdbEntry(r);
-        return song;
-      });
+        out.push(song);
+      }
+      return out;
     },
 
     // ---- beta event log (QWW-16): implemented by the event-log work ----
