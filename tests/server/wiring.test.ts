@@ -11,6 +11,8 @@ import {
 } from '../../src/lib/server/wiring';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { MOCK_TRACKS } from '../../src/lib/server/mockSpotify';
+import { songRangeFromUltrastar } from '../../src/lib/songs/range';
+import { fixture } from '../songs/fixture';
 
 const track = (artist: string, title: string): Track => ({
   id: 'x',
@@ -99,5 +101,30 @@ describe('production song wiring', () => {
     expect(deps.matchSong(t, nf(30, 90), { low: 48, high: 72, source: 'test' })).toBeNull();
     const estimate = { ...nf(46, 74), source: 'artist-typical' as const, confidence: 'low' as const };
     expect(deps.matchSong(t, estimate, { low: 48, high: 72, source: 'test' })).toMatchObject({ difficulty: 'maybe', octave: 'none', reasons: ['You play this a lot'] });
+  });
+
+  it('scores and shows a duet on the part the user sings', () => {
+    const deps = productionSongDeps(createMemoryStore(), false);
+    const range = { ...songRangeFromUltrastar(fixture('duet.txt')), usdbViews: 100 };
+    // D4..E5: P2 (G4..C5) fits as written; P1 (C4..D4) only an octave up.
+    const m = deps.matchSong(track('Duo', 'Duet Song'), range, { low: 62, high: 76, source: 'test' })!;
+    expect(m).toMatchObject({ difficulty: 'easy', octave: 'none', part: 2, partSinger: 'Singer Two' });
+    expect(m.range).toEqual({ ...range, low: 67, high: 72, tessitura: range.parts![1]!.tessitura, pitchShare: [[67, 0.333], [72, 0.667]] });
+    expect(m.parts?.comfort).toBe(1); // P2 sits in the middle of this range; P1's notes as written would score 0
+  });
+
+  it("uses the matched part's own fast-lyrics flag", () => {
+    const deps = productionSongDeps(createMemoryStore(), false);
+    const parts = [{ low: 40, high: 74, tessitura: 57, fastLyrics: false }, { low: 56, high: 64, tessitura: 60, fastLyrics: true }];
+    const m = deps.matchSong(track('A', 'B'), { ...nf(40, 74), duet: true, parts }, { low: 48, high: 72, source: 'test' })!;
+    expect(m).toMatchObject({ part: 2, range: { low: 56, high: 64, fastLyrics: true } });
+    expect(m.parts?.penalty).toBe(0.05);
+    expect(m).not.toHaveProperty('partSinger'); // the file named no singers
+  });
+
+  it('leaves a solo match on the stored range, with no part', () => {
+    const m = productionSongDeps(createMemoryStore(), false).matchSong(track('A', 'B'), nf(56, 64), { low: 48, high: 72, source: 'test' })!;
+    expect(m.range).toEqual(nf(56, 64));
+    expect(m).not.toHaveProperty('part');
   });
 });
