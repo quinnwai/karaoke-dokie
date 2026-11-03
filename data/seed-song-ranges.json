@@ -12,7 +12,8 @@
         "confidence": "low",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data."
+      "provenance": "Placeholder seed: approximate range of the original recording from general knowledge, not measured from a note file. Replace with USDB note-file data.",
+      "usdb": { "id": 900003, "views": 90000, "rating": 4.8, "year": 1975, "genre": "Rock", "language": "English" }
     },
     {
       "artist": "Whitney Houston",
@@ -116,7 +117,8 @@
         "confidence": "high",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data."
+      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data.",
+      "usdb": { "id": 900001, "views": 48000, "rating": 4.6, "year": 1976, "genre": "Pop", "language": "English" }
     },
     {
       "artist": "Frank Sinatra",
@@ -129,7 +131,8 @@
         "confidence": "high",
         "fastLyrics": false
       },
-      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data."
+      "provenance": "Placeholder seed standing in for a measured recording: approximate range of the original recording from general knowledge, not measured. Replace with real data.",
+      "usdb": { "id": 900002, "views": 12000, "rating": 4.1, "year": 1969, "genre": "Pop", "language": "English" }
     }
   ]
 }
