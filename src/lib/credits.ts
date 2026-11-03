@@ -43,6 +43,16 @@ export const CREDITS: Credit[] = [
     what: "Music experts' notes on Billboard Hot 100 songs from 1958 to 2022, by Oramas, Gouyon, Hogan, Landau and Ehmann (2025). We used it offline only, to check our mood labels; none of it is shown in the app (CC BY-NC-ND 4.0, © SiriusXM 2025).",
   },
   {
+    name: 'AcousticBrainz, MetaBrainz',
+    url: 'https://acousticbrainz.org/',
+    what: 'Computer analysis of how recordings sound (happy, sad, relaxed, danceable), which we turn into the Upbeat and Heartfelt labels (CC0).',
+  },
+  {
+    name: 'OpenAI GPT-6 Luna',
+    url: 'https://openai.com/',
+    what: "An AI model that suggests Upbeat and Heartfelt labels from a song's artist, title and year, ahead of time, for songs the analysis above does not cover. We show a mood only once its labels pass our accuracy check.",
+  },
+  {
     name: 'Material Symbols, Google',
     url: 'https://fonts.google.com/icons',
     what: 'The fast-lyrics icon (Apache 2.0).',
