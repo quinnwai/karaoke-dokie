@@ -129,3 +129,37 @@ describe('outliers and octave errors', () => {
     expect(range).toMatchObject({ low: 62, high: 66 });
   });
 });
+
+describe('ranges stay as they were before duet parts', () => {
+  // Every fixture's range as JSON, computed before duets got each singer's part (commit fd3fde1),
+  // plus two made-up songs for the octave fix and the outlier trim. Solo songs must come out
+  // byte for byte the same; a duet keeps these top-level fields (P1's, or the part asked for).
+  const song = (notes: [number, number][]) => '#BPM:120\n' + notes.map(([pitch, len], i) => `: ${i * 8} ${len} ${pitch} la`).join('\n') + '\nE\n';
+  const twoOctavesHigh = song(Array.from({ length: 12 }, (_, i) => [26 + (i % 5), 4]));
+  const shout = song([...Array.from({ length: 30 }, (_, i): [number, number] => [i % 2 ? 2 : 4, 4]), [19, 1]]);
+  const before: [name: string, text: string, part: number, json: string][] = [
+    ['ballad.txt', fixture('ballad.txt'), 1, '{"low":58,"high":62,"tessitura":60,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[58,0.2],[59,0.2],[60,0.2],[61,0.2],[62,0.2]]}'],
+    ['comma-bpm.txt', fixture('comma-bpm.txt'), 1, '{"low":60,"high":60,"tessitura":60,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,1]]}'],
+    ['crlf-bom.txt', fixture('crlf-bom.txt'), 1, '{"low":65,"high":69,"tessitura":66.6,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[65,0.4],[67,0.4],[69,0.2]]}'],
+    ['fast.txt', fixture('fast.txt'), 1, '{"low":60,"high":62,"tessitura":60.6,"source":"note-file","confidence":"high","fastLyrics":true,"pitchShare":[[60,0.6],[61,0.2],[62,0.2]]}'],
+    ['low-song.txt', fixture('low-song.txt'), 1, '{"low":36,"high":48,"tessitura":42,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[36,0.333],[42,0.333],[48,0.333]]}'],
+    ['melisma.txt', fixture('melisma.txt'), 1, '{"low":60,"high":60,"tessitura":60,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,1]]}'],
+    ['rap.txt', fixture('rap.txt'), 1, '{"low":57,"high":69,"tessitura":63.8,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[57,0.2],[62,0.4],[69,0.4]]}'],
+    ['relative.txt', fixture('relative.txt'), 1, '{"low":60,"high":65,"tessitura":62.75,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,0.25],[62,0.25],[64,0.25],[65,0.25]]}'],
+    ['solo.txt', fixture('solo.txt'), 1, '{"low":55,"high":67,"tessitura":62.5,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[55,0.167],[60,0.167],[62,0.167],[64,0.167],[67,0.333]]}'],
+    ['two octaves high', twoOctavesHigh, 1, '{"low":62,"high":66,"tessitura":63.75,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[62,0.25],[63,0.25],[64,0.167],[65,0.167],[66,0.167]]}'],
+    ['one-beat shout', shout, 1, '{"low":62,"high":64,"tessitura":63.13223140495868,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[62,0.496],[64,0.496],[79,0.008]]}'],
+    ['duet.txt', fixture('duet.txt'), 1, '{"low":60,"high":62,"tessitura":61,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,0.5],[62,0.5]]}'],
+    ['duet.txt', fixture('duet.txt'), 2, '{"low":67,"high":72,"tessitura":70.33333333333333,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[67,0.333],[72,0.667]]}'],
+  ];
+
+  it.each(before)('%s, part %i', (name, text, part, json) => {
+    const range = songRangeFromUltrastar(text, part);
+    if (name === 'duet.txt') {
+      const { duet: _duet, parts: _parts, ...topLevel } = range;
+      expect(JSON.stringify(topLevel)).toBe(json);
+    } else {
+      expect(JSON.stringify(range)).toBe(json);
+    }
+  });
+});
