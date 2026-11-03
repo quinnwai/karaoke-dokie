@@ -9,7 +9,8 @@
 // with a pitch histogram (pitchShare, from the note file) use it; others are estimated from
 // their typical note and their highest and lowest notes.
 // Familiarity (0-1): computed from Spotify listening (see server/spotify.ts buildLibrary).
-// Popularity (0-1): average of Spotify popularity and USDB karaoke popularity (views, stars).
+// Popularity (0-1): average of Spotify popularity, USDB karaoke popularity (views, stars) and
+// karaoke-video views, raised for Billboard Year-End hits (popularityScore).
 // Penalties lower a song without hiding it.
 
 import type { Label, Match, OctaveShift, ScoreParts, SongRange, Track, VocalRange } from '../contracts';
@@ -23,6 +24,39 @@ export const PENALTIES = { octave: 0.1, artistEstimate: 0.1, fastLyrics: 0.05 } 
 export const UNKNOWN_POPULARITY = 0.4;
 /** USDB views at which view-popularity reaches 1 (log scale). */
 const USDB_VIEWS_FULL = 100_000;
+/**
+ * Karaoke views (YouTube views of a song's KaraFun karaoke videos) at which they count 1, on the
+ * same log scale as USDB views: the 99th percentile of the 9,712 songs in the KaraFun file of
+ * Oct 2026. The median song there scores 0.70 and the 90th percentile 0.86. `npm run
+ * popularity:import -- ... --dry-run` prints the percentiles of a newer file.
+ */
+export const KARAOKE_VIEWS_FULL = 5_500_000;
+/**
+ * Least popularity of a song on a Billboard Year-End Hot 100, and of a top-20 one, which always
+ * reads as a crowd favourite. The 955 charting songs KaraFun also has score 0.63 at their lower
+ * quartile from karaoke views alone (0.72 median, much the same at every rank), so a chart entry
+ * with nothing else puts a song about where most charting songs land.
+ */
+export const CHART_FLOOR = { top100: 0.6, top20: 0.75 } as const;
+
+/**
+ * Popularity from our own karaoke data (song_popularity, QWW-6): the YouTube views of a song's
+ * KaraFun karaoke videos and its best Billboard Year-End Hot 100 rank (1 to 100). It goes on a copy
+ * of the song's range for scoring only and is never stored with the range.
+ */
+export interface KaraokePopularity {
+  karaokeViews?: number;
+  chartRank?: number;
+}
+
+/** A copy of `range` carrying the song's karaoke popularity, to score with; `range` is left as it is. */
+export function withKaraokePopularity(range: SongRange, p: KaraokePopularity | undefined): SongRange & KaraokePopularity {
+  if (p?.karaokeViews === undefined && p?.chartRank === undefined) return range;
+  const scored: SongRange & KaraokePopularity = { ...range };
+  if (p.karaokeViews !== undefined) scored.karaokeViews = p.karaokeViews;
+  if (p.chartRank !== undefined) scored.chartRank = p.chartRank;
+  return scored;
+}
 
 const shiftOf = (octave: OctaveShift) => (octave === 'up' ? 12 : octave === 'down' ? -12 : 0);
 
@@ -53,19 +87,43 @@ export function comfortScore(user: VocalRange, song: SongRange, octave: OctaveSh
   return 0.7 * typical + 0.3 * extremes;
 }
 
-export function popularityScore(track: Track, song: SongRange): number {
+/**
+ * How well known a song is, from what we know about it, in this order:
+ *   1. Spotify popularity, when Spotify sends it
+ *   2. USDB views (log scale) and stars, averaged into one
+ *   3. karaoke views (log scale, full at KARAOKE_VIEWS_FULL)
+ *   4. a Billboard Year-End Hot 100 entry, as a floor (CHART_FLOOR)
+ * The first three measure the same thing on their own scales, and none is reliably the best, so
+ * the ones present are averaged, as Spotify and USDB always were. The chart is a floor instead:
+ * a Year-End hit is widely known whatever its views say, while a song missing from the chart may
+ * still be well known (older songs, hits outside the US), so it can only raise a song. With none
+ * of the four, UNKNOWN_POPULARITY.
+ */
+export function popularityScore(track: Track, song: SongRange & KaraokePopularity): number {
   const parts: number[] = [];
   if (typeof track.popularity === 'number') parts.push(Math.min(1, Math.max(0, track.popularity / 100)));
   const usdb: number[] = [];
   if (typeof song.usdbViews === 'number') usdb.push(Math.min(1, Math.log10(song.usdbViews + 1) / Math.log10(USDB_VIEWS_FULL)));
   if (typeof song.usdbRating === 'number') usdb.push(Math.min(1, Math.max(0, song.usdbRating / 5)));
   if (usdb.length) parts.push(usdb.reduce((a, b) => a + b, 0) / usdb.length);
-  return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : UNKNOWN_POPULARITY;
+  if (typeof song.karaokeViews === 'number') parts.push(Math.min(1, Math.log10(song.karaokeViews + 1) / Math.log10(KARAOKE_VIEWS_FULL)));
+  const floor = typeof song.chartRank !== 'number' ? undefined : song.chartRank <= 20 ? CHART_FLOOR.top20 : CHART_FLOOR.top100;
+  if (!parts.length) return floor ?? UNKNOWN_POPULARITY;
+  return Math.max(parts.reduce((a, b) => a + b, 0) / parts.length, floor ?? 0);
 }
 
-/** False when popularityScore had nothing to go on (no Spotify popularity, USDB views or stars) and gave the flat default. */
-export function popularityKnown(track: Track, song: SongRange): boolean {
-  return typeof track.popularity === 'number' || typeof song.usdbViews === 'number' || typeof song.usdbRating === 'number';
+/**
+ * False when popularityScore had nothing to go on (no Spotify popularity, USDB views or stars,
+ * karaoke views or Year-End chart entry) and gave the flat default.
+ */
+export function popularityKnown(track: Track, song: SongRange & KaraokePopularity): boolean {
+  return (
+    typeof track.popularity === 'number' ||
+    typeof song.usdbViews === 'number' ||
+    typeof song.usdbRating === 'number' ||
+    typeof song.karaokeViews === 'number' ||
+    typeof song.chartRank === 'number'
+  );
 }
 
 /** Familiarity for tracks that predate the familiarity field: falls with play rank. */

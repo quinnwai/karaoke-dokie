@@ -96,7 +96,10 @@ export interface ScoreParts {
   familiarity: number;
   /** 0-1: how well known the song is. */
   popularity: number;
-  /** False when popularity is the flat default because we know nothing (no Spotify popularity, no USDB views or stars). */
+  /**
+   * False when popularity is the flat default because we know nothing (no Spotify popularity, no
+   * USDB views or stars, no karaoke views, no Billboard Year-End entry).
+   */
   popularityKnown?: boolean;
   /** Total subtracted for octave shift, artist-estimated range and fast lyrics. */
   penalty: number;
