@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import type { DataSourceLogEntry, Match, VocalRange } from '../lib/contracts';
 import { difficultyLabel, octaveWording, rangeBar, sourceTooltip } from '../lib/client/display';
+import { handleSpotifyClick } from '../lib/client/spotifyLink';
 import { usdbSongUrl } from '../lib/usdb/client';
 import { FastLyricsIcon, OctaveIcon } from './Icon';
 import styles from './screen.module.css';
@@ -115,7 +116,13 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
 
       {match.reasons && match.reasons.length > 0 && <p className={styles.detailReasons}>{match.reasons.join(' · ')}</p>}
 
-      <a className={styles.spotify} href={match.track.spotifyUrl} target="_blank" rel="noreferrer">
+      <a
+        className={styles.spotify}
+        href={match.track.spotifyUrl}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(e) => handleSpotifyClick(e, match.track.spotifyUrl)}
+      >
         Open in Spotify
       </a>
 
