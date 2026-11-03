@@ -16,6 +16,8 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | GET | `/api/songs/known` | | `KnownSongsResponse` (up to 50 library songs with a known range, play order) |
 | POST | `/api/feedback` | `FeedbackRequest` (`difficulty` may be `maybe`) | `{ ok: true }`; 400 on bad input; 409 before a range is saved. Stored with the user's current range and, when the song is in the cached library, its range at that moment (`range_source` = the log outcome, `range_method`, `range_low`, `range_high`); the tap never loads the library from Spotify |
 | GET | `/api/admin/log` | header `x-admin-token`, `limit` (1..1000, default 200) | `{ entries: DataSourceLogEntry[] }`, newest first; 403 on a wrong token or when `ADMIN_TOKEN` is unset |
+| POST | `/api/events` | `EventsRequest`, as JSON or as the `text/plain` body `navigator.sendBeacon` sends; no session | 204, storing nothing while `EVENTS` is off. 400 on bad input, checked even when off: `anonId` 8 to 64 of `[A-Za-z0-9-]`; 1 to 50 events; `name` matching `^[a-z][a-z0-9_]{1,48}$`; `at` an ISO time with a zone, within 7 days of the server clock (stored as UTC); at most 20 props named `^[a-zA-Z][a-zA-Z0-9_]{0,40}$`, each a string of up to 200 characters, a finite number, a boolean or null. Props named `trackId`, `spotifyId`, `userId`, `displayName` or `email` (any case, underscores ignored) are dropped before storing |
+| GET | `/api/admin/events` | header `x-admin-token`, `limit` (1..20000, default 5000) | `AdminEventsResponse` from the newest `limit` events (see Beta event log); 403 like `/api/admin/log` |
 
 Errors are JSON `{ error, message? }`. Every user route returns 401 `{ error: 'signed-out' }`
 without a valid session (also when Spotify access was revoked). Spotify outages give 502.
@@ -36,7 +38,8 @@ the lookup budget ran out: keep asking until it is `null`.
 | `SPOTIFY_MOCK` | `1` uses the offline mock client (user "Test Singer", 25 well-known songs) |
 | `DATABASE_URL` | Postgres (Neon) connection string |
 | `KARAOKE_STORE` | `memory` forces the in-memory store |
-| `ADMIN_TOKEN` | Token for `/api/admin/log`; unset disables it |
+| `ADMIN_TOKEN` | Token for `/api/admin/log` and `/api/admin/events`; unset disables both |
+| `EVENTS` | `on` or `off`: whether `POST /api/events` stores beta events. Unset or blank, it is on only when `NODE_ENV=production`, `SPOTIFY_MOCK` is not `1` and the store is Postgres, so tests, e2e and local dev collect nothing. Any other value counts as off |
 
 ## Store
 
@@ -48,6 +51,32 @@ Postgres tables are in `db/schema.sql` (an identical copy is inlined in
 `src/lib/server/schema.ts`). The Postgres store runs `migrate()` (idempotent `CREATE ... IF NOT
 EXISTS`, plus `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for columns added later, such as the
 feedback range columns) once before its first query, so there is no separate migration step.
+
+## Beta event log
+
+Our own `events` table, not a third-party tool, to see where testers drop out of onboarding and
+which results views land. Each event is keyed by `anonId`, a random id the device makes and keeps
+in localStorage (`loadAnonId` in `src/lib/client/events.ts`); signed-in testers send it too, and
+the server never reads the session for events. Events carry no Spotify-derived data: no Spotify
+track ids, no song from someone's library (not even its title or key), no display names
+(Spotify Developer Policy, section III, item 13). Catalogue song keys are fine. The forbidden
+prop names are a backstop on both ends, not the rule itself.
+
+The client tracker (`createTracker`) batches events and sends them with `sendEvents`
+(`navigator.sendBeacon`, else `fetch` with `keepalive`); `flushWhenHidden` flushes when the page
+is hidden or unloaded. It never throws, and drops props the server would reject.
+
+`GET /api/admin/events` is computed by `summarizeEvents` (`src/lib/server/eventStats.ts`) from
+these names and props:
+
+- **Funnel**, distinct devices per step: `landing_viewed`, `start_pressed`, `note_detected` with
+  `step: 'low'` and with `step: 'high'`, `range_shown`, `results_viewed`, `song_opened`,
+  `spotify_link_pressed`, `spotify_connect_pressed`. Each step counts on its own, so a returning
+  tester who lands on results still counts there.
+- **By sort**, keyed by the `sort` prop: `song_opened` (count, and the median of its `position`
+  prop), `spotify_link_pressed` (count), `feedback_tapped` (its `thumbs` prop, `up` or `down`).
+  Events without a string `sort` are left out.
+- **Sessions**: each device's events in time order, the 50 most recently active devices first.
 
 ## Swap points
 
