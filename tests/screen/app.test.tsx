@@ -131,7 +131,7 @@ describe('KaraokeApp', () => {
     render(<KaraokeApp api={api} mic={fakeMic().mic} />);
     fireEvent.click(await screen.findByRole('button', { name: /^Plastic Love/ }));
     fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
-    const anonId = localStorage.getItem('kd.anon');
+    const anonId = localStorage.getItem('kd.anonId');
     expect(anonId).toMatch(/^[A-Za-z0-9-]{8,64}$/);
     expect(api.catalogueFeedback).toHaveBeenCalledWith({
       trackId: 't0',
@@ -294,5 +294,21 @@ describe('KaraokeApp', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use 3 songs' }));
     await screen.findByRole('button', { name: 'Generate more songs' });
     expect(api.saveRange).toHaveBeenCalledWith({ low: 40, high: 64, source: 'songs' });
+  });
+
+  it('records the beta funnel without any Spotify id or library song', async () => {
+    const tracked: { name: string; props?: Record<string, unknown> }[] = [];
+    const track = { track: (name: string, props?: Record<string, unknown>) => void tracked.push({ name, props }), flush: () => {} };
+    const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
+    const navigate = vi.fn();
+    render(<KaraokeApp api={api} track={track} mic={fakeMic().mic} navigate={navigate} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Yoru ni Kakeru/ }));
+    fireEvent.click(screen.getByRole('link', { name: 'Open in Spotify' }));
+    fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to songs' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Warm-up' }));
+    expect(tracked.map((e) => e.name)).toEqual(['results_viewed', 'song_opened', 'spotify_link_pressed', 'feedback_tapped', 'sort_selected']);
+    expect(tracked[1]!.props).toEqual({ mode: 'library', sort: 'top', decade: null, mood: null, duetsOnly: false, position: 3 });
+    expect(JSON.stringify(tracked)).not.toMatch(/"t\d"|Yoru|YOASOBI|open\.spotify/);
   });
 });

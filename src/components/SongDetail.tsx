@@ -12,6 +12,8 @@ interface SongDetailProps {
   source: DataSourceLogEntry | undefined;
   feedback: 'up' | 'down' | undefined;
   onFeedback(thumbs: 'up' | 'down'): void;
+  /** "Open in Spotify" was tapped (for the beta event log). */
+  onSpotify?(): void;
   onBack(): void;
 }
 
@@ -51,7 +53,7 @@ function Thumb({ down }: { down?: boolean }) {
   );
 }
 
-export function SongDetail({ match, userRange, source, feedback, onFeedback, onBack }: SongDetailProps) {
+export function SongDetail({ match, userRange, source, feedback, onFeedback, onSpotify, onBack }: SongDetailProps) {
   const [infoOpen, setInfoOpen] = useState(false);
   const tipId = useId();
   const octave = octaveWording(match.octave);
@@ -127,7 +129,7 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
 
       {match.reasons && match.reasons.length > 0 && <p className={styles.detailReasons}>{match.reasons.join(' · ')}</p>}
 
-      <a className={styles.spotify} href={match.track.spotifyUrl} target="_blank" rel="noreferrer">
+      <a className={styles.spotify} href={match.track.spotifyUrl} target="_blank" rel="noreferrer" onClick={onSpotify}>
         {catalogue ? 'Find on Spotify' : 'Open in Spotify'}
       </a>
 

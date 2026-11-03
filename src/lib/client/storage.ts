@@ -88,29 +88,7 @@ export function keepRange(low: number, high: number): void {
 
 // ---- no-Spotify mode (QWW-2 Track B) ----
 
-const ANON_KEY = 'kd.anon';
 const SAVED_RANGE_KEY = 'kd.range';
-
-/** A random id for this device, never a Spotify id. Used for feedback and the beta event log. */
-let sessionAnonId: string | null = null;
-export function getAnonId(): string {
-  try {
-    const existing = local()?.getItem(ANON_KEY);
-    if (existing && /^[A-Za-z0-9-]{8,64}$/.test(existing)) return existing;
-    const fresh = newId();
-    local()?.setItem(ANON_KEY, fresh);
-    return fresh;
-  } catch {
-    // Storage blocked: one id for this page, forgotten on reload.
-    sessionAnonId ??= newId();
-    return sessionAnonId;
-  }
-}
-
-function newId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-  return `kd-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
 
 /** The range of someone without Spotify, kept on this device so they come back to their songs. */
 export function loadSavedRange(): { low: number; high: number } | null {

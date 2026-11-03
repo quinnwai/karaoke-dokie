@@ -5,11 +5,12 @@ import { detectPitch } from '../lib/audio/pitch';
 import { detectHeldNote } from '../lib/audio/heldNote';
 import { frequencyToMidi, midiToNoteName } from '../lib/audio/notes';
 import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
-import { flowReducer, initialState } from '../lib/client/flow';
+import { createTracker, flushWhenHidden, loadAnonId, sendEvents, type Tracker } from '../lib/client/events';
+import { flowReducer, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
+import { eventsFor } from '../lib/client/funnel';
 import { browserMic, type Mic, type MicRecorder } from '../lib/client/mic';
 import {
   clearProgress,
-  getAnonId,
   loadProgress,
   loadSavedRange,
   saveProgress,
@@ -27,6 +28,8 @@ import styles from './screen.module.css';
 
 export interface KaraokeAppProps {
   api?: Api;
+  /** The beta event log; tests pass a fake. */
+  track?: Pick<Tracker, 'track' | 'flush'>;
   mic?: Mic;
   /** Leaves the page (Spotify sign-in). */
   navigate?: (url: string) => void;
@@ -39,9 +42,27 @@ const LIVE_EVERY_MS = 50; // ~20 times a second
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 
-export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultNavigate, quietMs = 2600 }: KaraokeAppProps) {
+export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, quietMs = 2600 }: KaraokeAppProps) {
   const [api] = useState(() => apiProp ?? createApi());
-  const [state, dispatch] = useReducer(flowReducer, initialState);
+  const [state, rawDispatch] = useReducer(flowReducer, initialState);
+
+  // Beta event log (QWW-16, QWW-20): every action passes through here, and funnel.ts decides what
+  // it records. The server drops everything unless collection is switched on.
+  const [tracker] = useState(() => track ?? createTracker({ anonId: loadAnonId(), send: sendEvents }));
+  useEffect(() => (typeof window === 'undefined' ? undefined : flushWhenHidden(tracker)), [tracker]);
+  const stateRef = useRef<FlowState>(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+  const dispatch = useCallback(
+    (action: FlowEvent) => {
+      for (const e of eventsFor(stateRef.current, action)) tracker.track(e.name, e.props);
+      // Keep the ref ahead of React so a second action in the same tick sees this one's result.
+      stateRef.current = flowReducer(stateRef.current, action);
+      rawDispatch(action);
+    },
+    [tracker],
+  );
   const [live, setLive] = useState<number | null>(null);
   const recorder = useRef<MicRecorder | null>(null);
   const holding = useRef(false);
@@ -200,6 +221,8 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
   const pickSongs = () => {
     if (state.signedIn) dispatch({ type: 'pickStart' });
     else {
+      tracker.track('pick_songs_pressed', { signedIn: false });
+      tracker.flush();
       setWantsPick(true);
       navigate(LOGIN_PATH);
     }
@@ -217,7 +240,7 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
     const body = { trackId, thumbs, difficulty: match.difficulty, octave: match.octave, view: state.view };
     const sent =
       state.mode === 'catalogue'
-        ? api.catalogueFeedback({ ...body, anonId: getAnonId(), range: { low: state.range.low, high: state.range.high } })
+        ? api.catalogueFeedback({ ...body, anonId: loadAnonId(), range: { low: state.range.low, high: state.range.high } })
         : api.feedback(body);
     sent.catch(() => {});
   };
@@ -232,6 +255,8 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
 
   // Spotify as the upgrade: keep the range across the sign-in round trip, then it is saved to the account.
   const connectSpotify = () => {
+    tracker.track('spotify_connect_pressed', { from: state.step, mode: state.mode });
+    tracker.flush();
     if (state.range) saveProgress({ low: state.range.low, high: state.range.high });
     navigate(LOGIN_PATH);
   };
@@ -343,6 +368,7 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
           source={state.sources[selected.track.id]}
           feedback={state.feedback[selected.track.id]}
           onFeedback={(thumbs) => sendFeedback(selected.track.id, thumbs)}
+          onSpotify={() => tracker.track('spotify_link_pressed', { mode: state.mode, sort: state.view.sort })}
           onBack={() => dispatch({ type: 'deselect' })}
         />
       )}
