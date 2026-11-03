@@ -183,6 +183,9 @@ export async function knownSongs(req: Request, ctx: AppContext): Promise<Respons
   return json(body);
 }
 
+// ---------- catalogue: results without Spotify (QWW-2 Track B) ----------
+// catalogueRecommendations and catalogueFeedback go here.
+
 // ---------- feedback ----------
 
 /**
@@ -218,6 +221,9 @@ export async function postFeedback(req: Request, ctx: AppContext): Promise<Respo
   return json({ ok: true });
 }
 
+// ---------- beta event log (QWW-16, QWW-20) ----------
+// postEvents goes here.
+
 // ---------- admin ----------
 
 function safeEqual(a: string, b: string): boolean {
@@ -233,3 +239,6 @@ export async function adminLog(req: Request, ctx: AppContext): Promise<Response>
   if (limit === null) return errorJson(400, 'bad-request', 'limit must be 1..1000');
   return json({ entries: await ctx.store.listLog(limit) });
 }
+
+// ---------- admin: beta events (QWW-16) ----------
+// adminEvents goes here.

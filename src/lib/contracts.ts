@@ -36,6 +36,24 @@ export interface SongRange {
   method?: string;
   /** MusicBrainz recording id of a measured recording. */
   mbid?: string;
+  /**
+   * True for a note file with sung notes in both P1 and P2 (a duet). The fields above stay
+   * P1's, so older readers keep working; `parts` has each singer's own range.
+   */
+  duet?: boolean;
+  /** Each singer's range in a duet, P1 first. Unset for solo songs. */
+  parts?: SongPart[];
+}
+
+/** One singer's part of a duet note file. */
+export interface SongPart {
+  /** The singer's name from the #P1/#P2 (or older #DUETSINGERP1/#DUETSINGERP2) header, when given. */
+  singer?: string;
+  low: Midi;
+  high: Midi;
+  tessitura: Midi;
+  pitchShare?: [Midi, number][];
+  fastLyrics: boolean;
 }
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
@@ -63,8 +81,12 @@ export interface Track {
   familiarity?: number;
   /** True when the user knows the song: in a top list, recent plays or one of their playlists. Saved-only songs are false. */
   known?: boolean;
-  /** Spotify's 0-100 track popularity, when Spotify returns it. */
+  /** Spotify's 0-100 track popularity, when Spotify returns it (it no longer does for Development Mode apps). */
   popularity?: number;
+  /** Year from Spotify's album.release_date. Unset for compilation albums (their date is the compilation's) and unparsable dates. */
+  releaseYear?: number;
+  /** ISRC from Spotify's external_ids, when sent. */
+  isrc?: string;
 }
 
 export interface ScoreParts {
@@ -74,9 +96,15 @@ export interface ScoreParts {
   familiarity: number;
   /** 0-1: how well known the song is. */
   popularity: number;
+  /** False when popularity is the flat default because we know nothing (no Spotify popularity, no USDB views or stars). */
+  popularityKnown?: boolean;
   /** Total subtracted for octave shift, artist-estimated range and fast lyrics. */
   penalty: number;
 }
+
+/** Mood labels that can ship as chips (QWW-11 decides which pass the precision gate). */
+export type Mood = 'upbeat' | 'heartfelt';
+export const MOODS: Mood[] = ['upbeat', 'heartfelt'];
 
 export interface Match {
   track: Track;
@@ -88,7 +116,35 @@ export interface Match {
   parts?: ScoreParts;
   /** One or two short reasons for the rank, e.g. "In your sweet spot". */
   reasons?: string[];
+  /** Release year: the earliest of USDB's year for the song and Spotify's album year. */
+  year?: number;
+  yearSource?: 'usdb' | 'spotify';
+  /** Genre as USDB lists it (free text, e.g. "Rock"). */
+  genre?: string;
+  /** For a duet matched on one singer's part: which part (1 = P1, 2 = P2) and that singer's name. */
+  part?: number;
+  partSinger?: string;
+  /** Moods that passed the label gate, for the mood chips. Unset when the song has no shipped label. */
+  moods?: Mood[];
 }
+
+// ---------- results view (QWW-9, QWW-13, QWW-22, QWW-23) ----------
+
+/** How the results are ordered. 'played' needs listening data, so catalogue mode has no 'played'. */
+export type SortId = 'top' | 'played' | 'warmup' | 'showoff' | 'singalong';
+/** Decade buckets; '60s' means "60s and earlier". */
+export type Decade = '60s' | '70s' | '80s' | '90s' | '00s' | '10s' | '20s';
+
+/** What the singer has picked on the results screen. One pick per row; null = nothing picked. */
+export interface ResultsView {
+  sort: SortId;
+  decade: Decade | null;
+  mood: Mood | null;
+  duetsOnly: boolean;
+}
+
+/** Where the results come from: the signed-in user's Spotify library, or the catalogue (no Spotify). */
+export type ResultsMode = 'library' | 'catalogue';
 
 export type LogOutcome = RangeSource | 'skipped';
 
@@ -118,6 +174,8 @@ export interface FeedbackEntry {
    * cached library or had no cached range.
    */
   songRange?: { source: LogOutcome; method?: string; low?: Midi; high?: Midi };
+  /** The results view the song was found in, as the client sent it. Unset for older clients. */
+  view?: ResultsView;
 }
 
 // ---------- HTTP API (app/api) ----------
@@ -127,9 +185,16 @@ export interface FeedbackEntry {
 // GET  /api/me                         -> MeResponse (401 when signed out)
 // PUT  /api/me/range   body VocalRange -> { ok: true }
 // GET  /api/recommendations?offset=0&limit=5 -> RecommendationsResponse
+// GET  /api/recommendations?all=1      -> RecommendationsResponse with every match, `complete: true`
 // GET  /api/songs/known                -> KnownSongsResponse (saved songs with a known range, for "pick songs you sing well")
 // POST /api/feedback   body FeedbackRequest -> { ok: true }
 // GET  /api/admin/log  (header x-admin-token) -> { entries: DataSourceLogEntry[] }
+// No Spotify (QWW-2 Track B), no session needed:
+// GET  /api/catalogue/recommendations?low=&high=&all=1 (or &offset=&limit=) -> RecommendationsResponse
+// POST /api/catalogue/feedback body CatalogueFeedbackRequest -> { ok: true }
+// Beta event log (QWW-16, QWW-20):
+// POST /api/events     body EventsRequest -> 204 (also 204 when collection is switched off)
+// GET  /api/admin/events (header x-admin-token) -> AdminEventsResponse
 
 export interface MeResponse {
   userId: string;
@@ -143,6 +208,8 @@ export interface RecommendationsResponse {
   nextOffset: number | null;
   /** Data-source lines for the songs in this page, keyed by track id (info button). */
   sources: Record<string, DataSourceLogEntry>;
+  /** True when `matches` is every match there is (an `all=1` request whose lookups all finished). */
+  complete?: boolean;
 }
 
 export interface KnownSongsResponse {
@@ -154,4 +221,40 @@ export interface FeedbackRequest {
   thumbs: 'up' | 'down';
   difficulty: Label;
   octave: OctaveShift;
+  /** The results view the song was found in. */
+  view?: ResultsView;
+}
+
+/** Feedback from someone without Spotify: no account, so the device id and range come with it. */
+export interface CatalogueFeedbackRequest extends FeedbackRequest {
+  /** Random id kept on the device (localStorage); never a Spotify id. */
+  anonId: string;
+  range: { low: Midi; high: Midi };
+}
+
+// ---------- beta event log (QWW-16, QWW-20) ----------
+
+export type EventValue = string | number | boolean | null;
+
+/** One thing a tester did. Never carries a Spotify id or a song from someone's Spotify library. */
+export interface AppEvent {
+  /** e.g. 'landing_viewed', 'range_shown', 'results_viewed', 'sort_selected', 'song_opened'. */
+  name: string;
+  /** ISO time on the device. */
+  at: string;
+  props?: Record<string, EventValue>;
+}
+
+export interface EventsRequest {
+  anonId: string;
+  events: AppEvent[];
+}
+
+export interface AdminEventsResponse {
+  /** How many distinct devices reached each funnel step, in funnel order. */
+  funnel: { name: string; devices: number }[];
+  /** Per sort: songs opened, Spotify opens, thumbs up and down, and the median list position opened. */
+  bySort: Record<string, { opened: number; spotify: number; up: number; down: number; medianPosition: number | null }>;
+  /** Each device's events in time order, newest devices first, so a session reads as a replay. */
+  sessions: { anonId: string; events: AppEvent[] }[];
 }

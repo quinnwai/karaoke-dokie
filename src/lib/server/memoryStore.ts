@@ -93,5 +93,25 @@ export function createMemoryStore(): Store {
       const items = opts.userId ? feedback.filter((f) => f.userId === opts.userId) : feedback;
       return newestFirst(items).slice(0, opts.limit ?? DEFAULT_LIST_LIMIT).map(clone);
     },
+    // ---- catalogue (QWW-2 Track B): implemented by the catalogue work ----
+    async listCatalogue() {
+      throw new Error('listCatalogue not implemented yet');
+    },
+
+    // ---- beta event log (QWW-16): implemented by the event-log work ----
+    async appendEvents() {
+      throw new Error('appendEvents not implemented yet');
+    },
+    async listEvents() {
+      throw new Error('listEvents not implemented yet');
+    },
+
+    // ---- mood labels (QWW-11): implemented by the mood-label work ----
+    async putSongMoods() {
+      throw new Error('putSongMoods not implemented yet');
+    },
+    async getSongMoods() {
+      throw new Error('getSongMoods not implemented yet');
+    },
   };
 }

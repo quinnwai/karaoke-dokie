@@ -58,3 +58,26 @@ CREATE TABLE IF NOT EXISTS usdb_songs (
   last_change BIGINT
 );
 CREATE INDEX IF NOT EXISTS usdb_songs_key ON usdb_songs (song_key);
+-- QWW-3 (Nov 2026). Year, genre and language from USDB's song list (QWW-6).
+ALTER TABLE usdb_songs ADD COLUMN IF NOT EXISTS year INTEGER;
+ALTER TABLE usdb_songs ADD COLUMN IF NOT EXISTS genre TEXT;
+ALTER TABLE usdb_songs ADD COLUMN IF NOT EXISTS language TEXT;
+-- The results view a thumbs tap came from (QWW-16).
+ALTER TABLE feedback ADD COLUMN IF NOT EXISTS view_json TEXT;
+-- Beta event log, keyed by a random device id, never a Spotify id (QWW-16, QWW-20).
+CREATE TABLE IF NOT EXISTS events (
+  id BIGSERIAL PRIMARY KEY,
+  anon_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  at TEXT NOT NULL,
+  props_json TEXT
+);
+CREATE INDEX IF NOT EXISTS events_anon ON events (anon_id);
+CREATE INDEX IF NOT EXISTS events_at ON events (at);
+-- Mood labels per song, one labelling method per row (QWW-11).
+CREATE TABLE IF NOT EXISTS song_moods (
+  song_key TEXT PRIMARY KEY,
+  moods TEXT NOT NULL,
+  method TEXT NOT NULL,
+  source TEXT NOT NULL
+);
