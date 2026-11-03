@@ -125,6 +125,42 @@ describe('importBulkRanges', () => {
     expect(await store.listLog()).toEqual([]);
   });
 
+  it('adds duet parts over a note file stored without them, keeping its USDB facts', async () => {
+    const store = createMemoryStore();
+    const duet = rangeFromNoteText(fixture('duet.txt'), 'c')!;
+    const { duet: _duet, parts: _parts, ...withoutParts } = duet.range; // as imported before parts existed
+    const usdbFacts = { usdbId: 9, usdbViews: 500, usdbRating: 4 };
+    const log = { trackId: 't', title: 'Duet Song', artist: 'Duo', outcome: 'note-file' as const, reason: 'usdb', at: 'x', usdbMissAt: '2026-09-01T00:00:00.000Z' };
+    await store.putSongRange(duet.key, { range: { ...withoutParts, ...usdbFacts }, log });
+
+    expect(await importBulkRanges(store, [duet], { now: at })).toEqual({ imported: 1, kept: 0, fastUpdated: 0 });
+    const upgraded = (await store.getSongRange(duet.key))!;
+    expect(upgraded.range).toEqual({ ...duet.range, ...usdbFacts });
+    expect(upgraded.log).toMatchObject({ outcome: 'note-file', reason: expect.stringContaining('public collection c'), usdbMissAt: log.usdbMissAt });
+
+    // Importing again keeps it: the stored duet has its parts now.
+    expect(await importBulkRanges(store, [duet], { now: at })).toEqual({ imported: 0, kept: 1, fastUpdated: 0 });
+  });
+
+  it('only upgrades a note file to a duet with parts: other note files are kept', async () => {
+    const store = createMemoryStore();
+    const duet = rangeFromNoteText(fixture('duet.txt'), 'c')!;
+    const solo = rangeFromNoteText(fixture('solo.txt'), 'c')!;
+    const log = { trackId: 't', title: 'x', artist: 'y', outcome: 'note-file' as const, reason: 'earlier', at: 'x' };
+    // A duet already stored with its parts (from another collection), and a solo file stored before.
+    const storedDuet = { ...duet.range, collection: 'other', low: 59 };
+    await store.putSongRange(duet.key, { range: storedDuet, log });
+    await store.putSongRange(solo.key, { range: { ...solo.range, low: 40 }, log });
+    // Parts with no duet flag, or a duet flag with no parts, are not a duet read.
+    const halfDuets = [{ ...duet, key: 'a|parts only', range: { ...duet.range, duet: undefined } }, { ...duet, key: 'a|flag only', range: { ...duet.range, parts: [] } }];
+    for (const h of halfDuets) await store.putSongRange(h.key, { range: { ...solo.range, low: 41 }, log });
+
+    expect(await importBulkRanges(store, [duet, solo, ...halfDuets], { now: at })).toEqual({ imported: 0, kept: 4, fastUpdated: 0 });
+    expect((await store.getSongRange(duet.key))!.range).toEqual(storedDuet);
+    expect((await store.getSongRange(solo.key))!.range!.low).toBe(40);
+    for (const h of halfDuets) expect((await store.getSongRange(h.key))!.range!.low).toBe(41);
+  });
+
   it('stores a measured recording with the log line it came with', async () => {
     const store = createMemoryStore();
     const row = audioRow('whitney houston|i will always love you');
