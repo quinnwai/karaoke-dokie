@@ -119,3 +119,25 @@ joined by the first artist). MGPHot ends in 2022, so few 2020s songs match (245 
 
 Precision and recall of run 1 against the proxies: not run yet (it needs run 1). Run it with
 `npx tsx scripts/moods-mgphot.ts <mgphot folder> labels-billboard-haiku-v1.json`.
+
+## AcousticBrainz (QWW-19)
+
+AcousticBrainz ([acousticbrainz.org](https://acousticbrainz.org), MetaBrainz, CC0) ran audio
+classifiers over recordings people submitted, keyed by MusicBrainz recording ID. The vocal-range
+pipeline's measured recordings carry that ID (`range.mbid`), so
+
+```sh
+npm run moods:acousticbrainz -- <pipeline>/data/karaoke_ranges.json --cache <dir outside the repo> \
+  --out data/moods/labels-acousticbrainz-v1.json
+```
+
+reads each recording's models (25 recordings per request, at most 2 requests a second, every raw
+response cached in the folder, so a rerun asks only about the rest) and labels every song key whose
+recording AcousticBrainz has. Method `acousticbrainz-proxy-v1`, source `acousticbrainz`. Being
+CC0, the labels may be committed.
+
+Proxy rules, fixed on Nov 3, 2026 before any AcousticBrainz label was compared with MGPHot or any
+other source (each model gives the probability of its class, from 0 to 1):
+
+- Upbeat: mood_happy >= 0.7 or mood_party >= 0.7 or danceability >= 0.8, and mood_sad < 0.5
+- Heartfelt: mood_sad >= 0.6, or mood_relaxed >= 0.7 and mood_happy < 0.5
