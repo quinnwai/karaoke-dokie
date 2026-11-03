@@ -1,9 +1,9 @@
 // Mood labels from a language model (QWW-11): Claude, GPT or Gemini (providers.ts), made offline
 // and stored; nothing calls the model at request time. The model gets a batch of about 25 songs
 // (artist and title, plus year and genre when known; no lyrics, no audio), answers yes or no per
-// mood, and may say it does not know a song. Code
-// decides what ships: replies are parsed strictly, songs it does not know get no label, and the
-// gate (gate.ts) decides which moods are right often enough to show as chips.
+// mood, and may say it does not know a song. Code decides what ships: replies are parsed strictly,
+// songs it does not know get no label, and the gate (gate.ts) decides which moods are right often
+// enough to show as chips.
 
 import { MOODS, type Mood } from '../contracts';
 import type { SongMoodsRecord } from '../server/store';
