@@ -3,25 +3,9 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Results } from '../../src/components/Results';
 import { DEFAULT_VIEW } from '../../src/lib/songs/browse';
-import { HIGHEST_LIKELY, LOWEST_LIKELY, plausibleNote } from '../../src/lib/client/rangeCheck';
 import type { VocalRange } from '../../src/lib/contracts';
 
 const r = (low: number, high: number): VocalRange => ({ low, high, source: 'test' });
-
-describe('plausibleNote', () => {
-  it('lifts a growled low note to E2 and lowers a whistled high note to C6', () => {
-    expect(LOWEST_LIKELY).toBe(40); // E2
-    expect(HIGHEST_LIKELY).toBe(84); // C6
-    expect(plausibleNote(38)).toBe(40); // D2
-    expect(plausibleNote(28)).toBe(40);
-    expect(plausibleNote(86)).toBe(84); // D6
-    expect(plausibleNote(96)).toBe(84);
-  });
-
-  it('leaves every note from E2 to C6 alone', () => {
-    for (let midi = LOWEST_LIKELY; midi <= HIGHEST_LIKELY; midi++) expect(plausibleNote(midi)).toBe(midi);
-  });
-});
 
 describe('the results screen', () => {
   afterEach(cleanup);
