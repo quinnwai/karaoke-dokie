@@ -3,6 +3,7 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FastLyricsIcon, OctaveIcon } from '../../src/components/Icon';
 import { Results } from '../../src/components/Results';
+import { resultsProps } from '../helpers/results';
 import { SongDetail } from '../../src/components/SongDetail';
 import type { Match } from '../../src/lib/contracts';
 import { match } from '../fixtures/screen';
@@ -46,7 +47,6 @@ describe('icons', () => {
 });
 
 describe('Results row', () => {
-  const props = { range, loading: false, error: false, hasMore: false, onSelect: vi.fn(), onMore: vi.fn(), onRedo: vi.fn(), onRedoEnd: vi.fn() };
 
   it('shows octave and fast-lyrics icons, and reasons under the artist', () => {
     const matches = [
@@ -54,7 +54,7 @@ describe('Results row', () => {
       withMatch(match(1), { octave: 'down', fastLyrics: false, reasons: undefined }),
       withMatch(match(3), { octave: 'none', fastLyrics: false, reasons: [] }),
     ];
-    render(<Results {...props} matches={matches} />);
+    render(<Results {...resultsProps(range, matches)} />);
     const [first, second, third] = screen.getAllByRole('listitem');
 
     expect(within(first!).getByRole('img', { name: 'Sing it an octave higher than the artist' })).toBeTruthy();
@@ -93,7 +93,7 @@ describe('sources', () => {
   });
 
   it('shows a Sources and credits link under the results', () => {
-    render(<Results range={range} matches={[match(0)]} hasMore={false} loading={false} error={false} onSelect={() => {}} onMore={() => {}} onRedo={() => {}} onRedoEnd={() => {}} />);
+    render(<Results {...resultsProps(range, [match(0)])} />);
     expect(screen.getByRole('link', { name: 'Sources and credits' }).getAttribute('href')).toBe('/credits');
   });
 });

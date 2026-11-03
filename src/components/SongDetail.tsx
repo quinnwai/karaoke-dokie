@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import type { DataSourceLogEntry, Match, VocalRange } from '../lib/contracts';
-import { difficultyLabel, octaveWording, rangeBar, sourceTooltip } from '../lib/client/display';
+import { difficultyLabel, duetPartLine, isCatalogueTrack, octaveWording, rangeBar, sourceTooltip } from '../lib/client/display';
+import { MOOD_LABELS } from '../lib/songs/browse';
 import { usdbSongUrl } from '../lib/usdb/client';
 import { FastLyricsIcon, OctaveIcon } from './Icon';
 import styles from './screen.module.css';
@@ -55,6 +56,9 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
   const tipId = useId();
   const octave = octaveWording(match.octave);
   const maybe = match.difficulty === 'maybe';
+  const duet = duetPartLine(match);
+  const facts = [match.year, match.genre].filter((f) => f !== undefined && f !== '').join(' · ');
+  const catalogue = isCatalogueTrack(match.track.id);
 
   return (
     <div className={styles.detail}>
@@ -65,6 +69,7 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
       <div className={styles.detailHead}>
         <h2 className={styles.detailTitle}>{match.track.title}</h2>
         <p className={styles.detailArtist}>{match.track.artist}</p>
+        {facts && <p className={styles.detailFacts}>{facts}</p>}
       </div>
 
       <RangeBarView userRange={userRange} match={match} />
@@ -77,6 +82,11 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
             <span aria-hidden>Fast lyrics</span>
           </span>
         )}
+        {match.moods?.map((mood) => (
+          <span key={mood} className={styles.pillQuiet}>
+            {MOOD_LABELS[mood]}
+          </span>
+        ))}
         <span className={styles.infoWrap}>
           <button
             type="button"
@@ -113,10 +123,12 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
         </p>
       )}
 
+      {duet && <p className={styles.octave}>{duet}</p>}
+
       {match.reasons && match.reasons.length > 0 && <p className={styles.detailReasons}>{match.reasons.join(' · ')}</p>}
 
       <a className={styles.spotify} href={match.track.spotifyUrl} target="_blank" rel="noreferrer">
-        Open in Spotify
+        {catalogue ? 'Find on Spotify' : 'Open in Spotify'}
       </a>
 
       <div className={styles.feedback}>

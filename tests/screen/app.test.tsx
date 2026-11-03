@@ -6,7 +6,8 @@ import type { Api } from '../../src/lib/client/api';
 import { MicDeniedError, type Mic, type MicRecorder } from '../../src/lib/client/mic';
 import type { MeResponse, VocalRange } from '../../src/lib/contracts';
 import { SAMPLE_RATE, voice } from '../helpers/synth';
-import { knownSongs, me, recommendationsPage } from '../fixtures/screen';
+import { allMatches, knownSongs, me, recommendationsPage } from '../fixtures/screen';
+import { DEFAULT_VIEW } from '../../src/lib/songs/browse';
 
 /** A mic that "hears" whatever tone the test queues for the next hold. */
 function fakeMic() {
@@ -39,8 +40,11 @@ function fakeApi(user: MeResponse | null) {
       if (current) current = { ...current, range };
     }),
     recommendations: vi.fn(async (offset: number) => recommendationsPage(offset)),
+    allRecommendations: vi.fn(async () => allMatches()),
+    catalogue: vi.fn(async (_range: { low: number; high: number }) => allMatches()),
     knownSongs: vi.fn(async () => knownSongs()),
     feedback: vi.fn(async () => {}),
+    catalogueFeedback: vi.fn(async () => {}),
   } satisfies Api;
   return api;
 }
@@ -59,15 +63,17 @@ async function hold(label: RegExp) {
 
 beforeEach(() => {
   sessionStorage.clear();
+  localStorage.clear();
   window.history.replaceState(null, '', '/');
 });
 afterEach(cleanup);
 
 describe('KaraokeApp', () => {
-  it('runs the singing test and sends the user to Spotify', async () => {
+  it('runs the singing test, then shows catalogue songs with no sign-in', async () => {
     const { mic, sing } = fakeMic();
     const navigate = vi.fn();
-    render(<KaraokeApp api={fakeApi(null)} mic={mic} navigate={navigate} quietMs={0} />);
+    const api = fakeApi(null);
+    render(<KaraokeApp api={api} mic={mic} navigate={navigate} quietMs={0} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
     await screen.findByRole('button', { name: /lowest note/ });
@@ -85,7 +91,58 @@ describe('KaraokeApp', () => {
     expect(JSON.parse(sessionStorage.getItem('kd.test')!)).toEqual({ low: 45, high: 72 });
 
     fireEvent.click(arrow);
+    await screen.findByText('Plastic Love');
+    expect(navigate).not.toHaveBeenCalled();
+    expect(api.catalogue).toHaveBeenCalledWith({ low: 45, high: 72 });
+    expect(api.allRecommendations).not.toHaveBeenCalled();
+    // The range stays on this device instead of an account.
+    expect(JSON.parse(localStorage.getItem('kd.range')!)).toEqual({ low: 45, high: 72 });
+    expect(sessionStorage.getItem('kd.test')).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Connect Spotify' })).toHaveLength(2);
+    // Catalogue songs are nobody's library, so there is no Most played.
+    expect(screen.queryByRole('button', { name: 'Most played' })).toBeNull();
+  });
+
+  it('after the test, "or use songs from your Spotify" keeps the range and goes to sign-in', async () => {
+    sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
+    const navigate = vi.fn();
+    render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} navigate={navigate} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'or use songs from your Spotify' }));
     expect(navigate).toHaveBeenCalledWith('/api/auth/login');
+    expect(JSON.parse(sessionStorage.getItem('kd.test')!)).toEqual({ low: 45, high: 72 });
+  });
+
+  it('someone without Spotify comes back to their catalogue songs, and can connect Spotify later', async () => {
+    localStorage.setItem('kd.range', JSON.stringify({ low: 45, high: 72 }));
+    const navigate = vi.fn();
+    const api = fakeApi(null);
+    render(<KaraokeApp api={api} mic={fakeMic().mic} navigate={navigate} />);
+    await screen.findByText('Plastic Love');
+    expect(api.catalogue).toHaveBeenCalledWith({ low: 45, high: 72 });
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Connect Spotify' })[0]!);
+    expect(navigate).toHaveBeenCalledWith('/api/auth/login');
+    expect(JSON.parse(sessionStorage.getItem('kd.test')!)).toEqual({ low: 45, high: 72 });
+  });
+
+  it('catalogue feedback goes to the catalogue route with the device id and range', async () => {
+    localStorage.setItem('kd.range', JSON.stringify({ low: 45, high: 72 }));
+    const api = fakeApi(null);
+    render(<KaraokeApp api={api} mic={fakeMic().mic} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Plastic Love/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
+    const anonId = localStorage.getItem('kd.anon');
+    expect(anonId).toMatch(/^[A-Za-z0-9-]{8,64}$/);
+    expect(api.catalogueFeedback).toHaveBeenCalledWith({
+      trackId: 't0',
+      thumbs: 'up',
+      difficulty: 'easy',
+      octave: 'none',
+      view: DEFAULT_VIEW,
+      anonId,
+      range: { low: 45, high: 72 },
+    });
+    expect(api.feedback).not.toHaveBeenCalled();
   });
 
   it('asks to try again when nothing was held', async () => {
@@ -141,8 +198,46 @@ describe('KaraokeApp', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Generate more songs' }));
     await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(10));
-    expect(api.recommendations).toHaveBeenLastCalledWith(5);
+    // Every match came in one request; more songs come from memory.
+    expect(api.allRecommendations).toHaveBeenCalledTimes(1);
+    expect(api.recommendations).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Generate more songs' })).toBeNull();
+  });
+
+  it('the sort row reorders the songs without asking the server again', async () => {
+    const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
+    render(<KaraokeApp api={api} mic={fakeMic().mic} />);
+    await screen.findByText('Plastic Love');
+    const titles = () => Array.from(document.querySelectorAll('ol li')).map((li) => li.querySelector('[class*="songTitle"]')?.textContent);
+    const before = titles();
+    expect(screen.getByRole('button', { name: 'Top picks' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Show-off' }));
+    expect(screen.getByRole('button', { name: 'Show-off' }).getAttribute('aria-pressed')).toBe('true');
+    expect(lyrics()).toContain('Uses your whole range');
+    expect(titles()).not.toEqual(before);
+    expect(api.allRecommendations).toHaveBeenCalledTimes(1);
+  });
+
+  it('decade chips filter the list and show their counts', async () => {
+    const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
+    const years = [1984, 2017, 2020, 1957, 1975, 2004, 1975, 1985, 1987, 1963];
+    api.allRecommendations.mockImplementation(async () => {
+      const page = allMatches();
+      page.matches = page.matches.map((m, i) => ({ ...m, year: years[i] }));
+      return page;
+    });
+    render(<KaraokeApp api={api} mic={fakeMic().mic} />);
+    await screen.findByText('Plastic Love');
+    expect(screen.getByText('Mariya Takeuchi · 1984')).toBeTruthy();
+    const eighties = screen.getByRole('button', { name: '80s, 3 songs' });
+    expect(screen.getByRole('button', { name: '90s, 0 songs' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(eighties);
+    expect(eighties.getAttribute('aria-pressed')).toBe('true');
+    // Two sure fits and one Maybe from the 80s.
+    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.getAllByRole('listitem')).toHaveLength(5);
   });
 
   it('song detail: range bar, info tooltip, feedback', async () => {
@@ -164,7 +259,7 @@ describe('KaraokeApp', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
     expect(screen.getByText('Thanks! That helps.')).toBeTruthy();
-    expect(api.feedback).toHaveBeenCalledWith({ trackId: 't2', thumbs: 'up', difficulty: 'hard', octave: 'down' });
+    expect(api.feedback).toHaveBeenCalledWith({ trackId: 't2', thumbs: 'up', difficulty: 'hard', octave: 'down', view: DEFAULT_VIEW });
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to songs' }));
     expect(await screen.findByText('Plastic Love')).toBeTruthy();

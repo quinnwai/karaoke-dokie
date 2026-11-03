@@ -4,11 +4,30 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Results } from '../../src/components/Results';
 import { SongDetail } from '../../src/components/SongDetail';
 import { match, source } from '../fixtures/screen';
+import { DEFAULT_VIEW } from '../../src/lib/songs/browse';
 
 afterEach(cleanup);
 
 const range = { low: 45, high: 72, source: 'test' as const };
-const props = { range, loading: false, error: false, hasMore: false, onSelect: vi.fn(), onMore: vi.fn(), onRedo: vi.fn(), onRedoEnd: vi.fn() };
+const props = {
+  range,
+  mode: 'library' as const,
+  view: DEFAULT_VIEW,
+  shown: 10,
+  loading: false,
+  error: false,
+  onSelect: vi.fn(),
+  onMore: vi.fn(),
+  onRetry: vi.fn(),
+  onRedo: vi.fn(),
+  onRedoEnd: vi.fn(),
+  onSort: vi.fn(),
+  onDecade: vi.fn(),
+  onMood: vi.fn(),
+  onDuets: vi.fn(),
+  onClear: vi.fn(),
+  onConnect: vi.fn(),
+};
 const labels = (el: HTMLElement) => within(el).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
 
 describe('Maybe group', () => {

@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Results } from '../../src/components/Results';
+import { DEFAULT_VIEW } from '../../src/lib/songs/browse';
 import { rangeWarning } from '../../src/lib/client/rangeCheck';
 import type { VocalRange } from '../../src/lib/contracts';
 
@@ -30,7 +31,25 @@ describe('rangeWarning', () => {
 describe('range warning on the results screen', () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(cleanup);
-  const base = { matches: [], loading: false, error: false, hasMore: false, onSelect: () => {}, onMore: () => {}, onRedo: () => {} };
+  const noop = () => {};
+  const base = {
+    matches: [],
+    mode: 'library' as const,
+    view: DEFAULT_VIEW,
+    shown: 5,
+    loading: false,
+    error: false,
+    onSelect: noop,
+    onMore: noop,
+    onRetry: noop,
+    onRedo: noop,
+    onSort: noop,
+    onDecade: noop,
+    onMood: noop,
+    onDuets: noop,
+    onClear: noop,
+    onConnect: noop,
+  };
 
   it('offers to redo either end, and remembers "Keep it" for that range', () => {
     const onRedoEnd = vi.fn();

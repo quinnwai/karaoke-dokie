@@ -88,6 +88,17 @@ export function recommendationsPage(offset: number, limit = 5): RecommendationsR
   };
 }
 
+/** Every match at once, as `GET /api/recommendations?all=1` and the catalogue route send them. */
+export function allMatches(count = TOTAL): RecommendationsResponse {
+  const ids = Array.from({ length: count }, (_, k) => k);
+  return {
+    matches: ids.map(match),
+    nextOffset: null,
+    sources: Object.fromEntries(ids.map((i) => [`t${i}`, source(i)])),
+    complete: true,
+  };
+}
+
 export function me(range: MeResponse['range'] = null): MeResponse {
   return { userId: 'u1', displayName: 'Quinn', range };
 }

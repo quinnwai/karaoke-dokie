@@ -1,6 +1,6 @@
 // Plain-words text and geometry for the screen. No music jargon reaches the user.
 
-import type { DataSourceLogEntry, Label, LogOutcome, Midi, OctaveShift, SongRange, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, Label, LogOutcome, Match, Midi, OctaveShift, SongRange, SortId, VocalRange } from '../contracts';
 import { midiToNoteName } from '../audio/notes';
 
 export function difficultyLabel(d: Label): string {
@@ -85,3 +85,42 @@ export function scalePosition(midi: number): number {
   const p = ((midi - SCALE_LOW) / (SCALE_HIGH - SCALE_LOW)) * 100;
   return Math.max(0, Math.min(100, round(p)));
 }
+
+// ---- results view (QWW-3) ----
+
+/** Which reasons speak to each sort, so the reason line leads with why the song is where it is. */
+const SORT_REASONS: Record<SortId, RegExp | null> = {
+  top: null,
+  played: /^You (play this a lot|know this one)/,
+  warmup: /^(In your sweet spot|Mostly comfortable)/,
+  showoff: /^(Spends time at|A few notes near) your/,
+  singalong: /^Crowd favourite/,
+};
+
+/** The song's reasons with the one that matches the active sort first. */
+export function reasonsForSort(reasons: string[] | undefined, sort: SortId): string[] {
+  const list = reasons ?? [];
+  const re = SORT_REASONS[sort];
+  if (!re) return list;
+  return [...list.filter((r) => re.test(r)), ...list.filter((r) => !re.test(r))];
+}
+
+/** "Take Lady Gaga's part" for a duet matched on one part; null for everything else. */
+export function duetPartLine(m: Pick<Match, 'part' | 'partSinger' | 'range'>): string | null {
+  if (!m.range.duet || !m.part) return null;
+  const singer = m.partSinger?.trim();
+  return singer ? `Duet: take ${singer}'s part` : `Duet: take part ${m.part}`;
+}
+
+/** "Queen · 1975", or just the artist when the year is unknown. */
+export function artistLine(m: Pick<Match, 'track' | 'year'>): string {
+  return typeof m.year === 'number' ? `${m.track.artist} · ${m.year}` : m.track.artist;
+}
+
+/** Catalogue songs have no Spotify track of their own, only a search. */
+export const isCatalogueTrack = (trackId: string) => trackId.startsWith('cat:');
+
+/** Under the list in catalogue mode. */
+export const CATALOGUE_NOTE =
+  'These are songs from our catalogue. Connect Spotify to find songs from your own library. Spotify is invite-only during the beta.';
+

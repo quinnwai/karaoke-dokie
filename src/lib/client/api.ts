@@ -1,6 +1,7 @@
 // The screen's only door to the HTTP API. Paths and shapes follow src/lib/contracts.ts.
 
 import type {
+  CatalogueFeedbackRequest,
   FeedbackRequest,
   KnownSongsResponse,
   MeResponse,
@@ -25,8 +26,13 @@ export interface Api {
   me(): Promise<MeResponse | null>;
   saveRange(range: VocalRange): Promise<void>;
   recommendations(offset: number, limit?: number): Promise<RecommendationsResponse>;
+  /** Every match in the signed-in user's library, ranked (the phone sorts and filters from here). */
+  allRecommendations(): Promise<RecommendationsResponse>;
+  /** Every catalogue match for a range, with no Spotify and no session (QWW-2 Track B). */
+  catalogue(range: { low: number; high: number }): Promise<RecommendationsResponse>;
   knownSongs(): Promise<KnownSongsResponse>;
   feedback(body: FeedbackRequest): Promise<void>;
+  catalogueFeedback(body: CatalogueFeedbackRequest): Promise<void>;
 }
 
 type Fetch = typeof fetch;
@@ -57,11 +63,20 @@ export function createApi(fetchImpl: Fetch = (...args) => fetch(...args)): Api {
     recommendations(offset, limit = PAGE_SIZE) {
       return call<RecommendationsResponse>(`/api/recommendations?offset=${offset}&limit=${limit}`);
     },
+    allRecommendations() {
+      return call<RecommendationsResponse>('/api/recommendations?all=1');
+    },
+    catalogue(range) {
+      return call<RecommendationsResponse>(`/api/catalogue/recommendations?low=${range.low}&high=${range.high}&all=1`);
+    },
     knownSongs() {
       return call<KnownSongsResponse>('/api/songs/known');
     },
     async feedback(body) {
       await call('/api/feedback', { method: 'POST', body: JSON.stringify(body) });
+    },
+    async catalogueFeedback(body) {
+      await call('/api/catalogue/feedback', { method: 'POST', body: JSON.stringify(body) });
     },
   };
 }

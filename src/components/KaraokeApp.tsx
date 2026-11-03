@@ -7,7 +7,16 @@ import { frequencyToMidi, midiToNoteName } from '../lib/audio/notes';
 import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
 import { flowReducer, initialState } from '../lib/client/flow';
 import { browserMic, type Mic, type MicRecorder } from '../lib/client/mic';
-import { clearProgress, loadProgress, saveProgress, setWantsPick, takeWantsPick } from '../lib/client/storage';
+import {
+  clearProgress,
+  getAnonId,
+  loadProgress,
+  loadSavedRange,
+  saveProgress,
+  saveRangeOnDevice,
+  setWantsPick,
+  takeWantsPick,
+} from '../lib/client/storage';
 import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';
 import { PickSongs } from './PickSongs';
@@ -49,7 +58,13 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
         url.searchParams.delete('signedIn');
         window.history.replaceState(null, '', url.pathname + url.search + url.hash);
       }
-      dispatch({ type: 'booted', me, progress: loadProgress(), wantsPick: me ? takeWantsPick() : false });
+      dispatch({
+        type: 'booted',
+        me,
+        progress: loadProgress(),
+        wantsPick: me ? takeWantsPick() : false,
+        savedRange: me ? null : loadSavedRange(),
+      });
     })();
     return () => {
       cancelled = true;
@@ -88,18 +103,20 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
     };
   }, [api, step, range, error]);
 
-  const { loading, nextOffset } = state;
+  // Every match at once: the phone sorts, filters and pages them (src/lib/songs/browse.ts).
+  const { loading, mode, attempt } = state;
   useEffect(() => {
-    if (step !== 'results' || !loading) return;
+    if (step !== 'results' || !loading || !range) return;
     let cancelled = false;
-    api.recommendations(nextOffset ?? 0).then(
-      (page) => !cancelled && dispatch({ type: 'pageLoaded', page }),
+    const load = mode === 'catalogue' ? api.catalogue({ low: range.low, high: range.high }) : api.allRecommendations();
+    load.then(
+      (page) => !cancelled && dispatch({ type: 'allLoaded', page }),
       () => !cancelled && dispatch({ type: 'loadFailed' }),
     );
     return () => {
       cancelled = true;
     };
-  }, [api, step, loading, nextOffset]);
+  }, [api, step, loading, mode, range, attempt]);
 
   const { known, signedIn } = state;
   useEffect(() => {
@@ -195,9 +212,28 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
 
   const sendFeedback = (trackId: string, thumbs: 'up' | 'down') => {
     const match = state.matches.find((m) => m.track.id === trackId);
-    if (!match) return;
+    if (!match || !state.range) return;
     dispatch({ type: 'feedback', trackId, thumbs });
-    api.feedback({ trackId, thumbs, difficulty: match.difficulty, octave: match.octave }).catch(() => {});
+    const body = { trackId, thumbs, difficulty: match.difficulty, octave: match.octave, view: state.view };
+    const sent =
+      state.mode === 'catalogue'
+        ? api.catalogueFeedback({ ...body, anonId: getAnonId(), range: { low: state.range.low, high: state.range.high } })
+        : api.feedback(body);
+    sent.catch(() => {});
+  };
+
+  // No Spotify: straight to songs from the catalogue, with the range kept on this device.
+  const showCatalogue = () => {
+    if (!state.range) return;
+    saveRangeOnDevice(state.range);
+    clearProgress();
+    dispatch({ type: 'showCatalogue' });
+  };
+
+  // Spotify as the upgrade: keep the range across the sign-in round trip, then it is saved to the account.
+  const connectSpotify = () => {
+    if (state.range) saveProgress({ low: state.range.low, high: state.range.high });
+    navigate(LOGIN_PATH);
   };
 
   const selected = state.selectedId ? state.matches.find((m) => m.track.id === state.selectedId) : undefined;
@@ -250,10 +286,13 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
             </span>
             <span data-testid="range-high">{midiToNoteName(state.range.high)}</span>
           </p>
-          <button type="button" className={styles.arrow} aria-label="Continue" onClick={() => navigate(LOGIN_PATH)}>
+          <button type="button" className={styles.arrow} aria-label="Continue" onClick={showCatalogue}>
             <svg viewBox="0 0 48 24" width="56" height="28" aria-hidden>
               <path d="M2 12h40M32 3l10 9-10 9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
+          </button>
+          <button type="button" className={styles.textButton} onClick={connectSpotify}>
+            or use songs from your Spotify
           </button>
         </div>
       )}
@@ -276,14 +315,23 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
       {step === 'results' && state.range && !selected && (
         <Results
           range={state.range}
+          mode={state.mode}
           matches={state.matches}
+          view={state.view}
+          shown={state.shown}
           loading={state.loading}
           error={state.error === 'load'}
-          hasMore={state.nextOffset !== null}
           onSelect={(trackId) => dispatch({ type: 'select', trackId })}
           onMore={() => dispatch({ type: 'loadMore' })}
+          onRetry={() => dispatch({ type: 'retryLoad' })}
           onRedo={redo}
           onRedoEnd={(end) => dispatch({ type: 'redoEnd', end })}
+          onSort={(sort) => dispatch({ type: 'setSort', sort })}
+          onDecade={(decade) => dispatch({ type: 'pickDecade', decade })}
+          onMood={(mood) => dispatch({ type: 'pickMood', mood })}
+          onDuets={() => dispatch({ type: 'toggleDuets' })}
+          onClear={() => dispatch({ type: 'clearFilters' })}
+          onConnect={connectSpotify}
         />
       )}
 

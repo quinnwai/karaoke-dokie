@@ -913,3 +913,130 @@
 .tooltip a {
   color: var(--ink);
 }
+
+/* ---- results view: sort row, filter row (QWW-3) ---- */
+
+.barActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.connect {
+  border: 1px solid var(--pink);
+  border-radius: 999px;
+  background: rgba(255, 46, 147, 0.08);
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.controls {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* One row of pills; it scrolls sideways on a phone instead of the page. */
+.chipRow {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 1px;
+}
+
+.chipRow::-webkit-scrollbar {
+  display: none;
+}
+
+.sortPill,
+.chip,
+.clearChip {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--faint);
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sortPill[data-selected] {
+  background: var(--pink);
+  border-color: var(--pink);
+  color: var(--bg);
+  box-shadow: 0 0 14px -4px var(--pink-glow);
+}
+
+.chip[aria-pressed='true'] {
+  border-color: var(--pink);
+  color: var(--pink);
+}
+
+.chip:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.sortPill:focus-visible,
+.chip:focus-visible,
+.clearChip:focus-visible,
+.connect:focus-visible {
+  outline: 2px solid var(--pink);
+  outline-offset: 2px;
+}
+
+.chipCount {
+  margin-left: 2px;
+  font-weight: 500;
+  opacity: 0.6;
+}
+
+.chipDivider {
+  flex: none;
+  width: 1px;
+  margin: 4px 2px;
+  background: var(--faint);
+}
+
+.clearChip {
+  border-style: dashed;
+  color: var(--dim);
+}
+
+/* Between the songs you know and the ones you only saved: the one ranking rule we keep. */
+.savedDivider {
+  display: block;
+  padding: 14px 4px 2px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.songList li.afterDivider {
+  border-top: none;
+}
+
+.catalogueNote {
+  margin: 0;
+  max-width: 36ch;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--dim);
+  text-align: center;
+}
+
+.detailFacts {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--dim);
+}
