@@ -129,7 +129,7 @@ export type FlowEvent =
   | { type: 'pickMood'; mood: Mood }
   | { type: 'toggleDuets' }
   | { type: 'clearFilters' }
-  | { type: 'select'; trackId: string }
+  | { type: 'select'; trackId: string; /** 1-based place in the list on screen, for the event log. */ position?: number }
   | { type: 'deselect' }
   | { type: 'feedback'; trackId: string; thumbs: 'up' | 'down' }
   | { type: 'redo' }

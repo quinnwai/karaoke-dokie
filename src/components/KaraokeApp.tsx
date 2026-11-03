@@ -321,7 +321,7 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
           shown={state.shown}
           loading={state.loading}
           error={state.error === 'load'}
-          onSelect={(trackId) => dispatch({ type: 'select', trackId })}
+          onSelect={(trackId, position) => dispatch({ type: 'select', trackId, position })}
           onMore={() => dispatch({ type: 'loadMore' })}
           onRetry={() => dispatch({ type: 'retryLoad' })}
           onRedo={redo}
