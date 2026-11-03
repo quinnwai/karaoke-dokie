@@ -38,6 +38,11 @@ export const CREDITS: Credit[] = [
     what: 'Labeled sung notes used to test note detection (CC BY 4.0).',
   },
   {
+    name: 'MGPHot, SiriusXM',
+    url: 'https://doi.org/10.5334/tismir.236',
+    what: "Music experts' notes on Billboard Hot 100 songs from 1958 to 2022, by Oramas, Gouyon, Hogan, Landau and Ehmann (2025). We used it offline only, to check our mood labels; none of it is shown in the app (CC BY-NC-ND 4.0, © SiriusXM 2025).",
+  },
+  {
     name: 'Material Symbols, Google',
     url: 'https://fonts.google.com/icons',
     what: 'The fast-lyrics icon (Apache 2.0).',

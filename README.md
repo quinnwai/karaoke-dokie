@@ -34,6 +34,7 @@ integration, Vitest) and `npm run test:e2e` (end to end, Playwright).
 | Feedback | One-tap "How'd it go?" thumbs up or down, stored with your range, the label (or Maybe), the octave note, and where the song's range came from at that moment (source, method, lowest and highest note), so later imports cannot change what a tap was about. | `app/api/feedback/`, `src/lib/server/` | `tests/server/routes.test.ts`, `tests/server/storeContract.test.ts`, `tests/e2e/` |
 | Database | Saved ranges, song ranges, the data-source log and feedback. Postgres (Neon) in production, memory store locally. Every write is read back in one shared test suite run against both. | `src/lib/server/*Store.ts`, `db/schema.sql` | `tests/server/storeContract.test.ts` (pg-mem) |
 | Admin log | Hidden page listing every song's data source or skip reason. Needs the `x-admin-token` header. | `app/api/admin/log/` | `tests/server/routes.test.ts`, `tests/e2e/fullstack.spec.ts` |
+| Mood labels | Offline, never at request time: Claude labels songs Upbeat and/or Heartfelt from artist, title and year, or says it doesn't know the song (`npm run moods:label`, resumable). A mood may become a chip only if it passes the precision gate against Quinn-Wai's hand-labelled gold set (`npm run moods:report`). `npm run moods:import` stores the labels. Not shown in the app yet. See [data/moods/README.md](data/moods/README.md). | `src/lib/moods/`, `scripts/moods-*.ts` | `tests/moods/`, `tests/server/storeContract.test.ts` |
 
 More detail: [docs/backend.md](docs/backend.md) and [docs/screen.md](docs/screen.md).
 
@@ -69,6 +70,7 @@ Screenshots of every step land in `test-results/screens/`.
 | Labeled sung-note test audio | [NSynth dataset](https://magenta.tensorflow.org/datasets/nsynth), Google Magenta, CC BY 4.0 ([list](tests/fixtures/vocals/SOURCES.md)) |
 | Fast-lyrics threshold (speech is about 5 to 8 syllables per second) | Pellegrino, Coupé and Marsico, 2011, "A cross-language perspective on speech information rate", *Language* 87(3) |
 | Spotify API limits for new apps | [Spotify developer blog, Nov 2024](https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api) |
+| Offline check of the mood labels (nothing from it is stored or shown) | MGPHot: Oramas, Gouyon, Hogan, Landau and Ehmann, 2025, "MGPHot: A Dataset of Musicological Annotations for Popular Music (1958-2022)", *TISMIR* 8(1), [doi:10.5334/tismir.236](https://doi.org/10.5334/tismir.236), CC BY-NC-ND 4.0, © SiriusXM 2025 |
 | Live pitch line during the test | SingStar (game) |
 | Landing page layout (one centered object) | Chromakopia website |
 | Look | Japanese karaoke venues at night (neon カラオケ signs, private rooms) |

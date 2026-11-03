@@ -1,6 +1,6 @@
 // Postgres store using raw SQL through an injected query function, so the same code
 // runs on Neon (production) and pg-mem (tests).
-import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, FeedbackEntry, Mood, SongRange, VocalRange } from '../contracts';
 import { isMeasured, MEASURED_RANK, SOURCE_RANK } from '../songs/sourceRank';
 import { SCHEMA_SQL } from './schema';
 import {
@@ -8,6 +8,7 @@ import {
   DEFAULT_LIST_LIMIT,
   MAX_EVENTS_LIMIT,
   type CatalogueSong,
+  type SongMoodsRecord,
   type SongRangeRecord,
   type Store,
   type StoredEvent,
@@ -111,6 +112,15 @@ function toEvent(r: Row): StoredEvent {
 const MEASURED_SOURCES = Object.entries(SOURCE_RANK)
   .filter(([, rank]) => rank >= MEASURED_RANK)
   .map(([source]) => source);
+
+function toSongMoods(r: Row): SongMoodsRecord {
+  return {
+    key: str(r.song_key),
+    moods: str(r.moods).split(',').filter(Boolean) as Mood[],
+    method: str(r.method),
+    source: str(r.source),
+  };
+}
 
 export interface PostgresStoreOptions {
   /** Run migrate() before the first query (default true). */
@@ -323,12 +333,36 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       return rows.reverse().map(toEvent);
     },
 
-    // ---- mood labels (QWW-11): implemented by the mood-label work ----
-    async putSongMoods() {
-      throw new Error('putSongMoods not implemented yet');
+    // ---- mood labels (QWW-11) ----
+    async putSongMoods(entries) {
+      // One row per key, the last entry winning as in the memory store: Postgres refuses an
+      // upsert that touches the same row twice in one statement.
+      const unique = [...new Map(entries.map((e) => [e.key, e])).values()];
+      for (let i = 0; i < unique.length; i += 100) {
+        const chunk = unique.slice(i, i + 100);
+        const params: unknown[] = [];
+        const rows = chunk.map((e) => {
+          params.push(e.key, e.moods.join(','), e.method, e.source);
+          const n = params.length;
+          return `($${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(
+          `INSERT INTO song_moods (song_key, moods, method, source) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET moods = EXCLUDED.moods, method = EXCLUDED.method, source = EXCLUDED.source`,
+          params,
+        );
+      }
     },
-    async getSongMoods() {
-      throw new Error('getSongMoods not implemented yet');
+    async getSongMoods(songKeys) {
+      const out = new Map<string, SongMoodsRecord>();
+      const unique = [...new Set(songKeys)];
+      for (let i = 0; i < unique.length; i += 200) {
+        const chunk = unique.slice(i, i + 200);
+        const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
+        const rows = await query(`SELECT * FROM song_moods WHERE song_key IN (${placeholders})`, chunk);
+        for (const r of rows) out.set(str(r.song_key), toSongMoods(r));
+      }
+      return out;
     },
   };
 }

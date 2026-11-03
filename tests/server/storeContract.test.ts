@@ -8,6 +8,7 @@ import { createPostgresStore, migrate, schemaStatements, type QueryFn } from '..
 import { SCHEMA_SQL } from '../../src/lib/server/schema';
 import { pickStoreKind } from '../../src/lib/server/getStore';
 import type { Store } from '../../src/lib/server/store';
+import type { SongMoodsRecord } from '../../src/lib/server/store';
 
 function pgMemQuery(opts: Parameters<typeof newDb>[0] = {}): QueryFn {
   const db = newDb(opts);
@@ -272,6 +273,42 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     const skipped = { ...feedback('u1', 3), songRange: { source: 'skipped' as const } };
     for (const f of [measured, estimate, skipped]) await s.saveFeedback(f);
     expect(await s.listFeedback()).toEqual([skipped, estimate, measured]);
+  });
+
+  it('reads back mood labels by song key, and a relabel replaces the whole row', async () => {
+    const s = make();
+    const method = 'claude-haiku-5-5/moods-v1';
+    const both: SongMoodsRecord = { key: 'whitney houston|i wanna dance with somebody', moods: ['upbeat', 'heartfelt'], method, source: 'claude' };
+    const none: SongMoodsRecord = { key: 'nirvana|smells like teen spirit', moods: [], method, source: 'claude' };
+    expect((await s.getSongMoods([both.key])).size).toBe(0);
+    await s.putSongMoods([both, none]);
+    const read = await s.getSongMoods([both.key, none.key, 'nobody|missing']);
+    expect([...read.keys()].sort()).toEqual([none.key, both.key]);
+    expect(read.get(both.key)).toEqual(both);
+    expect(read.get(none.key)).toEqual(none);
+
+    // Upsert by key; within one call the last entry for a key wins.
+    const relabel: SongMoodsRecord = { ...both, moods: ['heartfelt'], method: 'claude-sonnet-5-5/moods-v2' };
+    await s.putSongMoods([{ ...none, moods: ['upbeat'], source: 'hand' }, relabel, { ...none, moods: ['heartfelt'], source: 'hand' }]);
+    const again = await s.getSongMoods([both.key, none.key]);
+    expect(again.get(both.key)).toEqual(relabel);
+    expect(again.get(none.key)).toEqual({ ...none, moods: ['heartfelt'], source: 'hand' });
+    expect((await s.getSongMoods([])).size).toBe(0);
+    await s.putSongMoods([]);
+  });
+
+  it('writes and reads mood labels in bulk', async () => {
+    const s = make();
+    const many: SongMoodsRecord[] = Array.from({ length: 250 }, (_, i) => ({
+      key: `artist ${i}|song ${i}`,
+      moods: i % 3 === 0 ? ['upbeat'] : [],
+      method: 'claude-haiku-5-5/moods-v1',
+      source: 'claude',
+    }));
+    await s.putSongMoods(many);
+    const read = await s.getSongMoods(many.map((m) => m.key));
+    expect(read.size).toBe(250);
+    expect(read.get('artist 249|song 249')).toEqual(many[249]);
   });
 });
 

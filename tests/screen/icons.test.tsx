@@ -96,4 +96,12 @@ describe('sources', () => {
     render(<Results {...resultsProps(range, [match(0)])} />);
     expect(screen.getByRole('link', { name: 'Sources and credits' }).getAttribute('href')).toBe('/credits');
   });
+
+  it('credits MGPHot as an offline check of the mood labels, with its licence', async () => {
+    const { CREDITS } = await import('../../src/lib/credits');
+    const mgphot = CREDITS.find((c) => c.name.startsWith('MGPHot'));
+    expect(mgphot?.url).toBe('https://doi.org/10.5334/tismir.236');
+    expect(mgphot?.what).toContain('offline only, to check our mood labels');
+    expect(mgphot?.what).toContain('CC BY-NC-ND 4.0');
+  });
 });
