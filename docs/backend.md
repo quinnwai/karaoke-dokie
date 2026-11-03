@@ -16,6 +16,8 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | GET | `/api/songs/known` | | `KnownSongsResponse` (up to 50 library songs with a known range, play order) |
 | POST | `/api/feedback` | `FeedbackRequest` (`difficulty` may be `maybe`; optional `view`, the results view the song was found in) | `{ ok: true }`; 400 on bad input, including a `view` without a known `sort`, a `decade` and `mood` that are known or null, and a boolean `duetsOnly`; 409 before a range is saved. Stored with the user's current range, the view (`view_json`) and, when the song is in the cached library, its range at that moment (`range_source` = the log outcome, `range_method`, `range_low`, `range_high`); the tap never loads the library from Spotify |
 | GET | `/api/admin/log` | header `x-admin-token`, `limit` (1..1000, default 200) | `{ entries: DataSourceLogEntry[] }`, newest first; 403 on a wrong token or when `ADMIN_TOKEN` is unset |
+| GET | `/api/catalogue/recommendations` | `low`, `high` (the range: integers, 28 <= low < high <= 96, span 5..48), then `all=1` or `offset`/`limit`; no session | `RecommendationsResponse` from the public catalogue (QWW-2 Track B): every song with a note-file or recording range, most-viewed USDB row attached, cached per process for an hour (6,000 songs). Tracks have `cat:<songKey>` ids and Spotify search links, `known: false`, so no familiarity reasons. `all=1` sends at most the best 1,000 matches with year and genre; `complete: false` and `nextOffset: null` when trimmed. 400 on a bad range |
+| POST | `/api/catalogue/feedback` | `CatalogueFeedbackRequest`: the feedback fields plus `anonId` (8 to 64 of `[A-Za-z0-9-]`) and `range`; no session | `{ ok: true }`; stored with `user_id = 'anon:' + anonId`, the range, and the song's range snapshot looked up by key. 400 on bad input or a `trackId` that is not `cat:` |
 | POST | `/api/events` | `EventsRequest`, as JSON or as the `text/plain` body `navigator.sendBeacon` sends; no session | 204, storing nothing while `EVENTS` is off. 400 on bad input, checked even when off: `anonId` 8 to 64 of `[A-Za-z0-9-]`; 1 to 50 events; `name` matching `^[a-z][a-z0-9_]{1,48}$`; `at` an ISO time with a zone, within 7 days of the server clock (stored as UTC); at most 20 props named `^[a-zA-Z][a-zA-Z0-9_]{0,40}$`, each a string of up to 200 characters, a finite number, a boolean or null. Props named `trackId`, `spotifyId`, `userId`, `displayName` or `email` (any case, underscores ignored) are dropped before storing |
 | GET | `/api/admin/events` | header `x-admin-token`, `limit` (1..20000, default 5000) | `AdminEventsResponse` from the newest `limit` events (see Beta event log); 403 like `/api/admin/log` |
 
@@ -24,10 +26,11 @@ without a valid session (also when Spotify access was revoked). Spotify outages 
 
 ### Paging
 
-Songs are looked up lazily in play order (top tracks, then saved songs), at most 40 uncached
-lookups per request, so the first page is fast. Matches are paged in play order and ranked within
-each page, so pages never overlap. `nextOffset` can be returned with a short (even empty) page when
-the lookup budget ran out: keep asking until it is `null`.
+`songService.recommend` looks songs up in play order (top tracks, then saved songs), up to 1,000
+uncached lookups per request, ranks the whole library, then pages it, so pages never repeat or skip
+a song. The screen asks once with `all=1` and sorts, filters and pages the list itself. If lookups
+ran out of budget (a first visit to a very large library), `all=1` returns `complete: false` with a
+`nextOffset`, and the screen asks `all=1` again, a few times at most.
 
 ## Environment
 
@@ -35,11 +38,12 @@ the lookup budget ran out: keep asking until it is `null`.
 | --- | --- |
 | `SESSION_SECRET` | Required, 16+ chars. HMAC-SHA256 key for the session cookie |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI` | Required unless `SPOTIFY_MOCK=1`. Redirect URI is the full `/api/auth/callback` URL |
-| `SPOTIFY_MOCK` | `1` uses the offline mock client (user "Test Singer", 25 well-known songs) |
+| `SPOTIFY_MOCK` | `1` uses the offline mock client (user "Test Singer", 25 well-known songs) and, with the memory store, seeds the placeholder songs in `data/seed-song-ranges.json` |
 | `DATABASE_URL` | Postgres (Neon) connection string |
 | `KARAOKE_STORE` | `memory` forces the in-memory store |
 | `ADMIN_TOKEN` | Token for `/api/admin/log` and `/api/admin/events`; unset disables both |
 | `EVENTS` | `on` or `off`: whether `POST /api/events` stores beta events. Unset or blank, it is on only when `NODE_ENV=production`, `SPOTIFY_MOCK` is not `1` and the store is Postgres, so tests, e2e and local dev collect nothing. Any other value counts as off |
+| `MOODS_SHIPPED` | Comma-separated moods (`upbeat`, `heartfelt`) allowed on screen as chips. Set a mood here only after it passes the QWW-11 precision gate (`npm run moods:report`). Unset = no mood chips |
 
 ## Store
 
