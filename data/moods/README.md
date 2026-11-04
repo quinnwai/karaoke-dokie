@@ -234,6 +234,29 @@ Not measured yet, waiting for the AcousticBrainz API (QWW-17): AcousticBrainz's 
 recall, those of AcousticBrainz with the LLM filling its gaps, and the agreement of all three
 sources. `moods:mgphot-check --ab` prints them.
 
+**Looking for an Upbeat that passes (Nov 3, 2026).** Other sources, and rules that show Upbeat only
+when two sources agree, were each kept or dropped on the tune half alone, and only a rule that
+passed there would have been scored on the held-out half, once. The Claude models labelled only
+the 150 pilot songs, so rules that use them are scored on those:
+
+| Tune half, against the MGPHot proxy | Songs | Upbeat precision | Upbeat recall |
+| --- | --- | --- | --- |
+| `gpt-6-luna`, 3 runs | 1,251 | 0.62 | 0.71 to 0.74 |
+| `claude-haiku-5-5` | 150 | 0.56 | 0.73 |
+| `claude-sonnet-5-5` | 150 | 0.63 | 0.60 |
+| Upbeat only when `gpt-6-luna` and Haiku agree | 150 | 0.65 | 0.68 |
+| Upbeat only when `gpt-6-luna` and Sonnet agree | 150 | 0.65 | 0.58 |
+| Upbeat only when Haiku and Sonnet agree | 150 | 0.69 | 0.55 |
+| Upbeat when 2 of those 3 models say so | 150 | 0.61 | 0.74 |
+| Upbeat only when all 3 models agree | 150 | 0.70 | 0.53 |
+
+No rule built from language models alone comes near 0.8: the models mostly make the same calls, so
+asking more of them to agree removes few of the songs the proxy disagrees with. Of the 150 songs,
+all 3 models call 14 Upbeat that the proxy does not, most of them feel-good songs just under its
+bars, and the proxy calls 11 Upbeat that no model does, among them power ballads that pass on Aural
+Intensity alone and slow R&B songs that pass on Danceability. Much of the gap may be the proxy's,
+then, which only the hand-labelled gold set can settle.
+
 **Recommended: `MOODS_SHIPPED=heartfelt`**, with the LLM's labels stored
 (`npm run moods:import -- data/moods/labels-openai-v1.json`). By default MGPHot is not stored and
 AcousticBrainz has no labels yet, so the LLM's labels are what the app shows, and its Heartfelt
