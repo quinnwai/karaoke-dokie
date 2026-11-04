@@ -312,7 +312,7 @@ describe('recommendations', () => {
     // The mock library: Baby is in all three top lists, Bohemian Rhapsody only in the 6-month one,
     // Can't Help Falling in Love in the 1-year one and the last plays, Africa in a playlist.
     expect(reasons['Baby']).toEqual(['In your sweet spot', 'In your top songs this month']);
-    expect(reasons['Bohemian Rhapsody']).toEqual(['In your top songs of the past 6 months', 'Crowd favourite']);
+    expect(reasons['Bohemian Rhapsody']).toEqual(['In your top songs, past 6 months', 'Crowd favourite']);
     expect(reasons["Can't Help Falling in Love"]).toEqual(['Spends time at your low end', 'Played recently']);
     expect(reasons['Africa']).toEqual(['In your sweet spot', 'In your playlists']);
     // Every library track says where it was heard, so none falls back to the older wording.

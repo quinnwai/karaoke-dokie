@@ -552,11 +552,11 @@
 
 .songReasons {
   font-size: 12px;
+  line-height: 1.35;
   color: var(--pink);
   opacity: 0.8;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Wraps between reasons (each keeps its own spaces), never mid-reason and never cut off. */
+  overflow-wrap: anywhere;
 }
 
 .songMeta {

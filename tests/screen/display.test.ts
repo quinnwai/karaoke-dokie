@@ -67,9 +67,9 @@ describe('reasonsForSlider', () => {
 
   const LISTENING_REASONS = [
     'In your top songs this month',
-    'In your top songs of the past 6 months',
+    'In your top songs, past 6 months',
     'Played recently',
-    'In your top songs of the past year',
+    'In your top songs, past year',
     'In your playlists',
     'You play this a lot',
     'You know this one',

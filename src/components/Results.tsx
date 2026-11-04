@@ -104,7 +104,7 @@ export function Results(props: ResultsProps) {
         <span className={styles.songText}>
           <span className={styles.songTitle}>{m.track.title}</span>
           <span className={styles.songArtist}>{artistLine(m)}</span>
-          {reasons.length > 0 && <span className={styles.songReasons}>{reasons.join(' · ')}</span>}
+          {reasons.length > 0 && <span className={styles.songReasons}>{reasonLine(reasons)}</span>}
         </span>
         <span className={styles.songMeta}>
           <OctaveIcon octave={m.octave} className={styles.icon} />
@@ -320,6 +320,9 @@ export function Results(props: ResultsProps) {
     </div>
   );
 }
+
+/** Reasons joined on one line that may wrap only between reasons, so none is cut off. */
+const reasonLine = (reasons: string[]) => reasons.map((r) => r.replace(/ /g, '\u00a0')).join(' · ');
 
 /**
  * One continuous preference. Untouched it does nothing and sits dim in the middle; moving it (a
