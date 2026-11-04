@@ -225,8 +225,16 @@ describe('reasons', () => {
   it('follows the difficulty label, so a Hard song never says sweet spot', () => {
     const p = { comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0 };
     expect(reasonsFor(p, { difficulty: 'easy', side: 'top' })[0]).toBe('In your sweet spot');
-    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })[0]).toBe('A few notes near your top');
+    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })[0]).toBe('A few notes near your high end');
     expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' })).toEqual(['Spends time at your low end', 'You play this a lot']);
+  });
+
+  it('says which end of your range a song leans on: high end or low end', () => {
+    const p = { comfort: 0.9, familiarity: 0, popularity: 0, penalty: 0 };
+    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })).toEqual(['A few notes near your high end']);
+    expect(reasonsFor(p, { difficulty: 'medium', side: 'bottom' })).toEqual(['A few notes near your low end']);
+    expect(reasonsFor(p, { difficulty: 'hard', side: 'top' })).toEqual(['Spends time at your high end']);
+    expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' })).toEqual(['Spends time at your low end']);
   });
 
   it('says nothing about where a Maybe song sits, since its range is an estimate', () => {
@@ -266,6 +274,6 @@ describe('reasons', () => {
     expect(hard.difficulty).toBe('hard');
     expect(hard.parts!.comfort).toBeGreaterThan(0.8);
     expect(hard.reasons).not.toContain('In your sweet spot');
-    expect(hard.reasons![0]).toBe('Spends time at your top');
+    expect(hard.reasons![0]).toBe('Spends time at your high end');
   });
 });

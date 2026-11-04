@@ -167,7 +167,7 @@ export interface FitNote {
 export function reasonsFor(p: ScoreParts, fit?: FitNote, known?: boolean): string[] {
   const candidates: { text: string; weight: number }[] = [];
   const comfortWeight = REASON_WEIGHTS.comfort * p.comfort;
-  const edge = fit?.side === 'bottom' ? 'low end' : 'top';
+  const edge = fit?.side === 'bottom' ? 'low end' : 'high end';
   if (!fit) {
     if (p.comfort >= 0.8) candidates.push({ text: 'In your sweet spot', weight: comfortWeight });
     else if (p.comfort >= 0.5) candidates.push({ text: 'Mostly comfortable', weight: comfortWeight });

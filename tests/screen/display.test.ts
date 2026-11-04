@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { difficultyLabel, octaveWording, rangeBar, scalePosition, sourceTooltip } from '../../src/lib/client/display';
+import { difficultyLabel, octaveWording, rangeBar, reasonsForSlider, scalePosition, sourceTooltip } from '../../src/lib/client/display';
 import type { SongRange, VocalRange } from '../../src/lib/contracts';
 import { source } from '../fixtures/screen';
 
@@ -51,6 +51,29 @@ describe('wording', () => {
 
   it('difficulty labels', () => {
     expect(['easy', 'medium', 'hard', 'maybe'].map((d) => difficultyLabel(d as 'easy'))).toEqual(['Easy', 'Medium', 'Hard', 'Maybe']);
+  });
+});
+
+describe('reasonsForSlider', () => {
+  const RANGE_REASONS = [
+    'In your sweet spot',
+    'Mostly comfortable',
+    'A few notes near your high end',
+    'A few notes near your low end',
+    'Spends time at your high end',
+    'Spends time at your low end',
+  ];
+
+  it('leads with the range reason when the difficulty slider moved last', () => {
+    for (const range of RANGE_REASONS) {
+      expect(reasonsForSlider(['You play this a lot', range], 'difficulty')).toEqual([range, 'You play this a lot']);
+      expect(reasonsForSlider(['Crowd favourite', range], 'popularity')).toEqual(['Crowd favourite', range]);
+    }
+  });
+
+  it('keeps the order when no slider leads, and copes with no reasons', () => {
+    expect(reasonsForSlider(['Crowd favourite', 'In your sweet spot'], null)).toEqual(['Crowd favourite', 'In your sweet spot']);
+    expect(reasonsForSlider(undefined, 'difficulty')).toEqual([]);
   });
 });
 
