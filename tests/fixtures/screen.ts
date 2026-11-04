@@ -35,8 +35,8 @@ function sourceOf(i: number): Pick<SongRange, 'source' | 'confidence'> {
 
 /** Ranking reasons for some songs, by index; the rest have none. */
 const REASONS: Record<number, string[]> = {
-  0: ['In your sweet spot', 'You play this a lot'],
-  2: ['You play this a lot'],
+  0: ['In your sweet spot', 'In your top songs this month'],
+  2: ['Played recently'],
   4: ['In your sweet spot'],
 };
 

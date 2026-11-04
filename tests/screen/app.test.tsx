@@ -194,7 +194,7 @@ describe('KaraokeApp', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(5);
     expect(screen.getAllByRole('img', { name: 'Sing it an octave lower than the artist' }).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /^Lemon by Kenshi Yonezu, Medium\. Sing it lower than the artist$/ })).toBeTruthy();
-    expect(screen.getByText('In your sweet spot · You play this a lot')).toBeTruthy();
+    expect(screen.getByText('In your sweet spot · In your top songs this month')).toBeTruthy();
     expect(screen.getAllByText('Easy').length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Generate more songs' }));
@@ -300,7 +300,7 @@ describe('KaraokeApp', () => {
     expect(screen.getByRole('img', { name: 'Fast lyrics' })).toBeTruthy();
     expect(screen.getByText('Sing it lower than the artist')).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeTruthy();
-    expect(screen.getByText('You play this a lot')).toBeTruthy();
+    expect(screen.getByText('Played recently')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Open in Spotify' }).getAttribute('href')).toBe('https://open.spotify.com/track/t2');
 
     fireEvent.click(screen.getByRole('button', { name: 'Where this came from' }));

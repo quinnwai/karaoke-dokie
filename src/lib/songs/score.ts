@@ -156,15 +156,35 @@ export interface FitNote {
   side: 'top' | 'bottom';
 }
 
+/** What the reasons read from a track: whether the user knows it, and where their listening shows it. */
+type TrackListening = Pick<Track, 'known' | 'topLists' | 'recentPlays' | 'inPlaylist'>;
+
+/**
+ * The listening reason: the strongest sign that the user knows the song, with its time frame, in
+ * this order: the 4-week top list, the 6-month one, the last 50 plays, the all-time list, their
+ * playlists. A track that does not say where it was heard (a library cached before buildLibrary
+ * recorded it, a test track) gets the older wording, from familiarity alone.
+ */
+function listeningReason(t: TrackListening | undefined, familiarity: number): string {
+  const top = t?.topLists ?? [];
+  if (top.includes('short_term')) return 'In your top songs this month';
+  if (top.includes('medium_term')) return 'In your top songs of the past 6 months';
+  if (t?.recentPlays) return 'Played recently';
+  if (top.includes('long_term')) return 'One of your all-time top songs';
+  if (t?.inPlaylist) return 'In your playlists';
+  return familiarity >= 0.6 ? 'You play this a lot' : 'You know this one';
+}
+
 /**
  * The one or two biggest contributors, in words. With a FitNote the range reason follows the
  * difficulty label, so a Hard song never says "In your sweet spot"; a Hard song always says why.
  * A Maybe song's range is only an estimate, so it gets no range reason.
- * A song the user does not know (`known` false) never says they play or know it: catalogue songs
- * carry familiarity 1 only so that comfort alone decides their fit. Saved-only songs are also
- * not known, but their familiarity is below both thresholds anyway.
+ * A song with familiarity 0.3 or more gets a listening reason (listeningReason), unless the user
+ * does not know it (`known` false): catalogue songs carry familiarity 1 only so that comfort
+ * alone decides their fit. Saved-only songs are also not known, but their familiarity is below
+ * 0.3 anyway.
  */
-export function reasonsFor(p: ScoreParts, fit?: FitNote, known?: boolean): string[] {
+export function reasonsFor(p: ScoreParts, fit?: FitNote, track?: TrackListening): string[] {
   const candidates: { text: string; weight: number }[] = [];
   const comfortWeight = REASON_WEIGHTS.comfort * p.comfort;
   const edge = fit?.side === 'bottom' ? 'low end' : 'high end';
@@ -178,9 +198,8 @@ export function reasonsFor(p: ScoreParts, fit?: FitNote, known?: boolean): strin
   } else if (fit.difficulty === 'hard') {
     candidates.push({ text: `Spends time at your ${edge}`, weight: Infinity });
   }
-  if (known !== false) {
-    if (p.familiarity >= 0.6) candidates.push({ text: 'You play this a lot', weight: REASON_WEIGHTS.familiarity * p.familiarity });
-    else if (p.familiarity >= 0.3) candidates.push({ text: 'You know this one', weight: REASON_WEIGHTS.familiarity * p.familiarity });
+  if (track?.known !== false && p.familiarity >= 0.3) {
+    candidates.push({ text: listeningReason(track, p.familiarity), weight: REASON_WEIGHTS.familiarity * p.familiarity });
   }
   if (p.popularity >= 0.7) candidates.push({ text: 'Crowd favourite', weight: REASON_WEIGHTS.popularity * p.popularity });
   return candidates
@@ -193,5 +212,5 @@ export function reasonsFor(p: ScoreParts, fit?: FitNote, known?: boolean): strin
 export function scoreMatch(user: VocalRange, m: Match): Match {
   const parts = scoreParts(user, m.track, m.range, m.octave);
   const { side } = edgeTime(user, m.range, shiftOf(m.octave));
-  return { ...m, parts, score: totalScore(parts), reasons: reasonsFor(parts, { difficulty: m.difficulty, side }, m.track.known) };
+  return { ...m, parts, score: totalScore(parts), reasons: reasonsFor(parts, { difficulty: m.difficulty, side }, m.track) };
 }
