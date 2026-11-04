@@ -31,6 +31,12 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   await expect(page.getByRole('slider', { name: 'Ease in to Whole range' })).toBeVisible();
   await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toHaveCount(0);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-01-catalogue.png') });
+  // The end of the list: one short question with the button, and the book icon for sources.
+  const credits = page.getByRole('link', { name: 'Sources and credits' });
+  await credits.scrollIntoViewIfNeeded();
+  await expect(page.getByText('Want personalized recommendations?')).toBeVisible();
+  await expect(credits).toBeVisible();
+  await page.screenshot({ path: path.join(SCREENS, 'fullstack-01b-catalogue-end.png') });
 
   // The catalogue route needs no session, and every song it lists fits A2 to C5 (as written or an
   // octave away). Catalogue songs never include the mock library's estimates.
@@ -70,7 +76,7 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   await page.getByRole('button', { name: 'Back to songs' }).click();
 
   // ---- Connect Spotify (mock): the range carries over and library songs load ----
-  await page.getByRole('button', { name: 'Connect Spotify' }).first().click();
+  await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
   await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toBeVisible({ timeout: 20_000 });
   await expect(songs).toHaveCount(5);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-04-library.png') });

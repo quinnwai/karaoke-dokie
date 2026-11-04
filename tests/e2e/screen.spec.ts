@@ -210,7 +210,7 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await shot(page, '07-catalogue-results');
 
   // ---- Connect Spotify (mocked redirect back to /?signedIn=1): the range carries over ----
-  await page.getByRole('button', { name: 'Connect Spotify' }).first().click();
+  await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
   await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toBeVisible();
   expect(api.savedRanges).toEqual([{ low: 45, high: 72, source: 'test' }]);
   expect(api.recommendationCalls.at(-1)).toBe('library ?all=1');
@@ -379,8 +379,11 @@ test('sliders and decade chips: sliders reorder, chips filter with counts, all o
   expect(await inView(page.getByRole('region', { name: 'Tune' }))).toBe(true);
   expect(await inView(page.getByRole('group', { name: 'Filter songs' }))).toBe(true);
   for (let i = 0; i < 3; i++) expect(await inView(page.locator('ol li').nth(i))).toBe(true);
-  // No sideways scroll for the page; the chip row scrolls on its own.
+  // Nothing scrolls sideways: not the page, and not the chips, which wrap onto new lines instead.
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const chipRows = page.getByRole('group', { name: 'Filter songs' }).locator('> div');
+  expect(await chipRows.count()).toBeGreaterThan(0);
+  for (const row of await chipRows.all()) expect(await row.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await page.waitForTimeout(300);
   await shot(page, '19-controls');
 

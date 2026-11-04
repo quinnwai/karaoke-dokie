@@ -92,9 +92,13 @@ describe('sources', () => {
     expect(screen.getByRole('link', { name: 'View on USDB' }).getAttribute('href')).toBe('https://usdb.animux.de/index.php?link=detail&id=1234');
   });
 
-  it('shows a Sources and credits link under the results', () => {
+  it('shows Sources and credits as a book icon under the results', () => {
     render(<Results {...resultsProps(range, [match(0)])} />);
-    expect(screen.getByRole('link', { name: 'Sources and credits' }).getAttribute('href')).toBe('/credits');
+    const credits = screen.getByRole('link', { name: 'Sources and credits' });
+    expect(credits.getAttribute('href')).toBe('/credits');
+    // Just the book icon: no words on screen.
+    expect(credits.textContent).toBe('');
+    expect(credits.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('credits MGPHot as an offline check of the mood labels, with its licence', async () => {

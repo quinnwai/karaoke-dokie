@@ -53,7 +53,7 @@ export const SLIDERS: SliderDef[] = [
 export const DEFAULT_LYRIC = 'Our best guess for you';
 
 export const DECADES: { id: Decade; label: string }[] = [
-  { id: '60s', label: '60s & earlier' },
+  { id: '60s', label: 'Pre-70s' },
   { id: '70s', label: '70s' },
   { id: '80s', label: '80s' },
   { id: '90s', label: '90s' },

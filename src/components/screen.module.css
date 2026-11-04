@@ -906,11 +906,19 @@
   }
 }
 
+/* Sources and credits: a pale book in the bottom right corner, there when wanted, never in the way. */
 .credits {
-  display: block;
-  margin: 24px auto 8px;
-  text-align: center;
-  font-size: 13px;
+  align-self: flex-end;
+  display: flex;
+  margin: 4px -6px -10px 0;
+  padding: 6px;
+  border-radius: var(--squircle);
+  color: rgba(244, 241, 246, 0.26);
+  transition: color 0.15s;
+}
+
+.credits:hover,
+.credits:focus-visible {
   color: var(--dim);
 }
 
@@ -1095,23 +1103,23 @@
 }
 
 /* One row of chips; it scrolls sideways on a phone instead of the page. */
-.chipRow {
+.chipRows {
   min-width: 0;
   display: flex;
+  flex-direction: column;
   gap: 6px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-  padding: 3px 1px;
 }
 
-.chipRow::-webkit-scrollbar {
-  display: none;
+/* One facet per line (decades, then moods and duets); a line wraps instead of scrolling sideways. */
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .chip {
   flex: none;
-  padding: 7px 12px;
+  padding: 7px 10px;
   border: 0;
   border-radius: var(--squircle);
   background: rgba(255, 255, 255, 0.06);
@@ -1151,13 +1159,6 @@
   opacity: 0.75;
 }
 
-.chipDivider {
-  flex: none;
-  width: 1px;
-  margin: 6px 2px;
-  background: var(--faint);
-}
-
 .savedDivider {
   display: block;
   padding: 14px 4px 2px;
@@ -1172,12 +1173,17 @@
 }
 
 .catalogueNote {
-  margin: 0;
-  max-width: 36ch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   font-size: 13px;
   line-height: 1.45;
   color: var(--dim);
   text-align: center;
+}
+
+.catalogueNote p {
+  margin: 0;
 }
 
 .detailFacts {

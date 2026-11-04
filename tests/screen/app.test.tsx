@@ -98,7 +98,10 @@ describe('KaraokeApp', () => {
     // The range stays on this device instead of an account.
     expect(JSON.parse(localStorage.getItem('kd.range')!)).toEqual({ low: 45, high: 72 });
     expect(sessionStorage.getItem('kd.test')).toBeNull();
-    expect(screen.getAllByRole('button', { name: 'Connect Spotify' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2);
+    // Under the list: one short question and the button, nothing else.
+    expect(screen.getByText('Want personalized recommendations?')).toBeTruthy();
+    expect(screen.queryByText(/every song that fits|invite-only|from our catalogue/)).toBeNull();
     // Catalogue songs are nobody's library, so there is no on-repeat slider.
     expect(screen.getByRole('slider', { name: 'Ease in to Whole range' })).toBeTruthy();
     expect(screen.queryByRole('slider', { name: 'Deep cuts to On repeat' })).toBeNull();
@@ -121,7 +124,7 @@ describe('KaraokeApp', () => {
     await screen.findByText('Plastic Love');
     expect(api.catalogue).toHaveBeenCalledWith({ low: 45, high: 72 });
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Connect Spotify' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Connect to Spotify' })[0]!);
     expect(navigate).toHaveBeenCalledWith('/api/auth/login');
     expect(JSON.parse(sessionStorage.getItem('kd.test')!)).toEqual({ low: 45, high: 72 });
   });

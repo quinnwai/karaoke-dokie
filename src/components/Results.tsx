@@ -1,9 +1,8 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { Decade, Match, Mood, ResultsMode, ResultsView, SliderId, VocalRange } from '../lib/contracts';
 import { midiToNoteName } from '../lib/audio/notes';
 import {
   artistLine,
-  CATALOGUE_NOTE,
   difficultyLabel,
   duetPartLine,
   MAYBE_NOTE,
@@ -26,7 +25,7 @@ import {
   viewMatches,
   type SliderDef,
 } from '../lib/songs/browse';
-import { FastLyricsIcon, OctaveIcon } from './Icon';
+import { BookIcon, FastLyricsIcon, OctaveIcon } from './Icon';
 import { Lyric } from './Lyric';
 import styles from './screen.module.css';
 
@@ -135,7 +134,7 @@ export function Results(props: ResultsProps) {
         <span className={styles.barActions}>
           {mode === 'catalogue' && (
             <button type="button" className={styles.connect} onClick={props.onConnect}>
-              Connect Spotify
+              Connect to Spotify
             </button>
           )}
           <button type="button" className={styles.redo} onClick={props.onRedo} aria-label="Redo the singing test">
@@ -216,36 +215,38 @@ export function Results(props: ResultsProps) {
                   </button>
                 )}
               </div>
-              <ChipRow label="Filter songs" selected={view.decade ?? view.mood ?? (view.duetsOnly ? 'duets' : null)}>
-                {facets.decades &&
-                  DECADES.map((d) => (
-                    <Chip
-                      key={d.id}
-                      id={d.id}
-                      label={d.label}
-                      count={counts.decades[d.id]}
-                      on={view.decade === d.id}
-                      onClick={() => props.onDecade(d.id)}
-                    />
-                  ))}
-                {facets.moods.length > 0 && <span className={styles.chipDivider} aria-hidden />}
-                {facets.moods.map((mood) => (
-                  <Chip
-                    key={mood}
-                    id={mood}
-                    label={MOOD_LABELS[mood]}
-                    count={counts.moods[mood]}
-                    on={view.mood === mood}
-                    onClick={() => props.onMood(mood)}
-                  />
-                ))}
-                {facets.duets && (
-                  <>
-                    <span className={styles.chipDivider} aria-hidden />
-                    <Chip id="duets" label="Duets" count={counts.duets} on={view.duetsOnly} onClick={props.onDuets} />
-                  </>
+              {/* Chips wrap onto new lines rather than scroll sideways: decades, then moods and duets. */}
+              <div className={styles.chipRows} role="group" aria-label="Filter songs">
+                {facets.decades && (
+                  <div className={styles.chipRow}>
+                    {DECADES.map((d) => (
+                      <Chip
+                        key={d.id}
+                        id={d.id}
+                        label={d.label}
+                        count={counts.decades[d.id]}
+                        on={view.decade === d.id}
+                        onClick={() => props.onDecade(d.id)}
+                      />
+                    ))}
+                  </div>
                 )}
-              </ChipRow>
+                {(facets.moods.length > 0 || facets.duets) && (
+                  <div className={styles.chipRow}>
+                    {facets.moods.map((mood) => (
+                      <Chip
+                        key={mood}
+                        id={mood}
+                        label={MOOD_LABELS[mood]}
+                        count={counts.moods[mood]}
+                        on={view.mood === mood}
+                        onClick={() => props.onMood(mood)}
+                      />
+                    ))}
+                    {facets.duets && <Chip id="duets" label="Duets" count={counts.duets} on={view.duetsOnly} onClick={props.onDuets} />}
+                  </div>
+                )}
+              </div>
             </section>
           )}
         </div>
@@ -302,19 +303,19 @@ export function Results(props: ResultsProps) {
         </button>
       )}
       {loading && <p className={styles.hint}>Loading…</p>}
-      {!loading && !error && list.length > 0 && visible.length >= list.length && (
+      {mode === 'library' && !loading && !error && list.length > 0 && visible.length >= list.length && (
         <p className={styles.hint}>That’s every song that fits, for now.</p>
       )}
       {mode === 'catalogue' && matches.length > 0 && (
-        <p className={styles.catalogueNote}>
-          {CATALOGUE_NOTE}{' '}
+        <div className={styles.catalogueNote}>
+          <p>Want personalized recommendations?</p>
           <button type="button" className={styles.textButton} onClick={props.onConnect}>
-            Connect Spotify
+            Connect to Spotify
           </button>
-        </p>
+        </div>
       )}
-      <a className={styles.credits} href="/credits">
-        Sources and credits
+      <a className={styles.credits} href="/credits" aria-label="Sources and credits" title="Sources and credits">
+        <BookIcon />
       </a>
     </div>
   );
@@ -380,20 +381,6 @@ function PreferenceSlider({
       <span className={styles.sliderEnd} aria-hidden>
         {def.right}
       </span>
-    </div>
-  );
-}
-
-/** A horizontally scrolling row of chips that keeps the picked one in view. */
-function ChipRow({ label, selected, children }: { label: string; selected: string | null; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const picked = ref.current?.querySelector<HTMLElement>('[aria-pressed="true"]');
-    picked?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-  }, [selected]);
-  return (
-    <div ref={ref} className={styles.chipRow} role="group" aria-label={label}>
-      {children}
     </div>
   );
 }

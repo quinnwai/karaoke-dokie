@@ -117,8 +117,3 @@ export function artistLine(m: Pick<Match, 'track' | 'year'>): string {
 
 /** Catalogue songs have no Spotify track of their own, only a search. */
 export const isCatalogueTrack = (trackId: string) => trackId.startsWith('cat:');
-
-/** Under the list in catalogue mode. */
-export const CATALOGUE_NOTE =
-  'These are songs from our catalogue. Connect Spotify to find songs from your own library. Spotify is invite-only during the beta.';
-
