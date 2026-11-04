@@ -58,12 +58,33 @@ other source (each model gives the probability of its class, from 0 to 1):
 - Upbeat: mood_happy >= 0.7 or mood_party >= 0.7 or danceability >= 0.8, and mood_sad < 0.5
 - Heartfelt: mood_sad >= 0.6, or mood_relaxed >= 0.7 and mood_happy < 0.5
 
-**Not run yet (Nov 3, 2026).** The API answered normally at 15:25 and has returned 500 and 504
-errors since about 15:50, its home page included, so only one batch (25 recordings) is cached. The
-labels file and the AcousticBrainz numbers below wait for the API (QWW-17): rerun the command
-above, which carries on from the cache. The final data dump on data.metabrainz.org holds the same
+**Not finished (Nov 3, 2026).** The API answered normally at 15:25, then returned 500 and 504
+errors from about 15:50, its home page included. It answered again from about 18:30, but only now
+and then: one recording took about 30 seconds, 25 at a time mostly timed out at its gateway (504
+after about 90 seconds), and most requests for recordings it had not served lately failed at once
+with 500 ("An unknown error occurred"). When the fetch stopped at 19:30, 10 of the 124 batches were
+cached (the last at 19:00): 250 of the 3,095 recordings, 197 of them with data. The labels file and
+the AcousticBrainz numbers below wait for the rest (QWW-17). To carry on from that cache on
+Quinn-Wai's Mac:
+
+```sh
+npm run moods:acousticbrainz -- ~/Desktop/test-audio-files/karaoke-dokie/ingestion-pipeline/data/karaoke_ranges.json \
+  --cache ~/multica_workspaces/quinnspirat-76a11c5eb0a3/qww-3-4e5c2c69110b/workdir/review/acousticbrainz \
+  --out data/moods/labels-acousticbrainz-v1.json
+```
+
+A run stops when one batch fails 3 tries in a row, keeping every batch it got, so run it again
+until it writes the labels file. The final data dump on data.metabrainz.org holds the same
 documents, but only as 30 files of about 40 GB in all, each mixing every recording ID, so it was
 not used.
+
+**A provisional reading, not a gate result.** On the 93 tune-half songs (of 1,251) that the cached
+batches cover, "Upbeat only when `gpt-6-luna` and AcousticBrainz agree" has Upbeat precision 0.69
+to 0.71 over the 3 runs (22 to 24 of 31 to 34 yes answers) and recall 0.56 to 0.62 on those songs,
+against precision 0.62 to 0.63 for `gpt-6-luna` alone and 0.54 for AcousticBrainz alone. That is
+too few songs to decide on (the 95% interval runs from about 0.5 to 0.8), and the held-out half was
+not looked at. It is the closest rule to the bar so far, so it is the first to check once every
+recording is in.
 
 ## MGPHot
 
@@ -178,8 +199,9 @@ Stability: 80.0% of the songs got the same label in all 3 runs (known or not, an
 the Upbeat chip is the same in all 3 runs for 88.3% of songs, and the Heartfelt chip for 90.0%.
 
 **Choosing the model.** A pilot labelled 150 songs from the tune half of the MGPHot overlap (see
-the next section; MGPHot says yes to 41% of them for Upbeat and 57% for Heartfelt) with four
-current models, scored against the MGPHot proxies:
+the next section; MGPHot says yes to 41% of them for Upbeat and 57% for Heartfelt) with six
+current models, scored against the MGPHot proxies. The two Claude models joined later on Nov 3,
+once an Anthropic key worked, on the same 150 songs:
 
 | Model | Upbeat precision and recall | Heartfelt precision and recall | List price per million tokens, in and out |
 | --- | --- | --- | --- |
@@ -187,10 +209,17 @@ current models, scored against the MGPHot proxies:
 | `gpt-6.1-terra` | 0.62, 0.63 | 0.88, 0.84 | $1.00, $5.00 |
 | `gemini-3.8-flash` | 0.57, 0.84 | 0.82, 0.80 | $0.75, $3.75 (doubling on Jan 1, 2027) |
 | `gemini-3.5-flash-lite` | 0.54, 0.89 | 0.83, 0.62 | $0.30, $2.50 |
+| `claude-haiku-5-5` | 0.56, 0.73 | 0.86, 0.65 | $0.10, $0.50 |
+| `claude-sonnet-5-5` | 0.63, 0.60 | 0.89, 0.55 | $2.00, $10.00 |
 
-The differences are within the noise of 150 songs, so the cheapest won. The held-out half was not
-used. At the same token counts a full run would cost about $0.45 with `gemini-3.8-flash` and $0.90
-with `gpt-6.1-terra`; labelling the 60 gold songs costs under a cent per run.
+The differences are within the noise of 150 songs (50 to 100 yes answers per model and mood, so a
+precision of 0.6 could be anything from about 0.5 to 0.7), so the cheapest won. The held-out half was not
+used. The Claude models knew 145 (Haiku) and 148 (Sonnet) of the songs and said yes less often,
+so their Heartfelt recall is lower, and neither comes near the Upbeat bar. At the same token counts
+a full run would cost about $0.25 with `claude-haiku-5-5` (its thinking made 18,148 tokens for the
+150 songs, against 10,498 for `gpt-6-luna`), $0.45 with `gemini-3.8-flash`, $0.90 with
+`gpt-6.1-terra` and $1.90 with `claude-sonnet-5-5`; labelling the 60 gold songs costs under a cent
+per run.
 
 ## Check against MGPHot
 
@@ -225,6 +254,30 @@ kappa 0.36, fair) and on Heartfelt for 80.4% (kappa 0.61, substantial).
 Not measured yet, waiting for the AcousticBrainz API (QWW-17): AcousticBrainz's precision and
 recall, those of AcousticBrainz with the LLM filling its gaps, and the agreement of all three
 sources. `moods:mgphot-check --ab` prints them.
+
+**Looking for an Upbeat that passes (Nov 3, 2026).** Other sources, and rules that show Upbeat only
+when two sources agree, were each kept or dropped on the tune half alone, and only a rule that
+passed there would have been scored on the held-out half, once. The Claude models labelled only
+the 150 pilot songs, so rules that use them are scored on those:
+
+| Tune half, against the MGPHot proxy | Songs | Upbeat precision | Upbeat recall |
+| --- | --- | --- | --- |
+| `gpt-6-luna`, 3 runs | 1,251 | 0.62 | 0.71 to 0.74 |
+| `claude-haiku-5-5` | 150 | 0.56 | 0.73 |
+| `claude-sonnet-5-5` | 150 | 0.63 | 0.60 |
+| Upbeat only when `gpt-6-luna` and Haiku agree | 150 | 0.65 | 0.68 |
+| Upbeat only when `gpt-6-luna` and Sonnet agree | 150 | 0.65 | 0.58 |
+| Upbeat only when Haiku and Sonnet agree | 150 | 0.69 | 0.55 |
+| Upbeat when 2 of those 3 models say so | 150 | 0.61 | 0.74 |
+| Upbeat only when all 3 models agree | 150 | 0.70 | 0.53 |
+
+No rule built from language models alone comes near 0.8: the models mostly make the same calls, so
+asking more of them to agree removes few of the songs the proxy disagrees with. Of the 150 songs,
+all 3 models call 14 Upbeat that the proxy does not, most of them feel-good songs just under its
+bars, and the proxy calls 11 Upbeat that no model does, among them power ballads that pass on Aural
+Intensity alone and slow R&B songs that pass on Danceability. Much of the gap may be the proxy's,
+then, which only the hand-labelled gold set can settle. AcousticBrainz, alone or agreeing with
+`gpt-6-luna`, waits for its fetch to finish (see "AcousticBrainz" for a provisional reading).
 
 **Recommended: `MOODS_SHIPPED=heartfelt`**, with the LLM's labels stored
 (`npm run moods:import -- data/moods/labels-openai-v1.json`). By default MGPHot is not stored and
