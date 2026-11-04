@@ -1,6 +1,6 @@
 // Spotify Web API client: authorization code flow, token refresh, library reads.
 // `fetch` is injected so tests run offline; SPOTIFY_MOCK=1 swaps in mockSpotify.ts.
-import type { Track } from '../contracts';
+import type { TimeRange, Track } from '../contracts';
 import type { SpotifyTokens, Store, UserRecord } from './store';
 
 export const SPOTIFY_SCOPES = 'user-library-read user-top-read user-read-recently-played playlist-read-private playlist-read-collaborative';
@@ -44,7 +44,7 @@ export interface SpotifyClient {
   getPlaylistTracks(accessToken: string): Promise<Track[]>;
 }
 
-export type TimeRange = 'short_term' | 'medium_term' | 'long_term';
+export type { TimeRange };
 export const TIME_RANGES: TimeRange[] = ['short_term', 'medium_term', 'long_term'];
 
 export class SpotifyError extends Error {
@@ -140,12 +140,15 @@ export const PLAYLIST_ONLY = 0.4;
  * the three time spans, plus a bonus for each extra span it appears in and for recent plays.
  * Songs in the user's own playlists get at least 0.4; songs that are only saved get 0.15.
  * `known` is true for songs in a top list, recent plays or a playlist: the ones the user knows.
+ * Each song also keeps where it was found (topLists, recentPlays, inPlaylist, saved), so its
+ * reason can name the list.
  * playRank is the order by familiarity (0 = most familiar).
  */
 export function buildLibrary({ top, recent, saved, playlists = [] }: Listening): Track[] {
   const byId = new Map<string, Track>();
   const best = new Map<string, number>();
   const windows = new Map<string, number>();
+  const lists = new Map<string, Set<TimeRange>>();
   const plays = new Map<string, number>();
   const savedIds = new Set(saved.map((t) => t.id));
   const playlistIds = new Set(playlists.map((t) => t.id));
@@ -169,6 +172,7 @@ export function buildLibrary({ top, recent, saved, playlists = [] }: Listening):
       add(t);
       best.set(t.id, Math.max(best.get(t.id) ?? 0, topPositionScore(i)));
       windows.set(t.id, (windows.get(t.id) ?? 0) + 1);
+      lists.set(t.id, (lists.get(t.id) ?? new Set<TimeRange>()).add(range));
     });
   }
   for (const t of recent) {
@@ -187,10 +191,21 @@ export function buildLibrary({ top, recent, saved, playlists = [] }: Listening):
     if (savedIds.has(id)) f = f === 0 ? SAVED_ONLY : f + SAVED_BONUS;
     return Math.min(1, Math.round(f * 1000) / 1000);
   };
+  /** Where the song was found, leaving out the lists it is not in. */
+  const foundIn = (id: string): Partial<Track> => {
+    const found: Partial<Track> = {};
+    const spans = lists.get(id);
+    if (spans) found.topLists = [...spans];
+    const n = plays.get(id);
+    if (n) found.recentPlays = n;
+    if (playlistIds.has(id)) found.inPlaylist = true;
+    if (savedIds.has(id)) found.saved = true;
+    return found;
+  };
   return order
     .map((id, i) => ({ track: byId.get(id)!, f: familiarity(id), i }))
     .sort((a, b) => b.f - a.f || a.i - b.i)
-    .map(({ track, f }, playRank) => ({ ...track, familiarity: f, known: known(track.id), playRank }));
+    .map(({ track, f }, playRank) => ({ ...track, ...foundIn(track.id), familiarity: f, known: known(track.id), playRank }));
 }
 
 // ---- real client ----

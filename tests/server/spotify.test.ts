@@ -284,6 +284,37 @@ describe('familiarity', () => {
     expect(by.saved!.familiarity).toBe(0.15);
   });
 
+  it('records where it found each song, without changing its familiarity', () => {
+    const lib = buildLibrary({
+      top: { short_term: [t('all'), t('month')], medium_term: [t('all'), t('half')], long_term: [t('all'), t('year')] },
+      recent: [t('played'), t('all'), t('played')],
+      saved: [t('saved'), t('all')],
+      playlists: [t('list'), t('all')],
+    });
+    // Only the lists a song is in are set.
+    const signals = ['topLists', 'recentPlays', 'inPlaylist', 'saved'];
+    const found = Object.fromEntries(lib.map((x) => [x.id, Object.fromEntries(Object.entries(x).filter(([k]) => signals.includes(k)))]));
+    expect(found).toStrictEqual({
+      all: { topLists: ['short_term', 'medium_term', 'long_term'], recentPlays: 1, inPlaylist: true, saved: true },
+      month: { topLists: ['short_term'] },
+      half: { topLists: ['medium_term'] },
+      year: { topLists: ['long_term'] },
+      played: { recentPlays: 2 },
+      list: { inPlaylist: true },
+      saved: { saved: true },
+    });
+    // The familiarity, known flags and order this library had before the lists were recorded.
+    expect(lib.map((x) => [x.id, x.familiarity, x.known, x.playRank])).toEqual([
+      ['all', 1, true, 0],
+      ['month', 0.984, true, 1],
+      ['half', 0.984, true, 2],
+      ['year', 0.984, true, 3],
+      ['list', 0.4, true, 4],
+      ['played', 0.2, true, 5],
+      ['saved', 0.15, false, 6],
+    ]);
+  });
+
   it('skips playlists when the permission is missing', async () => {
     const client = { ...createMockSpotifyClient(), getPlaylistTracks: async () => { throw new SpotifyError('no scope', 403); } };
     const lib = await getUserTracks(client, 'tok');
