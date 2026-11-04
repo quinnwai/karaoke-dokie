@@ -67,7 +67,7 @@ export type Label = Difficulty | 'maybe';
 /** 'none' = fits as written; 'up'/'down' = fits if sung an octave higher/lower than the artist. */
 export type OctaveShift = 'none' | 'up' | 'down';
 
-/** Spotify's top-50 lists by time span: short_term (about 4 weeks), medium_term (6 months), long_term (all time). */
+/** Spotify's top-50 lists by time span: short_term (about 4 weeks), medium_term (6 months), long_term (about a year). */
 export type TimeRange = 'short_term' | 'medium_term' | 'long_term';
 
 /** A Spotify track from the user's library. */

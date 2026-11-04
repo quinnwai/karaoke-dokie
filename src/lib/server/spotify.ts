@@ -36,7 +36,10 @@ export interface SpotifyClient {
   getMe(accessToken: string): Promise<SpotifyProfile>;
   /** Saved songs in Spotify's order (newest saved first), up to `max` (default 2000). playRank is the saved position. */
   getSavedTracks(accessToken: string, max?: number): Promise<Track[]>;
-  /** Top tracks for one time span (about 4 weeks, 6 months, or all time), most played first. */
+  /**
+   * Top tracks for one time span (about 4 weeks, 6 months, or a year), most played first.
+   * Spotify computes long_term from about a year of data, so it is not all time.
+   */
   getTopTracks(accessToken: string, timeRange?: TimeRange): Promise<Track[]>;
   /** The last 50 plays, newest first (a song can appear more than once). */
   getRecentlyPlayed(accessToken: string): Promise<Track[]>;

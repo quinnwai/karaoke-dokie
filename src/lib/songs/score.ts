@@ -161,7 +161,7 @@ type TrackListening = Pick<Track, 'known' | 'topLists' | 'recentPlays' | 'inPlay
 
 /**
  * The listening reason: the strongest sign that the user knows the song, with its time frame, in
- * this order: the 4-week top list, the 6-month one, the last 50 plays, the all-time list, their
+ * this order: the 4-week top list, the 6-month one, the last 50 plays, the 1-year one, their
  * playlists. A track that does not say where it was heard (a library cached before buildLibrary
  * recorded it, a test track) gets the older wording, from familiarity alone.
  */
@@ -170,7 +170,7 @@ function listeningReason(t: TrackListening | undefined, familiarity: number): st
   if (top.includes('short_term')) return 'In your top songs this month';
   if (top.includes('medium_term')) return 'In your top songs of the past 6 months';
   if (t?.recentPlays) return 'Played recently';
-  if (top.includes('long_term')) return 'One of your all-time top songs';
+  if (top.includes('long_term')) return 'In your top songs of the past year';
   if (t?.inPlaylist) return 'In your playlists';
   return familiarity >= 0.6 ? 'You play this a lot' : 'You know this one';
 }

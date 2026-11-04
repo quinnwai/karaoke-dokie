@@ -69,7 +69,7 @@ describe('reasonsForSlider', () => {
     'In your top songs this month',
     'In your top songs of the past 6 months',
     'Played recently',
-    'One of your all-time top songs',
+    'In your top songs of the past year',
     'In your playlists',
     'You play this a lot',
     'You know this one',

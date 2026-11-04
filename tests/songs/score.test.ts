@@ -257,18 +257,18 @@ describe('reasons', () => {
     expect(reason({ topLists: ['short_term'] })).toEqual(['In your top songs this month']);
     expect(reason({ topLists: ['medium_term'] })).toEqual(['In your top songs of the past 6 months']);
     expect(reason({ recentPlays: 1 })).toEqual(['Played recently']);
-    expect(reason({ topLists: ['long_term'] })).toEqual(['One of your all-time top songs']);
+    expect(reason({ topLists: ['long_term'] })).toEqual(['In your top songs of the past year']);
     expect(reason({ inPlaylist: true })).toEqual(['In your playlists']);
   });
 
-  it('picks the 4-week list first, then the 6-month list, recent plays, the all-time list, playlists', () => {
+  it('picks the 4-week list first, then the 6-month list, recent plays, the 1-year list, playlists', () => {
     const p = { comfort: 0, familiarity: 0.8, popularity: 0, penalty: 0 };
     const reason = (t: Partial<Track>) => reasonsFor(p, undefined, { known: true, ...t });
     const everywhere: Partial<Track> = { topLists: ['short_term', 'medium_term', 'long_term'], recentPlays: 3, inPlaylist: true, saved: true };
     expect(reason(everywhere)).toEqual(['In your top songs this month']);
     expect(reason({ ...everywhere, topLists: ['medium_term', 'long_term'] })).toEqual(['In your top songs of the past 6 months']);
     expect(reason({ ...everywhere, topLists: ['long_term'] })).toEqual(['Played recently']);
-    expect(reason({ ...everywhere, topLists: ['long_term'], recentPlays: undefined })).toEqual(['One of your all-time top songs']);
+    expect(reason({ ...everywhere, topLists: ['long_term'], recentPlays: undefined })).toEqual(['In your top songs of the past year']);
     expect(reason({ ...everywhere, topLists: undefined, recentPlays: undefined })).toEqual(['In your playlists']);
   });
 
