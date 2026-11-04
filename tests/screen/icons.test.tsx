@@ -50,7 +50,7 @@ describe('Results row', () => {
 
   it('shows octave and fast-lyrics icons, and reasons under the artist', () => {
     const matches = [
-      withMatch(match(0), { octave: 'up', fastLyrics: true, reasons: ['In your sweet spot', 'You play this a lot'] }),
+      withMatch(match(0), { octave: 'up', fastLyrics: true, reasons: ['In your sweet spot', 'In your top songs this month'] }),
       withMatch(match(1), { octave: 'down', fastLyrics: false, reasons: undefined }),
       withMatch(match(3), { octave: 'none', fastLyrics: false, reasons: [] }),
     ];
@@ -59,7 +59,7 @@ describe('Results row', () => {
 
     expect(within(first!).getByRole('img', { name: 'Sing it an octave higher than the artist' })).toBeTruthy();
     expect(within(first!).getByRole('img', { name: 'Fast lyrics' })).toBeTruthy();
-    expect(within(first!).getByText('In your sweet spot · You play this a lot')).toBeTruthy();
+    expect(within(first!).getByText('In your sweet spot · In your top songs this month')).toBeTruthy();
     expect(within(first!).getByRole('button').getAttribute('aria-label')).toBe(
       'Plastic Love by Mariya Takeuchi, Easy. Sing it higher than the artist. Fast lyrics',
     );
@@ -74,12 +74,12 @@ describe('Results row', () => {
 
 describe('SongDetail', () => {
   it('shows icons next to the wording and the reasons', () => {
-    const m = withMatch(match(2), { reasons: ['You play this a lot'] });
+    const m = withMatch(match(2), { reasons: ['Played recently'] });
     render(<SongDetail match={m} userRange={range} source={undefined} feedback={undefined} onFeedback={vi.fn()} onBack={vi.fn()} />);
     expect(screen.getByRole('img', { name: 'Fast lyrics' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeTruthy();
     expect(screen.getByText('Sing it lower than the artist')).toBeTruthy();
-    expect(screen.getByText('You play this a lot')).toBeTruthy();
+    expect(screen.getByText('Played recently')).toBeTruthy();
   });
 });
 

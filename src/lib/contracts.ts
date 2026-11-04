@@ -67,6 +67,9 @@ export type Label = Difficulty | 'maybe';
 /** 'none' = fits as written; 'up'/'down' = fits if sung an octave higher/lower than the artist. */
 export type OctaveShift = 'none' | 'up' | 'down';
 
+/** Spotify's top-50 lists by time span: short_term (about 4 weeks), medium_term (6 months), long_term (about a year). */
+export type TimeRange = 'short_term' | 'medium_term' | 'long_term';
+
 /** A Spotify track from the user's library. */
 export interface Track {
   id: string;
@@ -81,6 +84,17 @@ export interface Track {
   familiarity?: number;
   /** True when the user knows the song: in a top list, recent plays or one of their playlists. Saved-only songs are false. */
   known?: boolean;
+  // Where the user's listening shows the song (server/spotify.ts buildLibrary), so its reason can say
+  // which list it is in. Each is unset when it does not apply; catalogue tracks and libraries
+  // cached before these were kept have none.
+  /** The top-50 lists the song is in, shortest span first. */
+  topLists?: TimeRange[];
+  /** How many of the user's last 50 plays were this song. */
+  recentPlays?: number;
+  /** True when the song is in a playlist the user made or collaborates on. */
+  inPlaylist?: boolean;
+  /** True when the user saved the song. */
+  saved?: boolean;
   /** Spotify's 0-100 track popularity, when Spotify returns it (it no longer does for Development Mode apps). */
   popularity?: number;
   /** Year from Spotify's album.release_date. Unset for compilation albums (their date is the compilation's) and unparsable dates. */

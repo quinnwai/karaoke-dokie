@@ -3,8 +3,8 @@
 // the visitor's range comes with each request, and nothing about them is kept here.
 //
 // Catalogue songs are shown as tracks nobody has played. Familiarity is 1, so comfort alone
-// decides the fit part of the score, and known is false, so no reason says "You play this a lot"
-// (score.ts). Popularity comes from the song's USDB views and stars and from our karaoke
+// decides the fit part of the score, and known is false, so no reason says the user listens to
+// them (score.ts). Popularity comes from the song's USDB views and stars and from our karaoke
 // popularity (KaraFun views, Billboard Year-End rank), whatever measured its range.
 
 import type { DataSourceLogEntry, Match, RecommendationsResponse, SongRange, Track, VocalRange } from '../contracts';

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { difficultyLabel, octaveWording, rangeBar, scalePosition, sourceTooltip } from '../../src/lib/client/display';
-import type { SongRange, VocalRange } from '../../src/lib/contracts';
+import { difficultyLabel, octaveWording, rangeBar, reasonsForSlider, scalePosition, sourceTooltip } from '../../src/lib/client/display';
+import { SLIDER_IDS, type SongRange, type Track, type VocalRange } from '../../src/lib/contracts';
+import { reasonsFor } from '../../src/lib/songs/score';
 import { source } from '../fixtures/screen';
 
 const user: VocalRange = { low: 45, high: 72, source: 'test' }; // A2 to C5
@@ -51,6 +52,70 @@ describe('wording', () => {
 
   it('difficulty labels', () => {
     expect(['easy', 'medium', 'hard', 'maybe'].map((d) => difficultyLabel(d as 'easy'))).toEqual(['Easy', 'Medium', 'Hard', 'Maybe']);
+  });
+});
+
+describe('reasonsForSlider', () => {
+  const RANGE_REASONS = [
+    'In your sweet spot',
+    'Mostly comfortable',
+    'A few notes near your high end',
+    'A few notes near your low end',
+    'Spends time at your high end',
+    'Spends time at your low end',
+  ];
+
+  const LISTENING_REASONS = [
+    'In your top songs this month',
+    'In your top songs of the past 6 months',
+    'Played recently',
+    'In your top songs of the past year',
+    'In your playlists',
+    'You play this a lot',
+    'You know this one',
+  ];
+
+  it('leads with the range reason when the difficulty slider moved last', () => {
+    for (const range of RANGE_REASONS) {
+      expect(reasonsForSlider(['Played recently', range], 'difficulty')).toEqual([range, 'Played recently']);
+      expect(reasonsForSlider(['Crowd favourite', range], 'popularity')).toEqual(['Crowd favourite', range]);
+    }
+  });
+
+  it('leads with the listening reason when the familiarity slider moved last', () => {
+    for (const heard of LISTENING_REASONS) {
+      expect(reasonsForSlider(['In your sweet spot', heard], 'familiarity')).toEqual([heard, 'In your sweet spot']);
+      expect(reasonsForSlider([heard, 'In your sweet spot'], 'difficulty')).toEqual(['In your sweet spot', heard]);
+      expect(reasonsForSlider([heard, 'Crowd favourite'], 'popularity')).toEqual(['Crowd favourite', heard]);
+    }
+  });
+
+  it('matches every reason a song can get to its own slider and to no other', () => {
+    const bySlider = { difficulty: new Set<string>(), familiarity: new Set<string>(), popularity: new Set<string>() };
+    const none = { comfort: 0, familiarity: 0, popularity: 0, penalty: 0 };
+    for (const difficulty of ['easy', 'medium', 'hard'] as const) {
+      for (const side of ['top', 'bottom'] as const) reasonsFor({ ...none, comfort: 0.9 }, { difficulty, side }).forEach((r) => bySlider.difficulty.add(r));
+    }
+    for (const comfort of [0.6, 0.9]) reasonsFor({ ...none, comfort }).forEach((r) => bySlider.difficulty.add(r));
+    const heard: Partial<Track>[] = [{}, { topLists: ['short_term'] }, { topLists: ['medium_term'] }, { recentPlays: 1 }, { topLists: ['long_term'] }, { inPlaylist: true }];
+    for (const t of heard) {
+      for (const familiarity of [0.3, 0.6]) reasonsFor({ ...none, familiarity }, undefined, t).forEach((r) => bySlider.familiarity.add(r));
+    }
+    reasonsFor({ ...none, popularity: 0.9 }).forEach((r) => bySlider.popularity.add(r));
+    expect([...bySlider.difficulty].sort()).toEqual([...RANGE_REASONS].sort());
+    expect([...bySlider.familiarity].sort()).toEqual([...LISTENING_REASONS].sort());
+    expect([...bySlider.popularity]).toEqual(['Crowd favourite']);
+
+    for (const [slider, reasons] of Object.entries(bySlider)) {
+      for (const reason of reasons) {
+        for (const lead of SLIDER_IDS) expect(reasonsForSlider(['Other', reason], lead)[0]).toBe(lead === slider ? reason : 'Other');
+      }
+    }
+  });
+
+  it('keeps the order when no slider leads, and copes with no reasons', () => {
+    expect(reasonsForSlider(['Crowd favourite', 'In your sweet spot'], null)).toEqual(['Crowd favourite', 'In your sweet spot']);
+    expect(reasonsForSlider(undefined, 'difficulty')).toEqual([]);
   });
 });
 

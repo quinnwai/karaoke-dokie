@@ -226,7 +226,7 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   const yoru = page.locator('ol li').filter({ hasText: 'Yoru ni Kakeru' });
   await expect(yoru.getByRole('img', { name: 'Fast lyrics' })).toBeVisible();
   await expect(yoru.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeVisible();
-  await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByText('In your sweet spot · You play this a lot')).toBeVisible();
+  await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByText('In your sweet spot · In your top songs this month')).toBeVisible();
   await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByRole('img')).toHaveCount(0);
   await shot(page, '07b-results-icons');
 
@@ -250,7 +250,7 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await expect(page.getByText('Fast lyrics', { exact: true }).last()).toBeVisible();
   await expect(page.getByText('Sing it lower than the artist')).toBeVisible();
   await expect(page.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeVisible();
-  await expect(page.getByText('You play this a lot')).toBeVisible();
+  await expect(page.getByText('Played recently')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open in Spotify' })).toHaveAttribute('href', 'https://open.spotify.com/track/t2');
   await shot(page, '09-song-detail');
 
