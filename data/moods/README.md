@@ -178,8 +178,9 @@ Stability: 80.0% of the songs got the same label in all 3 runs (known or not, an
 the Upbeat chip is the same in all 3 runs for 88.3% of songs, and the Heartfelt chip for 90.0%.
 
 **Choosing the model.** A pilot labelled 150 songs from the tune half of the MGPHot overlap (see
-the next section; MGPHot says yes to 41% of them for Upbeat and 57% for Heartfelt) with four
-current models, scored against the MGPHot proxies:
+the next section; MGPHot says yes to 41% of them for Upbeat and 57% for Heartfelt) with six
+current models, scored against the MGPHot proxies. The two Claude models joined later on Nov 3,
+once an Anthropic key worked, on the same 150 songs:
 
 | Model | Upbeat precision and recall | Heartfelt precision and recall | List price per million tokens, in and out |
 | --- | --- | --- | --- |
@@ -187,10 +188,17 @@ current models, scored against the MGPHot proxies:
 | `gpt-6.1-terra` | 0.62, 0.63 | 0.88, 0.84 | $1.00, $5.00 |
 | `gemini-3.8-flash` | 0.57, 0.84 | 0.82, 0.80 | $0.75, $3.75 (doubling on Jan 1, 2027) |
 | `gemini-3.5-flash-lite` | 0.54, 0.89 | 0.83, 0.62 | $0.30, $2.50 |
+| `claude-haiku-5-5` | 0.56, 0.73 | 0.86, 0.65 | $0.10, $0.50 |
+| `claude-sonnet-5-5` | 0.63, 0.60 | 0.89, 0.55 | $2.00, $10.00 |
 
-The differences are within the noise of 150 songs, so the cheapest won. The held-out half was not
-used. At the same token counts a full run would cost about $0.45 with `gemini-3.8-flash` and $0.90
-with `gpt-6.1-terra`; labelling the 60 gold songs costs under a cent per run.
+The differences are within the noise of 150 songs (50 to 100 yes answers per model and mood, so a
+precision of 0.6 could be anything from about 0.5 to 0.7), so the cheapest won. The held-out half was not
+used. The Claude models knew 145 (Haiku) and 148 (Sonnet) of the songs and said yes less often,
+so their Heartfelt recall is lower, and neither comes near the Upbeat bar. At the same token counts
+a full run would cost about $0.25 with `claude-haiku-5-5` (its thinking made 18,148 tokens for the
+150 songs, against 10,498 for `gpt-6-luna`), $0.45 with `gemini-3.8-flash`, $0.90 with
+`gpt-6.1-terra` and $1.90 with `claude-sonnet-5-5`; labelling the 60 gold songs costs under a cent
+per run.
 
 ## Check against MGPHot
 
