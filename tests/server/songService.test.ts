@@ -71,6 +71,19 @@ describe('song service recommendations', () => {
     expect(res.sources.t2).toMatchObject({ outcome: 'note-file', trackId: 't2' });
   });
 
+  it('lists a song once when the library has it under two Spotify ids, where it ranks best', async () => {
+    const store = createMemoryStore();
+    const { deps } = fakeDeps();
+    const svc = createSongService(store, deps, { concurrency: 1 });
+    // t2's single and album track: same artist and title, different ids.
+    const album: Track = { ...track(2), id: 't2-album', playRank: 9 };
+    const lib = [track(2), track(4), album];
+    for (const all of [false, true]) {
+      const res = await svc.recommend(lib, user, 0, 10, { all });
+      expect(res.matches.map((m) => m.track.id)).toEqual(['t2', 't4']);
+    }
+  });
+
   it('caches lookups and logs every resolved song, including skipped ones', async () => {
     const store = createMemoryStore();
     const { deps, resolveSongRange } = fakeDeps();
@@ -105,13 +118,14 @@ describe('song service recommendations', () => {
     expect(seen).toEqual(['t2', 't4', 't8', 't10', 't14', 't16', 't20', 't22', 't26', 't28']);
   });
 
-  it('leaves out dub and instrumental versions, which share the original song key', async () => {
+  it('leaves out dub and instrumental versions, and lists a remix sharing the key once', async () => {
     // Like the real songKey, both versions share the original's key, so they share its range.
     const svc = createSongService(createMemoryStore(), fakeDeps({ songKey: (a, t) => `${a}|${t.replace(/ - .*$/, '')}`.toLowerCase() }).deps);
     const dub = { ...track(2), id: 't2dub', title: 'Song 2 - Satta Dub' };
     const remix = { ...track(2), id: 't2remix', title: 'Song 2 - Remix' };
     const res = await svc.recommend([track(2), dub, remix], user, 0, 50);
-    expect(res.matches.map((m) => m.track.id)).toEqual(['t2', 't2remix']);
+    // The remix shares the original's key and range, so it is the same song on the list.
+    expect(res.matches.map((m) => m.track.id)).toEqual(['t2']);
   });
 
   it('never matches skipped songs', async () => {
@@ -148,14 +162,13 @@ describe('song service recommendations', () => {
     expect(await store.getSongRange('artist 1|song 1')).toBeNull();
   });
 
-  it('shares cached ranges between tracks with the same song key', async () => {
+  it('shares cached ranges between tracks with the same song key, and lists the song once', async () => {
     const store = createMemoryStore();
     const { deps, resolveSongRange } = fakeDeps();
     const dup = { ...track(2), id: 'other-id', playRank: 3 };
     const res = await createSongService(store, deps).recommend([track(2), dup], user, 0, 5);
     expect(resolveSongRange).toHaveBeenCalledTimes(1);
-    expect(res.matches.map((m) => m.track.id)).toEqual(['t2', 'other-id']);
-    expect(res.sources['other-id']?.trackId).toBe('other-id');
+    expect(res.matches.map((m) => m.track.id)).toEqual(['t2']);
   });
 });
 

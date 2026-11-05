@@ -216,6 +216,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       const [index, popularity] = all ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys)]) : [null, null];
       const matches: Match[] = [];
       const logs = new Map<string, DataSourceLogEntry>();
+      const keyOf = new Map<string, string>();
       for (const { track, key, range, log } of candidates) {
         const row = index?.get(key);
         const pop = popularity?.get(key);
@@ -223,6 +224,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         if (!m) continue;
         matches.push(index ? { ...m, ...songFacts(track, row, pop) } : m);
         logs.set(track.id, log);
+        keyOf.set(track.id, key);
       }
       const sourcesOf = (items: Match[]) => {
         const sources: Record<string, DataSourceLogEntry> = {};
@@ -235,7 +237,15 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
 
       // Rank the whole library, then page it. The order is the same on every request (same
       // tracks, same cached ranges), so pages never repeat or skip a song.
-      const ranked = deps.rankMatches(matches);
+      // A song can be in a library twice under different Spotify ids (the single and the album
+      // track): it is listed once, where it ranks best.
+      const seen = new Set<string>();
+      const ranked = deps.rankMatches(matches).filter((m) => {
+        const key = keyOf.get(m.track.id) ?? m.track.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
       if (all) {
         const items = ranked.slice(0, MAX_ALL_MATCHES).map(compact);
         // Not complete while lookups have run out of budget: nextOffset is then set, and asking for
