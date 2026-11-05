@@ -204,14 +204,14 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   expect(api.savedRanges).toEqual([]);
   expect(await page.evaluate(() => localStorage.getItem('kd.range'))).toBe(JSON.stringify({ low: 45, high: 72 }));
   // Catalogue songs are nobody's library: a difficulty slider, but no on-repeat one.
-  await expect(page.getByRole('slider', { name: 'Ease in to Whole range' })).toBeVisible();
-  await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toHaveCount(0);
+  await expect(page.getByRole('slider', { name: 'Light work to Locked in' })).toBeVisible();
+  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
   await page.waitForTimeout(800);
   await shot(page, '07-catalogue-results');
 
   // ---- Connect Spotify (mocked redirect back to /?signedIn=1): the range carries over ----
   await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
-  await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toBeVisible();
+  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toBeVisible();
   expect(api.savedRanges).toEqual([{ low: 45, high: 72, source: 'test' }]);
   expect(api.recommendationCalls.at(-1)).toBe('library ?all=1');
   await expect(page).toHaveURL(/\/$/);
@@ -230,18 +230,18 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByRole('img')).toHaveCount(0);
   await shot(page, '07b-results-icons');
 
-  await page.getByRole('button', { name: 'Generate more songs' }).click();
+  await page.getByRole('button', { name: 'Load more songs' }).click();
   await expect(page.locator('ol li')).toHaveCount(10);
   // More songs come from memory: still one library request.
   expect(api.recommendationCalls.filter((c) => c.startsWith('library'))).toHaveLength(1);
-  await expect(page.getByRole('button', { name: 'Generate more songs' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Load more songs' })).toHaveCount(0);
   // Low-confidence songs come last, under Maybe, without a difficulty label.
   const maybe = page.getByRole('region', { name: 'Maybe' });
   await expect(maybe.locator('li')).toHaveCount(2);
   await expect(maybe.getByRole('button', { name: 'Sukiyaki by Kyu Sakamoto, Maybe' })).toBeVisible();
   await expect(maybe.locator('[data-difficulty]')).toHaveCount(0);
   await page.locator('ol li').nth(9).scrollIntoViewIfNeeded();
-  await shot(page, '08-generate-more');
+  await shot(page, '08-load-more');
 
   // ---- Song detail ----
   await page.getByRole('button', { name: /^Yoru ni Kakeru/ }).click();
@@ -291,7 +291,7 @@ test('a Maybe song has no difficulty, and its info says the range is an estimate
   await mockApi(context, api);
   const page = await context.newPage();
   await page.goto('/');
-  await page.getByRole('button', { name: 'Generate more songs' }).click();
+  await page.getByRole('button', { name: 'Load more songs' }).click();
   const maybe = page.getByRole('region', { name: 'Maybe' });
   await expect(maybe.getByText('We only have an estimate of these songs’ range.', { exact: false })).toBeVisible();
   await maybe.scrollIntoViewIfNeeded();
@@ -388,36 +388,36 @@ test('sliders and decade chips: sliders reorder, chips filter with counts, all o
   await shot(page, '19-controls');
 
   const titles = () => page.locator('ol li [class*="songTitle"]').allTextContents();
-  const lyric = page.locator('[data-lyric]');
   const before = await titles();
-  await expect(lyric).toHaveText('Our best guess for you');
+  // No title line over the list; each song's reasons are sung in instead, once its row is on screen.
+  await expect(page.locator('[data-lyric]')).toHaveCount(0);
+  await expect(page.locator('ol li').first().locator('[data-reasons]')).toHaveAttribute('data-sing', 'singing');
 
   // A real drag: the thumb starts in the middle; pulling it to the right end switches the slider on.
-  const difficulty = page.getByRole('slider', { name: 'Ease in to Whole range' });
+  const difficulty = page.getByRole('slider', { name: 'Light work to Locked in' });
   await expect(difficulty).toHaveAttribute('aria-valuetext', 'not set');
   const box = (await difficulty.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 6 });
   await page.mouse.up();
-  await expect(difficulty).toHaveAttribute('aria-valuetext', 'towards Whole range');
-  await expect(lyric).toHaveText('Using your whole range');
+  await expect(difficulty).toHaveAttribute('aria-valuetext', 'towards Locked in');
   await page.waitForTimeout(300);
-  await shot(page, '20-slider-whole-range');
+  await shot(page, '20-slider-locked-in');
 
-  // Each slider, from the keyboard, to each end; every move reorders and says what it does.
+  // Each slider, from the keyboard, to each end; every move reorders the songs.
   const orders = new Set([JSON.stringify(before)]);
-  for (const [name, leftLyric, rightLyric] of [
-    ['Ease in to Whole range', 'Comfortable tunes to ease into', 'Using your whole range'],
-    ['Deep cuts to On repeat', 'Saved songs you haven’t played in a while', 'The songs you’ve got on repeat'],
-    ['Hidden gems to Big hits', 'Hidden gems for your voice', 'Songs the whole room knows'],
+  for (const [left, right] of [
+    ['Light work', 'Locked in'],
+    ['Rediscover', 'On repeat'],
+    ['Deep cuts', 'Pop hits'],
   ] as const) {
-    const slider = page.getByRole('slider', { name });
+    const slider = page.getByRole('slider', { name: `${left} to ${right}` });
     await slider.press('Home');
-    await expect(lyric).toHaveText(leftLyric);
+    await expect(slider).toHaveAttribute('aria-valuetext', `towards ${left}`);
     orders.add(JSON.stringify(await titles()));
     await slider.press('End');
-    await expect(lyric).toHaveText(rightLyric);
+    await expect(slider).toHaveAttribute('aria-valuetext', `towards ${right}`);
     orders.add(JSON.stringify(await titles()));
   }
   expect(orders.size).toBeGreaterThan(2);

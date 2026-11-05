@@ -28,8 +28,8 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   await page.getByRole('button', { name: 'Continue' }).click();
   const songs = page.locator('ol li');
   await expect(songs).toHaveCount(5, { timeout: 20_000 });
-  await expect(page.getByRole('slider', { name: 'Ease in to Whole range' })).toBeVisible();
-  await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toHaveCount(0);
+  await expect(page.getByRole('slider', { name: 'Light work to Locked in' })).toBeVisible();
+  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-01-catalogue.png') });
   // The end of the list: one short question with the button, and the book icon for sources.
   const credits = page.getByRole('link', { name: 'Sources and credits' });
@@ -77,7 +77,7 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
 
   // ---- Connect Spotify (mock): the range carries over and library songs load ----
   await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
-  await expect(page.getByRole('slider', { name: 'Deep cuts to On repeat' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toBeVisible({ timeout: 20_000 });
   await expect(songs).toHaveCount(5);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-04-library.png') });
 
@@ -118,7 +118,7 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   }
   await page.getByRole('button', { name: 'Back to songs' }).click();
   const group = page.getByRole('region', { name: 'Maybe' });
-  for (let i = 0; i < 10 && (await group.count()) === 0; i++) await page.getByRole('button', { name: 'Generate more songs' }).click();
+  for (let i = 0; i < 10 && (await group.count()) === 0; i++) await page.getByRole('button', { name: 'Load more songs' }).click();
   await expect(group.locator('li')).toHaveCount(3);
   await expect(group.locator('[data-difficulty]')).toHaveCount(0);
   await group.scrollIntoViewIfNeeded();

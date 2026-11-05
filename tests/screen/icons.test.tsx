@@ -59,7 +59,7 @@ describe('Results row', () => {
 
     expect(within(first!).getByRole('img', { name: 'Sing it an octave higher than the artist' })).toBeTruthy();
     expect(within(first!).getByRole('img', { name: 'Fast lyrics' })).toBeTruthy();
-    expect(within(first!).getByText('In your sweet spot · In your top songs this month')).toBeTruthy();
+    expect(first!.querySelector('[data-reasons]')!.textContent!.replace(/\u00a0/g, ' ')).toBe('In your sweet spot · In your top songs this month');
     expect(within(first!).getByRole('button').getAttribute('aria-label')).toBe(
       'Plastic Love by Mariya Takeuchi, Easy. Sing it higher than the artist. Fast lyrics',
     );

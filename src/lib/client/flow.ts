@@ -45,7 +45,7 @@ export interface TestProgress {
 export type KnownSong = KnownSongsResponse['songs'][number];
 
 export const MAX_PICKS = 3;
-/** Songs shown at first and added by each "Generate more". */
+/** Songs shown at first and added by each "Load more". */
 export const SHOW_STEP = 5;
 /** How many times an incomplete library load is asked for again (the server continues its lookups). */
 export const MAX_LOAD_ATTEMPTS = 5;

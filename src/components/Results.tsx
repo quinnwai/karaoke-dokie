@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Decade, Match, Mood, ResultsMode, ResultsView, SliderId, VocalRange } from '../lib/contracts';
 import { midiToNoteName } from '../lib/audio/notes';
 import {
@@ -18,7 +18,6 @@ import {
   chipCounts,
   DECADES,
   hasFilters,
-  lyricFor,
   MOOD_LABELS,
   savedDividerIndex,
   SLIDERS,
@@ -26,7 +25,6 @@ import {
   type SliderDef,
 } from '../lib/songs/browse';
 import { BookIcon, FastLyricsIcon, OctaveIcon, SpotifyIcon } from './Icon';
-import { Lyric } from './Lyric';
 import styles from './screen.module.css';
 
 interface ResultsProps {
@@ -104,7 +102,7 @@ export function Results(props: ResultsProps) {
         <span className={styles.songText}>
           <span className={styles.songTitle}>{m.track.title}</span>
           <span className={styles.songArtist}>{artistLine(m)}</span>
-          {reasons.length > 0 && <span className={styles.songReasons}>{reasonLine(reasons)}</span>}
+          {reasons.length > 0 && <SungReasons key={reasons.join(' · ')} reasons={reasons} />}
         </span>
         <span className={styles.songMeta}>
           <OctaveIcon octave={m.octave} className={styles.icon} />
@@ -256,8 +254,6 @@ export function Results(props: ResultsProps) {
         </div>
       )}
 
-      <Lyric text={matches.length > 0 ? lyricFor(view, leadSlider) : 'Songs for your voice'} />
-
       {sure.length > 0 && (
         <ol className={styles.songList}>
           {sure.map((m, i) => (
@@ -302,8 +298,8 @@ export function Results(props: ResultsProps) {
         </button>
       )}
       {!error && visible.length < list.length && (
-        <button type="button" className={styles.more} onClick={props.onMore} aria-label="Generate more songs">
-          Generate more
+        <button type="button" className={styles.loadMore} onClick={props.onMore} aria-label="Load more songs">
+          Load more
         </button>
       )}
       {loading && <p className={styles.hint}>Loading…</p>}
@@ -325,8 +321,65 @@ export function Results(props: ResultsProps) {
   );
 }
 
-/** Reasons joined on one line that may wrap only between reasons, so none is cut off. */
-const reasonLine = (reasons: string[]) => reasons.map((r) => r.replace(/ /g, '\u00a0')).join(' · ');
+/** Seconds between one sung word of a reason line and the next. */
+const REASON_WORD_GAP = 0.14;
+/** Share of a reason line that must be on screen before it is sung. */
+const SEEN = 0.6;
+
+/**
+ * A song's reasons, sung in like a karaoke lyric the first time its row scrolls into view: each
+ * word lights up pink in turn, then settles back to the line's own pink. Sings again when the
+ * reasons change (the caller keys it on their text). Wraps only between reasons: the words of one
+ * reason are joined by no-break spaces, so none is split across lines unless it alone is too wide.
+ */
+function SungReasons({ reasons }: { reasons: string[] }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  // Without IntersectionObserver there is no way to tell when the row is seen: show it settled.
+  const [sing, setSing] = useState<'waiting' | 'singing' | 'settled'>(() =>
+    typeof IntersectionObserver === 'undefined' ? 'settled' : 'waiting',
+  );
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || sing !== 'waiting') return;
+    // No root: the viewport, after clipping by every scrolling box around the row (the TV screen).
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.intersectionRatio >= SEEN)) {
+          setSing('singing');
+          observer.disconnect();
+        }
+      },
+      { threshold: SEEN },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [sing]);
+
+  let beat = 0;
+  const word = (text: string) => (
+    <span className={styles.reasonWord} style={{ animationDelay: `${(beat++ * REASON_WORD_GAP).toFixed(2)}s` }}>
+      {text}
+    </span>
+  );
+  return (
+    <span ref={ref} className={styles.songReasons} data-reasons data-sing={sing}>
+      {reasons.map((reason, i) => (
+        <Fragment key={i}>
+          {i > 0 && <> {word('·')} </>}
+          {reason
+            .split(' ')
+            .filter(Boolean)
+            .map((w, j) => (
+              <Fragment key={j}>
+                {j > 0 && '\u00a0'}
+                {word(w)}
+              </Fragment>
+            ))}
+        </Fragment>
+      ))}
+    </span>
+  );
+}
 
 /**
  * One continuous preference. Untouched it does nothing and sits dim in the middle; moving it (a

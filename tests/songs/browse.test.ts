@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { Decade, Label, Match, Mood, ResultsView, SliderId, VocalRange } from '../../src/lib/contracts';
 import {
   DECADES,
-  DEFAULT_LYRIC,
   DEFAULT_VIEW,
   SLIDERS,
   availableFacets,
@@ -12,7 +11,6 @@ import {
   filterMatches,
   fitViewTo,
   hasFilters,
-  lyricFor,
   orderMatches,
   pickDecade,
   pickMood,
@@ -110,7 +108,7 @@ describe('sliders', () => {
 
   it('the on-repeat slider orders by how much you play a song, and replaces the known-first rule', () => {
     expect(order({ familiarity: 1 })).toEqual(['top2', 'top3', 'top1', 'saved', 'maybe']);
-    // Deep cuts: the saved song you have not played in a while comes first.
+    // Rediscover: the saved song you have not played in a while comes first.
     expect(order({ familiarity: 0 })).toEqual(['saved', 'top1', 'top3', 'top2', 'maybe']);
   });
 
@@ -154,26 +152,15 @@ describe('sliders', () => {
   });
 });
 
-describe('the lyric line', () => {
-  it('reads the slider moved last, in thirds of its track', () => {
-    expect(lyricFor(DEFAULT_VIEW, null)).toBe(DEFAULT_LYRIC);
-    expect(lyricFor({ ...DEFAULT_VIEW, difficulty: 0 }, 'difficulty')).toBe('Comfortable tunes to ease into');
-    expect(lyricFor({ ...DEFAULT_VIEW, difficulty: 0.5 }, 'difficulty')).toBe('A little stretch, not too much');
-    expect(lyricFor({ ...DEFAULT_VIEW, difficulty: 1 }, 'difficulty')).toBe('Using your whole range');
-    expect(lyricFor({ ...DEFAULT_VIEW, familiarity: 0.9 }, 'familiarity')).toBe('The songs you’ve got on repeat');
-    const both = { ...DEFAULT_VIEW, difficulty: 0.1, popularity: 0.95 };
-    expect(lyricFor(both, 'popularity')).toBe('Songs the whole room knows');
-    // A lead that is no longer set gives way to a slider that is.
-    expect(lyricFor(both, 'familiarity')).toBe('Comfortable tunes to ease into');
-  });
-
-  it('every slider has words for both ends and three lyrics', () => {
+describe('slider labels', () => {
+  it('every slider has words for both ends, and no word is used twice', () => {
     expect(SLIDERS.map((s) => [s.left, s.right])).toEqual([
-      ['Ease in', 'Whole range'],
-      ['Deep cuts', 'On repeat'],
-      ['Hidden gems', 'Big hits'],
+      ['Light work', 'Locked in'],
+      ['Rediscover', 'On repeat'],
+      ['Deep cuts', 'Pop hits'],
     ]);
-    for (const s of SLIDERS) expect(new Set(s.lyrics).size).toBe(3);
+    const words = SLIDERS.flatMap((s) => [s.left, s.right]);
+    expect(new Set(words).size).toBe(words.length);
   });
 });
 

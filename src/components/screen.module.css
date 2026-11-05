@@ -445,6 +445,7 @@
   text-decoration: underline dotted;
   text-underline-offset: 3px;
   cursor: pointer;
+  transition: color 0.15s;
 }
 
 .rangeWarning {
@@ -475,6 +476,39 @@
   font-size: 12px;
   color: var(--dim);
   cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+/* Load more: the same quiet outline as redo, a little bigger. */
+.loadMore {
+  border: 1px solid var(--faint);
+  border-radius: var(--squircle);
+  background: none;
+  padding: 7px 18px;
+  font-size: 13px;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+/* Redo, Load more and the range notes are quiet until pointed at, then pink. Hover only where a
+   pointer can hover, so a tap on a phone does not leave them pink. */
+@media (hover: hover) {
+  .redo:hover,
+  .loadMore:hover {
+    border-color: var(--pink);
+    color: var(--pink);
+  }
+  .rangeNote:hover {
+    color: var(--pink);
+  }
+}
+
+.redo:focus-visible,
+.loadMore:focus-visible,
+.rangeNote:focus-visible {
+  border-color: var(--pink);
+  color: var(--pink);
 }
 
 .songList {
@@ -559,10 +593,34 @@
 .songReasons {
   font-size: 12px;
   line-height: 1.35;
-  color: var(--pink);
-  opacity: 0.8;
+  /* Pink at 80%, as a colour rather than opacity, so a word being sung can flash brighter. */
+  color: rgba(255, 46, 147, 0.8);
   /* Wraps between reasons (each keeps its own spaces), never mid-reason and never cut off. */
   overflow-wrap: anywhere;
+}
+
+/* Each word waits faint until its row scrolls into view, then is sung in like a lyric. */
+.songReasons[data-sing='waiting'] .reasonWord {
+  opacity: 0.22;
+}
+
+.songReasons[data-sing='singing'] .reasonWord {
+  animation: singReason 0.9s ease-out both;
+}
+
+/* The lyric's flash (see sing), settling back to the line's own pink instead of white. */
+@keyframes singReason {
+  0% {
+    opacity: 0.22;
+  }
+  25% {
+    opacity: 1;
+    color: var(--pink);
+    text-shadow: 0 0 12px var(--pink-glow);
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 .songMeta {
@@ -910,7 +968,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .word {
+  .word,
+  .songReasons[data-sing] .reasonWord {
     opacity: 1;
     animation: none;
   }
@@ -1265,6 +1324,7 @@
   .chip,
   .connect,
   .redo,
+  .loadMore,
   .more,
   .spotify,
   .pill,
@@ -1280,7 +1340,8 @@
   }
   .chip,
   .connect,
-  .redo {
+  .redo,
+  .loadMore {
     border-radius: 16px;
   }
   .pill,

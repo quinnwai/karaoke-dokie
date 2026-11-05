@@ -50,6 +50,8 @@ function fakeApi(user: MeResponse | null) {
 }
 
 const lyrics = () => Array.from(document.querySelectorAll('[data-lyric]')).map((p) => p.textContent);
+/** Each song's reason line as read on screen (its words are sung in one by one, so they sit in separate spans). */
+const reasonLines = () => Array.from(document.querySelectorAll('[data-reasons]')).map((r) => r.textContent!.replace(/\u00a0/g, ' '));
 
 async function hold(label: RegExp) {
   const button = screen.getByRole('button', { name: label });
@@ -103,8 +105,8 @@ describe('KaraokeApp', () => {
     expect(screen.getByText('Want personalized recommendations?')).toBeTruthy();
     expect(screen.queryByText(/every song that fits|invite-only|from our catalogue/)).toBeNull();
     // Catalogue songs are nobody's library, so there is no on-repeat slider.
-    expect(screen.getByRole('slider', { name: 'Ease in to Whole range' })).toBeTruthy();
-    expect(screen.queryByRole('slider', { name: 'Deep cuts to On repeat' })).toBeNull();
+    expect(screen.getByRole('slider', { name: 'Light work to Locked in' })).toBeTruthy();
+    expect(screen.queryByRole('slider', { name: 'Rediscover to On repeat' })).toBeNull();
   });
 
   it('after the test, "or use songs from your Spotify" keeps the range and goes to sign-in', async () => {
@@ -197,15 +199,15 @@ describe('KaraokeApp', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(5);
     expect(screen.getAllByRole('img', { name: 'Sing it an octave lower than the artist' }).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /^Lemon by Kenshi Yonezu, Medium\. Sing it lower than the artist$/ })).toBeTruthy();
-    expect(screen.getByText('In your sweet spot · In your top songs this month')).toBeTruthy();
+    expect(reasonLines()).toContain('In your sweet spot · In your top songs this month');
     expect(screen.getAllByText('Easy').length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Generate more songs' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load more songs' }));
     await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(10));
     // Every match came in one request; more songs come from memory.
     expect(api.allRecommendations).toHaveBeenCalledTimes(1);
     expect(api.recommendations).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: 'Generate more songs' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Load more songs' })).toBeNull();
   });
 
   it('a slider reorders the songs without asking the server again, and Reset puts them back', async () => {
@@ -214,19 +216,19 @@ describe('KaraokeApp', () => {
     await screen.findByText('Plastic Love');
     const titles = () => Array.from(document.querySelectorAll('ol li')).map((li) => li.querySelector('[class*="songTitle"]')?.textContent);
     const before = titles();
-    const slider = screen.getByRole('slider', { name: 'Ease in to Whole range' });
+    const slider = screen.getByRole('slider', { name: 'Light work to Locked in' });
     expect(slider.getAttribute('aria-valuetext')).toBe('not set');
-    expect(lyrics()).toContain('Our best guess for you');
+    // No title line over the list: the reasons under each song are what gets sung in.
+    expect(lyrics()).toEqual([]);
     expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
 
     fireEvent.change(slider, { target: { value: '100' } });
-    expect(slider.getAttribute('aria-valuetext')).toBe('towards Whole range');
-    expect(lyrics()).toContain('Using your whole range');
-    const wholeRange = titles();
-    expect(wholeRange).not.toEqual(before);
+    expect(slider.getAttribute('aria-valuetext')).toBe('towards Locked in');
+    const lockedIn = titles();
+    expect(lockedIn).not.toEqual(before);
     fireEvent.change(slider, { target: { value: '0' } });
-    expect(lyrics()).toContain('Comfortable tunes to ease into');
-    expect(titles()).not.toEqual(wholeRange);
+    expect(slider.getAttribute('aria-valuetext')).toBe('towards Light work');
+    expect(titles()).not.toEqual(lockedIn);
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
     expect(slider.getAttribute('aria-valuetext')).toBe('not set');
@@ -239,7 +241,7 @@ describe('KaraokeApp', () => {
     const track = { track: (name: string, props?: Record<string, unknown>) => void tracked.push({ name, props }), flush: async () => {} };
     render(<KaraokeApp api={fakeApi(me({ low: 45, high: 72, source: 'test' }))} track={track} mic={fakeMic().mic} />);
     await screen.findByText('Plastic Love');
-    const slider = screen.getByRole('slider', { name: 'Ease in to Whole range' });
+    const slider = screen.getByRole('slider', { name: 'Light work to Locked in' });
     const sliderEvents = () => tracked.filter((e) => e.name === 'slider_changed');
 
     // A vertical scroll that starts on the track: the browser cancels the pointer.
@@ -257,7 +259,6 @@ describe('KaraokeApp', () => {
     fireEvent.pointerDown(slider);
     fireEvent.pointerUp(slider);
     expect(slider.getAttribute('aria-valuetext')).toBe('in between');
-    expect(lyrics()).toContain('A little stretch, not too much');
     expect(sliderEvents()).toHaveLength(1);
     expect(sliderEvents()[0]!.props).toMatchObject({ slider: 'difficulty', difficulty: 0.5 });
 
@@ -344,7 +345,7 @@ describe('KaraokeApp', () => {
     }
     expect((screen.getByRole('button', { name: /Lemon/ }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Use 3 songs' }));
-    await screen.findByRole('button', { name: 'Generate more songs' });
+    await screen.findByRole('button', { name: 'Load more songs' });
     expect(api.saveRange).toHaveBeenCalledWith({ low: 40, high: 64, source: 'songs' });
   });
 
@@ -358,7 +359,7 @@ describe('KaraokeApp', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Open in Spotify' }));
     fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
     fireEvent.click(screen.getByRole('button', { name: 'Back to songs' }));
-    const slider = screen.getByRole('slider', { name: 'Ease in to Whole range' });
+    const slider = screen.getByRole('slider', { name: 'Light work to Locked in' });
     // Dragging (input events) records nothing; letting go (the browser's change event) records one adjustment.
     fireEvent.input(slider, { target: { value: '35' } });
     fireEvent.input(slider, { target: { value: '20' } });

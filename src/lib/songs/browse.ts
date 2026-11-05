@@ -24,33 +24,13 @@ export interface SliderDef {
   /** Words at each end of the track. */
   left: string;
   right: string;
-  /** Sung in under the controls when this slider leads: near the left end, the middle, the right end. */
-  lyrics: [string, string, string];
 }
 
 export const SLIDERS: SliderDef[] = [
-  {
-    id: 'difficulty',
-    left: 'Ease in',
-    right: 'Whole range',
-    lyrics: ['Comfortable tunes to ease into', 'A little stretch, not too much', 'Using your whole range'],
-  },
-  {
-    id: 'familiarity',
-    left: 'Deep cuts',
-    right: 'On repeat',
-    lyrics: ['Saved songs you haven’t played in a while', 'Songs you know', 'The songs you’ve got on repeat'],
-  },
-  {
-    id: 'popularity',
-    left: 'Hidden gems',
-    right: 'Big hits',
-    lyrics: ['Hidden gems for your voice', 'Songs plenty of people know', 'Songs the whole room knows'],
-  },
+  { id: 'difficulty', left: 'Light work', right: 'Locked in' },
+  { id: 'familiarity', left: 'Rediscover', right: 'On repeat' },
+  { id: 'popularity', left: 'Deep cuts', right: 'Pop hits' },
 ];
-
-/** Sung in when no slider is set: the server's Top picks order. */
-export const DEFAULT_LYRIC = 'Our best guess for you';
 
 export const DECADES: { id: Decade; label: string }[] = [
   { id: '60s', label: 'Pre-70s' },
@@ -109,7 +89,8 @@ export function rangeCoverage(m: Match, user: VocalRange): number {
 /**
  * Where a song sits on a slider, 0 to 1, or null when we do not know. Difficulty is how much of
  * the singer's range the song uses together with how little of it sits in their comfortable middle,
- * so the right end is "using your whole range" and the left end is easy, centred songs.
+ * so the right end (Locked in) is songs that use your whole range and the left end (Light work) is
+ * easy, centred songs.
  */
 export function sliderValue(m: Match, id: SliderId, user: VocalRange): number | null {
   if (id === 'difficulty') return clamp01((rangeCoverage(m, user) + (1 - (m.parts?.comfort ?? 0.5))) / 2);
@@ -139,15 +120,6 @@ export function orderMatches(matches: Match[], view: ResultsView, user: VocalRan
     .map((m, i) => ({ m, i, d: distance(m) }))
     .sort((a, b) => maybe(a.m) - maybe(b.m) || tier(a.m) - tier(b.m) || a.d - b.d || a.i - b.i)
     .map(({ m }) => m);
-}
-
-/** The line sung in under the controls: the slider moved last leads, then any other set slider. */
-export function lyricFor(view: ResultsView, lead: SliderId | null): string {
-  const id = lead !== null && view[lead] !== null ? lead : activeSliders(view)[0];
-  if (!id) return DEFAULT_LYRIC;
-  const target = view[id]!;
-  const lyrics = SLIDERS.find((s) => s.id === id)!.lyrics;
-  return target < 1 / 3 ? lyrics[0] : target > 2 / 3 ? lyrics[2] : lyrics[1];
 }
 
 // ---- chips ----
