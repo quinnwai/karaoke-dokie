@@ -118,6 +118,17 @@ async function mockApi(context: BrowserContext, state: ApiState) {
         return json({ error: 'not mocked' }, 404);
     }
   });
+  // Spotify's player is another site's page, so the tests never load it: this stand-in says which track
+  // it was asked for. What the real player does (plays, and its logo opens the song in Spotify) was
+  // checked by hand against open.spotify.com, not here.
+  await context.route('https://open.spotify.com/embed/**', (route) => {
+    const id = new URL(route.request().url()).pathname.split('/').pop();
+    return route.fulfill({
+      contentType: 'text/html',
+      body: `<!doctype html><body style="margin:0;height:152px;box-sizing:border-box;padding:16px;font:600 15px system-ui;color:#fff;background:#282828">
+        Spotify player (stand-in)<br><small style="font-weight:400;color:#b3b3b3">track ${id}</small></body>`,
+    });
+  });
 }
 
 async function launchWithMic(wav: string): Promise<Browser> {
@@ -263,7 +274,12 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await expect(page.getByText('Sing it lower than the artist')).toBeVisible();
   await expect(page.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeVisible();
   await expect(page.getByText('Played recently')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open in Spotify' })).toHaveAttribute('href', 'https://open.spotify.com/track/t2');
+  // Spotify's player stands where the "Open in Spotify" button used to be.
+  const player = page.getByTitle('Spotify player: Yoru ni Kakeru by YOASOBI');
+  await expect(player).toHaveAttribute('src', 'https://open.spotify.com/embed/track/t2');
+  await expect(page.frameLocator('iframe[title^="Spotify player"]').getByText('track t2')).toBeVisible();
+  await expect(player).toHaveCSS('height', '152px');
+  await expect(page.getByRole('link', { name: 'Open in Spotify' })).toHaveCount(0);
   await shot(page, '09-song-detail');
 
   await expect(page.getByRole('button', { name: 'Where this came from' })).toHaveCount(0);
@@ -300,6 +316,26 @@ test('returning user goes straight to results, and redo restarts the test', asyn
   await page.getByRole('button', { name: 'Redo the singing test' }).click();
   await expect(page.getByText('Find a quiet spot')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Hold to record your lowest note' })).toBeVisible({ timeout: 5000 });
+  await context.close();
+});
+
+test("on a 360px phone Spotify's player gets the 280px it wants and the TV stays on the page", async ({ browser, baseURL }) => {
+  const api = freshState();
+  api.user = me({ low: 45, high: 72, source: 'test' });
+  const context = await browser.newContext({ ...iPhone, viewport: { width: 360, height: 740 }, baseURL, reducedMotion: 'reduce' });
+  await mockApi(context, api);
+  const page = await context.newPage();
+  await page.goto('/');
+  await page.getByRole('button', { name: /^Plastic Love/ }).click();
+  const player = page.getByTitle('Spotify player: Plastic Love by Mariya Takeuchi');
+  await expect(player).toBeVisible();
+  expect((await player.boundingBox())!.width).toBeGreaterThanOrEqual(280);
+  // A player that is too wide for its screen pushes the whole TV past the page edge.
+  const tv = (await page.getByRole('region', { name: 'Karaoke screen' }).boundingBox())!;
+  expect(tv.x + tv.width).toBeLessThanOrEqual(360 - 16 + 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+  await player.scrollIntoViewIfNeeded();
+  await shot(page, '13-player-360px');
   await context.close();
 });
 
@@ -372,6 +408,9 @@ test('desktop layout', async ({ browser, baseURL }) => {
   await page.waitForTimeout(1000);
   await shot(page, '15-desktop-results');
   await page.getByRole('button', { name: /^Lemon/ }).click();
+  // On a wide screen the player stops at 460px instead of stretching across the TV.
+  await expect(page.frameLocator('iframe[title^="Spotify player"]').getByText('track t1')).toBeVisible();
+  expect((await page.getByTitle('Spotify player: Lemon by Kenshi Yonezu').boundingBox())!.width).toBe(460);
   await shot(page, '16-desktop-detail');
   await context.close();
 });

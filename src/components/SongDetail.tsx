@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { Match, VocalRange } from '../lib/contracts';
 import { difficultyLabel, duetPartLine, isCatalogueTrack, octaveWording, rangeBar } from '../lib/client/display';
 import { MOOD_LABELS } from '../lib/songs/browse';
 import { FastLyricsIcon, OctaveIcon } from './Icon';
 import styles from './screen.module.css';
+import { SpotifyPlayer } from './SpotifyPlayer';
 
 interface SongDetailProps {
   match: Match;
@@ -66,8 +67,15 @@ export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, 
   const facts = [match.year, match.genre].filter((f) => f !== undefined && f !== '').join(' · ');
   const catalogue = isCatalogueTrack(match.track.id);
 
+  // The screen is one scroller shared with the song list. With the player, a long title can make this page
+  // taller than the screen, and it would open scrolled to wherever the list was, past the back button.
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (root.current?.parentElement) root.current.parentElement.scrollTop = 0;
+  }, []);
+
   return (
-    <div className={styles.detail}>
+    <div className={styles.detail} ref={root}>
       <button type="button" className={styles.back} onClick={onBack} aria-label="Back to songs">
         ‹
       </button>
@@ -106,9 +114,11 @@ export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, 
 
       {match.reasons && match.reasons.length > 0 && <p className={styles.detailReasons}>{match.reasons.join(' · ')}</p>}
 
-      <a className={styles.spotify} href={match.track.spotifyUrl} target="_blank" rel="noreferrer" onClick={onSpotify}>
-        {catalogue ? 'Find on Spotify' : 'Open in Spotify'}
-      </a>
+      <SpotifyPlayer
+        track={match.track}
+        label={catalogue ? 'Find on Spotify' : 'Open in Spotify'}
+        onOpen={onSpotify}
+      />
 
       <div className={styles.feedback}>
         {feedback ? (

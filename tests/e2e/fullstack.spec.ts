@@ -96,7 +96,9 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
 
   // Open the first song, check the info line, leave feedback.
   await songs.first().getByRole('button').first().click();
-  await expect(page.getByRole('link', { name: 'Open in Spotify' })).toBeVisible();
+  // Spotify's player stands where the button was. The mock gives most songs a real track id; the few
+  // without one keep the plain link.
+  await expect(page.locator('iframe[src^="https://open.spotify.com/embed/track/"], a:has-text("Open in Spotify")')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Where this came from' })).toHaveCount(0);
   const feedback = page.waitForResponse((r) => r.url().endsWith('/api/feedback'));
   await page.getByRole('button', { name: 'It went well' }).click();

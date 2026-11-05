@@ -321,7 +321,12 @@ describe('KaraokeApp', () => {
     const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
     render(<KaraokeApp api={api} mic={fakeMic().mic} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /^Yoru ni Kakeru/ }));
+    const song = await screen.findByRole('button', { name: /^Yoru ni Kakeru/ });
+    // The screen is one scroller shared with the list: a song opened from a scrolled list must start at the top.
+    const scroller = screen.getByRole('region', { name: 'Karaoke screen' }).querySelector('div > div') as HTMLElement;
+    scroller.scrollTop = 120;
+    fireEvent.click(song);
+    expect(scroller.scrollTop).toBe(0);
     expect(screen.getByRole('heading', { name: 'Yoru ni Kakeru' })).toBeTruthy();
     expect(screen.getByRole('img', { name: /Song goes from A#2 to F4. You sing from A2 to C5/ })).toBeTruthy();
     expect(screen.getByText('Hard')).toBeTruthy();
@@ -329,16 +334,23 @@ describe('KaraokeApp', () => {
     expect(screen.getByText('Sing it lower than the artist')).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeTruthy();
     expect(screen.getByText('Played recently')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Open in Spotify' }).getAttribute('href')).toBe('https://open.spotify.com/track/t2');
+    // Spotify's player stands where the "Open in Spotify" button used to be.
+    const player = screen.getByTitle('Spotify player: Yoru ni Kakeru by YOASOBI');
+    expect(player.getAttribute('src')).toBe('https://open.spotify.com/embed/track/t2');
+    expect(screen.queryByRole('link', { name: 'Open in Spotify' })).toBeNull();
 
     expect(screen.queryByRole('button', { name: 'Where this came from' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
     expect(screen.getByText('Thanks! That helps.')).toBeTruthy();
     expect(api.feedback).toHaveBeenCalledWith({ trackId: 't2', thumbs: 'up', difficulty: 'hard', octave: 'down', view: DEFAULT_VIEW });
+    // Tapping a thumb must not reload the player: that would restart the song.
+    expect(screen.getByTitle('Spotify player: Yoru ni Kakeru by YOASOBI')).toBe(player);
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to songs' }));
     expect(await screen.findByText('Plastic Love')).toBeTruthy();
+    // Leaving the page removes the player, which stops the song.
+    expect(screen.queryByTitle(/^Spotify player/)).toBeNull();
   });
 
   it('returning user lands on results and can redo the test', async () => {
