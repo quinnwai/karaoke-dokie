@@ -14,8 +14,15 @@ export const MAX_PLAYLIST_TRACKS = 3000;
 const SAVED_PAGE_CONCURRENCY = 5;
 /** Refresh this long before the access token actually expires. */
 const REFRESH_MARGIN_MS = 60_000;
+/**
+ * When Spotify answers 429 (rate limited), a request waits the Retry-After it is given and tries
+ * again, up to this many times, but only when the wait is short enough to keep the page usable.
+ */
+const RATE_LIMIT_RETRIES = 3;
+const RATE_LIMIT_MAX_WAIT_MS = 10_000;
 
 export type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
+export type SleepFn = (ms: number) => Promise<void>;
 
 export interface SpotifyConfig {
   clientId: string;
@@ -213,7 +220,17 @@ export function buildLibrary({ top, recent, saved, playlists = [] }: Listening):
 
 // ---- real client ----
 
-export function createSpotifyClient(cfg: SpotifyConfig, fetchFn: FetchFn = (i, init) => fetch(i, init)): SpotifyClient {
+/** Spotify's Retry-After is in seconds; a missing or unreadable one counts as 1 s. */
+export function retryAfterMs(header: string | null): number {
+  const seconds = Number(header);
+  return header !== null && header.trim() !== '' && Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 1000;
+}
+
+export function createSpotifyClient(
+  cfg: SpotifyConfig,
+  fetchFn: FetchFn = (i, init) => fetch(i, init),
+  sleep: SleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): SpotifyClient {
   async function tokenRequest(body: Record<string, string>, previousRefresh?: string): Promise<SpotifyTokens> {
     const basic = Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString('base64');
     const res = await fetchFn(`${SPOTIFY_ACCOUNTS}/api/token`, {
@@ -229,11 +246,20 @@ export function createSpotifyClient(cfg: SpotifyConfig, fetchFn: FetchFn = (i, i
   }
 
   async function api<T>(accessToken: string, url: string): Promise<T> {
-    const res = await fetchFn(url.startsWith('http') ? url : `${SPOTIFY_API}${url}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) throw new SpotifyError(`Spotify API ${url} failed (${res.status})`, res.status);
-    return (await res.json()) as T;
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetchFn(url.startsWith('http') ? url : `${SPOTIFY_API}${url}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.status === 429 && attempt < RATE_LIMIT_RETRIES) {
+        const wait = retryAfterMs(res.headers.get('retry-after'));
+        if (wait <= RATE_LIMIT_MAX_WAIT_MS) {
+          await sleep(wait);
+          continue;
+        }
+      }
+      if (!res.ok) throw new SpotifyError(`Spotify API ${url} failed (${res.status})`, res.status);
+      return (await res.json()) as T;
+    }
   }
 
   return {
@@ -364,10 +390,11 @@ export async function ensureFreshTokens(
 /** The user's library as contract Tracks with familiarity, ordered by playRank. */
 export async function getUserTracks(client: SpotifyClient, accessToken: string): Promise<Track[]> {
   // Recently played and playlists need permissions that users who signed in before they were added
-  // have not granted; without them we skip that signal rather than fail.
+  // have not granted; without them we skip that signal rather than fail. Playlists are also the
+  // most requests by far, so when Spotify still rate-limits after the retries, they are skipped too.
   const optional = (p: Promise<Track[]>) =>
     p.catch((err) => {
-      if (err instanceof SpotifyError && (err.status === 401 || err.status === 403)) return [] as Track[];
+      if (err instanceof SpotifyError && (err.status === 401 || err.status === 403 || err.status === 429)) return [] as Track[];
       throw err;
     });
   const [short, medium, long, plays, saved, playlists] = await Promise.all([

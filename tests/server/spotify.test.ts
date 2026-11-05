@@ -5,6 +5,7 @@ import {
   getUserTracks,
   mapTrack,
   buildLibrary,
+  retryAfterMs,
   SpotifyError,
   type FetchFn,
 } from '../../src/lib/server/spotify';
@@ -210,6 +211,60 @@ describe('Spotify library reads', () => {
     expect(mapTrack({ ...sTrack(1), artists: [{ id: 'a1', name: null }] }, 0)).toBeNull();
     expect(mapTrack({ ...sTrack(1), artists: [{ id: 'a1', name: '' }] }, 0)).toBeNull();
     expect(mapTrack(sTrack(1), 0)).toMatchObject({ title: 'Song 1', artist: 'Artist 1' });
+  });
+});
+
+describe('Spotify rate limits (429)', () => {
+  const limited = (retryAfter: string | null) =>
+    new Response('', { status: 429, headers: retryAfter === null ? {} : { 'retry-after': retryAfter } });
+
+  it('waits the Retry-After it is given, then tries again', async () => {
+    const calls: Call[] = [];
+    const waits: number[] = [];
+    let n = 0;
+    const f = fakeFetch({ 'https://api.spotify.com/v1/me': () => (n++ === 0 ? limited('2') : { id: 'user1', display_name: 'Ann' }) }, calls);
+    const client = createSpotifyClient(cfg, f, async (ms) => void waits.push(ms));
+    expect(await client.getMe('tok')).toEqual({ id: 'user1', displayName: 'Ann' });
+    expect(waits).toEqual([2000]);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('gives up after three retries', async () => {
+    const calls: Call[] = [];
+    const waits: number[] = [];
+    const f = fakeFetch({ 'https://api.spotify.com/v1/me': () => limited('1') }, calls);
+    const client = createSpotifyClient(cfg, f, async (ms) => void waits.push(ms));
+    await expect(client.getMe('tok')).rejects.toMatchObject({ status: 429 });
+    expect(waits).toEqual([1000, 1000, 1000]);
+    expect(calls).toHaveLength(4);
+  });
+
+  it('does not wait when Spotify asks for longer than 10 seconds', async () => {
+    const waits: number[] = [];
+    const f = fakeFetch({ 'https://api.spotify.com/v1/me': () => limited('120') });
+    const client = createSpotifyClient(cfg, f, async (ms) => void waits.push(ms));
+    await expect(client.getMe('tok')).rejects.toMatchObject({ status: 429 });
+    expect(waits).toEqual([]);
+  });
+
+  it('reads Retry-After as seconds, and a missing or junk one as 1 second', () => {
+    expect(retryAfterMs('3')).toBe(3000);
+    expect(retryAfterMs('0')).toBe(0);
+    expect(retryAfterMs(null)).toBe(1000);
+    expect(retryAfterMs('')).toBe(1000);
+    expect(retryAfterMs('soon')).toBe(1000);
+    expect(retryAfterMs('-5')).toBe(1000);
+  });
+
+  it('still loads the library when playlists stay rate-limited', async () => {
+    const client = { ...createMockSpotifyClient(), getPlaylistTracks: async () => { throw new SpotifyError('rate limited', 429); } };
+    const lib = await getUserTracks(client, 'tok');
+    expect(lib.length).toBeGreaterThan(20);
+  });
+
+  it('fails the load when saved songs stay rate-limited, rather than show a partial library', async () => {
+    const client = { ...createMockSpotifyClient(), getSavedTracks: async () => { throw new SpotifyError('rate limited', 429); } };
+    await expect(getUserTracks(client, 'tok')).rejects.toMatchObject({ status: 429 });
   });
 });
 
