@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Decade, Match, Mood, ResultsMode, ResultsView, SliderId, VocalRange } from '../lib/contracts';
 import { midiToNoteName } from '../lib/audio/notes';
 import {
@@ -25,7 +25,7 @@ import {
   viewMatches,
   type SliderDef,
 } from '../lib/songs/browse';
-import { BookIcon, FastLyricsIcon, OctaveIcon } from './Icon';
+import { BookIcon, FastLyricsIcon, OctaveIcon, SpotifyIcon } from './Icon';
 import { Lyric } from './Lyric';
 import styles from './screen.module.css';
 
@@ -122,25 +122,29 @@ export function Results(props: ResultsProps) {
   return (
     <div className={styles.results}>
       <div className={styles.resultsBar}>
-        <span className={styles.rangeChip} aria-label={`Your range ${low} to ${high}`}>
-          <button type="button" className={styles.rangeNote} onClick={() => props.onRedoEnd('low')} aria-label={`Redo your low note, ${low}`}>
-            {low}
-          </button>{' '}
-          –{' '}
-          <button type="button" className={styles.rangeNote} onClick={() => props.onRedoEnd('high')} aria-label={`Redo your high note, ${high}`}>
-            {high}
-          </button>
-        </span>
-        <span className={styles.barActions}>
-          {mode === 'catalogue' && (
-            <button type="button" className={styles.connect} onClick={props.onConnect}>
-              Connect to Spotify
+        {/* The range and its redo sit together on the left: redo is about the range. */}
+        <span className={styles.rangeGroup}>
+          <span className={styles.rangeChip} aria-label={`Your range ${low} to ${high}`}>
+            <button type="button" className={styles.rangeNote} onClick={() => props.onRedoEnd('low')} aria-label={`Redo your low note, ${low}`}>
+              {low}
+            </button>{' '}
+            –{' '}
+            <button type="button" className={styles.rangeNote} onClick={() => props.onRedoEnd('high')} aria-label={`Redo your high note, ${high}`}>
+              {high}
             </button>
-          )}
+          </span>
           <button type="button" className={styles.redo} onClick={props.onRedo} aria-label="Redo the singing test">
             redo
           </button>
         </span>
+        {mode === 'catalogue' && (
+          <button type="button" className={styles.connect} onClick={props.onConnect} aria-label="Connect to Spotify">
+            <SpotifyIcon />
+            <span className={styles.connectTip} aria-hidden>
+              Connect to Spotify
+            </span>
+          </button>
+        )}
       </div>
 
       {warning && !kept && (
@@ -358,7 +362,12 @@ function PreferenceSlider({
     return () => input.removeEventListener('change', record);
   }, []);
   return (
-    <div className={styles.sliderRow} data-active={active || undefined}>
+    <div
+      className={styles.sliderRow}
+      data-active={active || undefined}
+      // Pink fills the track up to the thumb only: progress, not the whole line.
+      style={{ '--fill': position / 100 } as CSSProperties}
+    >
       <span className={styles.sliderEnd} aria-hidden>
         {def.left}
       </span>

@@ -19,17 +19,25 @@ interface SongDetailProps {
 
 export function RangeBarView({ userRange, match }: { userRange: VocalRange; match: Match }) {
   const bar = rangeBar(userRange, match.range, match.octave);
+  // Note names stay out of the way until wanted: hover or focus shows them, and so does a tap on a phone.
+  const [open, setOpen] = useState(false);
   return (
-    <div className={styles.rangeBar} role="img" aria-label={`Song goes from ${bar.song.low} to ${bar.song.high}. You sing from ${bar.user.low} to ${bar.user.high}.`}>
+    <div
+      className={styles.rangeBar}
+      role="img"
+      aria-label={`Song goes from ${bar.song.low} to ${bar.song.high}. You sing from ${bar.user.low} to ${bar.user.high}.`}
+      data-open={open || undefined}
+      onClick={() => setOpen((o) => !o)}
+    >
       <div className={styles.barTrack}>
-        <div className={styles.barUser} style={{ left: `${bar.user.left}%`, width: `${bar.user.width}%` }}>
-          <span className={styles.barEndLow}>{bar.user.low}</span>
-          <span className={styles.barEndHigh}>{bar.user.high}</span>
-        </div>
-        <div className={styles.barSong} style={{ left: `${bar.song.left}%`, width: `${bar.song.width}%` }}>
-          <span className={styles.barEndLow}>{bar.song.low}</span>
-          <span className={styles.barEndHigh}>{bar.song.high}</span>
-        </div>
+        <div className={styles.barUser} style={{ left: `${bar.user.left}%`, width: `${bar.user.width}%` }} />
+        <div className={styles.barSong} style={{ left: `${bar.song.left}%`, width: `${bar.song.width}%` }} />
+      </div>
+      <div className={styles.barNames} aria-hidden>
+        <span className={styles.barNameSong} style={{ left: `${bar.song.left}%` }}>{bar.song.low}</span>
+        <span className={styles.barNameSong} style={{ left: `${bar.song.left + bar.song.width}%` }}>{bar.song.high}</span>
+        <span className={styles.barNameUser} style={{ left: `${bar.user.left}%` }}>{bar.user.low}</span>
+        <span className={styles.barNameUser} style={{ left: `${bar.user.left + bar.user.width}%` }}>{bar.user.high}</span>
       </div>
       <div className={styles.barLegend} aria-hidden>
         <span><i className={styles.legendSong} /> song</span>

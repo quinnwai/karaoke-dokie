@@ -423,6 +423,12 @@
   align-items: center;
 }
 
+.rangeGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .rangeChip {
   font-size: 12px;
   letter-spacing: 0.06em;
@@ -691,69 +697,79 @@
   color: var(--dim);
 }
 
+/* The range bar: one quiet capsule. Your range is the lighter stretch, the song the pink one.
+   Note names wait below it and show on hover, focus or a tap. */
 .rangeBar {
   width: 100%;
   max-width: 460px;
   padding: 0 34px;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .barTrack {
   position: relative;
-  height: 64px;
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(244, 241, 246, 0.06);
+}
+
+.barUser,
+.barSong {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 5px;
 }
 
 .barUser {
-  position: absolute;
-  top: 22px;
-  height: 22px;
-  border-radius: 11px;
-  border: 1px solid rgba(244, 241, 246, 0.22);
-  background: rgba(244, 241, 246, 0.05);
-}
-
-.barUser .barEndLow,
-.barUser .barEndHigh {
-  top: calc(100% + 6px);
+  background: rgba(244, 241, 246, 0.2);
 }
 
 .barSong {
-  position: absolute;
-  top: 30px;
-  height: 6px;
-  border-radius: 3px;
   background: var(--pink);
   box-shadow: 0 0 10px var(--pink-glow), 0 0 22px rgba(255, 46, 147, 0.35);
 }
 
-.barSong .barEndLow,
-.barSong .barEndHigh {
-  bottom: calc(100% + 22px);
-  color: var(--pink);
+.barNames {
+  position: relative;
+  height: 34px;
+  margin-top: 6px;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 0.15s, transform 0.15s;
 }
 
-.barEndLow,
-.barEndHigh {
+.rangeBar:hover .barNames,
+.rangeBar[data-open] .barNames {
+  opacity: 1;
+  transform: none;
+}
+
+.barNameSong,
+.barNameUser {
   position: absolute;
+  transform: translateX(-50%);
   font-size: 11px;
-  color: var(--dim);
+  line-height: 1;
   white-space: nowrap;
 }
 
-.barEndLow {
-  left: 0;
-  transform: translateX(-50%);
+.barNameSong {
+  top: 0;
+  color: var(--pink);
 }
 
-.barEndHigh {
-  right: 0;
-  transform: translateX(50%);
+.barNameUser {
+  top: 18px;
+  color: var(--dim);
 }
 
 .barLegend {
   display: flex;
   justify-content: center;
   gap: 18px;
-  margin-top: 18px;
+  margin-top: 4px;
   font-size: 11px;
   color: var(--dim);
 }
@@ -767,10 +783,14 @@
 .legendSong,
 .legendUser {
   display: inline-block;
-  width: 16px;
-  height: 4px;
-  border-radius: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
   background: var(--pink);
+}
+
+.legendUser {
+  background: rgba(244, 241, 246, 0.3);
 }
 
 .legendUser {
@@ -928,21 +948,47 @@
 
 /* ---- results view: Tune (sliders, pink) and Pick (chips, cyan) (QWW-3) ---- */
 
-.barActions {
+/* Connect to Spotify: just the logo, grey until hovered, with its name in a tooltip. */
+.connect {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  border: 0;
+  border-radius: var(--squircle);
+  background: none;
+  padding: 4px;
+  color: rgba(244, 241, 246, 0.4);
+  cursor: pointer;
+  transition: color 0.15s;
 }
 
-.connect {
-  border: 1px solid var(--pink);
-  border-radius: var(--squircle);
-  background: rgba(255, 46, 147, 0.1);
-  padding: 5px 12px;
+.connect:hover,
+.connect:focus-visible {
+  color: #1db954;
+}
+
+.connectTip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 2;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: #1c1a21;
+  box-shadow: 0 0 0 1px var(--faint);
   font-size: 12px;
   font-weight: 600;
   color: var(--ink);
-  cursor: pointer;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.connect:hover .connectTip,
+.connect:focus-visible .connectTip {
+  opacity: 1;
+  transform: none;
 }
 
 .controls {
@@ -954,12 +1000,18 @@
   gap: 10px;
 }
 
-/* Two clearly different blocks: a quiet panel of sliders, then a row of chips. */
-.tune {
+/* Two panels of the same shape, both about choosing: sliders in pink, chips in cyan. Same padding,
+   so the TUNE and PICK titles line up. */
+.tune,
+.pick {
   min-width: 0;
-  padding: 8px 12px 6px;
+  padding: 8px 12px 10px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.035);
+}
+
+.tune {
+  padding-bottom: 6px;
   box-shadow: inset 0 0 0 1px rgba(255, 46, 147, 0.12);
 }
 
@@ -969,14 +1021,19 @@
 }
 
 .pick {
-  min-width: 0;
+  box-shadow: inset 0 0 0 1px rgba(60, 229, 255, 0.12);
 }
 
 .controlsHead {
   display: flex;
   align-items: baseline;
   gap: 8px;
+  min-height: 16px;
   margin-bottom: 2px;
+}
+
+.pick .controlsHead {
+  margin-bottom: 6px;
 }
 
 .tuneLabel,
@@ -1078,12 +1135,22 @@
   background: #6b6675;
 }
 
+/* Pink up to the thumb's centre only, grey past it: how far along, not the whole line. */
 .sliderRow[data-active] .slider::-webkit-slider-runnable-track {
-  background: linear-gradient(90deg, rgba(255, 46, 147, 0.25), rgba(255, 46, 147, 0.6));
+  background: linear-gradient(
+    90deg,
+    var(--pink) 0 calc(11px + (100% - 22px) * var(--fill)),
+    var(--faint) calc(11px + (100% - 22px) * var(--fill)) 100%
+  );
 }
 
+/* Pink up to the thumb's centre only, grey past it: how far along, not the whole line. */
 .sliderRow[data-active] .slider::-moz-range-track {
-  background: linear-gradient(90deg, rgba(255, 46, 147, 0.25), rgba(255, 46, 147, 0.6));
+  background: linear-gradient(
+    90deg,
+    var(--pink) 0 calc(11px + (100% - 22px) * var(--fill)),
+    var(--faint) calc(11px + (100% - 22px) * var(--fill)) 100%
+  );
 }
 
 .sliderRow[data-active] .slider::-webkit-slider-thumb {
@@ -1114,12 +1181,12 @@
 .chipRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
 }
 
 .chip {
   flex: none;
-  padding: 7px 10px;
+  padding: 6px 8px;
   border: 0;
   border-radius: var(--squircle);
   background: rgba(255, 255, 255, 0.06);
@@ -1203,7 +1270,8 @@
   .pill,
   .pillQuiet,
   .slider::-webkit-slider-thumb,
-  .tune {
+  .tune,
+  .pick {
     corner-shape: squircle;
   }
   .more,
@@ -1219,7 +1287,8 @@
   .pillQuiet {
     border-radius: 12px;
   }
-  .tune {
+  .tune,
+  .pick {
     border-radius: 26px;
   }
 }
