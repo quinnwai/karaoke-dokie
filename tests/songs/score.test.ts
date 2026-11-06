@@ -3,6 +3,8 @@ import type { Match, SongRange, TimeRange, Track, VocalRange } from '../../src/l
 import { matchSong, toMatch } from '../../src/lib/songs/match';
 import { rankMatches } from '../../src/lib/songs/rank';
 import {
+  byCatalogueRank,
+  catalogueRank,
   CHART_FLOOR,
   comfortScore,
   familiarityScore,
@@ -324,5 +326,39 @@ describe('reasons', () => {
     expect(hard.reasons![0]).toBe('Lots of high notes');
     const played = match(track('p', { familiarity: 0.9, known: true, topLists: ['long_term'], recentPlays: 2 }), song(57, 63));
     expect(played.reasons).toEqual(['In your sweet spot', 'Played recently']);
+  });
+});
+
+describe('catalogue rank: what the no-Spotify catalogue is picked by (QWW-32)', () => {
+  const none = song(55, 65);
+
+  it('is the popularity score without Spotify, from USDB and karaoke numbers alike', () => {
+    expect(catalogueRank(none, { views: 99_999, rating: 5 }, undefined)).toBeCloseTo(1);
+    expect(catalogueRank(none, undefined, { karaokeViews: KARAOKE_VIEWS_FULL })).toBeCloseTo(1);
+    expect(catalogueRank(none, undefined, { chartRank: 58 })).toBe(CHART_FLOOR.top100);
+    expect(catalogueRank(none, { views: 0 }, { karaokeViews: KARAOKE_VIEWS_FULL })).toBeCloseTo(0.5);
+  });
+
+  it('puts a song with no popularity at all below every song with some, even a score of 0', () => {
+    expect(catalogueRank(none, undefined, undefined)).toBe(-1);
+    expect(catalogueRank(none, {}, {})).toBe(-1);
+    expect(catalogueRank(none, { views: 0 }, undefined)).toBe(0);
+    expect(popularityScore(track('x'), none)).toBe(UNKNOWN_POPULARITY); // what scoring alone would give it
+  });
+
+  it("takes the range's own USDB views and stars over the USDB row's, as the catalogue scores it", () => {
+    const own = song(55, 65, { usdbViews: 99_999 });
+    expect(catalogueRank(own, { views: 9, rating: 5 }, undefined)).toBeCloseTo((1 + 1) / 2);
+    expect(catalogueRank(own, { views: 9 }, undefined)).toBeCloseTo(1);
+  });
+
+  it('orders highest first, then by song key', () => {
+    const rows = [
+      { key: 'b|song', rank: 0.5 },
+      { key: 'a|song', rank: -1 },
+      { key: 'c|song', rank: 0.9 },
+      { key: 'a|other', rank: 0.5 },
+    ];
+    expect(rows.sort(byCatalogueRank).map((r) => r.key)).toEqual(['c|song', 'a|other', 'b|song', 'a|song']);
   });
 });

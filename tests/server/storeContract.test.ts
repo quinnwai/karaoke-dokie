@@ -193,12 +193,31 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
       expect(keys).toContain('queen|rough');
     });
 
-    it('orders by USDB views, then stars, then songs without a USDB row by key, and cuts to the limit', async () => {
+    it('orders by popularity from USDB views and stars, then songs with none by key, and cuts to the limit', async () => {
       const s = await filled();
       const order = ['abba|sos', 'queen|bohemian rhapsody', 'abba|waterloo', 'a-ha|take on me', 'queen|rough', 'toto|africa'];
       expect((await s.listCatalogue(100)).map((c) => c.key)).toEqual(order);
       expect((await s.listCatalogue(2)).map((c) => c.key)).toEqual(order.slice(0, 2));
       expect(await s.listCatalogue(0)).toEqual([]);
+    });
+
+    it('also orders by karaoke popularity and the range’s own USDB views, so a recording with no USDB row makes the cut (QWW-32)', async () => {
+      const s = await filled();
+      await s.putSongRange('a-ha|take on me', row('a-ha', 'Take On Me', { ...songRange, usdbViews: 5_000 }));
+      const pop = (key: string, p: Partial<SongPopularityRecord>): SongPopularityRecord => ({ key, source: 'karafun+billboard', ...p });
+      await s.putSongPopularity([
+        pop('toto|africa', { karaokeViews: 5_500_000 }), // a recording with no USDB row: about 1
+        pop('queen|rough', { chartRank: 15, chartYear: 1999 }), // top-20 Year-End floor: 0.75
+        pop('abba|waterloo', { chartRank: 90, chartYear: 1990 }), // lifted from 0.37 to the 0.6 floor
+        pop('queen|guess', { karaokeViews: 5_500_000 }), // an estimate: still left out
+        pop('nobody|skipped', { karaokeViews: 5_500_000 }), // skipped: still left out
+      ]);
+      // a-ha's own range views (0.74) count as the catalogue scores them; sos 0.596, Bohemian 0.591.
+      const order = ['toto|africa', 'queen|rough', 'a-ha|take on me', 'abba|waterloo', 'abba|sos', 'queen|bohemian rhapsody'];
+      expect((await s.listCatalogue(100)).map((c) => c.key)).toEqual(order);
+      expect((await s.listCatalogue(2)).map((c) => c.key)).toEqual(['toto|africa', 'queen|rough']);
+      const waterloo = (await s.listCatalogue(100)).find((c) => c.key === 'abba|waterloo')!;
+      expect(waterloo.usdb).toEqual(usdb.waterloo); // the row is still the most-viewed one (a tie goes to the lower id)
     });
 
     it('takes display names from the log line and returns the stored range and log as they are', async () => {

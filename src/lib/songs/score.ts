@@ -58,6 +58,9 @@ export function withKaraokePopularity(range: SongRange, p: KaraokePopularity | u
   return scored;
 }
 
+/** What popularityScore reads from a song: its USDB views and stars and its karaoke popularity. */
+export type PopularityInputs = Pick<SongRange, 'usdbViews' | 'usdbRating'> & KaraokePopularity;
+
 const shiftOf = (octave: OctaveShift) => (octave === 'up' ? 12 : octave === 'down' ? -12 : 0);
 
 /** 1 inside the middle half of the range, falling linearly to 0 at the edges and beyond. */
@@ -99,7 +102,7 @@ export function comfortScore(user: VocalRange, song: SongRange, octave: OctaveSh
  * still be well known (older songs, hits outside the US), so it can only raise a song. With none
  * of the four, UNKNOWN_POPULARITY.
  */
-export function popularityScore(track: Track, song: SongRange & KaraokePopularity): number {
+export function popularityScore(track: Pick<Track, 'popularity'>, song: PopularityInputs): number {
   const parts: number[] = [];
   if (typeof track.popularity === 'number') parts.push(Math.min(1, Math.max(0, track.popularity / 100)));
   const usdb: number[] = [];
@@ -116,7 +119,7 @@ export function popularityScore(track: Track, song: SongRange & KaraokePopularit
  * False when popularityScore had nothing to go on (no Spotify popularity, USDB views or stars,
  * karaoke views or Year-End chart entry) and gave the flat default.
  */
-export function popularityKnown(track: Track, song: SongRange & KaraokePopularity): boolean {
+export function popularityKnown(track: Pick<Track, 'popularity'>, song: PopularityInputs): boolean {
   return (
     typeof track.popularity === 'number' ||
     typeof song.usdbViews === 'number' ||
@@ -124,6 +127,33 @@ export function popularityKnown(track: Track, song: SongRange & KaraokePopularit
     typeof song.karaokeViews === 'number' ||
     typeof song.chartRank === 'number'
   );
+}
+
+/**
+ * Where a song goes in the no-Spotify catalogue, highest first (QWW-32): its popularityScore
+ * without Spotify, from its USDB views and stars (the range's own, else its USDB row's, as the
+ * catalogue scores it) and its karaoke popularity. -1 when there is none of these, so a song we
+ * know nothing about never takes the place of one we do; scored, it would get UNKNOWN_POPULARITY,
+ * above many known songs. Both stores pick the catalogue with this, so it reads the same anywhere.
+ */
+export function catalogueRank(
+  range: Pick<SongRange, 'usdbViews' | 'usdbRating'>,
+  usdb: { views?: number; rating?: number } | undefined,
+  karaoke: KaraokePopularity | undefined,
+): number {
+  const song: PopularityInputs = {};
+  const views = range.usdbViews ?? usdb?.views;
+  const rating = range.usdbRating ?? usdb?.rating;
+  if (views !== undefined) song.usdbViews = views;
+  if (rating !== undefined) song.usdbRating = rating;
+  if (karaoke?.karaokeViews !== undefined) song.karaokeViews = karaoke.karaokeViews;
+  if (karaoke?.chartRank !== undefined) song.chartRank = karaoke.chartRank;
+  return popularityKnown({}, song) ? popularityScore({}, song) : -1;
+}
+
+/** Catalogue order: highest catalogueRank first, then by song key (code points, the same in every store). */
+export function byCatalogueRank(a: { key: string; rank: number }, b: { key: string; rank: number }): number {
+  return b.rank - a.rank || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 }
 
 /** Familiarity for tracks that predate the familiarity field: falls with play rank. */

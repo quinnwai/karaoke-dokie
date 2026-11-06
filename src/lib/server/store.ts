@@ -125,8 +125,9 @@ export interface Store {
 
   // ---- catalogue: results without Spotify (QWW-2 Track B) ----
   /**
-   * Songs with a usable (not skipped) range, one per song key, each with its most-viewed USDB row,
-   * most popular first (USDB views, then stars), at most `limit`.
+   * Songs with a measured range (note file or recording), one per song key, each with its
+   * most-viewed USDB row, most popular first by catalogueRank (songs/score.ts: USDB views and
+   * stars, karaoke views, Year-End rank; songs with none of them last, by key), at most `limit`.
    */
   listCatalogue(limit: number): Promise<CatalogueSong[]>;
 
