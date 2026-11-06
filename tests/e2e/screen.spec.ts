@@ -8,7 +8,7 @@ import { chromium, devices, expect, test, type Browser, type BrowserContext, typ
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CatalogueFeedbackRequest, FeedbackRequest, MeResponse, VocalRange } from '../../src/lib/contracts';
-import { allMatches, allMatchesWithFacts, knownSongs, match, me } from '../fixtures/screen';
+import { allMatches, allMatchesWithFacts, knownSongs, longList, match, me } from '../fixtures/screen';
 
 const SCREENS = path.resolve('test-results/screens');
 const AUDIO = path.resolve('test-results/audio');
@@ -66,6 +66,8 @@ interface ApiState {
   recommendationCalls: string[];
   /** Serve songs with years, genres and known popularity. */
   facts?: boolean;
+  /** Serve a long list whose difficulty scores bunch low, as a wide range makes them (QWW-33). */
+  long?: boolean;
 }
 
 async function mockApi(context: BrowserContext, state: ApiState) {
@@ -88,10 +90,10 @@ async function mockApi(context: BrowserContext, state: ApiState) {
       }
       case 'GET /api/recommendations':
         state.recommendationCalls.push(`library ${url.search}`);
-        return json(state.facts ? allMatchesWithFacts() : allMatches());
+        return json(state.long ? longList() : state.facts ? allMatchesWithFacts() : allMatches());
       case 'GET /api/catalogue/recommendations':
         state.recommendationCalls.push(`catalogue ${url.search}`);
-        return json(state.facts ? allMatchesWithFacts() : allMatches());
+        return json(state.long ? longList() : state.facts ? allMatchesWithFacts() : allMatches());
       case 'POST /api/catalogue/feedback':
         state.catalogueFeedback.push(req.postDataJSON() as CatalogueFeedbackRequest);
         return json({ ok: true });
@@ -515,6 +517,48 @@ for (const width of [375, 1280]) {
     await expect(page.locator('[class*="detailReasons"]')).toHaveText('Lots of low notes · Top songs, past 6 months');
     await page.waitForTimeout(300);
     await shot(page, `reasons-${width}-song`);
+    await context.close();
+  });
+}
+
+// QWW-33: the difficulty slider changes the list along its whole length. The long list has the
+// difficulty scores a wide range gives (all under 0.4), so with songs placed by raw score the right
+// 60% of the track listed the same songs first. On a phone (375 px) and a desktop (1280 px), the
+// slider goes to 25, 50, 75 and 100%, and every step shows other songs first.
+for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 }]) {
+  test(`the difficulty slider changes the list along its whole length, at ${viewport.width} px`, async ({ browser, baseURL }) => {
+    const api = freshState();
+    api.user = me({ low: 45, high: 72, source: 'test' });
+    api.long = true;
+    // The phone is an iPhone SE; the desktop has no touch, like the desktop layout test.
+    const context = await browser.newContext({ ...(viewport.width < 600 ? iPhone : {}), viewport, baseURL, reducedMotion: 'reduce' });
+    await mockApi(context, api);
+    const page = await context.newPage();
+    await page.goto('/');
+    await expect(page.locator('ol li')).toHaveCount(5);
+
+    const titles = () => page.locator('ol li [class*="songTitle"]').allTextContents();
+    const slider = page.getByRole('slider', { name: 'Light work to Locked in' });
+    const lists: string[][] = [];
+    for (const percent of [25, 50, 75, 100]) {
+      const before = await titles();
+      await slider.fill(String(percent));
+      await expect.poll(titles, { message: `the list at ${percent}% is the list before it` }).not.toEqual(before);
+      await page.waitForTimeout(300);
+      lists.push(await titles());
+      await shot(page, `qww33-difficulty-${percent}-${viewport.width}px`);
+    }
+    // No step keeps a song of the step before it in the top five.
+    for (let k = 1; k < lists.length; k++) {
+      expect(lists[k]!.filter((t) => lists[k - 1]!.includes(t)), `steps ${k - 1} and ${k} share songs`).toEqual([]);
+    }
+
+    // The ends keep their meaning: Light work lists the narrowest range first, Locked in the widest.
+    const list = longList().matches;
+    await slider.press('Home');
+    await expect.poll(async () => (await titles())[0]).toBe(list[0]!.track.title);
+    await slider.press('End');
+    await expect.poll(async () => (await titles())[0]).toBe(list[list.length - 1]!.track.title);
     await context.close();
   });
 }

@@ -20,7 +20,8 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
 6. **Results**: one request for every match (`/api/catalogue/recommendations?...&all=1` without
    Spotify, `/api/recommendations?all=1` with it), then the phone orders, filters and pages them
    (`src/lib/songs/browse.ts`), 5 at a time. Two panels sit above the list: **Tune** (pink), sliders
-   that reorder and never remove a song, untouched until moved, with Reset; and **Pick** (cyan),
+   that reorder and never remove a song, untouched until moved, with Reset (a song sits on a slider by its
+   rank in the list, so every tenth of the track holds about a tenth of the songs); and **Pick** (cyan),
    chips for decades, moods and duets (one pick per row, a count on each, disabled at zero). The
    lyric line says what the slider moved last does. Songs whose range is only an estimate
    (`difficulty: 'maybe'`) show last in their own "Maybe" list, without a difficulty pill. In

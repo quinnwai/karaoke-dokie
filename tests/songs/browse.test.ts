@@ -16,6 +16,7 @@ import {
   pickMood,
   rangeCoverage,
   savedDividerIndex,
+  sliderPlaces,
   sliderValue,
   toggleDuets,
   viewMatches,
@@ -29,6 +30,7 @@ interface Opts {
   year?: number;
   known?: boolean;
   familiarity?: number;
+  playRank?: number;
   comfort?: number;
   popularity?: number;
   popularityKnown?: boolean;
@@ -41,7 +43,7 @@ interface Opts {
 
 function match(o: Opts): Match {
   const m: Match = {
-    track: { id: o.id, title: o.id, artist: 'A', artistId: 'a', spotifyUrl: '', playRank: 0, known: o.known ?? true },
+    track: { id: o.id, title: o.id, artist: 'A', artistId: 'a', spotifyUrl: '', playRank: o.playRank ?? 0, known: o.known ?? true },
     range: {
       low: o.low ?? 50,
       high: o.high ?? 62,
@@ -141,14 +143,106 @@ describe('sliders', () => {
     }
   });
 
-  it('equal distances keep the server order', () => {
-    const tied = [match({ id: 'a' }), match({ id: 'b' }), match({ id: 'c' })];
-    expect(ids(orderMatches(tied, { ...DEFAULT_VIEW, difficulty: 0.9 }, user, 'library'))).toEqual(['a', 'b', 'c']);
+  it('songs at the same distance from a target keep the server order', () => {
+    // 'a' and 'c' sit at places 0 and 1 (below), 'b' at 0.5: a target of 0.5 is 0.5 from a and c.
+    const songs = [
+      match({ id: 'a', familiarity: 0.2 }),
+      match({ id: 'b', familiarity: 0.5 }),
+      match({ id: 'c', familiarity: 0.8 }),
+    ];
+    expect(ids(orderMatches([songs[2]!, songs[0]!, songs[1]!], { ...DEFAULT_VIEW, familiarity: 0.5 }, user, 'library'))).toEqual(['b', 'c', 'a']);
   });
 
   it('in catalogue mode no song is treated as saved-only', () => {
     expect(order({ difficulty: 0 }, 'catalogue')).toEqual(['saved', 'top2', 'top1', 'top3', 'maybe']);
     expect(savedDividerIndex(list, 'catalogue')).toBe(-1);
+  });
+});
+
+describe('where songs sit on a slider (QWW-33)', () => {
+  // The on-repeat slider's score is the song's familiarity, which keeps these lists easy to read.
+  const fam = (id: string, familiarity: number, extra: Partial<Opts> = {}) => match({ id, familiarity, ...extra });
+  const library = (list: Match[], view: Partial<ResultsView>) => ids(orderMatches(list, { ...DEFAULT_VIEW, ...view }, user, 'library'));
+
+  // 101 songs whose scores all fall between 0.15 and 0.25: placed by score, 90% of the track is empty.
+  const bunched = Array.from({ length: 101 }, (_, i) => fam(`s${i}`, 0.15 + (i / 100) ** 3 * 0.1));
+
+  it('a song sits at its rank in the list, not at its score', () => {
+    expect(sliderPlaces(bunched, 'familiarity', user)).toEqual(bunched.map((_, i) => i / 100));
+  });
+
+  it('each tenth of the track holds a tenth of the songs, and the ends are still the lowest and highest score', () => {
+    const firsts = Array.from({ length: 11 }, (_, k) => library(bunched, { familiarity: k / 10 })[0]);
+    expect(firsts).toEqual(Array.from({ length: 11 }, (_, k) => `s${k * 10}`));
+  });
+
+  it('songs with the same score are told apart by Spotify’s order, then by the server order', () => {
+    // Saved-only songs all score 0.15. The lower the play rank, the more the song was played, and the
+    // further right it sits.
+    const saved = ['a', 'b', 'c', 'd'].map((id, rank) => fam(id, 0.15, { playRank: rank }));
+    expect(sliderPlaces(saved, 'familiarity', user)).toEqual([1, 2 / 3, 1 / 3, 0]);
+    expect(library(saved, { familiarity: 1 })).toEqual(['a', 'b', 'c', 'd']);
+    expect(library(saved, { familiarity: 0 })).toEqual(['d', 'c', 'b', 'a']);
+    // Same play rank too: the one earlier in the list (the better Top pick) sits further right.
+    const tied = ['a', 'b', 'c'].map((id) => fam(id, 0.15));
+    expect(sliderPlaces(tied, 'familiarity', user)).toEqual([1, 0.5, 0]);
+  });
+
+  it('a big tied group spreads over its share of the track', () => {
+    // 80 saved-only songs, then 20 played ones: the saved ones take the first 80% of the track.
+    const saved = Array.from({ length: 80 }, (_, i) => fam(`s${i}`, 0.15, { playRank: 100 - i }));
+    const played = Array.from({ length: 20 }, (_, i) => fam(`p${i}`, 0.5 + i * 0.02, { playRank: 19 - i }));
+    const list = [...played, ...saved];
+    const firsts = [0, 0.2, 0.4, 0.6, 0.8].map((t) => library(list, { familiarity: t })[0]);
+    expect(new Set(firsts).size).toBe(5);
+    expect(firsts.every((id) => id!.startsWith('s'))).toBe(true);
+    expect(library(list, { familiarity: 1 })[0]).toBe('p19');
+  });
+
+  it('songs we know nothing about get no place and take none', () => {
+    const songs = [
+      match({ id: 'p9', popularity: 0.9, popularityKnown: true }),
+      match({ id: 'unknown' }),
+      match({ id: 'p2', popularity: 0.2, popularityKnown: true }),
+    ];
+    expect(sliderPlaces(songs, 'popularity', user)).toEqual([1, null, 0]);
+    expect(sliderPlaces([songs[0]!], 'popularity', user)).toEqual([0.5]);
+    expect(sliderPlaces([], 'popularity', user)).toEqual([]);
+  });
+
+  it('known songs, saved-only songs and Maybe songs each fill the whole track, and stay in that order', () => {
+    // Known songs are far more popular than the saved-only ones, and the Maybe ones sit in between.
+    const pop = (id: string, popularity: number, extra: Partial<Opts> = {}) => match({ id, popularity, popularityKnown: true, ...extra });
+    const block = (prefix: string, base: number, extra: Partial<Opts> = {}) =>
+      Array.from({ length: 11 }, (_, i) => pop(`${prefix}${i}`, base + i * 0.01, extra));
+    const list = [...block('m', 0.5, { difficulty: 'maybe' }), ...block('s', 0.1, { known: false }), ...block('k', 0.85)];
+    const at = (t: number) => library(list, { popularity: t });
+    for (const [t, k] of [[0, 0], [0.5, 5], [1, 10]] as const) {
+      const out = at(t);
+      expect(out.find((id) => id.startsWith('k'))).toBe(`k${k}`);
+      expect(out.find((id) => id.startsWith('s'))).toBe(`s${k}`);
+      expect(out.find((id) => id.startsWith('m'))).toBe(`m${k}`);
+      expect(out.map((id) => id[0]).join('')).toBe('k'.repeat(11) + 's'.repeat(11) + 'm'.repeat(11));
+    }
+  });
+
+  it('a song’s place is among the songs the chips let through, so the slider spreads over what is left', () => {
+    // s20 to s40 are the 90s songs. Placed among all 41 songs they would sit in the right half of the
+    // track; placed among themselves, the middle one (s30) is the middle of the track.
+    const songs = Array.from({ length: 41 }, (_, i) => fam(`s${i}`, 0.15 + i * 0.001, { year: i < 20 ? 1985 : 1995 }));
+    const view = { ...DEFAULT_VIEW, decade: '90s' as const };
+    const first = (familiarity: number) => ids(viewMatches(songs, { ...view, familiarity }, user, 'library'))[0];
+    expect([first(0), first(0.5), first(1)]).toEqual(['s20', 's30', 's40']);
+  });
+
+  it('Maybe songs take no place from the others', () => {
+    const sure = [0.2, 0.3, 0.4, 0.5, 0.6].map((f, i) => fam(`a${i}`, f));
+    // Five Maybe songs scoring between a3 and a4: counted among the others, they would squeeze a0 to a3
+    // into the left third of the track and push a4 to the far end.
+    const maybe = [0.52, 0.54, 0.56, 0.58, 0.59].map((f, i) => fam(`m${i}`, f, { difficulty: 'maybe' }));
+    const view = { familiarity: 0.5 };
+    expect(library(sure, view)[0]).toBe('a2');
+    expect(library([...maybe, ...sure], view).slice(0, 5)).toEqual(library(sure, view));
   });
 });
 
