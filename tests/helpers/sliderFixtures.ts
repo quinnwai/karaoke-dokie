@@ -17,7 +17,10 @@ import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { MAX_ALL_MATCHES } from '../../src/lib/server/songService';
 import { buildLibrary } from '../../src/lib/server/spotify';
 import { productionSongDeps } from '../../src/lib/server/wiring';
-import { KARAOKE_VIEWS_FULL, UNKNOWN_POPULARITY, withKaraokePopularity } from '../../src/lib/songs/score';
+import { UNKNOWN_POPULARITY, withKaraokePopularity } from '../../src/lib/songs/score';
+
+/** A KaraFun song's karaoke views at the 99th percentile (Oct 2026), to make up plausible view counts. */
+const KARAOKE_VIEWS_TOP = 5_500_000;
 
 const deps = productionSongDeps(createMemoryStore(), false);
 
@@ -86,7 +89,7 @@ function shape(rand: () => number, confidence: 'high' | 'low' = 'high'): Shape {
   }
   if (rand() < 0.55) {
     const score = clamp(0.7 + 0.12 * gauss(rand), 0.2, 1);
-    out.karaokeViews = Math.round(10 ** (score * Math.log10(KARAOKE_VIEWS_FULL)) - 1);
+    out.karaokeViews = Math.round(10 ** (score * Math.log10(KARAOKE_VIEWS_TOP)) - 1);
   }
   if (rand() < 0.08) out.chartRank = 1 + Math.floor(rand() * 100);
   return out;
@@ -94,7 +97,7 @@ function shape(rand: () => number, confidence: 'high' | 'low' = 'high'): Shape {
 
 const keyOf = (artist: string, title: string) => `${artist}|${title}`.toLowerCase();
 
-/** Share of songs with no popularity data at all; the popularity slider is offered while 60% have it. */
+/** Share of songs with no popularity data at all. */
 const UNKNOWN_POPULARITY_SHARE = 0.2;
 
 /**
