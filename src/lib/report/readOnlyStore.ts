@@ -32,6 +32,9 @@ const ACCESS: Record<keyof Store, 'read' | 'write'> = {
   getSongPopularity: 'read',
   putSongDeezer: 'write',
   listSongDeezer: 'read',
+  putSongTempo: 'write',
+  getSongTempos: 'read',
+  listSongTempos: 'read',
 };
 
 export function readOnlyStore(store: Store): Store {

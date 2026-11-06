@@ -75,6 +75,24 @@ a floor at the lower quartile of its tier's charting songs. USDB stars are not u
 song has 5. `npm run popularity:calibrate [-- --dry-run]` reads the numbers from `DATABASE_URL` and
 writes `src/lib/songs/popularityScale.ts`.
 
+## Song tempo
+
+The Tempo slider (QWW-40) sorts by beats per minute, 70 to 180, placed by rank like popularity. No
+tempo is read from Spotify (its audio features are closed to new apps). `song_tempo` keeps each
+source as measured, and `combineTempo` (`src/lib/tempo/tempo.ts`) picks the song's one tempo when
+it is read, so changing the rule needs no refetch: Deezer's `bpm` (median over the studio versions
+looked at, each folded into range), else a beat tracker (librosa) on the 30 s Deezer preview, else
+UltraStar's `#BPM` divided by 4; when Deezer and the tracker disagree, whichever UltraStar's tempo
+agrees with. Preview audio is deleted as soon as it is measured.
+
+- `npm run tempo:fill -- --max-minutes 30`, repeated until it reports nothing left: Deezer bpm and the
+  tracker, for songs `popularity:deezer` matched, most popular first. Needs `DATABASE_URL`, and
+  librosa for `TEMPO_PYTHON` (default `python3`). Paced at 5 requests a second counting preview
+  downloads, stops after 20 failures in a row; finished songs are skipped. Never runs at page load.
+- `npm run tempo:ultrastar -- <name>=<folder> ...`: the note files' `#BPM`, numbers only.
+- `npm run tempo:report`: gold-set accuracy (`data/tempo-gold.json`), coverage and a spot check, from
+  saved data only.
+
 ## Beta event log
 
 Our own `events` table, not a third-party tool, to see where testers drop out of onboarding and

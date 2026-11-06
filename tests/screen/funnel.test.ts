@@ -38,17 +38,17 @@ describe('funnel events', () => {
     expect(eventsFor(tuned, { type: 'sliderDone', slider: 'difficulty' })).toEqual([
       {
         name: 'slider_changed',
-        props: { slider: 'difficulty', mode: 'library', difficulty: 0.33, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false },
+        props: { slider: 'difficulty', mode: 'library', difficulty: 0.33, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false },
       },
     ]);
     expect(eventsFor(tuned, { type: 'resetSliders' })).toEqual([
-      { name: 'sliders_reset', props: { mode: 'library', difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false } },
+      { name: 'sliders_reset', props: { mode: 'library', difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false } },
     ]);
     expect(eventsFor(loaded, { type: 'pickDecade', decade: '80s' })[0]!.props).toMatchObject({ kind: 'decade', value: '80s', on: true, decade: '80s' });
     expect(eventsFor(loaded, { type: 'select', trackId: 't3', position: 4 })).toEqual([
       {
         name: 'song_opened',
-        props: { mode: 'library', difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false, position: 4 },
+        props: { mode: 'library', difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false, position: 4 },
       },
     ]);
     expect(eventsFor(loaded, { type: 'feedback', trackId: 't3', thumbs: 'down' })[0]).toMatchObject({ name: 'feedback_tapped', props: { thumbs: 'down' } });

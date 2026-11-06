@@ -151,9 +151,9 @@ describe('results', () => {
     expect(s.view).toMatchObject({ difficulty: 0.2, decade: '80s' });
     expect(s.shown).toBe(5);
     s = run([{ type: 'pickDecade', decade: '90s' }, { type: 'pickMood', mood: 'upbeat' }, { type: 'toggleDuets' }], s);
-    expect(s.view).toEqual({ difficulty: 0.2, familiarity: null, popularity: null, decade: '90s', mood: 'upbeat', duetsOnly: true });
+    expect(s.view).toEqual({ difficulty: 0.2, familiarity: null, popularity: null, tempo: null, decade: '90s', mood: 'upbeat', duetsOnly: true });
     s = run([{ type: 'clearFilters' }], s);
-    expect(s.view).toEqual({ difficulty: 0.2, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false });
+    expect(s.view).toEqual({ difficulty: 0.2, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false });
   });
 
   it('a slider is clamped to its track, the last one moved leads, and Reset unsets them all', () => {
@@ -163,7 +163,7 @@ describe('results', () => {
     expect(run([{ type: 'sliderDone', slider: 'familiarity' }], s)).toBe(s);
     expect(run([{ type: 'setSlider', slider: 'familiarity', value: null }], s).leadSlider).toBeNull();
     s = run([{ type: 'pickDecade', decade: '80s' }, { type: 'resetSliders' }], s);
-    expect(s.view).toEqual({ difficulty: null, familiarity: null, popularity: null, decade: '80s', mood: null, duetsOnly: false });
+    expect(s.view).toEqual({ difficulty: null, familiarity: null, popularity: null, tempo: null, decade: '80s', mood: null, duetsOnly: false });
     expect(s.leadSlider).toBeNull();
   });
 
@@ -201,7 +201,7 @@ describe('results', () => {
   it('redo restarts the test, clears results and filters, and keeps the sliders', () => {
     const s = run([{ type: 'setSlider', slider: 'difficulty', value: 0.8 }, { type: 'pickDecade', decade: '80s' }, { type: 'redo' }], loaded);
     expect(s).toMatchObject({ step: 'quiet', low: null, high: null, matches: [], signedIn: true });
-    expect(s.view).toEqual({ difficulty: 0.8, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false });
+    expect(s.view).toEqual({ difficulty: 0.8, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false });
   });
 });
 
@@ -257,7 +257,7 @@ describe('logging out', () => {
 
   it('keeps the sliders and drops the chips, as a new range does', () => {
     const s = run([{ type: 'loggedOut' }], inLibrary);
-    expect(s.view).toEqual({ difficulty: 0.8, familiarity: 0.2, popularity: null, decade: null, mood: null, duetsOnly: false });
+    expect(s.view).toEqual({ difficulty: 0.8, familiarity: 0.2, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false });
   });
 
   it('asks the catalogue for songs once, then drops the sliders it has no data for (on repeat is the library\'s)', () => {

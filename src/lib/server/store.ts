@@ -101,6 +101,9 @@ export interface SongDeezerRecord {
   checkedAt: string;
 }
 
+import type { SongTempoRecord } from '../tempo/tempo';
+export type { SongTempoRecord };
+
 export interface Store {
   getUser(id: string): Promise<UserRecord | null>;
   upsertUser(user: UserRecord): Promise<void>;
@@ -171,6 +174,14 @@ export interface Store {
   putSongDeezer(entries: SongDeezerRecord[]): Promise<void>;
   /** Every lookup, hits and misses, by song key. */
   listSongDeezer(): Promise<Map<string, SongDeezerRecord>>;
+
+  // ---- tempo (QWW-40) ----
+  /** Adds rows, or sets the fields given on a key's row: a field left unset keeps its stored value. */
+  putSongTempo(entries: SongTempoRecord[]): Promise<void>;
+  /** Batch read; the map only has keys that have a row. */
+  getSongTempos(songKeys: string[]): Promise<Map<string, SongTempoRecord>>;
+  /** Every row, for the fill script's skip list. */
+  listSongTempos(): Promise<Map<string, SongTempoRecord>>;
 }
 
 export const DEFAULT_LIST_LIMIT = 200;

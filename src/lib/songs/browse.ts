@@ -9,7 +9,8 @@
 //   Untouched, a slider does nothing. Set, it is a target from 0 (left end) to 1 (right end), and
 //   the songs closest to every set target come first. A song sits on the track by its rank in the
 //   list, not by its raw score, so every tenth of the track holds about a tenth of the songs and
-//   the list changes along the whole length (QWW-33). Sliders only reorder, so they can never empty
+//   the list changes along the whole length (QWW-33). Tempo (QWW-40) is placed the same way, by rank
+//   of the song's beats per minute. Sliders only reorder, so they can never empty
 //   the list either, and every view is computed on the phone in one pass.
 //
 // Two rules from the original ranking hold throughout: Maybe songs (estimated ranges) come last,
@@ -32,6 +33,7 @@ export const SLIDERS: SliderDef[] = [
   { id: 'difficulty', left: 'Light work', right: 'Locked in' },
   { id: 'familiarity', left: 'Rediscover', right: 'On repeat' },
   { id: 'popularity', left: 'Deep cuts', right: 'Pop hits' },
+  { id: 'tempo', left: 'Slow jams', right: 'Upbeat tracks' },
 ];
 
 export const DECADES: { id: Decade; label: string }[] = [
@@ -50,6 +52,7 @@ export const DEFAULT_VIEW: ResultsView = {
   difficulty: null,
   familiarity: null,
   popularity: null,
+  tempo: null,
   decade: null,
   mood: null,
   duetsOnly: false,
@@ -74,7 +77,8 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
 /**
  * Which sliders make sense for this list. "On repeat" needs listening data. Popularity always shows
- * (Quinn-Wai's call, QWW-32); songs whose popularity is unknown go after the rest when it is set.
+ * (Quinn-Wai's call, QWW-32), and so does Tempo (QWW-40); songs whose popularity or tempo is unknown
+ * go after the rest when it is set.
  */
 export function availableSliders(mode: ResultsMode, _matches: Match[]): SliderId[] {
   return SLIDER_IDS.filter((id) => (id === 'familiarity' ? mode === 'library' : true));
@@ -96,6 +100,7 @@ export function rangeCoverage(m: Match, user: VocalRange): number {
 export function sliderValue(m: Match, id: SliderId, user: VocalRange): number | null {
   if (id === 'difficulty') return clamp01((rangeCoverage(m, user) + (1 - (m.parts?.comfort ?? 0.5))) / 2);
   if (id === 'familiarity') return typeof m.parts?.familiarity === 'number' ? clamp01(m.parts.familiarity) : null;
+  if (id === 'tempo') return typeof m.tempo === 'number' ? m.tempo : null;
   return m.parts?.popularityKnown ? clamp01(m.parts.popularity) : null;
 }
 

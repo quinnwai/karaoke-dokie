@@ -468,6 +468,7 @@ describe('KaraokeApp', () => {
       difficulty: null,
       familiarity: null,
       popularity: null,
+      tempo: null,
       decade: null,
       mood: null,
       duetsOnly: false,

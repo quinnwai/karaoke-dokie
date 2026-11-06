@@ -423,13 +423,39 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(all.get('toto|africa')!.deezerId).toBe(3_135_556_000);
   });
 
+  it('keeps tempo per source: a write sets only the fields it names (QWW-40)', async () => {
+    const s = make();
+    await s.putSongTempo([{ key: 'a-ha|take on me', ultrastarBpm: 456 }, { key: 'toto|africa', ultrastarBpm: 372 }]);
+    await s.putSongTempo([{ key: 'toto|africa', deezerBpm: 93.5, deezerVersions: 2, previewUrl: 'https://cdn/x.mp3', checkedAt: '2026-11-06T12:00:00.000Z' }]);
+    await s.putSongTempo([{ key: 'nobody|missing', checkedAt: '2026-11-06T12:00:01.000Z' }]); // a miss
+    // the fill script writing a tracker tempo leaves Deezer's and UltraStar's alone
+    await s.putSongTempo([{ key: 'toto|africa', trackerBpm: 92, checkedAt: '2026-11-06T13:00:00.000Z' }]);
+    const read = await s.getSongTempos(['toto|africa', 'a-ha|take on me', 'unknown|song']);
+    expect([...read.keys()].sort()).toEqual(['a-ha|take on me', 'toto|africa']);
+    expect(read.get('toto|africa')).toStrictEqual({
+      key: 'toto|africa',
+      deezerBpm: 93.5,
+      deezerVersions: 2,
+      trackerBpm: 92,
+      ultrastarBpm: 372,
+      previewUrl: 'https://cdn/x.mp3',
+      checkedAt: '2026-11-06T13:00:00.000Z',
+    });
+    expect(read.get('a-ha|take on me')).toStrictEqual({ key: 'a-ha|take on me', ultrastarBpm: 456 });
+    expect((await s.listSongTempos()).size).toBe(3);
+    // more keys than one query carries
+    const many = Array.from({ length: 2_500 }, (_, i) => ({ key: `artist ${i}|song ${i}`, deezerBpm: 100 + (i % 50) }));
+    await s.putSongTempo(many);
+    expect((await s.getSongTempos(many.map((m) => m.key))).size).toBe(2_500);
+  });
+
   it('reads back the results view stored with feedback, and no view for a tap without one', async () => {
     const s = make();
     const filtered = {
       ...feedback('u1', 1),
-      view: { difficulty: 0.1, familiarity: null, popularity: 0.75, decade: '80s' as const, mood: 'upbeat' as const, duetsOnly: true },
+      view: { difficulty: 0.1, familiarity: null, popularity: 0.75, tempo: null, decade: '80s' as const, mood: 'upbeat' as const, duetsOnly: true },
     };
-    const plain = { ...feedback('u1', 2), view: { difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false } };
+    const plain = { ...feedback('u1', 2), view: { difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false } };
     const older = feedback('u1', 3);
     for (const f of [filtered, plain, older]) await s.saveFeedback(f);
     const [o, p, f] = await s.listFeedback();
@@ -473,7 +499,7 @@ describe('schema and store selection', () => {
     const fresh = {
       ...feedback('u1', 2),
       songRange: { source: 'audio-full' as const, method: 'm', low: 52, high: 65 },
-      view: { difficulty: 1, familiarity: 0.5, popularity: null, decade: '20s' as const, mood: null, duetsOnly: false },
+      view: { difficulty: 1, familiarity: 0.5, popularity: null, tempo: null, decade: '20s' as const, mood: null, duetsOnly: false },
     };
     await s.saveFeedback(fresh);
     expect(await s.listFeedback()).toEqual([fresh, old]);

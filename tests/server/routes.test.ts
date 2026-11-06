@@ -423,10 +423,10 @@ describe('feedback', () => {
     const jar = await signIn();
     await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
     const tap = { trackId: 'mock-1-bohemian-rhapsody', thumbs: 'up', difficulty: 'maybe', octave: 'none' };
-    const view = { difficulty: 0.25, familiarity: null, popularity: 1, decade: '70s', mood: 'heartfelt', duetsOnly: false };
+    const view = { difficulty: 0.25, familiarity: null, popularity: 1, tempo: null, decade: '70s', mood: 'heartfelt', duetsOnly: false };
     const post = async (json: unknown) => (await feedback.POST(req('/api/feedback', jar, { method: 'POST', json }))).status;
     expect(await post({ ...tap, view: { ...view, chips: ['a'] } })).toBe(200); // fields it does not know are dropped
-    const duetsOnly = { difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: true };
+    const duetsOnly = { difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: true };
     expect(await post({ ...tap, view: duetsOnly })).toBe(200);
     expect(await post(tap)).toBe(200);
     const [older, plain, filtered] = await getStore().listFeedback({ userId: MOCK_USER.id });
@@ -435,7 +435,7 @@ describe('feedback', () => {
     expect(older).not.toHaveProperty('view');
   });
 
-  const goodView = { difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false };
+  const goodView = { difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false };
   const without = (key: keyof typeof goodView) => Object.fromEntries(Object.entries(goodView).filter(([k]) => k !== key));
   it.each([
     ['null', null],
@@ -784,7 +784,7 @@ describe('admin events', () => {
       { name: 'note_detected', at: at(40), props: { step: 'high' } },
       { name: 'range_shown', at: at(39) },
     ]);
-    const view = { difficulty: null, familiarity: null, popularity: null, decade: '80s', mood: null, duetsOnly: false };
+    const view = { difficulty: null, familiarity: null, popularity: null, tempo: null, decade: '80s', mood: null, duetsOnly: false };
     const opened = { name: 'song_opened', at: at(15), props: { ...view, position: 2 } };
     await send('device-bbbb', [
       { name: 'landing_viewed', at: at(30) },

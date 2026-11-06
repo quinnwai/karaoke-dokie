@@ -34,6 +34,7 @@ interface Opts {
   comfort?: number;
   popularity?: number;
   popularityKnown?: boolean;
+  tempo?: number;
   low?: number;
   high?: number;
   fastLyrics?: boolean;
@@ -64,6 +65,7 @@ function match(o: Opts): Match {
     },
   };
   if (o.year !== undefined) m.year = o.year;
+  if (o.tempo !== undefined) m.tempo = o.tempo;
   if (o.moods) m.moods = o.moods;
   return m;
 }
@@ -125,6 +127,23 @@ describe('sliders', () => {
     expect(by(1)).toEqual(['p9', 'p6', 'p2', 'unknown']);
     expect(by(0)).toEqual(['p2', 'p6', 'p9', 'unknown']);
     expect(sliderValue(songs[0]!, 'popularity', user)).toBeNull();
+  });
+
+  it('the tempo slider places songs by rank of beats per minute, and songs with no tempo go last (QWW-40)', () => {
+    const songs = [
+      match({ id: 'none' }),
+      match({ id: 'fast', tempo: 172 }),
+      match({ id: 'slow', tempo: 72 }),
+      match({ id: 'mid', tempo: 110 }),
+    ];
+    const by = (tempo: number) => ids(orderMatches(songs, { ...DEFAULT_VIEW, tempo }, user, 'catalogue'));
+    expect(by(1)).toEqual(['fast', 'mid', 'slow', 'none']);
+    expect(by(0)).toEqual(['slow', 'mid', 'fast', 'none']);
+    expect(sliderValue(songs[0]!, 'tempo', user)).toBeNull();
+    expect(sliderValue(songs[1]!, 'tempo', user)).toBe(172);
+    // Placed by rank, not by bpm: three songs at 118 to 121 still fill the track
+    const bunched = [match({ id: 'a', tempo: 118 }), match({ id: 'b', tempo: 120 }), match({ id: 'c', tempo: 121 })];
+    expect(sliderPlaces(bunched, 'tempo', user)).toEqual([0, 0.5, 1]);
   });
 
   it('several sliders together put the song closest to every target first', () => {
@@ -252,6 +271,7 @@ describe('slider labels', () => {
       ['Light work', 'Locked in'],
       ['Rediscover', 'On repeat'],
       ['Deep cuts', 'Pop hits'],
+      ['Slow jams', 'Upbeat tracks'],
     ]);
     const words = SLIDERS.flatMap((s) => [s.left, s.right]);
     expect(new Set(words).size).toBe(words.length);
@@ -259,11 +279,11 @@ describe('slider labels', () => {
 });
 
 describe('available sliders and rows', () => {
-  it('on repeat needs a library; popularity always shows, even when no song has it', () => {
+  it('on repeat needs a library; popularity and tempo always show, even when no song has them', () => {
     const unknownPop = [match({ id: 'a' }), match({ id: 'b' })];
-    expect(availableSliders('library', unknownPop)).toEqual(['difficulty', 'familiarity', 'popularity']);
-    expect(availableSliders('catalogue', unknownPop)).toEqual(['difficulty', 'popularity']);
-    expect(availableSliders('library', [])).toEqual(['difficulty', 'familiarity', 'popularity']);
+    expect(availableSliders('library', unknownPop)).toEqual(['difficulty', 'familiarity', 'popularity', 'tempo']);
+    expect(availableSliders('catalogue', unknownPop)).toEqual(['difficulty', 'popularity', 'tempo']);
+    expect(availableSliders('library', [])).toEqual(['difficulty', 'familiarity', 'popularity', 'tempo']);
   });
 
   it('a filter row shows only when some song has data for it', () => {
@@ -276,9 +296,9 @@ describe('available sliders and rows', () => {
   });
 
   it('a slider the list cannot offer is unset, and everything else is kept', () => {
-    const view: ResultsView = { difficulty: 0.3, familiarity: 0.8, popularity: 0.5, decade: '80s', mood: 'upbeat', duetsOnly: true };
-    expect(fitViewTo(view, ['difficulty'])).toEqual({ ...view, familiarity: null, popularity: null });
-    expect(fitViewTo(view, ['difficulty', 'familiarity', 'popularity'])).toEqual(view);
+    const view: ResultsView = { difficulty: 0.3, familiarity: 0.8, popularity: 0.5, tempo: 0.4, decade: '80s', mood: 'upbeat', duetsOnly: true };
+    expect(fitViewTo(view, ['difficulty'])).toEqual({ ...view, familiarity: null, popularity: null, tempo: null });
+    expect(fitViewTo(view, ['difficulty', 'familiarity', 'popularity', 'tempo'])).toEqual(view);
   });
 });
 

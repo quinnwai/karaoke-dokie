@@ -43,7 +43,7 @@ describe.each(FIXTURES)('$name', (f) => {
       const saved = f.list.filter((m) => m.parts!.familiarity === 0.15).length;
       expect(saved / f.list.length).toBeGreaterThanOrEqual(0.7);
     }
-    expect(sliders).toEqual(f.mode === 'library' ? ['difficulty', 'familiarity', 'popularity'] : ['difficulty', 'popularity']);
+    expect(sliders).toEqual(f.mode === 'library' ? ['difficulty', 'familiarity', 'popularity', 'tempo'] : ['difficulty', 'popularity', 'tempo']);
     expect(f.list.length).toBeGreaterThan(800);
   });
 

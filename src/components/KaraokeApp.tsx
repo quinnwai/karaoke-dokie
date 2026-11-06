@@ -386,6 +386,7 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
               difficulty: state.view.difficulty,
               familiarity: state.view.familiarity,
               popularity: state.view.popularity,
+              tempo: state.view.tempo,
               decade: state.view.decade,
               mood: state.view.mood,
               duetsOnly: state.view.duetsOnly,

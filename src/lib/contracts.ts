@@ -144,6 +144,8 @@ export interface Match {
    */
   year?: number;
   yearSource?: 'usdb' | 'spotify' | 'chart';
+  /** Tempo in beats per minute, 70 to 180, from Deezer, a beat tracker or the note file (QWW-40). Unset when unknown. */
+  tempo?: number;
   /** Genre as USDB lists it (free text, e.g. "Rock"). */
   genre?: string;
   /** For a duet matched on one singer's part: which part (1 = P1, 2 = P2) and that singer's name. */
@@ -157,10 +159,10 @@ export interface Match {
 
 /**
  * The continuous controls: a slider each. 'familiarity' needs listening data, so catalogue mode
- * has none; 'popularity' needs real popularity data for most songs.
+ * has none; 'popularity' needs real popularity data for most songs; 'tempo' (QWW-40) is in both modes.
  */
-export type SliderId = 'difficulty' | 'familiarity' | 'popularity';
-export const SLIDER_IDS: SliderId[] = ['difficulty', 'familiarity', 'popularity'];
+export type SliderId = 'difficulty' | 'familiarity' | 'popularity' | 'tempo';
+export const SLIDER_IDS: SliderId[] = ['difficulty', 'familiarity', 'popularity', 'tempo'];
 /** Decade buckets; '60s' means "60s and earlier". */
 export type Decade = '60s' | '70s' | '80s' | '90s' | '00s' | '10s' | '20s';
 
@@ -173,6 +175,7 @@ export interface ResultsView {
   difficulty: number | null;
   familiarity: number | null;
   popularity: number | null;
+  tempo: number | null;
   decade: Decade | null;
   mood: Mood | null;
   duetsOnly: boolean;
