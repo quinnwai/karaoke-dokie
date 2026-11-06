@@ -103,6 +103,8 @@ export interface Store {
    * part of songKey), for the artist fallback.
    */
   listMeasuredRangesByArtist(artistKey: string): Promise<SongRange[]>;
+  /** Every stored (not skipped) song range for one artist (the artist part of songKey), by song key; for the octave fix. */
+  listSongRangesByArtist(artistKey: string): Promise<Map<string, SongRangeRecord>>;
 
   /** Adds or updates songs in the USDB song index. */
   putUsdbSongs(entries: UsdbIndexEntry[]): Promise<void>;

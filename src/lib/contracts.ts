@@ -34,6 +34,11 @@ export interface SongRange {
   collection?: string;
   /** How a recording was measured, e.g. "pyin-v1/app-range-v1"; a new value marks a newer export. */
   method?: string;
+  /**
+   * Set when a note file's octave was corrected after import (octave.ts): from this song's own
+   * recording, or from the artist's other recordings.
+   */
+  octaveFrom?: 'recording' | 'artist';
   /** MusicBrainz recording id of a measured recording. */
   mbid?: string;
   /**
