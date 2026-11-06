@@ -6,12 +6,25 @@ import type { SpotifyTokens, Store, UserRecord } from './store';
 export const SPOTIFY_SCOPES = 'user-library-read user-top-read user-read-recently-played playlist-read-private playlist-read-collaborative';
 export const SPOTIFY_ACCOUNTS = 'https://accounts.spotify.com';
 export const SPOTIFY_API = 'https://api.spotify.com/v1';
-export const MAX_SAVED_TRACKS = 2000;
+/**
+ * Saved (liked) songs read per sign-in: more than any real library, so all of them. It was 2,000,
+ * which silently dropped the older likes of a big library (QWW-31: Easy was liked 3,283rd of 11,139).
+ */
+export const MAX_SAVED_TRACKS = 20_000;
 /** Playlists and playlist songs read per sign-in. */
 export const MAX_PLAYLISTS = 100;
 export const MAX_PLAYLIST_TRACKS = 3000;
 /** Saved-song pages fetched at once (50 songs each). */
 const SAVED_PAGE_CONCURRENCY = 5;
+/**
+ * A group of saved-song pages takes at least this long, so a big library is read at about 8
+ * requests a second (5 pages per 600 ms) instead of as fast as Spotify answers, which keeps clear of
+ * its rate limit. An 11,000 song library is 223 pages: about 27 s.
+ */
+const SAVED_BATCH_MIN_MS = 600;
+/** Saved songs are the library itself, so a rate limit is waited out for longer than the optional lists. */
+const SAVED_RATE_LIMIT_RETRIES = 6;
+const SAVED_RATE_LIMIT_MAX_WAIT_MS = 30_000;
 /** Refresh this long before the access token actually expires. */
 const REFRESH_MARGIN_MS = 60_000;
 /**
@@ -245,14 +258,19 @@ export function createSpotifyClient(
     return { accessToken: j.access_token, refreshToken, expiresAt: Date.now() + j.expires_in * 1000 };
   }
 
-  async function api<T>(accessToken: string, url: string): Promise<T> {
+  async function api<T>(
+    accessToken: string,
+    url: string,
+    patience: { retries: number; maxWaitMs: number; onRateLimited?: () => void } = { retries: RATE_LIMIT_RETRIES, maxWaitMs: RATE_LIMIT_MAX_WAIT_MS },
+  ): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const res = await fetchFn(url.startsWith('http') ? url : `${SPOTIFY_API}${url}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      if (res.status === 429 && attempt < RATE_LIMIT_RETRIES) {
+      if (res.status === 429) patience.onRateLimited?.();
+      if (res.status === 429 && attempt < patience.retries) {
         const wait = retryAfterMs(res.headers.get('retry-after'));
-        if (wait <= RATE_LIMIT_MAX_WAIT_MS) {
+        if (wait <= patience.maxWaitMs) {
           await sleep(wait);
           continue;
         }
@@ -286,14 +304,20 @@ export function createSpotifyClient(
     async getSavedTracks(accessToken, max = MAX_SAVED_TRACKS) {
       type Page = { items: { track: SpotifyTrackObject | null }[]; next: string | null; total?: number };
       const pageUrl = (offset: number) => `/me/tracks?limit=50&offset=${offset}`;
-      const first: Page = await api(accessToken, pageUrl(0));
+      let rateLimited = 0;
+      const patience = { retries: SAVED_RATE_LIMIT_RETRIES, maxWaitMs: SAVED_RATE_LIMIT_MAX_WAIT_MS, onRateLimited: () => rateLimited++ };
+      const started = Date.now();
+      const first: Page = await api(accessToken, pageUrl(0), patience);
       const pages: Page[] = [first];
       if (typeof first.total === 'number') {
         // The first page says how many songs there are, so fetch the rest a few pages at a time.
         const offsets: number[] = [];
         for (let o = 50; o < Math.min(first.total, max); o += 50) offsets.push(o);
         for (let i = 0; i < offsets.length; i += SAVED_PAGE_CONCURRENCY) {
-          pages.push(...(await Promise.all(offsets.slice(i, i + SAVED_PAGE_CONCURRENCY).map((o) => api<Page>(accessToken, pageUrl(o))))));
+          const batchStarted = Date.now();
+          pages.push(...(await Promise.all(offsets.slice(i, i + SAVED_PAGE_CONCURRENCY).map((o) => api<Page>(accessToken, pageUrl(o), patience)))));
+          const pause = SAVED_BATCH_MIN_MS - (Date.now() - batchStarted);
+          if (pause > 0 && i + SAVED_PAGE_CONCURRENCY < offsets.length) await sleep(pause);
         }
       } else {
         let page = first;
@@ -302,6 +326,8 @@ export function createSpotifyClient(
           pages.push(page);
         }
       }
+      // One line per load in the server log, so a rate limit or a slow big library shows up.
+      if (pages.length > 10) console.info(`[spotify] read ${pages.length} pages of saved songs in ${Date.now() - started} ms, rate limited ${rateLimited} times`);
       const out: Track[] = [];
       for (const page of pages) {
         for (const item of page.items) {

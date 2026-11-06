@@ -119,23 +119,40 @@ describe('Spotify library reads', () => {
     expect(tracks[499]!.playRank).toBe(499);
   });
 
-  it('reads up to 2000 saved songs, fetching pages in parallel once the total is known', async () => {
+  it('reads every saved song of a big library (11,139 liked songs, QWW-31), pages in parallel once the total is known', async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
+    const total = 11_139;
     const f = fakeFetch(
       {
         'https://api.spotify.com/v1/me/tracks': (u) => {
           const offset = Number(u.searchParams.get('offset'));
-          const items = Array.from({ length: Math.max(0, Math.min(50, 3000 - offset)) }, (_, i) => ({ track: sTrack(offset + i) }));
-          return { items, total: 3000, next: null };
+          const items = Array.from({ length: Math.max(0, Math.min(50, total - offset)) }, (_, i) => ({ track: sTrack(offset + i) }));
+          return { items, total, next: null };
         },
       },
       calls,
     );
-    const tracks = await createSpotifyClient(cfg, f).getSavedTracks('tok');
-    expect(tracks).toHaveLength(2000);
-    expect(calls).toHaveLength(40);
+    const tracks = await createSpotifyClient(cfg, f, async () => {}).getSavedTracks('tok');
+    expect(tracks).toHaveLength(total);
+    expect(calls).toHaveLength(Math.ceil(total / 50));
     expect(tracks.map((t) => t.playRank)).toEqual(tracks.map((_, i) => i));
-    expect(tracks[1999]!.id).toBe('id1999');
+    // The oldest like is read: it used to be cut at the 2,000th.
+    expect(tracks[3282]!.id).toBe('id3282');
+    expect(tracks[total - 1]!.id).toBe(`id${total - 1}`);
+  });
+
+  it('spaces groups of pages so a big library is read at about 8 requests a second', async () => {
+    const waits: number[] = [];
+    const f = fakeFetch({
+      'https://api.spotify.com/v1/me/tracks': (u) => {
+        const offset = Number(u.searchParams.get('offset'));
+        return { items: Array.from({ length: 50 }, (_, i) => ({ track: sTrack(offset + i) })), total: 2000, next: null };
+      },
+    });
+    await createSpotifyClient(cfg, f, async (ms) => void waits.push(ms)).getSavedTracks('tok');
+    // 40 pages: the first alone, then 39 in groups of 5 (8 groups); no pause after the last group.
+    expect(waits).toHaveLength(7);
+    expect(waits.every((ms) => ms > 0 && ms <= 600)).toBe(true);
   });
 
   it('stops at the last page and skips local or missing tracks', async () => {
@@ -237,6 +254,24 @@ describe('Spotify rate limits (429)', () => {
     await expect(client.getMe('tok')).rejects.toMatchObject({ status: 429 });
     expect(waits).toEqual([1000, 1000, 1000]);
     expect(calls).toHaveLength(4);
+  });
+
+  it('waits out a longer rate limit for saved songs (up to 30 s, 6 times), since they are the library itself', async () => {
+    const waits: number[] = [];
+    let n = 0;
+    const f = fakeFetch({
+      'https://api.spotify.com/v1/me/tracks': () => (n++ < 2 ? limited('25') : { items: [{ track: sTrack(1) }], next: null }),
+    });
+    const tracks = await createSpotifyClient(cfg, f, async (ms) => void waits.push(ms)).getSavedTracks('tok');
+    expect(tracks).toHaveLength(1);
+    expect(waits).toEqual([25_000, 25_000]);
+  });
+
+  it('still gives up on saved songs when Spotify asks for more than 30 seconds', async () => {
+    const waits: number[] = [];
+    const f = fakeFetch({ 'https://api.spotify.com/v1/me/tracks': () => limited('120') });
+    await expect(createSpotifyClient(cfg, f, async (ms) => void waits.push(ms)).getSavedTracks('tok')).rejects.toMatchObject({ status: 429 });
+    expect(waits).toEqual([]);
   });
 
   it('does not wait when Spotify asks for longer than 10 seconds', async () => {

@@ -99,11 +99,25 @@ export function artistKey(artist: string): string {
   return songKey(artist, '').split('|')[0]!;
 }
 
-export function realResolver(store: Store, noteFiles: NoteFileSource): (track: Track) => Promise<ResolveResult> {
+/** How long an artist's measured ranges are reused: a library has many songs by one artist, looked up together. */
+const ARTIST_RANGES_TTL_MS = 60_000;
+
+export function realResolver(store: Store, noteFiles: NoteFileSource, now: () => number = Date.now): (track: Track) => Promise<ResolveResult> {
+  const byArtist = new Map<string, { at: number; ranges: Promise<SongRange[]> }>();
+  const artistRanges = (artist: string) => {
+    const key = artistKey(artist);
+    const hit = byArtist.get(key);
+    if (hit && now() - hit.at < ARTIST_RANGES_TTL_MS) return hit.ranges;
+    const ranges = store.listMeasuredRangesByArtist(key);
+    // A failed lookup is not kept, so it is retried.
+    ranges.catch(() => byArtist.delete(key));
+    byArtist.set(key, { at: now(), ranges });
+    return ranges;
+  };
   return (track) =>
     resolveSongRange(track, {
       getNoteFile: (artist, title) => noteFiles.getNoteFile(artist, title),
-      getArtistSongRanges: (artist) => store.listMeasuredRangesByArtist(artistKey(artist)),
+      getArtistSongRanges: (artist) => artistRanges(artist),
       // No outside artist-range source is connected in v1.
       getExternalArtistRange: async () => null,
     });
