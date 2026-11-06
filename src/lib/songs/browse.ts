@@ -55,9 +55,6 @@ export const DEFAULT_VIEW: ResultsView = {
   duetsOnly: false,
 };
 
-/** The popularity slider needs real popularity for most songs; below this share it would order on guesses. */
-export const MIN_KNOWN_POPULARITY_SHARE = 0.6;
-
 export function decadeOf(year: number | undefined): Decade | null {
   if (typeof year !== 'number' || !Number.isFinite(year)) return null;
   if (year < 1970) return '60s';
@@ -75,11 +72,12 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
 // ---- sliders ----
 
-/** Which sliders make sense for this list. "On repeat" needs listening data; popularity needs data. */
-export function availableSliders(mode: ResultsMode, matches: Match[]): SliderId[] {
-  const known = matches.filter((m) => m.parts?.popularityKnown === true).length;
-  const popularity = matches.length > 0 && known / matches.length >= MIN_KNOWN_POPULARITY_SHARE;
-  return SLIDER_IDS.filter((id) => (id === 'familiarity' ? mode === 'library' : id === 'popularity' ? popularity : true));
+/**
+ * Which sliders make sense for this list. "On repeat" needs listening data. Popularity always shows
+ * (Quinn-Wai's call, QWW-32); songs whose popularity is unknown go after the rest when it is set.
+ */
+export function availableSliders(mode: ResultsMode, _matches: Match[]): SliderId[] {
+  return SLIDER_IDS.filter((id) => (id === 'familiarity' ? mode === 'library' : true));
 }
 
 /** Share of the singer's range the song covers: 1 = the song spans the whole range. */

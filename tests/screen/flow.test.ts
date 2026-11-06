@@ -168,9 +168,9 @@ describe('results', () => {
   });
 
   it('a slider the new list cannot offer is unset', () => {
-    // No song in the fixtures has known popularity, so the popularity slider is not offered.
-    const s = run([{ type: 'setSlider', slider: 'popularity', value: 0.9 }, { type: 'allLoaded', page: allMatches() }], atResults);
-    expect(s.view.popularity).toBeNull();
+    // The catalogue has no listening data, so "on repeat" is not offered there.
+    const s = run([{ type: 'setSlider', slider: 'familiarity', value: 0.9 }, { type: 'allLoaded', page: allMatches() }], { ...atResults, mode: 'catalogue' });
+    expect(s.view.familiarity).toBeNull();
     expect(s.leadSlider).toBeNull();
   });
 

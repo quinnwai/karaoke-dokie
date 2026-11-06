@@ -259,13 +259,11 @@ describe('slider labels', () => {
 });
 
 describe('available sliders and rows', () => {
-  it('on repeat needs a library, and popularity needs real popularity for most songs', () => {
+  it('on repeat needs a library; popularity always shows, even when no song has it', () => {
     const unknownPop = [match({ id: 'a' }), match({ id: 'b' })];
-    expect(availableSliders('library', unknownPop)).toEqual(['difficulty', 'familiarity']);
-    expect(availableSliders('catalogue', unknownPop)).toEqual(['difficulty']);
-    const known = [match({ id: 'a', popularityKnown: true }), match({ id: 'b', popularityKnown: true }), match({ id: 'c' })];
-    expect(availableSliders('catalogue', known)).toEqual(['difficulty', 'popularity']);
-    expect(availableSliders('library', [])).toEqual(['difficulty', 'familiarity']);
+    expect(availableSliders('library', unknownPop)).toEqual(['difficulty', 'familiarity', 'popularity']);
+    expect(availableSliders('catalogue', unknownPop)).toEqual(['difficulty', 'popularity']);
+    expect(availableSliders('library', [])).toEqual(['difficulty', 'familiarity', 'popularity']);
   });
 
   it('a filter row shows only when some song has data for it', () => {
