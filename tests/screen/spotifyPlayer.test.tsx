@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SpotifyPlayer } from '../../src/components/SpotifyPlayer';
 import { track } from '../fixtures/screen';
 
@@ -34,5 +34,13 @@ describe('SpotifyPlayer', () => {
     const link = screen.getByRole('link', { name: 'Open in Spotify' });
     expect(link.getAttribute('href')).toBe(search);
     expect(link.getAttribute('target')).toBe('_blank');
+  });
+
+  it('uses the given label and reports a tap on the fallback link', () => {
+    const onOpen = vi.fn();
+    render(<SpotifyPlayer track={withLink('https://open.spotify.com/search/Queen')} label="Find on Spotify" onOpen={onOpen} />);
+
+    fireEvent.click(screen.getByRole('link', { name: 'Find on Spotify' }));
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });

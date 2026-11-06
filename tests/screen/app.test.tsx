@@ -465,7 +465,7 @@ describe('KaraokeApp', () => {
     const navigate = vi.fn();
     render(<KaraokeApp api={api} track={track} mic={fakeMic().mic} navigate={navigate} />);
     fireEvent.click(await screen.findByRole('button', { name: /^Yoru ni Kakeru/ }));
-    fireEvent.click(screen.getByRole('link', { name: 'Open in Spotify' }));
+    // Spotify's player is Spotify's page, so playing in it is not seen here; only the fallback link is (SpotifyPlayer test).
     fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
     fireEvent.click(screen.getByRole('button', { name: 'Back to songs' }));
     const slider = screen.getByRole('slider', { name: 'Light work to Locked in' });
@@ -474,7 +474,7 @@ describe('KaraokeApp', () => {
     fireEvent.input(slider, { target: { value: '20' } });
     fireEvent.pointerUp(slider);
     fireEvent.change(slider);
-    expect(tracked.map((e) => e.name)).toEqual(['results_viewed', 'song_opened', 'spotify_link_pressed', 'feedback_tapped', 'slider_changed']);
+    expect(tracked.map((e) => e.name)).toEqual(['results_viewed', 'song_opened', 'feedback_tapped', 'slider_changed']);
     expect(tracked[1]!.props).toEqual({
       mode: 'library',
       difficulty: null,
@@ -485,7 +485,7 @@ describe('KaraokeApp', () => {
       duetsOnly: false,
       position: 3,
     });
-    expect(tracked[4]!.props).toMatchObject({ slider: 'difficulty', difficulty: 0.2 });
+    expect(tracked[3]!.props).toMatchObject({ slider: 'difficulty', difficulty: 0.2 });
     expect(JSON.stringify(tracked)).not.toMatch(/"t\d"|Yoru|YOASOBI|open\.spotify/);
   });
 });
