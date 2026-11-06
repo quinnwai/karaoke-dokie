@@ -1,4 +1,5 @@
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
+import { catalogueRank, pickCatalogue } from '../songs/score';
 import { isMeasured } from '../songs/sourceRank';
 import {
   DEFAULT_EVENTS_LIMIT,
@@ -15,16 +16,6 @@ import {
 } from './store';
 
 const clone = <T>(v: T): T => structuredClone(v);
-
-/** Catalogue order: songs with a USDB row first, most views then most stars; then the rest by key. */
-function byCatalogueOrder(a: CatalogueSong, b: CatalogueSong): number {
-  return (
-    Number(!a.usdb) - Number(!b.usdb) ||
-    (b.usdb?.views ?? 0) - (a.usdb?.views ?? 0) ||
-    (b.usdb?.rating ?? 0) - (a.usdb?.rating ?? 0) ||
-    (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
-  );
-}
 
 /** In-process store. Everything is copied in and out so callers cannot mutate stored data. */
 export function createMemoryStore(): Store {
@@ -132,16 +123,17 @@ export function createMemoryStore(): Store {
         const more = (e.views ?? 0) - (b?.views ?? 0);
         if (!b || more > 0 || (more === 0 && e.id < b.id)) best.set(e.key, e);
       }
-      const out: CatalogueSong[] = [];
+      const out: { key: string; rank: number; charted: boolean; song: CatalogueSong }[] = [];
       for (const [key, { range, log }] of songs) {
         // Measured ranges only. Artist estimates exist only because a tester's library had the song.
         if (!range || !isMeasured(range)) continue;
         const song: CatalogueSong = { key, artist: log.artist, title: log.title, range, log };
         const usdb = best.get(key);
         if (usdb) song.usdb = usdb;
-        out.push(song);
+        const popularity = songPopularity.get(key);
+        out.push({ key, rank: catalogueRank(range, usdb, popularity), charted: popularity?.chartRank !== undefined, song });
       }
-      return out.sort(byCatalogueOrder).slice(0, limit).map(clone);
+      return pickCatalogue(out, limit).map(({ song }) => clone(song));
     },
 
     // ---- beta event log (QWW-16) ----

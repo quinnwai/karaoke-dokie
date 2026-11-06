@@ -2,8 +2,8 @@
 // karaoke-video views and Billboard Year-End Hot 100 ranks, merged per song key
 // (src/lib/popularity/import.ts). Both files are needed, since a row replaces the song's whole
 // earlier row: a run with one file would drop the other's numbers. Prints how many keys there are,
-// how many have views and a chart entry, and the view percentiles (the 99th calibrates
-// KARAOKE_VIEWS_FULL in src/lib/songs/score.ts).
+// how many have views and a chart entry, and the view percentiles. Run popularity:calibrate after
+// it, so the new numbers score on the shared popularity scale.
 // Usage: npm run popularity:import -- --karafun karafun_songs.csv --billboard billboard_songs.csv [--dry-run]
 // Writes to Postgres with DATABASE_URL, otherwise to an in-memory store that is thrown away;
 // --dry-run reads and summarises the files without opening any store.

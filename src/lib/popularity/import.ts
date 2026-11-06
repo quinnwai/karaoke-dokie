@@ -112,7 +112,7 @@ export interface PopularitySummary {
   withChart: number;
   /** Keys with both: how well the two files join. */
   withBoth: number;
-  /** Nearest-rank percentiles of the karaoke views, one per key; KARAOKE_VIEWS_FULL in score.ts is the 99th. */
+  /** Nearest-rank percentiles of the karaoke views, one per key (npm run popularity:calibrate sets the scale they score on). */
   viewPercentiles: { p10: number; p25: number; p50: number; p75: number; p90: number; p99: number; max: number } | null;
 }
 

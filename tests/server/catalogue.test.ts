@@ -13,7 +13,7 @@ import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import type { CatalogueSong, SongPopularityRecord, UsdbIndexEntry } from '../../src/lib/server/store';
 import { MAX_ALL_MATCHES } from '../../src/lib/server/songService';
 import { productionSongDeps } from '../../src/lib/server/wiring';
-import { CHART_FLOOR, KARAOKE_VIEWS_FULL, UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
+import { CHART_FLOOR, UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
 
 const user: VocalRange = { low: 48, high: 72, source: 'test' }; // C3-C5, centre C4
 /** The real matching, scoring and ranking, as the app injects them. */
@@ -202,7 +202,7 @@ describe('karaoke popularity (QWW-6)', () => {
     const unknown = song('C', 'Unknown', plain);
     const tracks = catalogueTracks([
       { ...unknown },
-      { ...viewed, popularity: popularity(viewed, { karaokeViews: KARAOKE_VIEWS_FULL }) },
+      { ...viewed, popularity: popularity(viewed, { karaokeViews: 1_000_000 }) },
       { ...charted, popularity: popularity(charted, { chartRank: 15, chartYear: 1997 }) },
     ]);
     const all = recommendCatalogue(tracks, user, deps, { all: true });

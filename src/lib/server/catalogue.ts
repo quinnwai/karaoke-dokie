@@ -13,7 +13,7 @@ import { withKaraokePopularity } from '../songs/score';
 import { MAX_ALL_MATCHES, type SongDeps } from './songService';
 import type { CatalogueSong, SongPopularityRecord, Store, UsdbIndexEntry } from './store';
 
-/** How many songs are read from the store, most popular first. */
+/** How many songs are read from the store, most popular first; every Year-End song is read as well. */
 export const CATALOGUE_SIZE = 6000;
 /** One read of the catalogue serves every request in the process for this long. */
 export const CATALOGUE_TTL_MS = 60 * 60_000;
