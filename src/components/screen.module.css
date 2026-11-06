@@ -755,7 +755,7 @@
   color: var(--dim);
 }
 
-/* The range bar: one quiet capsule. Your range is the lighter stretch, the song the pink one.
+/* The range bar: two shades only. Your range is the grey stretch, the song the pink one.
    Note names wait below it and show on hover, focus or a tap. */
 .rangeBar {
   width: 100%;
@@ -769,7 +769,6 @@
   position: relative;
   height: 10px;
   border-radius: 5px;
-  background: rgba(244, 241, 246, 0.06);
 }
 
 .barUser,
@@ -830,6 +829,14 @@
   margin-top: 4px;
   font-size: 11px;
   color: var(--dim);
+  /* Hidden, not removed, so nothing moves when it shows. */
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.rangeBar:hover .barLegend,
+.rangeBar[data-open] .barLegend {
+  opacity: 1;
 }
 
 .barLegend span {
@@ -848,49 +855,13 @@
 }
 
 .legendUser {
-  background: rgba(244, 241, 246, 0.3);
-}
-
-.legendUser {
-  height: 8px;
-  border: 1px solid rgba(244, 241, 246, 0.3);
-  background: rgba(244, 241, 246, 0.05);
+  background: rgba(244, 241, 246, 0.2);
 }
 
 .tags {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.infoWrap {
-  position: relative;
-}
-
-.info {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid var(--faint);
-  background: none;
-  font-size: 13px;
-  font-style: italic;
-  font-family: Georgia, serif;
-  color: var(--dim);
-  cursor: pointer;
-}
-
-.tooltip {
-  margin: -10px 0 0;
-  max-width: 300px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: #1d1a22;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--ink);
-  text-align: center;
 }
 
 .octave {
@@ -999,10 +970,6 @@
 .credits:hover,
 .credits:focus-visible {
   color: var(--dim);
-}
-
-.tooltip a {
-  color: var(--ink);
 }
 
 /* ---- results view: Tune (sliders, pink) and Pick (chips, cyan) (QWW-3) ---- */

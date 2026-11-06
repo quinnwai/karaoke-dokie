@@ -97,8 +97,7 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   // Open the first song, check the info line, leave feedback.
   await songs.first().getByRole('button').first().click();
   await expect(page.getByRole('link', { name: 'Open in Spotify' })).toBeVisible();
-  await page.getByRole('button', { name: 'Where this came from' }).click();
-  await expect(page.getByRole('tooltip')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Where this came from' })).toHaveCount(0);
   const feedback = page.waitForResponse((r) => r.url().endsWith('/api/feedback'));
   await page.getByRole('button', { name: 'It went well' }).click();
   expect((await feedback).status()).toBe(200);
