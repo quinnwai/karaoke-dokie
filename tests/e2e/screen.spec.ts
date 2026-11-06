@@ -728,7 +728,7 @@ test('Spotify logo and Reset icon with a mouse at 375 px: pointing opens the box
 test('Spotify logo and Reset icon on a 1280 px desktop, with real transitions', async ({ browser, baseURL }) => {
   test.setTimeout(60_000);
   await walkLogoAndReset(browser, baseURL, { size: { width: 1280, height: 800 }, finger: false, motion: true });
-
+});
 
 // QWW-31: Easy (Commodores) is stored from a note file written an octave above Lionel Richie's recording.
 // Its stored range goes through the real octave fix and matcher, then to the screen, for a singer who
