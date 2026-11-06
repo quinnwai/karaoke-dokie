@@ -24,8 +24,8 @@ export function foldBpm(bpm: number | null | undefined): number | null {
 export const ultrastarTempo = (bpm: number | null | undefined): number | null => (bpm ? foldBpm(bpm / 4) : null);
 
 const VERSION_TAGS =
-  /\b(live|acoustic|remix|remixed|mix|karaoke|instrumental|sped up|speed up|slowed|reverb|nightcore|cover|demo|unplugged|edit|radio edit|stripped|version|session|medley|reprise|a cappella|acapella)\b/i;
-/** Tags that still leave the studio recording: "Remastered 2011", "Mono", "Single Version", "Album Version". */
+  /\b(live|acoustic|remix|remixed|karaoke|instrumental|sped up|speed up|slowed|reverb|nightcore|cover|demo|unplugged|stripped|session|medley|reprise|a cappella|acapella)\b/i;
+/** Tags that still leave the studio recording: "Remastered 2011", "Mono", "Single Version", "Album Version". ("Version", "Edit" and "Mix" alone are not version tags: "Glee Cast Version", "Radio Edit".) */
 const HARMLESS = /\b(remaster(ed)?( \d{4})?|\d{4} remaster(ed)?|mono|stereo|single version|album version|original version|deluxe|bonus track)\b/gi;
 
 /**
@@ -44,6 +44,18 @@ export function isStudioVersion(title: string, songTitle = ''): boolean {
     }
   }
   return true;
+}
+
+const OFF_TEMPO_TAGS = /\b(remix|remixed|karaoke|instrumental|sped up|speed up|slowed|reverb|nightcore|medley|a cappella|acapella)\b/i;
+
+/**
+ * A last resort for a song with no studio version on Deezer: a live, acoustic or demo take keeps
+ * about the song's tempo, a remix, sped-up or karaoke version does not.
+ */
+export function isSameTempoVersion(title: string, songTitle = ''): boolean {
+  const own = (songTitle.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(' ');
+  const offending = title.replace(HARMLESS, ' ').match(new RegExp(OFF_TEMPO_TAGS.source, 'gi')) ?? [];
+  return offending.every((w) => own.includes(w.toLowerCase()));
 }
 
 export function median(xs: number[]): number | null {

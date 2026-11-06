@@ -27,7 +27,7 @@ import { createDeezerClient, deezerQuery, matchesKey, type DeezerTrack, type Dee
 import { neonQuery } from '../src/lib/server/getStore';
 import { createPostgresStore } from '../src/lib/server/postgresStore';
 import type { SongTempoRecord } from '../src/lib/server/store';
-import { deezerTempo, isStudioVersion } from '../src/lib/tempo/tempo';
+import { deezerTempo, isSameTempoVersion, isStudioVersion } from '../src/lib/tempo/tempo';
 
 const RECHECK_DAYS = 90;
 /** Songs worked at a time; the client spaces their requests to Deezer's limit. */
@@ -168,12 +168,16 @@ async function main() {
         if (d) candidates.push(d);
       }
     }
+    // No studio version on Deezer: the matched take stands in if it keeps the song's tempo (live, acoustic),
+    // counted as 0 studio versions.
+    const studio = candidates.length;
+    if (!studio && first && matchesKey(key, first) && isSameTempoVersion(first.title, ownTitle)) candidates.push(first);
     const withBpm = candidates.filter((c) => c.bpm > 0);
     const record: SongTempoRecord = { key, checkedAt: new Date().toISOString() };
     const median = deezerTempo(candidates.map((c) => c.bpm));
     if (median !== null) {
       record.deezerBpm = Number(median.toFixed(2));
-      record.deezerVersions = withBpm.length;
+      record.deezerVersions = studio ? withBpm.length : 0;
       counts.deezer++;
     }
     if (median === null || values['always-track']) {

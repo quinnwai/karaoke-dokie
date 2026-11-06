@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { combineTempo, deezerTempo, foldBpm, isStudioVersion, median, tempoOf, ultrastarTempo } from '../../src/lib/tempo/tempo';
+import { combineTempo, deezerTempo, foldBpm, isSameTempoVersion, isStudioVersion, median, tempoOf, ultrastarTempo } from '../../src/lib/tempo/tempo';
 
 describe('foldBpm', () => {
   it('doubles or halves into 70 to 180', () => {
@@ -28,9 +28,16 @@ describe('isStudioVersion', () => {
     expect(isStudioVersion('Live Forever (Live)', 'Live Forever')).toBe(false); // one "live" is the song's, the other a tag
   });
   it('keeps the recording as released, remasters and single versions included', () => {
-    for (const t of ['Africa', 'Dancing Queen', 'Every Breath You Take (Remastered 2003)', 'Hey Jude - 2015 Remaster', 'Let It Be (Single Version)', "Don't Stop Believin' (Album Version)"]) {
+    for (const t of ['Africa', 'Dancing Queen', 'Every Breath You Take (Remastered 2003)', 'Hey Jude - 2015 Remaster', 'Let It Be (Single Version)', "Don't Stop Believin' (Glee Cast Version)", 'Hello (Radio Edit)', "Don't Stop Believin' (Album Version)"]) {
       expect(isStudioVersion(t), t).toBe(true);
     }
+  });
+});
+
+describe('isSameTempoVersion', () => {
+  it('lets a live, acoustic or demo take stand in, not a remix, sped-up or karaoke version', () => {
+    for (const t of ['What Up Gangsta (Live In New York City)', 'Torn (Acoustic)', 'Hello (Demo)']) expect(isSameTempoVersion(t), t).toBe(true);
+    for (const t of ['Fitzpleasure (Betatraxx Remix)', 'Flowers (Sped Up)', 'Hello (Karaoke Version)', 'Party Life (A Cappella)']) expect(isSameTempoVersion(t), t).toBe(false);
   });
 });
 
