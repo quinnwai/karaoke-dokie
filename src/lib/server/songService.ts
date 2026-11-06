@@ -12,6 +12,7 @@ import type {
 } from '../contracts';
 import type { SongPopularityRecord, SongRangeRecord, Store, UsdbIndexEntry } from './store';
 import { hasLittleSinging } from '../songs/resolve';
+import { tempoOf } from '../tempo/tempo';
 import { withKaraokePopularity, type KaraokePopularity } from '../songs/score';
 
 export interface ResolveResult {
@@ -217,10 +218,10 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       });
 
       // The whole list also carries song facts from our USDB index and is scored with our karaoke
-      // popularity (QWW-6), each read once for every candidate. Pages leave both out, so they stay
+      // popularity (QWW-6) and tempo (QWW-40), each read once for every candidate. Pages leave both out, so they stay
       // exactly as they were.
       const keys = candidates.map((c) => c.key);
-      const [index, popularity] = all ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys)]) : [null, null];
+      const [index, popularity, tempos] = all ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys), store.getSongTempos(keys)]) : [null, null, null];
       const matches: Match[] = [];
       const logs = new Map<string, DataSourceLogEntry>();
       const keyOf = new Map<string, string>();
@@ -229,7 +230,8 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         const pop = popularity?.get(key);
         const m = deps.matchSong(track, index ? withKaraokePopularity(withIndexPopularity(range, row), pop) : range, userRange);
         if (!m) continue;
-        matches.push(index ? { ...m, ...songFacts(track, row, pop) } : m);
+        const tempo = tempoOf(tempos?.get(key));
+        matches.push(index ? { ...m, ...songFacts(track, row, pop), ...(tempo !== undefined ? { tempo } : {}) } : m);
         logs.set(track.id, log);
         keyOf.set(track.id, key);
       }

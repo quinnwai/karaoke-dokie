@@ -195,6 +195,24 @@ describe('karaoke popularity (QWW-6)', () => {
     expect(loaded.find((s) => s.key === b.key)).not.toHaveProperty('popularity');
   });
 
+  it('reads each song\'s tempo with the catalogue and puts it on the match (QWW-40)', async () => {
+    const store = createMemoryStore();
+    const a = song('A', 'Fast', range(57, 63));
+    const b = song('B', 'NoTempo', range(57, 63));
+    await store.putSongRange(a.key, { range: a.range, log: a.log });
+    await store.putSongRange(b.key, { range: b.range, log: b.log });
+    // Deezer 60 folds to 120; a key with no song row never reaches the catalogue
+    await store.putSongTempo([{ key: a.key, deezerBpm: 60 }, { key: 'nobody|else', trackerBpm: 99 }]);
+    const getSongTempos = vi.spyOn(store, 'getSongTempos');
+    const loaded = await loadCatalogue(store);
+    expect(getSongTempos).toHaveBeenCalledTimes(1);
+    expect(loaded.find((s) => s.key === a.key)!.tempo).toBe(120);
+    expect(loaded.find((s) => s.key === b.key)).not.toHaveProperty('tempo');
+    const all = recommendCatalogue(catalogueTracks(loaded), user, deps, { all: true });
+    expect(all.matches.find((m) => m.track.title === 'Fast')!.tempo).toBe(120);
+    expect(all.matches.find((m) => m.track.title === 'NoTempo')).not.toHaveProperty('tempo');
+  });
+
   it('scores with it on every request, all=1 or a page, and returns the stored range', () => {
     const plain = range(57, 63);
     const charted = song('A', 'Charted', plain);

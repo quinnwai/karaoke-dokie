@@ -119,11 +119,13 @@ export function allMatchesWithFacts(): RecommendationsResponse {
   page.matches = page.matches.map((m, i) => {
     const [year, genre] = FACTS[i % FACTS.length]!;
     const popularity = [0.55, 0.8, 0.7, 0.6, 0.95, 0.85, 0.9, 0.75, 0.4, 0.5][i % 10]!;
+    const tempo = [92, 128, 110, 75, 150, 170, 99, 120, 84, 140][i % 10]!;
     return {
       ...m,
       year,
       yearSource: 'usdb' as const,
       genre,
+      tempo,
       parts: { comfort: 1 - (i % 5) * 0.15, familiarity: 0.9 - i * 0.07, popularity, popularityKnown: true, penalty: 0 },
     };
   });

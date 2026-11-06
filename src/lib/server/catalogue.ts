@@ -10,6 +10,7 @@
 import type { DataSourceLogEntry, Match, RecommendationsResponse, SongRange, Track, VocalRange } from '../contracts';
 import { hasLittleSinging } from '../songs/resolve';
 import { withKaraokePopularity } from '../songs/score';
+import { tempoOf } from '../tempo/tempo';
 import { MAX_ALL_MATCHES, type SongDeps } from './songService';
 import type { CatalogueSong, SongPopularityRecord, Store, UsdbIndexEntry } from './store';
 
@@ -23,6 +24,8 @@ const ID_PREFIX = 'cat:';
 /** A catalogue song as the cache keeps it: with its karaoke popularity row (QWW-6), when it has one. */
 export interface CatalogueEntry extends CatalogueSong {
   popularity?: SongPopularityRecord;
+  /** Tempo in beats per minute (QWW-40), when any source has one. */
+  tempo?: number;
 }
 
 /** A catalogue song and the track it is shown as. Its log line carries the track id. */
@@ -35,14 +38,16 @@ export interface CatalogueTrack extends CatalogueEntry {
  * The cache keeps both, so requests read neither.
  */
 export async function loadCatalogue(
-  store: Pick<Store, 'listCatalogue' | 'getSongPopularity'>,
+  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'>,
   size: number = CATALOGUE_SIZE,
 ): Promise<CatalogueEntry[]> {
   const songs = await store.listCatalogue(size);
-  const popularity = await store.getSongPopularity(songs.map((s) => s.key));
+  const keys = songs.map((s) => s.key);
+  const [popularity, tempos] = await Promise.all([store.getSongPopularity(keys), store.getSongTempos(keys)]);
   return songs.map((s) => {
     const p = popularity.get(s.key);
-    return p ? { ...s, popularity: p } : s;
+    const tempo = tempoOf(tempos.get(s.key));
+    return { ...s, ...(p ? { popularity: p } : {}), ...(tempo !== undefined ? { tempo } : {}) };
   });
 }
 
@@ -122,6 +127,7 @@ export function recommendCatalogue(
       m.yearSource = 'chart';
     }
     if (song.usdb?.genre) m.genre = song.usdb.genre;
+    if (song.tempo !== undefined) m.tempo = song.tempo;
     matches.push(m);
     logs.set(song.track.id, song.log);
   }

@@ -8,6 +8,7 @@ import {
   type CatalogueSong,
   type SongMoodsRecord,
   type SongDeezerRecord,
+  type SongTempoRecord,
   type SongPopularityRecord,
   type SongRangeRecord,
   type Store,
@@ -30,6 +31,7 @@ export function createMemoryStore(): Store {
   const songMoods = new Map<string, SongMoodsRecord>();
   const songPopularity = new Map<string, SongPopularityRecord>();
   const songDeezer = new Map<string, SongDeezerRecord>();
+  const songTempo = new Map<string, SongTempoRecord>();
   /** A song's popularity row with its Deezer rank, as getSongPopularity reads it. */
   const popularityOf = (key: string): SongPopularityRecord | undefined => {
     const p = songPopularity.get(key);
@@ -192,6 +194,25 @@ export function createMemoryStore(): Store {
     },
     async listSongDeezer() {
       return new Map([...songDeezer].map(([k, v]) => [k, clone(v)]));
+    },
+
+    // ---- tempo (QWW-40) ----
+    async putSongTempo(entries) {
+      for (const e of entries) {
+        const given = Object.fromEntries(Object.entries(e).filter(([, v]) => v !== undefined));
+        songTempo.set(e.key, { ...songTempo.get(e.key), ...clone(given) } as SongTempoRecord);
+      }
+    },
+    async getSongTempos(songKeys) {
+      const out = new Map<string, SongTempoRecord>();
+      for (const k of songKeys) {
+        const t = songTempo.get(k);
+        if (t) out.set(k, clone(t));
+      }
+      return out;
+    },
+    async listSongTempos() {
+      return new Map([...songTempo].map(([k, v]) => [k, clone(v)]));
     },
   };
 }

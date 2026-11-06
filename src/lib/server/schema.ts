@@ -101,4 +101,16 @@ CREATE TABLE IF NOT EXISTS song_deezer (
   deezer_id BIGINT,
   checked_at TEXT NOT NULL
 );
+-- Tempo per song (QWW-40), one column per source, written by npm run tempo:fill (Deezer, beat
+-- tracker) and npm run tempo:ultrastar (note files). Raw values: the one tempo shown is worked out
+-- when read (src/lib/tempo/tempo.ts). A row with no bpm at all is a miss, kept so a rerun skips it.
+CREATE TABLE IF NOT EXISTS song_tempo (
+  song_key TEXT PRIMARY KEY,
+  deezer_bpm DOUBLE PRECISION,
+  deezer_versions INTEGER,
+  tracker_bpm DOUBLE PRECISION,
+  ultrastar_bpm DOUBLE PRECISION,
+  preview_url TEXT,
+  checked_at TEXT
+);
 `;

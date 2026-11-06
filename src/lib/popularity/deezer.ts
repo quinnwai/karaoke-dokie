@@ -20,6 +20,14 @@ export interface DeezerTrack {
   artist: { name: string };
 }
 
+/** One Deezer track by id (GET /track/<id>), the fields tempo reads (QWW-40). */
+export interface DeezerTrackDetail extends DeezerTrack {
+  /** Beats per minute; 0 when Deezer has none. */
+  bpm: number;
+  /** Link to a 30 second MP3 preview on Deezer's CDN. */
+  preview?: string;
+}
+
 /** What a lookup found: the best-ranked matching track. */
 export interface DeezerHit {
   rank: number;
@@ -80,7 +88,7 @@ export function pickDeezerHit(key: string, results: DeezerTrack[]): DeezerHit | 
 
 export class DeezerError extends Error {}
 
-type Fetch = (url: string) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+export type Fetch = (url: string) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
 export interface DeezerClientOptions {
   fetch?: Fetch;
@@ -107,7 +115,26 @@ export function createDeezerClient(opts: DeezerClientOptions = {}) {
     next = at + gap;
     if (at > now) await sleep(at - now);
   };
+  /** One GET to `url` under the pacing and retry rules; null when Deezer has no such thing (error 800). */
+  async function get<T>(url: string, what: string): Promise<T | null> {
+    for (let i = 1; ; i++) {
+      await turn();
+      const res = await doFetch(url);
+      const body = res.ok ? ((await res.json()) as { error?: { code?: number; message?: string } } & T) : undefined;
+      if (body && !body.error) return body;
+      if (body?.error?.code === 800) return null;
+      const why = body?.error ? `error ${body.error.code}: ${body.error.message}` : `HTTP ${res.status}`;
+      if (i >= tries || res.status === 403) throw new DeezerError(`Deezer ${what} failed (${why})`);
+      await sleep(5000 * i);
+    }
+  }
   return {
+    /** Waits for a turn: for requests that are not API calls (preview downloads) but count against the same limit. */
+    wait: turn,
+    /** One track by id: its bpm (0 when Deezer has none), 30 s preview link and title (QWW-40), or null when gone. */
+    async track(id: number): Promise<DeezerTrackDetail | null> {
+      return get<DeezerTrackDetail>(`https://api.deezer.com/track/${id}`, `track ${id}`);
+    },
     async search(q: string): Promise<DeezerTrack[]> {
       const url = `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=${SEARCH_LIMIT}`;
       for (let i = 1; ; i++) {

@@ -93,6 +93,7 @@ const SLIDER_REASONS: Record<SliderId, RegExp> = {
   difficulty: /^(In your sweet spot|Mostly comfortable|(?:Some|Lots of) (?:high|low) notes)$/,
   familiarity: /^(Top songs(?: this month|, past 6 months| this past year)|Played recently|In your playlists|You (play this a lot|know this one))$/,
   popularity: /^Crowd favourite/,
+  tempo: /^(?!)/, // no reason line speaks to tempo
 };
 
 /** The song's reasons with the one that matches the leading slider first (unchanged when no slider leads). */

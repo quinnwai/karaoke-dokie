@@ -155,7 +155,7 @@ function freshResults(state: FlowState) {
   return {
     matches: [] as Match[],
     sources: {} as Record<string, DataSourceLogEntry>,
-    view: { ...DEFAULT_VIEW, difficulty: state.view.difficulty, familiarity: state.view.familiarity, popularity: state.view.popularity },
+    view: { ...DEFAULT_VIEW, difficulty: state.view.difficulty, familiarity: state.view.familiarity, popularity: state.view.popularity, tempo: state.view.tempo },
     shown: SHOW_STEP,
     attempt: 0,
     selectedId: null,
@@ -254,7 +254,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
     case 'sliderDone':
       return state;
     case 'resetSliders':
-      return { ...withView(state, { ...state.view, difficulty: null, familiarity: null, popularity: null }), leadSlider: null };
+      return { ...withView(state, { ...state.view, difficulty: null, familiarity: null, popularity: null, tempo: null }), leadSlider: null };
     case 'pickDecade':
       return withView(state, pickDecade(state.view, event.decade));
     case 'pickMood':

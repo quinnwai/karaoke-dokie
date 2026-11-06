@@ -62,11 +62,12 @@ const DECADES: readonly Decade[] = ['60s', '70s', '80s', '90s', '00s', '10s', '2
 /** A slider target: null when the slider was not touched, else a number from 0 to 1. */
 const isTarget = (v: unknown): v is number | null => v === null || (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1);
 
-/** The results view a tap came from. Only the six known fields are kept, so the stored view is just them. */
+/** The results view a tap came from. Only the known fields are kept, so the stored view is just them. */
 function validateView(view: unknown): Validated<ResultsView> {
   if (!isObj(view)) return { ok: false, error: 'view must be an object' };
-  const { difficulty, familiarity, popularity, decade, mood, duetsOnly } = view;
+  const { difficulty, familiarity, popularity, tempo, decade, mood, duetsOnly } = view;
   for (const id of SLIDER_IDS) {
+    if (id === 'tempo' && tempo === undefined) continue; // a client from before the Tempo slider
     if (!isTarget(view[id])) return { ok: false, error: `view.${id} must be null or a number from 0 to 1` };
   }
   if (decade !== null && !oneOf(decade, DECADES)) return { ok: false, error: `view.decade must be null or one of ${DECADES.join(', ')}` };
@@ -78,6 +79,7 @@ function validateView(view: unknown): Validated<ResultsView> {
       difficulty: difficulty as number | null,
       familiarity: familiarity as number | null,
       popularity: popularity as number | null,
+      tempo: (tempo ?? null) as number | null,
       decade,
       mood,
       duetsOnly,

@@ -22,6 +22,7 @@ function viewProps(s: FlowState): Record<string, EventValue> {
     difficulty: round(v.difficulty),
     familiarity: round(v.familiarity),
     popularity: round(v.popularity),
+    tempo: round(v.tempo),
     decade: v.decade,
     mood: v.mood,
     duetsOnly: v.duetsOnly,

@@ -139,7 +139,7 @@ async function holdButton(page: Page, name: RegExp, ms: number, midway?: () => P
 }
 
 const freshState = (): ApiState => ({ user: null, savedRanges: [], feedback: [], catalogueFeedback: [], recommendationCalls: [], logouts: 0 });
-const DEFAULT_VIEW = { difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false };
+const DEFAULT_VIEW = { difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false };
 
 test('full flow: test, sign in, results, song detail, feedback', async ({ baseURL }) => {
   test.setTimeout(120_000);
@@ -428,14 +428,17 @@ test('sliders and decade chips: sliders reorder, chips filter with counts, all o
     ['Light work', 'Locked in'],
     ['Rediscover', 'On repeat'],
     ['Deep cuts', 'Pop hits'],
+    ['Slow jams', 'Upbeat tracks'],
   ] as const) {
     const slider = page.getByRole('slider', { name: `${left} to ${right}` });
     await slider.press('Home');
     await expect(slider).toHaveAttribute('aria-valuetext', `towards ${left}`);
     orders.add(JSON.stringify(await titles()));
+    if (left === 'Slow jams') await shot(page, '22-tempo-slow-jams');
     await slider.press('End');
     await expect(slider).toHaveAttribute('aria-valuetext', `towards ${right}`);
     orders.add(JSON.stringify(await titles()));
+    if (left === 'Slow jams') await shot(page, '22-tempo-upbeat-tracks');
   }
   expect(orders.size).toBeGreaterThan(2);
   await page.waitForTimeout(300);

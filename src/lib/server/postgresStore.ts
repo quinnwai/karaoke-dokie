@@ -11,6 +11,7 @@ import {
   type CatalogueSong,
   type SongMoodsRecord,
   type SongDeezerRecord,
+  type SongTempoRecord,
   type SongPopularityRecord,
   type SongRangeRecord,
   type Store,
@@ -127,6 +128,17 @@ function toSongMoods(r: Row): SongMoodsRecord {
     method: str(r.method),
     source: str(r.source),
   };
+}
+
+function toSongTempo(r: Row): SongTempoRecord {
+  const t: SongTempoRecord = { key: str(r.song_key) };
+  if (isSet(r.deezer_bpm)) t.deezerBpm = num(r.deezer_bpm);
+  if (isSet(r.deezer_versions)) t.deezerVersions = num(r.deezer_versions);
+  if (isSet(r.tracker_bpm)) t.trackerBpm = num(r.tracker_bpm);
+  if (isSet(r.ultrastar_bpm)) t.ultrastarBpm = num(r.ultrastar_bpm);
+  if (isSet(r.preview_url)) t.previewUrl = str(r.preview_url);
+  if (isSet(r.checked_at)) t.checkedAt = str(r.checked_at);
+  return t;
 }
 
 function toSongPopularity(r: Row): SongPopularityRecord {
@@ -486,6 +498,45 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         out.set(d.key, d);
       }
       return out;
+    },
+
+    // ---- tempo (QWW-40) ----
+    async putSongTempo(entries) {
+      // One row per key (fields merged, the last entry winning); a field left unset keeps what is stored,
+      // so tempo:fill and tempo:ultrastar do not overwrite each other.
+      const merged = new Map<string, SongTempoRecord>();
+      for (const e of entries) {
+        const given = Object.fromEntries(Object.entries(e).filter(([, v]) => v !== undefined));
+        merged.set(e.key, { ...merged.get(e.key), ...given } as SongTempoRecord);
+      }
+      const unique = [...merged.values()];
+      const cols = ['deezer_bpm', 'deezer_versions', 'tracker_bpm', 'ultrastar_bpm', 'preview_url', 'checked_at'] as const;
+      const get = (e: SongTempoRecord) => [e.deezerBpm, e.deezerVersions, e.trackerBpm, e.ultrastarBpm, e.previewUrl, e.checkedAt];
+      for (let i = 0; i < unique.length; i += 100) {
+        const params: unknown[] = [];
+        const rows = unique.slice(i, i + 100).map((e) => {
+          params.push(e.key, ...get(e).map((v) => v ?? null));
+          const n = params.length;
+          return `(${Array.from({ length: cols.length + 1 }, (_, j) => `$${n - cols.length + j}`).join(', ')})`;
+        });
+        await query(
+          `INSERT INTO song_tempo (song_key, ${cols.join(', ')}) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET ${cols.map((c) => `${c} = COALESCE(EXCLUDED.${c}, song_tempo.${c})`).join(', ')}`,
+          params,
+        );
+      }
+    },
+    async getSongTempos(songKeys) {
+      const out = new Map<string, SongTempoRecord>();
+      for (let i = 0; i < songKeys.length; i += 1000) {
+        const chunk = songKeys.slice(i, i + 1000);
+        const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
+        for (const r of await query(`SELECT * FROM song_tempo WHERE song_key IN (${placeholders})`, chunk)) out.set(str(r.song_key), toSongTempo(r));
+      }
+      return out;
+    },
+    async listSongTempos() {
+      return new Map((await query('SELECT * FROM song_tempo')).map((r) => [str(r.song_key), toSongTempo(r)] as const));
     },
   };
 }

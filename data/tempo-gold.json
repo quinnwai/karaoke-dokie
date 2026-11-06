@@ -1,0 +1,202 @@
+[
+ {
+  "key": "the beatles|hey jude",
+  "bpm": 74
+ },
+ {
+  "key": "frank sinatra|fly me to the moon",
+  "bpm": 119
+ },
+ {
+  "key": "louis armstrong|what a wonderful world",
+  "bpm": 67
+ },
+ {
+  "key": "the rolling stones|paint it black",
+  "bpm": 160
+ },
+ {
+  "key": "aretha franklin|respect",
+  "bpm": 115
+ },
+ {
+  "key": "stevie wonder|superstition",
+  "bpm": 101
+ },
+ {
+  "key": "queen|bohemian rhapsody",
+  "bpm": 72
+ },
+ {
+  "key": "abba|dancing queen",
+  "bpm": 101
+ },
+ {
+  "key": "michael jackson|billie jean",
+  "bpm": 117
+ },
+ {
+  "key": "whitney houston|i wanna dance with somebody",
+  "bpm": 119
+ },
+ {
+  "key": "a-ha|take on me",
+  "bpm": 169
+ },
+ {
+  "key": "journey|don't stop believin'",
+  "bpm": 119
+ },
+ {
+  "key": "bon jovi|livin' on a prayer",
+  "bpm": 123
+ },
+ {
+  "key": "nirvana|smells like teen spirit",
+  "bpm": 117
+ },
+ {
+  "key": "oasis|wonderwall",
+  "bpm": 87
+ },
+ {
+  "key": "radiohead|creep",
+  "bpm": 92
+ },
+ {
+  "key": "red hot chili peppers|californication",
+  "bpm": 96
+ },
+ {
+  "key": "backstreet boys|i want it that way",
+  "bpm": 99
+ },
+ {
+  "key": "britney spears|...baby one more time",
+  "bpm": 93
+ },
+ {
+  "key": "eminem|lose yourself",
+  "bpm": 171
+ },
+ {
+  "key": "outkast|hey ya!",
+  "bpm": 160
+ },
+ {
+  "key": "beyonce|crazy in love",
+  "bpm": 99
+ },
+ {
+  "key": "usher|yeah!",
+  "bpm": 105
+ },
+ {
+  "key": "coldplay|yellow",
+  "bpm": 87
+ },
+ {
+  "key": "the killers|mr. brightside",
+  "bpm": 148
+ },
+ {
+  "key": "rihanna|umbrella",
+  "bpm": 87
+ },
+ {
+  "key": "adele|rolling in the deep",
+  "bpm": 105
+ },
+ {
+  "key": "lady gaga|poker face",
+  "bpm": 119
+ },
+ {
+  "key": "ed sheeran|shape of you",
+  "bpm": 96
+ },
+ {
+  "key": "taylor swift|shake it off",
+  "bpm": 160
+ },
+ {
+  "key": "the weeknd|blinding lights",
+  "bpm": 171
+ },
+ {
+  "key": "dua lipa|levitating",
+  "bpm": 103
+ },
+ {
+  "key": "harry styles|as it was",
+  "bpm": 174
+ },
+ {
+  "key": "olivia rodrigo|drivers license",
+  "bpm": 144
+ },
+ {
+  "key": "billie eilish|bad guy",
+  "bpm": 135
+ },
+ {
+  "key": "sabrina carpenter|espresso",
+  "bpm": 104
+ },
+ {
+  "key": "lizzo|about damn time",
+  "bpm": 109
+ },
+ {
+  "key": "johnny cash|ring of fire",
+  "bpm": 105
+ },
+ {
+  "key": "dolly parton|jolene",
+  "bpm": 111
+ },
+ {
+  "key": "shania twain|man! i feel like a woman!",
+  "bpm": 124
+ },
+ {
+  "key": "garth brooks|friends in low places",
+  "bpm": 104
+ },
+ {
+  "key": "blondie|heart of glass",
+  "bpm": 115
+ },
+ {
+  "key": "cyndi lauper|girls just want to have fun",
+  "bpm": 120
+ },
+ {
+  "key": "adele|someone like you",
+  "bpm": 135
+ },
+ {
+  "key": "elvis presley|suspicious minds",
+  "bpm": 118
+ },
+ {
+  "key": "earth, wind & fire|september",
+  "bpm": 126
+ },
+ {
+  "key": "guns n' roses|november rain",
+  "bpm": 80
+ },
+ {
+  "key": "mark ronson|uptown funk",
+  "bpm": 115
+ },
+ {
+  "key": "the temptations|my girl",
+  "bpm": 105
+ },
+ {
+  "key": "the police|every breath you take",
+  "bpm": 117
+ }
+]
