@@ -311,9 +311,9 @@ describe('recommendations', () => {
     const reasons = Object.fromEntries(body.matches.map((m) => [m.track.title, m.reasons]));
     // The mock library: Baby is in all three top lists, Bohemian Rhapsody only in the 6-month one,
     // Can't Help Falling in Love in the 1-year one and the last plays, Africa in a playlist.
-    expect(reasons['Baby']).toEqual(['In your sweet spot', 'In your top songs this month']);
-    expect(reasons['Bohemian Rhapsody']).toEqual(['In your top songs, past 6 months', 'Crowd favourite']);
-    expect(reasons["Can't Help Falling in Love"]).toEqual(['Spends time at your low end', 'Played recently']);
+    expect(reasons['Baby']).toEqual(['In your sweet spot', 'Top songs this month']);
+    expect(reasons['Bohemian Rhapsody']).toEqual(['Top songs, past 6 months', 'Crowd favourite']);
+    expect(reasons["Can't Help Falling in Love"]).toEqual(['Lots of low notes', 'Played recently']);
     expect(reasons['Africa']).toEqual(['In your sweet spot', 'In your playlists']);
     // Every library track says where it was heard, so none falls back to the older wording.
     expect(body.matches.flatMap((m) => m.reasons ?? []).filter((r) => /^You (play|know)/.test(r))).toEqual([]);
@@ -469,7 +469,7 @@ describe('catalogue (no Spotify)', () => {
       expect(m.track.spotifyUrl).toMatch(/^https:\/\/open\.spotify\.com\/search\//);
       expect(isMeasured(m.range)).toBe(true);
       // Nobody's library, so only range and crowd reasons.
-      for (const r of m.reasons ?? []) expect(r).toMatch(/^(In your sweet spot|Mostly comfortable|A few notes near your|Spends time at your|Crowd favourite)/);
+      for (const r of m.reasons ?? []) expect(r).toMatch(/^(In your sweet spot|Mostly comfortable|Some (high|low) notes|Lots of (high|low) notes|Crowd favourite)$/);
       expect(body.sources[m.track.id]).toMatchObject({ trackId: m.track.id, outcome: m.range.source });
     }
     expect(await getStore().listUserIds()).toEqual([]);

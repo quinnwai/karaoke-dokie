@@ -222,7 +222,7 @@ describe('reasons', () => {
   it('names the one or two biggest contributors', () => {
     expect(reasonsFor({ comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0 }, undefined, thisMonth)).toEqual([
       'In your sweet spot',
-      'In your top songs this month',
+      'Top songs this month',
     ]);
     expect(reasonsFor({ comfort: 0.3, familiarity: 0.1, popularity: 0.9, penalty: 0 })).toEqual(['Crowd favourite']);
     expect(reasonsFor({ comfort: 0.2, familiarity: 0.1, popularity: 0.2, penalty: 0 })).toEqual([]);
@@ -231,33 +231,33 @@ describe('reasons', () => {
   it('follows the difficulty label, so a Hard song never says sweet spot', () => {
     const p = { comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0 };
     expect(reasonsFor(p, { difficulty: 'easy', side: 'top' })[0]).toBe('In your sweet spot');
-    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })[0]).toBe('A few notes near your high end');
-    expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' }, thisMonth)).toEqual(['Spends time at your low end', 'In your top songs this month']);
+    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })[0]).toBe('Some high notes');
+    expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' }, thisMonth)).toEqual(['Lots of low notes', 'Top songs this month']);
   });
 
   it('says which end of your range a song leans on: high end or low end', () => {
     const p = { comfort: 0.9, familiarity: 0, popularity: 0, penalty: 0 };
-    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })).toEqual(['A few notes near your high end']);
-    expect(reasonsFor(p, { difficulty: 'medium', side: 'bottom' })).toEqual(['A few notes near your low end']);
-    expect(reasonsFor(p, { difficulty: 'hard', side: 'top' })).toEqual(['Spends time at your high end']);
-    expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' })).toEqual(['Spends time at your low end']);
+    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })).toEqual(['Some high notes']);
+    expect(reasonsFor(p, { difficulty: 'medium', side: 'bottom' })).toEqual(['Some low notes']);
+    expect(reasonsFor(p, { difficulty: 'hard', side: 'top' })).toEqual(['Lots of high notes']);
+    expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' })).toEqual(['Lots of low notes']);
   });
 
   it('says nothing about where a Maybe song sits, since its range is an estimate', () => {
     const p = { comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0.1 };
-    expect(reasonsFor(p, { difficulty: 'maybe', side: 'top' }, thisMonth)).toEqual(['In your top songs this month', 'Crowd favourite']);
+    expect(reasonsFor(p, { difficulty: 'maybe', side: 'top' }, thisMonth)).toEqual(['Top songs this month', 'Crowd favourite']);
     const rough = match(track('r', { familiarity: 0.9, ...thisMonth }), song(56, 64, { source: 'audio-full', confidence: 'low' }));
-    expect(rough).toMatchObject({ difficulty: 'maybe', reasons: ['In your top songs this month'] });
+    expect(rough).toMatchObject({ difficulty: 'maybe', reasons: ['Top songs this month'] });
     expect(rough.parts!.penalty).toBeCloseTo(0.1);
   });
 
   it('names the list that shows you know a song, and its time frame', () => {
     const p = { comfort: 0, familiarity: 0.8, popularity: 0, penalty: 0 };
     const reason = (t: Partial<Track>) => reasonsFor(p, undefined, { known: true, ...t });
-    expect(reason({ topLists: ['short_term'] })).toEqual(['In your top songs this month']);
-    expect(reason({ topLists: ['medium_term'] })).toEqual(['In your top songs, past 6 months']);
+    expect(reason({ topLists: ['short_term'] })).toEqual(['Top songs this month']);
+    expect(reason({ topLists: ['medium_term'] })).toEqual(['Top songs, past 6 months']);
     expect(reason({ recentPlays: 1 })).toEqual(['Played recently']);
-    expect(reason({ topLists: ['long_term'] })).toEqual(['In your top songs, past year']);
+    expect(reason({ topLists: ['long_term'] })).toEqual(['Top songs this past year']);
     expect(reason({ inPlaylist: true })).toEqual(['In your playlists']);
   });
 
@@ -265,10 +265,10 @@ describe('reasons', () => {
     const p = { comfort: 0, familiarity: 0.8, popularity: 0, penalty: 0 };
     const reason = (t: Partial<Track>) => reasonsFor(p, undefined, { known: true, ...t });
     const everywhere: Partial<Track> = { topLists: ['short_term', 'medium_term', 'long_term'], recentPlays: 3, inPlaylist: true, saved: true };
-    expect(reason(everywhere)).toEqual(['In your top songs this month']);
-    expect(reason({ ...everywhere, topLists: ['medium_term', 'long_term'] })).toEqual(['In your top songs, past 6 months']);
+    expect(reason(everywhere)).toEqual(['Top songs this month']);
+    expect(reason({ ...everywhere, topLists: ['medium_term', 'long_term'] })).toEqual(['Top songs, past 6 months']);
     expect(reason({ ...everywhere, topLists: ['long_term'] })).toEqual(['Played recently']);
-    expect(reason({ ...everywhere, topLists: ['long_term'], recentPlays: undefined })).toEqual(['In your top songs, past year']);
+    expect(reason({ ...everywhere, topLists: ['long_term'], recentPlays: undefined })).toEqual(['Top songs this past year']);
     expect(reason({ ...everywhere, topLists: undefined, recentPlays: undefined })).toEqual(['In your playlists']);
   });
 
@@ -285,10 +285,10 @@ describe('reasons', () => {
   it('keeps the 0.3 threshold and the weight of the listening reason', () => {
     const at = (familiarity: number, popularity = 0) => reasonsFor({ comfort: 0, familiarity, popularity, penalty: 0 }, undefined, thisMonth);
     expect(at(0.29)).toEqual([]);
-    expect(at(0.3)).toEqual(['In your top songs this month']);
+    expect(at(0.3)).toEqual(['Top songs this month']);
     // Weighed as 0.35 × familiarity against 0.15 × popularity: 0.35 × 0.35 < 0.15 × 0.9 < 0.35 × 0.4.
-    expect(at(0.35, 0.9)).toEqual(['Crowd favourite', 'In your top songs this month']);
-    expect(at(0.4, 0.9)).toEqual(['In your top songs this month', 'Crowd favourite']);
+    expect(at(0.35, 0.9)).toEqual(['Crowd favourite', 'Top songs this month']);
+    expect(at(0.4, 0.9)).toEqual(['Top songs this month', 'Crowd favourite']);
   });
 
   it('never gives a listening reason for a song you do not know, such as a catalogue song', () => {
@@ -298,14 +298,14 @@ describe('reasons', () => {
     expect(reasonsFor({ ...p, familiarity: 0.4 }, easy, { known: false })).toEqual(['In your sweet spot', 'Crowd favourite']);
     // Not even when the track says where it was heard.
     expect(reasonsFor(p, easy, { known: false, topLists: ['short_term'], recentPlays: 5, inPlaylist: true })).toEqual(['In your sweet spot', 'Crowd favourite']);
-    expect(reasonsFor(p, easy, thisMonth)).toEqual(['In your sweet spot', 'In your top songs this month']);
+    expect(reasonsFor(p, easy, thisMonth)).toEqual(['In your sweet spot', 'Top songs this month']);
 
     // A catalogue track has familiarity 1 so comfort alone decides its fit, and is not known.
     const popular = song(57, 63, { usdbViews: 99_999, usdbRating: 5 });
     const catalogue = match(track('cat', { familiarity: 1, known: false }), popular);
     const library = match(track('lib', { familiarity: 1, ...thisMonth }), popular);
     expect(catalogue.reasons).toEqual(['In your sweet spot', 'Crowd favourite']);
-    expect(library.reasons).toEqual(['In your sweet spot', 'In your top songs this month']);
+    expect(library.reasons).toEqual(['In your sweet spot', 'Top songs this month']);
     expect(catalogue.score).toBeCloseTo(library.score!);
   });
 
@@ -321,7 +321,7 @@ describe('reasons', () => {
     expect(hard.difficulty).toBe('hard');
     expect(hard.parts!.comfort).toBeGreaterThan(0.8);
     expect(hard.reasons).not.toContain('In your sweet spot');
-    expect(hard.reasons![0]).toBe('Spends time at your high end');
+    expect(hard.reasons![0]).toBe('Lots of high notes');
     const played = match(track('p', { familiarity: 0.9, known: true, topLists: ['long_term'], recentPlays: 2 }), song(57, 63));
     expect(played.reasons).toEqual(['In your sweet spot', 'Played recently']);
   });

@@ -117,7 +117,7 @@ describe('catalogue recommendations', () => {
     expect(matches[0]!.reasons).toEqual(['In your sweet spot', 'Crowd favourite']);
     // Only range and crowd reasons: no listening reason, in any wording.
     for (const m of matches) {
-      for (const r of m.reasons ?? []) expect(r).toMatch(/^(In your sweet spot|Mostly comfortable|A few notes near your|Spends time at your|Crowd favourite)/);
+      for (const r of m.reasons ?? []) expect(r).toMatch(/^(In your sweet spot|Mostly comfortable|Some (high|low) notes|Lots of (high|low) notes|Crowd favourite)$/);
     }
   });
 

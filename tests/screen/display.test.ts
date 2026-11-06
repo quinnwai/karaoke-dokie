@@ -59,17 +59,17 @@ describe('reasonsForSlider', () => {
   const RANGE_REASONS = [
     'In your sweet spot',
     'Mostly comfortable',
-    'A few notes near your high end',
-    'A few notes near your low end',
-    'Spends time at your high end',
-    'Spends time at your low end',
+    'Some high notes',
+    'Some low notes',
+    'Lots of high notes',
+    'Lots of low notes',
   ];
 
   const LISTENING_REASONS = [
-    'In your top songs this month',
-    'In your top songs, past 6 months',
+    'Top songs this month',
+    'Top songs, past 6 months',
     'Played recently',
-    'In your top songs, past year',
+    'Top songs this past year',
     'In your playlists',
     'You play this a lot',
     'You know this one',
