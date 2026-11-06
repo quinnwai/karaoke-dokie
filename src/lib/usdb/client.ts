@@ -104,6 +104,9 @@ export function parseSongList(html: string, now: Date = new Date()): UsdbSongRow
   const rowRe = /<tr([^>]*data-songid="(\d+)"[^>]*)>([\s\S]*?)<\/tr>/g;
   for (const m of html.matchAll(rowRe)) {
     const cells = [...m[3]!.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) => c[1]!);
+    // Since late 2026 a logged-in list ends each row with a download button, a cell with no text
+    // after Views; drop such trailing cells so Views is last again.
+    while (cells.length > 4 && !stripTags(cells[cells.length - 1]!) && !/<img[^>]*star/i.test(cells[cells.length - 1]!)) cells.pop();
     if (cells.length < 4) continue;
     const row: UsdbSongRow = { id: Number(m[2]), artist: stripTags(cells[2]!), title: stripTags(cells[3]!) };
     const changed = /data-lastchange="(\d+)"/.exec(m[1]!);

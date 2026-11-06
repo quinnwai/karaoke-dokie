@@ -61,6 +61,24 @@ describe('USDB page parsing', () => {
     expect(short).toEqual({ id: 9, artist: 'A', title: 'B', views: 12 });
   });
 
+  it('reads a row that ends with a download button after Views, as USDB lists them since late 2026', () => {
+    const row = `<tr class="list_tr2" data-songid="3" data-lastchange="1762883679"><td style="text-align: center"><audio id="sample3"></audio><button class="samplePlay"><svg></svg></button></td><td onclick="show_detail(3)"><img src="data/cover/3.jpg"></td><td onclick="show_detail(3)">2raumwohnung</td>
+<td onclick="show_detail(3)"><a href="?link=detail&id=3">Wir trafen uns in einem Garten</td>
+<td onclick="show_detail(3)">Pop</td>
+<td onclick="show_detail(3)">2000</td>
+<td onclick="show_detail(3)">SingStar Deutsch Rock-Pop</td>
+<td onclick="show_detail(3)">Yes</td>
+<td onclick="show_detail(3)">German</td>
+<td onclick="show_detail(3)">SsX</td>
+<td onclick="show_detail(3)"><img src="images/star.png"> <img src="images/star.png"> <img src="images/star.png"> <img src="images/star.png"> <img src="images/star.png"> </td>
+<td onclick="show_detail(3)">1387</td>
+<td><a  href="#" onClick="addToList(3, 1)"><img src="images/mini-zip.png" border="0"></a></td>
+</tr>`;
+    expect(parseSongList(row, NOW)).toEqual([
+      { id: 3, artist: '2raumwohnung', title: 'Wir trafen uns in einem Garten', lastChange: 1762883679, rating: 5, views: 1387, genre: 'Pop', year: 2000, edition: 'SingStar Deutsch Rock-Pop', language: 'German' },
+    ]);
+  });
+
   it('returns no rows for an empty result page', () => {
     expect(parseSongList('<html><body>No songs found</body></html>')).toEqual([]);
   });
