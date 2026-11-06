@@ -10,6 +10,8 @@
 //        npm run smoke:live -- --url https://<deployment>   calls the deployed API instead
 //          (a protected preview needs VERCEL_BYPASS_TOKEN, the project's protection-bypass secret)
 
+import { realpathSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import type { Match, RecommendationsResponse, VocalRange } from '../src/lib/contracts';
 import { catalogueTracks, loadCatalogue, recommendCatalogue } from '../src/lib/server/catalogue';
@@ -27,6 +29,11 @@ const RANGES: [string, VocalRange][] = [
 const share = (ms: Match[], f: (m: Match) => boolean) => ms.filter(f).length / Math.max(1, ms.length);
 const ids = (ms: Match[]) => ms.slice(0, 10).map((m) => m.track.id).join('|');
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1] ?? 0;
+const first10 = (ms: Match[], f: (m: Match) => number | undefined) => median(ms.slice(0, 10).map((m) => f(m) ?? NaN).filter((n) => !Number.isNaN(n)));
+
+// Thresholds: a healthy preview measured on Nov 6 2026 had 1,000 songs shown, 98% tempo, 95% year and
+// popularity known for all; the numbers below leave room under that and sit far above a database
+// without the data (0% on each). They are not tuned to be tight.
 
 export function check(label: string, matches: Match[], range: VocalRange): string[] {
   const fails: string[] = [];
@@ -35,7 +42,7 @@ export function check(label: string, matches: Match[], range: VocalRange): strin
   };
   need(matches.length >= 500, `only ${matches.length} songs shown (want 500 or more)`);
   const facets = availableFacets(matches);
-  const decades = new Set(matches.map((m) => m.year && Math.floor(m.year / 10))).size;
+  const decades = new Set(matches.filter((m) => typeof m.year === 'number').map((m) => Math.floor(m.year! / 10))).size;
   need(facets.decades && decades >= 3, `Pick row has no decade data (${decades} decades); a deployment without USDB years looks like this`);
   need(facets.duets, 'no duets');
   need(share(matches, (m) => !!m.parts?.popularityKnown) >= 0.95, `popularity known for only ${(100 * share(matches, (m) => !!m.parts?.popularityKnown)).toFixed(0)}% (want 95%)`);
@@ -47,7 +54,12 @@ export function check(label: string, matches: Match[], range: VocalRange): strin
     const low = orderMatches(matches, { ...DEFAULT_VIEW, [id]: 0 }, range, 'catalogue');
     const high = orderMatches(matches, { ...DEFAULT_VIEW, [id]: 1 }, range, 'catalogue');
     need(ids(low) !== ids(high), `the ${id} slider does not change the first 10 songs`);
-    need(ids(low) !== ids(matches), `the ${id} slider at 0 leaves the first 10 songs as they were`);
+    // The right end must hold higher values than the left, so a slider wired to the wrong field fails too.
+    const field = id === 'tempo' ? (m: Match) => m.tempo : id === 'popularity' ? (m: Match) => m.parts?.popularity : null;
+    if (field) {
+      const gap = id === 'tempo' ? 10 : 0.05;
+      need(first10(high, field) - first10(low, field) >= gap, `the ${id} slider's two ends are not ${id === 'tempo' ? 'slow to fast' : 'deep cuts to hits'} (median of the first 10: ${first10(low, field).toFixed(2)} at 0, ${first10(high, field).toFixed(2)} at 1)`);
+    }
   }
   return fails;
 }
@@ -59,13 +71,16 @@ async function main() {
     const base = values.url.replace(/\/$/, '');
     const headers: Record<string, string> = process.env.VERCEL_BYPASS_TOKEN ? { 'x-vercel-protection-bypass': process.env.VERCEL_BYPASS_TOKEN } : {};
     load = async (r) => {
-      const res = await fetch(`${base}/api/catalogue/recommendations?low=${r.low}&high=${r.high}&all=1`, { headers });
+      const res = await fetch(`${base}/api/catalogue/recommendations?low=${r.low}&high=${r.high}&all=1`, { headers, signal: AbortSignal.timeout(60_000) });
       if (!res.ok) throw new Error(`${base} answered HTTP ${res.status} (a protected preview needs VERCEL_BYPASS_TOKEN)`);
-      return ((await res.json()) as RecommendationsResponse).matches;
+      const body = (await res.json().catch(() => null)) as RecommendationsResponse | null;
+      if (!body || !Array.isArray(body.matches)) throw new Error(`${base} did not answer with a list of matches (a login page, or an error)`);
+      return body.matches;
     };
   } else {
     const url = process.env.DATABASE_URL?.trim();
     if (!url) throw new Error('Set DATABASE_URL, or pass --url');
+    console.log(`Reading database ${url.split('@')[1]?.split('?')[0] ?? '(unparsed)'} directly; use --url <deployment> to check what a deployment reads.`);
     const store = createPostgresStore(neonQuery(url));
     const tracks = catalogueTracks(await loadCatalogue(store));
     const deps = productionSongDeps(store, false);
@@ -85,7 +100,7 @@ async function main() {
   console.log('\nAll live-data checks passed.');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().catch((err) => {
     console.error(err instanceof Error ? err.message : err);
     process.exit(1);

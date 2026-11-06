@@ -39,3 +39,32 @@ describe('the live-data smoke check', () => {
     expect(fails).toMatch(/tempo slider does not change/);
   });
 });
+
+describe('the live-data smoke check, edge cases', () => {
+  const healthy = (i: number, m: Match): Match => ({
+    ...m,
+    year: 1960 + (i % 6) * 10,
+    tempo: 70 + (i % 100),
+    parts: { comfort: 0.5, familiarity: 0.5, popularity: Math.max(0.1, 0.99 - i / 700), popularityKnown: true, penalty: 0 },
+    range: { ...m.range, duet: i % 20 === 0 },
+  });
+
+  it('does not count songs with no year as a decade', () => {
+    // two real decades, the rest without a year
+    const list = many(600, (m, i) => {
+      const h = healthy(i, m);
+      if (i % 3) delete h.year;
+      return { ...h, ...(i % 3 === 0 ? { year: i % 2 ? 1985 : 1995 } : {}) };
+    });
+    expect(check('x', list, range).join('\n')).toMatch(/no decade data/);
+  });
+
+  it('fails when coverage is just under the bar', () => {
+    const list = many(600, (m, i) => {
+      const h = healthy(i, m);
+      if (i % 12 === 0) delete h.tempo; // 8% without a tempo
+      return h;
+    });
+    expect(check('x', list, range).join('\n')).toMatch(/tempo for only 92%/);
+  });
+});

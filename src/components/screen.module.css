@@ -1288,9 +1288,17 @@
 }
 
 /* No focus ring on the slider: Chrome shows it after a mouse or finger drag too, as a rounded border
-   around the row. A keyboard moves the thumb, which turns pink, so the focus still shows. */
+   around the row. Keyboard focus shows as a pink thumb instead. */
 .slider:focus-visible {
   outline: none;
+}
+
+.slider:focus-visible::-webkit-slider-thumb {
+  background: var(--pink);
+}
+
+.slider:focus-visible::-moz-range-thumb {
+  background: var(--pink);
 }
 
 /* One row of chips; it scrolls sideways on a phone instead of the page. */
