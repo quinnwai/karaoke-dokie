@@ -29,6 +29,16 @@ describe('api client', () => {
     await expect(createApi(f.impl).me()).rejects.toBeInstanceOf(ApiError);
   });
 
+  it('POST /api/auth/logout ends the session, and a failure rejects with the status', async () => {
+    const f = fakeFetch(() => ({}));
+    await createApi(f.impl).logout();
+    expect(f.calls.map((c) => [c.url, c.init.method])).toEqual([['/api/auth/logout', 'POST']]);
+    expect(f.calls[0]!.init.credentials).toBe('same-origin');
+
+    const down = fakeFetch(() => ({ status: 500 }));
+    await expect(createApi(down.impl).logout()).rejects.toMatchObject({ status: 500, path: '/api/auth/logout' });
+  });
+
   it('PUT /api/me/range sends the range as JSON', async () => {
     const f = fakeFetch(() => ({}));
     await createApi(f.impl).saveRange({ low: 45, high: 72, source: 'test' });

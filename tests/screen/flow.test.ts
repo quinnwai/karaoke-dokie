@@ -211,6 +211,56 @@ describe('no Spotify (catalogue mode)', () => {
   });
 });
 
+describe('logging out', () => {
+  const signedInRange = { low: 45, high: 72, source: 'test' as const };
+  const inLibrary = run([
+    { type: 'booted', me: me(signedInRange), progress: null, wantsPick: false },
+    { type: 'allLoaded', page: allMatches() },
+    { type: 'setSlider', slider: 'difficulty', value: 0.8 },
+    { type: 'setSlider', slider: 'familiarity', value: 0.2 },
+    { type: 'pickMood', mood: 'upbeat' },
+    { type: 'loadMore' },
+  ]);
+
+  it('shows the catalogue for the same range and forgets the library, who it was and the picks', () => {
+    expect(inLibrary).toMatchObject({ mode: 'library', signedIn: true, displayName: 'Quinn' });
+    expect(inLibrary.matches.length).toBeGreaterThan(0);
+    const s = run([{ type: 'loggedOut' }], { ...inLibrary, known: knownSongs().songs, picks: ['t0'] });
+    expect(s).toMatchObject({
+      step: 'results',
+      mode: 'catalogue',
+      loading: true,
+      signedIn: false,
+      displayName: null,
+      range: signedInRange,
+      matches: [],
+      sources: {},
+      known: null,
+      picks: [],
+      shown: 5,
+      selectedId: null,
+    });
+  });
+
+  it('keeps the sliders and drops the chips, as a new range does', () => {
+    const s = run([{ type: 'loggedOut' }], inLibrary);
+    expect(s.view).toEqual({ difficulty: 0.8, familiarity: 0.2, popularity: null, decade: null, mood: null, duetsOnly: false });
+  });
+
+  it('asks the catalogue for songs once, then drops the sliders it has no data for (on repeat is the library\'s)', () => {
+    const s = run([{ type: 'loggedOut' }, { type: 'allLoaded', page: allMatches() }], inLibrary);
+    expect(s).toMatchObject({ mode: 'catalogue', loading: false, signedIn: false });
+    expect(s.matches.length).toBeGreaterThan(0);
+    expect(s.view.familiarity).toBeNull();
+    expect(s.view.difficulty).toBe(0.8);
+  });
+
+  it('with no range there are no results to replace; it only signs out', () => {
+    const s = run([{ type: 'booted', me: me(), progress: null, wantsPick: false }, { type: 'loggedOut' }]);
+    expect(s).toMatchObject({ step: 'landing', signedIn: false, displayName: null, range: null });
+  });
+});
+
 describe('pick songs you sing well', () => {
   const songs = knownSongs().songs;
   const atPick = run([{ type: 'booted', me: me(), progress: null, wantsPick: true }, { type: 'knownLoaded', songs }]);

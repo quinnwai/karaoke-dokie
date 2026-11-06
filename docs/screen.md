@@ -20,13 +20,18 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
 6. **Results**: one request for every match (`/api/catalogue/recommendations?...&all=1` without
    Spotify, `/api/recommendations?all=1` with it), then the phone orders, filters and pages them
    (`src/lib/songs/browse.ts`), 5 at a time. Two panels sit above the list: **Tune** (pink), sliders
-   that reorder and never remove a song, untouched until moved, with Reset (a song sits on a slider by its
-   rank in the list, so every tenth of the track holds about a tenth of the songs); and **Pick** (cyan),
+   that reorder and never remove a song, untouched until moved, with a circular-arrow Reset icon
+   (`aria-label` "Reset sliders") once one is set (a song sits on a slider by its rank in the list, so
+   every tenth of the track holds about a tenth of the songs); and **Pick** (cyan),
    chips for decades, moods and duets (one pick per row, a count on each, disabled at zero). The
    lyric line says what the slider moved last does. Songs whose range is only an estimate
    (`difficulty: 'maybe'`) show last in their own "Maybe" list, without a difficulty pill. In
    catalogue mode "Connect Spotify" saves the range for the sign-in round trip; back from Spotify,
-   it is PUT to `/api/me/range` and library results load.
+   it is PUT to `/api/me/range` and library results load. The Spotify logo at the top right shows
+   which mode this is: grey ("Connect to Spotify") without an account, Spotify green when signed in.
+   Signed in, pointing at it (or a tap) opens a small box, "Logged in as <display name> · Log out";
+   Log out POSTs `/api/auth/logout`, forgets the library and shows catalogue results for the same
+   range, which stays on the device (`kd.range`). If the request fails the box says so and nothing changes.
 7. **Song detail**: range bar (song in neon pink over the user's range, note names at the
    ends), difficulty (or a quiet "Maybe"), "Fast lyrics", an "i" button explaining where the
    data came from (for Maybe songs, also that the range is an estimate), Open in Spotify, and

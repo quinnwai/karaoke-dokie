@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FastLyricsIcon, OctaveIcon } from '../../src/components/Icon';
+import { FastLyricsIcon, OctaveIcon, ResetIcon } from '../../src/components/Icon';
 import { Results } from '../../src/components/Results';
 import { resultsProps } from '../helpers/results';
 import { SongDetail } from '../../src/components/SongDetail';
 import type { Match } from '../../src/lib/contracts';
+import { DEFAULT_VIEW } from '../../src/lib/songs/browse';
 import { match } from '../fixtures/screen';
 
 afterEach(cleanup);
@@ -43,6 +44,46 @@ describe('icons', () => {
     render(<FastLyricsIcon />);
     const icon = screen.getByRole('img', { name: 'Fast lyrics' });
     expect(icon.querySelector('title')?.textContent).toBe('Fast lyrics');
+  });
+});
+
+describe('Reset icon', () => {
+  const props = resultsProps(range, [match(0)]);
+
+  it('is a decorative circular arrow, so the button around it carries the name', () => {
+    const { container } = render(<ResetIcon />);
+    const svg = container.querySelector('svg')!;
+    expect(svg.getAttribute('aria-hidden')).toBe('true');
+    expect(svg.getAttribute('viewBox')).toBe('0 -960 960 960');
+    expect(svg.querySelectorAll('path')).toHaveLength(1);
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+
+  it('replaces the word Reset: an icon button named "Reset sliders" with no text on screen', () => {
+    render(<Results {...props} view={{ ...DEFAULT_VIEW, difficulty: 0.8 }} />);
+    const reset = screen.getByRole('button', { name: 'Reset sliders' });
+    expect(reset.getAttribute('title')).toBe('Reset sliders');
+    expect(reset.textContent).toBe('');
+    expect(reset.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(screen.queryByText('Reset')).toBeNull();
+  });
+
+  it('shows and hides exactly when the word did: with a slider set, never for a chip', () => {
+    const onResetSliders = vi.fn();
+    const { rerender } = render(<Results {...props} onResetSliders={onResetSliders} />);
+    expect(screen.queryByRole('button', { name: 'Reset sliders' })).toBeNull();
+
+    rerender(<Results {...props} onResetSliders={onResetSliders} view={{ ...DEFAULT_VIEW, mood: 'upbeat' }} />);
+    expect(screen.queryByRole('button', { name: 'Reset sliders' })).toBeNull();
+
+    rerender(<Results {...props} onResetSliders={onResetSliders} view={{ ...DEFAULT_VIEW, familiarity: 0.3 }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset sliders' }));
+    expect(onResetSliders).toHaveBeenCalledTimes(1);
+    // Focus moves to the Tune panel, as it did when Reset was a word.
+    expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Tune' }));
+
+    rerender(<Results {...props} onResetSliders={onResetSliders} view={DEFAULT_VIEW} />);
+    expect(screen.queryByRole('button', { name: 'Reset sliders' })).toBeNull();
   });
 });
 
@@ -99,6 +140,14 @@ describe('sources', () => {
     expect(mgphot?.url).toBe('https://doi.org/10.5334/tismir.236');
     expect(mgphot?.what).toContain('offline only, to check our mood labels');
     expect(mgphot?.what).toContain('CC BY-NC-ND 4.0');
+  });
+
+  it('credits Material Symbols for the reset icon too, like the book and fast-lyrics ones', async () => {
+    const { CREDITS } = await import('../../src/lib/credits');
+    const symbols = CREDITS.find((c) => c.name.startsWith('Material Symbols'));
+    expect(symbols?.url).toBe('https://fonts.google.com/icons');
+    expect(symbols?.what).toMatch(/fast-lyrics, book and reset icons/);
+    expect(symbols?.what).toContain('Apache 2.0');
   });
 
   it('credits the AI model behind the mood labels', async () => {

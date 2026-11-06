@@ -64,6 +64,8 @@ interface ApiState {
   catalogueFeedback: CatalogueFeedbackRequest[];
   /** Query strings of every recommendations request, library and catalogue. */
   recommendationCalls: string[];
+  /** How many times the session was ended (POST /api/auth/logout). */
+  logouts: number;
   /** Serve songs with years, genres and known popularity. */
   facts?: boolean;
   /** Serve a long list whose difficulty scores bunch low, as a wide range makes them (QWW-33). */
@@ -82,6 +84,10 @@ async function mockApi(context: BrowserContext, state: ApiState) {
         return route.fulfill({ status: 302, headers: { location: '/?signedIn=1' } });
       case 'GET /api/me':
         return state.user ? json(state.user) : json({ error: 'signed out' }, 401);
+      case 'POST /api/auth/logout':
+        state.logouts++;
+        state.user = null;
+        return json({ ok: true });
       case 'PUT /api/me/range': {
         const range = req.postDataJSON() as VocalRange;
         state.savedRanges.push(range);
@@ -128,7 +134,7 @@ async function holdButton(page: Page, name: RegExp, ms: number, midway?: () => P
   await page.mouse.up();
 }
 
-const freshState = (): ApiState => ({ user: null, savedRanges: [], feedback: [], catalogueFeedback: [], recommendationCalls: [] });
+const freshState = (): ApiState => ({ user: null, savedRanges: [], feedback: [], catalogueFeedback: [], recommendationCalls: [], logouts: 0 });
 const DEFAULT_VIEW = { difficulty: null, familiarity: null, popularity: null, decade: null, mood: null, duetsOnly: false };
 
 test('full flow: test, sign in, results, song detail, feedback', async ({ baseURL }) => {
@@ -432,7 +438,7 @@ test('sliders and decade chips: sliders reorder, chips filter with counts, all o
   await shot(page, '21-sliders-set');
 
   // Reset unsets every slider and brings back the first order.
-  await page.getByRole('button', { name: 'Reset' }).click();
+  await page.getByRole('button', { name: 'Reset sliders' }).click();
   for (const s of await page.getByRole('slider').all()) await expect(s).toHaveAttribute('aria-valuetext', 'not set');
   expect(await titles()).toEqual(before);
   expect(api.recommendationCalls).toHaveLength(1);
@@ -562,3 +568,160 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
     await context.close();
   });
 }
+
+// ---- The Spotify logo (grey, or green with "Logged in as" and Log out) and the Reset icon ----
+
+const SPOTIFY_GREEN = 'rgb(29, 185, 84)';
+const LOGO_GREY = 'rgba(244, 241, 246, 0.4)';
+const ICON_GREY = 'rgba(244, 241, 246, 0.56)';
+const PINK = 'rgb(255, 46, 147)';
+
+interface Walk {
+  size: { width: number; height: number };
+  /** A finger taps the logo to open its box; otherwise a mouse points at it. */
+  finger: boolean;
+  /** Real transitions and sung reasons, instead of reduced motion. */
+  motion?: boolean;
+  /** Take the screenshots that look the same for a finger and a mouse. */
+  rest?: boolean;
+}
+
+/**
+ * One walk at one size, starting signed in: the green logo and its box, the Reset icon (no layout
+ * jump, grey, pink under a mouse), then Log out and the catalogue for the same range. Screenshots go
+ * to test-results/screens, named after the size.
+ */
+async function walkLogoAndReset(browser: Browser, baseURL: string | undefined, { size, finger, motion = false, rest = true }: Walk) {
+  const api = freshState();
+  api.user = me({ low: 45, high: 72, source: 'test' });
+  // The config's default device is a phone, which cannot hover and would carry over to a context that
+  // only sets a viewport; a mouse walk must say it is a desktop browser.
+  const context = await browser.newContext({
+    ...(finger ? iPhone : devices['Desktop Chrome']),
+    viewport: size,
+    baseURL,
+    reducedMotion: motion ? 'no-preference' : 'reduce',
+  });
+  await mockApi(context, api);
+  const page = await context.newPage();
+  const w = size.width;
+  const shotRest = async (name: string) => {
+    if (rest) await shot(page, `${name}-${w}`);
+  };
+  const logo = page.getByRole('button', { name: 'Spotify account' });
+  const who = page.getByText('Logged in as Quinn');
+  const logOut = page.getByRole('button', { name: 'Log out' });
+  const connect = page.getByRole('button', { name: 'Connect to Spotify' }).first();
+  const tune = page.getByRole('region', { name: 'Tune' });
+  const reset = page.getByRole('button', { name: 'Reset sliders' });
+  // A finger taps; a mouse points at the logo and clicks.
+  const open = () => (finger ? logo.tap() : logo.hover());
+  const press = (target: typeof logo) => (finger ? target.tap() : target.click());
+  // Somewhere neutral: a tap on the Tune title, or the pointer over a song near the bottom.
+  const away = () => (finger ? page.getByRole('heading', { name: 'Tune' }).tap() : page.mouse.move(w / 2, size.height - 40));
+
+  await page.goto('/');
+  await expect(page.locator('ol li')).toHaveCount(5);
+  await page.waitForTimeout(motion ? 2000 : 300);
+
+  // ---- Signed in: a green logo that says nothing until asked ----
+  await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(0);
+  await expect(logo).toHaveCSS('color', SPOTIFY_GREEN);
+  await expect(who).toBeHidden();
+  await shotRest('25-logo-signed-in');
+
+  // ---- The box: a tap opens it on a phone; pointing at the logo shows it on a desktop ----
+  await open();
+  await expect(who).toBeVisible();
+  await expect(logOut).toBeVisible();
+  if (finger) await expect(logo).toHaveAttribute('aria-expanded', 'true');
+  await page.waitForTimeout(300);
+  await shot(page, `26-box-${finger ? 'tapped' : 'hover'}-${w}`);
+  if (!finger) {
+    // From the logo to the box a pixel at a time, the box is never lost on the way: nothing sits between them.
+    const from = (await logo.boundingBox())!;
+    const to = (await who.boundingBox())!;
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 30 });
+    await expect(who).toBeVisible();
+  }
+  await away();
+  await expect(who).toBeHidden();
+  if (finger) await expect(logo).toHaveAttribute('aria-expanded', 'false');
+
+  // ---- Reset: a circular-arrow icon in the header's own height, where the word used to be ----
+  await expect(reset).toHaveCount(0);
+  const heightBefore = (await tune.boundingBox())!.height;
+  await page.getByRole('slider', { name: 'Light work to Locked in' }).press('End');
+  // Let go of the slider, so its keyboard focus ring is not in the Reset screenshots.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect(reset).toBeVisible();
+  await expect(page.getByText('Reset', { exact: true })).toHaveCount(0);
+  await expect(reset.locator('svg')).toHaveAttribute('aria-hidden', 'true');
+  expect(Math.abs((await tune.boundingBox())!.height - heightBefore)).toBeLessThan(0.5);
+  await expect(reset).toHaveCSS('color', ICON_GREY);
+  await shotRest('27-reset-rest');
+  if (finger) {
+    // A phone cannot hover, so pink-on-hover can never get stuck after a tap.
+    expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(false);
+  } else {
+    await reset.hover();
+    await expect(reset).toHaveCSS('color', PINK);
+    await page.waitForTimeout(200);
+    await shot(page, `28-reset-hover-${w}`);
+    await away();
+  }
+  await press(reset);
+  for (const s of await page.getByRole('slider').all()) await expect(s).toHaveAttribute('aria-valuetext', 'not set');
+  await expect(reset).toHaveCount(0);
+  expect(Math.abs((await tune.boundingBox())!.height - heightBefore)).toBeLessThan(0.5);
+
+  // ---- Log out: the session ends, the library goes, the catalogue answers for the same range ----
+  await open();
+  await expect(who).toBeVisible();
+  await press(logOut);
+  await expect.poll(() => api.logouts).toBe(1);
+  await expect(connect).toBeVisible();
+  await expect(logo).toHaveCount(0);
+  await expect(who).toHaveCount(0);
+  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
+  await expect(page.locator('ol li')).toHaveCount(5);
+  expect(api.recommendationCalls).toEqual(['library ?all=1', 'catalogue ?low=45&high=72&all=1']);
+  expect(await page.evaluate(() => localStorage.getItem('kd.range'))).toBe(JSON.stringify({ low: 45, high: 72 }));
+
+  // ---- Signed out again: the grey logo, green only under a mouse, as before ----
+  if (!finger) await page.mouse.move(w / 2, size.height - 40);
+  await expect(connect).toHaveCSS('color', LOGO_GREY);
+  // Playwright scrolls a button into view before it taps it; the screenshot should start at the top.
+  await page.evaluate(() => document.querySelector('[class*="screenInner"]')?.scrollTo(0, 0));
+  // The catalogue rows sing their reasons in again; wait it out so the screenshot is the settled screen.
+  await page.waitForTimeout(motion ? 2200 : 300);
+  await shotRest('29-logo-signed-out');
+  if (!finger) {
+    await connect.hover();
+    await expect(connect).toHaveCSS('color', SPOTIFY_GREEN);
+  }
+
+  // The session is gone for good: a reload is still the catalogue for the same range.
+  await page.reload();
+  await expect(connect).toBeVisible();
+  await expect(page.locator('ol li')).toHaveCount(5);
+  expect(api.recommendationCalls.at(-1)).toBe('catalogue ?low=45&high=72&all=1');
+  expect(api.logouts).toBe(1);
+  await context.close();
+}
+
+test('Spotify logo and Reset icon on a 375 px phone: a tap opens the box', async ({ browser, baseURL }) => {
+  test.setTimeout(60_000);
+  await walkLogoAndReset(browser, baseURL, { size: { width: 375, height: 667 }, finger: true });
+});
+
+test('Spotify logo and Reset icon with a mouse at 375 px: pointing opens the box', async ({ browser, baseURL }) => {
+  test.setTimeout(60_000);
+  await walkLogoAndReset(browser, baseURL, { size: { width: 375, height: 667 }, finger: false, rest: false });
+});
+
+test('Spotify logo and Reset icon on a 1280 px desktop, with real transitions', async ({ browser, baseURL }) => {
+  test.setTimeout(60_000);
+  await walkLogoAndReset(browser, baseURL, { size: { width: 1280, height: 800 }, finger: false, motion: true });
+});

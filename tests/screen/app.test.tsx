@@ -36,6 +36,9 @@ function fakeApi(user: MeResponse | null) {
   let current = user;
   const api = {
     me: vi.fn(async () => current),
+    logout: vi.fn(async () => {
+      current = null;
+    }),
     saveRange: vi.fn(async (range: VocalRange) => {
       if (current) current = { ...current, range };
     }),
@@ -220,7 +223,7 @@ describe('KaraokeApp', () => {
     expect(slider.getAttribute('aria-valuetext')).toBe('not set');
     // No title line over the list: the reasons under each song are what gets sung in.
     expect(lyrics()).toEqual([]);
-    expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reset sliders' })).toBeNull();
 
     fireEvent.change(slider, { target: { value: '100' } });
     expect(slider.getAttribute('aria-valuetext')).toBe('towards Locked in');
@@ -230,7 +233,7 @@ describe('KaraokeApp', () => {
     expect(slider.getAttribute('aria-valuetext')).toBe('towards Light work');
     expect(titles()).not.toEqual(lockedIn);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset sliders' }));
     expect(slider.getAttribute('aria-valuetext')).toBe('not set');
     expect(titles()).toEqual(before);
     expect(api.allRecommendations).toHaveBeenCalledTimes(1);
@@ -252,7 +255,7 @@ describe('KaraokeApp', () => {
     Object.defineProperty(rightClick, 'button', { value: 2 });
     fireEvent(slider, rightClick);
     expect(slider.getAttribute('aria-valuetext')).toBe('not set');
-    expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reset sliders' })).toBeNull();
     expect(sliderEvents()).toEqual([]);
 
     // A tap on the thumb: nothing moves, and the slider switches on at the middle, recorded once.
@@ -267,7 +270,7 @@ describe('KaraokeApp', () => {
     expect(sliderEvents()).toHaveLength(1);
 
     // Reset disappears once pressed, and focus moves to the Tune panel rather than the page.
-    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset sliders' }));
     expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Tune' }));
   });
 
@@ -324,6 +327,80 @@ describe('KaraokeApp', () => {
     expect(api.saveRange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Redo the singing test' }));
     await waitFor(() => expect(lyrics()).toContain('Find a quiet spot'));
+  });
+
+  it('signed in, the logo is the green account button; Log out ends the session and shows the catalogue songs for the same range', async () => {
+    const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
+    // The catalogue has fewer songs than the library, so the library's can be told apart.
+    api.catalogue.mockImplementation(async () => allMatches(3));
+    render(<KaraokeApp api={api} mic={fakeMic().mic} />);
+    await screen.findByText('Plastic Love');
+    expect(screen.getAllByRole('listitem')).toHaveLength(5);
+
+    // Signed in: no Connect to Spotify, a logo that says who, and the library's own on-repeat slider.
+    expect(screen.queryByRole('button', { name: 'Connect to Spotify' })).toBeNull();
+    const logo = screen.getByRole('button', { name: 'Spotify account' });
+    expect(logo.className).toMatch(/connectOn/);
+    fireEvent.click(logo);
+    expect(screen.getByText('Logged in as Quinn')).toBeTruthy();
+    expect(screen.getByRole('slider', { name: 'Rediscover to On repeat' })).toBeTruthy();
+    expect(api.logout).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2));
+
+    // The session ended first, then the catalogue was asked for the same range; the library was not asked again.
+    expect(api.logout).toHaveBeenCalledTimes(1);
+    expect(api.catalogue).toHaveBeenCalledTimes(1);
+    expect(api.catalogue).toHaveBeenCalledWith({ low: 45, high: 72 });
+    expect(api.logout.mock.invocationCallOrder[0]).toBeLessThan(api.catalogue.mock.invocationCallOrder[0]!);
+    expect(api.allRecommendations).toHaveBeenCalledTimes(1);
+    // Nothing of the library is left: three catalogue songs, no account, no on-repeat slider.
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(3));
+    expect(screen.queryByRole('button', { name: 'Spotify account' })).toBeNull();
+    expect(screen.queryByText(/Logged in/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Log out' })).toBeNull();
+    expect(screen.queryByRole('slider', { name: 'Rediscover to On repeat' })).toBeNull();
+    expect(screen.getByRole('slider', { name: 'Light work to Locked in' })).toBeTruthy();
+    // The range stays on this device, like it does for anyone without Spotify.
+    expect(JSON.parse(localStorage.getItem('kd.range')!)).toEqual({ low: 45, high: 72 });
+  });
+
+  it('after logging out, a reload comes back to the catalogue songs for the same range', async () => {
+    const first = fakeApi(me({ low: 45, high: 72, source: 'test' }));
+    const { unmount } = render(<KaraokeApp api={first} mic={fakeMic().mic} />);
+    await screen.findByText('Plastic Love');
+    fireEvent.click(screen.getByRole('button', { name: 'Spotify account' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2));
+    unmount();
+
+    // The server no longer knows this browser (the session cookie is gone): /api/me says 401.
+    const reloaded = fakeApi(null);
+    render(<KaraokeApp api={reloaded} mic={fakeMic().mic} />);
+    await screen.findByText('Plastic Love');
+    expect(reloaded.catalogue).toHaveBeenCalledWith({ low: 45, high: 72 });
+    expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2);
+  });
+
+  it('if Log out fails, nothing changes: still signed in, the box says so, and a second try works', async () => {
+    const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
+    api.logout.mockRejectedValueOnce(new Error('offline'));
+    render(<KaraokeApp api={api} mic={fakeMic().mic} />);
+    await screen.findByText('Plastic Love');
+    fireEvent.click(screen.getByRole('button', { name: 'Spotify account' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+
+    expect((await screen.findByRole('alert')).textContent).toBe('Couldn’t log out. Try again.');
+    expect(api.catalogue).not.toHaveBeenCalled();
+    expect(localStorage.getItem('kd.range')).toBeNull();
+    expect(screen.getByText('Logged in as Quinn')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Connect to Spotify' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2));
+    expect(api.logout).toHaveBeenCalledTimes(2);
+    expect(api.catalogue).toHaveBeenCalledWith({ low: 45, high: 72 });
   });
 
   it('pick songs you sing well: signed out goes to sign-in first', async () => {

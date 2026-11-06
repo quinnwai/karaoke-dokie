@@ -27,5 +27,7 @@ export function resultsProps(range: VocalRange, matches: Match[]) {
     onDuets: noop,
     onClear: noop,
     onConnect: noop,
+    displayName: 'Test Singer',
+    onLogout: async () => {},
   };
 }

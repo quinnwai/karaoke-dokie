@@ -951,7 +951,8 @@
   }
   .holdButton,
   .holdDot,
-  .pitchDot {
+  .pitchDot,
+  .accountMenu {
     transition: none;
   }
 }
@@ -974,7 +975,8 @@
 
 /* ---- results view: Tune (sliders, pink) and Pick (chips, cyan) (QWW-3) ---- */
 
-/* Connect to Spotify: just the logo, grey until hovered, with its name in a tooltip. */
+/* Connect to Spotify: just the logo, grey until hovered, with its name in a tooltip. Signed in
+   (connectOn), it is Spotify green all the time. */
 .connect {
   position: relative;
   display: flex;
@@ -988,7 +990,8 @@
 }
 
 .connect:hover,
-.connect:focus-visible {
+.connect:focus-visible,
+.connectOn {
   color: #1db954;
 }
 
@@ -1015,6 +1018,100 @@
 .connect:focus-visible .connectTip {
   opacity: 1;
   transform: none;
+}
+
+/* Signed in: the green logo opens a small box saying who is signed in, with Log out. Pointing at the
+   logo shows it where a pointer can hover; a tap opens and closes it (data-open) everywhere else. */
+.account {
+  position: relative;
+  display: flex;
+}
+
+.accountMenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 2;
+  /* The padding bridges the gap to the logo, so the pointer can cross it without losing the box. */
+  padding-top: 6px;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.15s, transform 0.15s, visibility 0s linear 0.15s;
+}
+
+.account[data-open] .accountMenu {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  transition-delay: 0s;
+}
+
+@media (hover: hover) {
+  .account:hover .accountMenu {
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+    transition-delay: 0s;
+  }
+}
+
+.accountBox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+  width: max-content;
+  max-width: min(300px, 78vw);
+  padding: 4px 6px 4px 12px;
+  border-radius: 10px;
+  background: #1c1a21;
+  box-shadow: 0 0 0 1px var(--faint);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.accountName {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.logout {
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  padding: 6px;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--faint);
+  text-underline-offset: 3px;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+
+.logout:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .logout:hover:not(:disabled) {
+    color: var(--pink);
+    text-decoration-color: var(--pink);
+  }
+}
+
+.logout:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 1px;
+}
+
+.accountError {
+  flex-basis: 100%;
+  margin: 0 0 6px;
 }
 
 .controls {
@@ -1092,6 +1189,27 @@
   font-size: 12px;
   color: var(--dim);
   cursor: pointer;
+}
+
+/* Reset: a quiet circular-arrow icon button in the panel's header, grey, pink when pointed at. Its
+   box is padded for a finger and given negative margins, so the header does not grow with it. */
+.headIcon {
+  align-self: center;
+  display: flex;
+  margin: -6px -6px -6px auto;
+  border: 0;
+  border-radius: var(--squircle);
+  background: none;
+  padding: 6px;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+@media (hover: hover) {
+  .headIcon:hover {
+    color: var(--pink);
+  }
 }
 
 .sliderRow {
@@ -1237,7 +1355,8 @@
 
 .chip:focus-visible,
 .connect:focus-visible,
-.headAction:focus-visible {
+.headAction:focus-visible,
+.headIcon:focus-visible {
   outline: 2px solid var(--cyan);
   outline-offset: 2px;
 }
