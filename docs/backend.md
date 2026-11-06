@@ -16,7 +16,7 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | GET | `/api/songs/known` | | `KnownSongsResponse` (up to 50 library songs with a known range, play order) |
 | POST | `/api/feedback` | `FeedbackRequest` (`difficulty` may be `maybe`; optional `view`, the results view the song was found in) | `{ ok: true }`; 400 on bad input, including a `view` without `difficulty`, `familiarity` and `popularity` that are each null or a number from 0 to 1, a `decade` and `mood` that are known or null, and a boolean `duetsOnly`; 409 before a range is saved. Stored with the user's current range, the view (`view_json`) and, when the song is in the cached library, its range at that moment (`range_source` = the log outcome, `range_method`, `range_low`, `range_high`); the tap never loads the library from Spotify |
 | GET | `/api/admin/log` | header `x-admin-token`, `limit` (1..1000, default 200) | `{ entries: DataSourceLogEntry[] }`, newest first; 403 on a wrong token or when `ADMIN_TOKEN` is unset |
-| GET | `/api/catalogue/recommendations` | `low`, `high` (the range: integers, 28 <= low < high <= 96, span 5..48), then `all=1` or `offset`/`limit`; no session | `RecommendationsResponse` from the public catalogue (QWW-2 Track B): every song with a note-file or recording range, most-viewed USDB row and karaoke popularity attached, cached per process for an hour (6,000 songs). Tracks have `cat:<songKey>` ids and Spotify search links, `known: false`, so no familiarity reasons. `all=1` sends at most the best 1,000 matches with year (USDB's, else the Year-End chart year) and genre; `complete: false` and `nextOffset: null` when trimmed. 400 on a bad range |
+| GET | `/api/catalogue/recommendations` | `low`, `high` (the range: integers, 28 <= low < high <= 96, span 5..48), then `all=1` or `offset`/`limit`; no session | `RecommendationsResponse` from the public catalogue (QWW-2 Track B): every song with a note-file or recording range, most-viewed USDB row and karaoke popularity attached, cached per process for an hour (the 6,000 most popular, plus every Billboard Year-End song). Tracks have `cat:<songKey>` ids and Spotify search links, `known: false`, so no familiarity reasons. `all=1` sends at most the best 1,000 matches with year (USDB's, else the Year-End chart year) and genre; `complete: false` and `nextOffset: null` when trimmed. 400 on a bad range |
 | POST | `/api/catalogue/feedback` | `CatalogueFeedbackRequest`: the feedback fields plus `anonId` (8 to 64 of `[A-Za-z0-9-]`) and `range`; no session | `{ ok: true }`; stored with `user_id = 'anon:' + anonId`, the range, and the song's range snapshot looked up by key. 400 on bad input or a `trackId` that is not `cat:` |
 | POST | `/api/events` | `EventsRequest`, as JSON or as the `text/plain` body `navigator.sendBeacon` sends; no session | 204, storing nothing while `EVENTS` is off. 400 on bad input, checked even when off: `anonId` 8 to 64 of `[A-Za-z0-9-]`; 1 to 50 events; `name` matching `^[a-z][a-z0-9_]{1,48}$`; `at` an ISO time with a zone, within 7 days of the server clock (stored as UTC); at most 20 props named `^[a-zA-Z][a-zA-Z0-9_]{0,40}$`, each a string of up to 200 characters, a finite number, a boolean or null. Props named `trackId`, `spotifyId`, `userId`, `displayName` or `email` (any case, underscores ignored) are dropped before storing |
 | GET | `/api/admin/events` | header `x-admin-token`, `limit` (1..20000, default 5000) | `AdminEventsResponse` from the newest `limit` events (see Beta event log); 403 like `/api/admin/log` |
@@ -66,6 +66,14 @@ cache load, and each scores a copy of the range with it; it is never stored with
 After merging, load it with `npm run popularity:import -- --karafun karafun_songs.csv --billboard
 billboard_songs.csv` (needs `DATABASE_URL`; `--dry-run` only prints the summary). Both files come
 from the vocal-range pipeline and never go into this repository.
+
+Every source is put on one scale before it is averaged (`src/lib/popularity/calibrate.ts`): USDB
+views score their percentile among catalogue songs with views, and karaoke views (and Spotify
+popularity, when it is sent) are linked to that on the songs that have both (equipercentile
+linking), so a song typical of one source scores what it would on USDB views. A Year-End entry is
+a floor at the lower quartile of its tier's charting songs. USDB stars are not used: nearly every
+song has 5. `npm run popularity:calibrate [-- --dry-run]` reads the numbers from `DATABASE_URL` and
+writes `src/lib/songs/popularityScale.ts`.
 
 ## Beta event log
 

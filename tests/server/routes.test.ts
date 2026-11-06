@@ -24,6 +24,7 @@ import { getStore } from '../../src/lib/server/getStore';
 import { MOCK_USER } from '../../src/lib/server/mockSpotify';
 import { songKey } from '../../src/lib/songs/resolve';
 import { isMeasured } from '../../src/lib/songs/sourceRank';
+import { CHART_FLOOR } from '../../src/lib/songs/score';
 import { SESSION_COOKIE, STATE_COOKIE } from '../../src/lib/server/session';
 import { getAppContext, resetAppContextForTests, SEED_SONGS } from '../../src/lib/server/wiring';
 
@@ -858,7 +859,7 @@ describe('karaoke popularity (QWW-6)', () => {
     await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
     const all = (await (await recs.GET(req('/api/recommendations?all=1', jar))).json()) as RecommendationsResponse;
     const baby = all.matches.find((m) => m.track.title === 'Baby')!;
-    expect(baby).toMatchObject({ year: 2010, yearSource: 'spotify', parts: { popularity: 0.75, popularityKnown: true } });
+    expect(baby).toMatchObject({ year: 2010, yearSource: 'spotify', parts: { popularity: CHART_FLOOR.top20, popularityKnown: true } });
     expect(baby.range).not.toHaveProperty('chartRank');
     const page = (await (await recs.GET(req('/api/recommendations?offset=0&limit=50', jar))).json()) as RecommendationsResponse;
     expect(page.matches.find((m) => m.track.title === 'Baby')!.parts).toMatchObject({ popularityKnown: false });
@@ -872,7 +873,7 @@ describe('karaoke popularity (QWW-6)', () => {
     await getStore().putSongPopularity([{ key, chartRank: 3, chartYear: 1999, source: 'billboard' }]);
     const body = (await (await catalogueRecs.GET(req('/api/catalogue/recommendations?low=45&high=80&all=1'))).json()) as RecommendationsResponse;
     const song = body.matches.find((m) => m.track.id === `cat:${key}`)!;
-    expect(song).toMatchObject({ year: 1999, yearSource: 'chart', parts: { popularity: 0.75, popularityKnown: true } });
+    expect(song).toMatchObject({ year: 1999, yearSource: 'chart', parts: { popularity: CHART_FLOOR.top20, popularityKnown: true } });
     expect(song.reasons).toContain('Crowd favourite');
     expect(song.range).toEqual(range);
   });

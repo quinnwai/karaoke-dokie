@@ -1,7 +1,7 @@
 // Postgres store using raw SQL through an injected query function, so the same code
 // runs on Neon (production) and pg-mem (tests).
 import type { DataSourceLogEntry, FeedbackEntry, Mood, SongRange, VocalRange } from '../contracts';
-import { byCatalogueRank, catalogueRank } from '../songs/score';
+import { catalogueRank, pickCatalogue } from '../songs/score';
 import { isMeasured, MEASURED_RANK, SOURCE_RANK } from '../songs/sourceRank';
 import { SCHEMA_SQL } from './schema';
 import {
@@ -301,37 +301,38 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
     async listCatalogue(limit) {
       // Three steps, so no response carries thousands of ranges (the table can hold tens of
       // thousands; one query for 6,000 songs would be about 6 MB). First a few numbers for every
-      // measured song: the range's own USDB views and stars, its most-viewed USDB row's (DISTINCT
+      // measured song: the range's own USDB views, its most-viewed USDB row's (DISTINCT
       // ON; a tie goes to the lower id) and its karaoke popularity. Those are ranked here with
       // catalogueRank, the formula the catalogue scores with (SQL would need a copy of it), and cut
-      // to the limit. Then the chosen songs' ranges and log lines, and their USDB rows, 1,000 a
+      // to the limit, keeping every Year-End song (pickCatalogue). Then the chosen songs' ranges and log lines, and their USDB rows, 1,000 a
       // query, all at once. Artist estimates stay out: they exist only because a tester's library had the song.
       // The join is on `b.song_key || ''` because pg-mem otherwise reads usdb_songs through its
       // song_key index and skips the DISTINCT ON.
       const sources = MEASURED_SOURCES.map((_, i) => `$${i + 1}`).join(', ');
       const candidates = await query(
-        `SELECT s.song_key, s.range_json::json ->> 'usdbViews' AS range_views, s.range_json::json ->> 'usdbRating' AS range_rating,
-           b.id AS usdb_id, b.views, b.rating, p.karaoke_views, p.chart_rank
+        `SELECT s.song_key, s.range_json::json ->> 'usdbViews' AS range_views,
+           b.id AS usdb_id, b.views, p.karaoke_views, p.chart_rank
          FROM song_ranges s
-         LEFT JOIN (SELECT DISTINCT ON (song_key) song_key, id, views, rating FROM usdb_songs ORDER BY song_key, COALESCE(views, 0) DESC, id) b
+         LEFT JOIN (SELECT DISTINCT ON (song_key) song_key, id, views FROM usdb_songs ORDER BY song_key, COALESCE(views, 0) DESC, id) b
            ON (b.song_key || '') = s.song_key
          LEFT JOIN song_popularity p ON p.song_key = s.song_key
          WHERE s.skipped = false AND (s.range_json::json ->> 'source') IN (${sources})`,
         MEASURED_SOURCES,
       );
       const opt = (v: unknown): number | undefined => (isSet(v) ? num(v) : undefined);
-      const chosen = candidates
-        .map((r) => ({
+      const chosen = pickCatalogue(
+        candidates.map((r) => ({
           key: str(r.song_key),
           usdbId: opt(r.usdb_id),
           rank: catalogueRank(
-            { usdbViews: opt(r.range_views), usdbRating: opt(r.range_rating) },
-            { views: opt(r.views), rating: opt(r.rating) },
+            { usdbViews: opt(r.range_views) },
+            { views: opt(r.views) },
             { karaokeViews: opt(r.karaoke_views), chartRank: opt(r.chart_rank) },
           ),
-        }))
-        .sort(byCatalogueRank)
-        .slice(0, Math.max(0, limit));
+          charted: isSet(r.chart_rank),
+        })),
+        Math.max(0, limit),
+      );
       const inList = (n: number) => Array.from({ length: n }, (_, j) => `$${j + 1}`).join(', ');
       const records = new Map<string, SongRangeRecord>();
       const usdbRows = new Map<number, UsdbIndexEntry>();

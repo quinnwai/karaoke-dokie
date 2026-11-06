@@ -206,16 +206,19 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
       await s.putSongRange('a-ha|take on me', row('a-ha', 'Take On Me', { ...songRange, usdbViews: 5_000 }));
       const pop = (key: string, p: Partial<SongPopularityRecord>): SongPopularityRecord => ({ key, source: 'karafun+billboard', ...p });
       await s.putSongPopularity([
-        pop('toto|africa', { karaokeViews: 5_500_000 }), // a recording with no USDB row: about 1
-        pop('queen|rough', { chartRank: 15, chartYear: 1999 }), // top-20 Year-End floor: 0.75
-        pop('abba|waterloo', { chartRank: 90, chartYear: 1990 }), // lifted from 0.37 to the 0.6 floor
-        pop('queen|guess', { karaokeViews: 5_500_000 }), // an estimate: still left out
-        pop('nobody|skipped', { karaokeViews: 5_500_000 }), // skipped: still left out
+        // Scores below are on the committed popularity scale (src/lib/songs/popularityScale.ts);
+        // recalibrating can move them.
+        pop('toto|africa', { karaokeViews: 40_000_000 }), // a recording with no USDB row: 1, the top of the scale
+        pop('queen|rough', { chartRank: 15, chartYear: 1999 }), // top-20 Year-End floor: 0.73
+        pop('abba|waterloo', { chartRank: 90, chartYear: 1990 }), // lifted from 0.01 to the 0.62 floor
+        pop('queen|guess', { karaokeViews: 40_000_000 }), // an estimate: still left out
+        pop('nobody|skipped', { karaokeViews: 40_000_000 }), // skipped: still left out
       ]);
-      // a-ha's own range views (0.74) count as the catalogue scores them; sos 0.596, Bohemian 0.591.
-      const order = ['toto|africa', 'queen|rough', 'a-ha|take on me', 'abba|waterloo', 'abba|sos', 'queen|bohemian rhapsody'];
+      // a-ha's own range views (0.97) count as the catalogue scores them; sos and Bohemian tie at 0.88, then by key.
+      const order = ['toto|africa', 'a-ha|take on me', 'abba|sos', 'queen|bohemian rhapsody', 'queen|rough', 'abba|waterloo'];
       expect((await s.listCatalogue(100)).map((c) => c.key)).toEqual(order);
-      expect((await s.listCatalogue(2)).map((c) => c.key)).toEqual(['toto|africa', 'queen|rough']);
+      // Past the limit, Year-End songs are still read: Rough and Waterloo, not SOS or Bohemian.
+      expect((await s.listCatalogue(2)).map((c) => c.key)).toEqual(['toto|africa', 'a-ha|take on me', 'queen|rough', 'abba|waterloo']);
       const waterloo = (await s.listCatalogue(100)).find((c) => c.key === 'abba|waterloo')!;
       expect(waterloo.usdb).toEqual(usdb.waterloo); // the row is still the most-viewed one (a tie goes to the lower id)
     });

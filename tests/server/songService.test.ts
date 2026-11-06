@@ -3,7 +3,9 @@ import type { DataSourceLogEntry, Match, SongRange, Track, VocalRange } from '..
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { createSongService, MAX_ALL_MATCHES, type SongDeps } from '../../src/lib/server/songService';
 import { matchSong as fitSong } from '../../src/lib/songs/match';
-import { CHART_FLOOR, KARAOKE_VIEWS_FULL, scoreMatch, UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
+import { CHART_FLOOR, scoreMatch, UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
+import { onScale } from '../../src/lib/popularity/calibrate';
+import { POPULARITY_SCALE } from '../../src/lib/songs/popularityScale';
 
 const track = (n: number): Track => ({
   id: `t${n}`,
@@ -380,7 +382,7 @@ describe('song service whole list (all)', () => {
 
     it('scores with karaoke views and chart rank on a copy, never stores or sends them, and leaves pages as they were', async () => {
       const store = createMemoryStore();
-      await store.putSongPopularity([popular(2, { chartRank: 12, chartYear: 1999 }), popular(4, { karaokeViews: KARAOKE_VIEWS_FULL })]);
+      await store.putSongPopularity([popular(2, { chartRank: 12, chartYear: 1999 }), popular(4, { karaokeViews: 1_000_000 })]);
       await store.putUsdbSongs([indexRow(4, { rating: 4 })]);
       const matchSong = vi.fn(scoring);
       const { deps } = fakeDeps({ matchSong, resolveSongRange: everyone(range(56, 64)) });
@@ -389,11 +391,11 @@ describe('song service whole list (all)', () => {
 
       const scored = Object.fromEntries(matchSong.mock.calls.map(([t, r]) => [t.id, r]));
       expect(scored.t2).toStrictEqual({ ...range(56, 64), chartRank: 12 });
-      expect(scored.t4).toStrictEqual({ ...range(56, 64), usdbRating: 4, karaokeViews: KARAOKE_VIEWS_FULL });
+      expect(scored.t4).toStrictEqual({ ...range(56, 64), usdbRating: 4, karaokeViews: 1_000_000 });
       expect(scored.t8).toStrictEqual(range(56, 64));
       const parts = Object.fromEntries(res.matches.map((m) => [m.track.id, m.parts!]));
       expect(parts.t2).toMatchObject({ popularity: CHART_FLOOR.top20, popularityKnown: true });
-      expect(parts.t4!.popularity).toBeCloseTo((0.8 + 1) / 2);
+      expect(parts.t4!.popularity).toBeCloseTo(onScale(POPULARITY_SCALE.karaokeViews, 1_000_000)); // USDB stars are left out
       expect(parts.t8).toMatchObject({ popularity: UNKNOWN_POPULARITY, popularityKnown: false });
 
       for (const m of res.matches) {
