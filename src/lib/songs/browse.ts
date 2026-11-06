@@ -7,7 +7,9 @@
 //   pick only widens the list.
 // - Sliders are preferences on continuous scores (how hard, how much you play it, how well known).
 //   Untouched, a slider does nothing. Set, it is a target from 0 (left end) to 1 (right end), and
-//   the songs closest to every set target come first. Sliders only reorder, so they can never empty
+//   the songs closest to every set target come first. A song sits on the track by its rank in the
+//   list, not by its raw score, so every tenth of the track holds about a tenth of the songs and
+//   the list changes along the whole length (QWW-33). Sliders only reorder, so they can never empty
 //   the list either, and every view is computed on the phone in one pass.
 //
 // Two rules from the original ranking hold throughout: Maybe songs (estimated ranges) come last,
@@ -87,10 +89,11 @@ export function rangeCoverage(m: Match, user: VocalRange): number {
 }
 
 /**
- * Where a song sits on a slider, 0 to 1, or null when we do not know. Difficulty is how much of
+ * A song's score on a slider, 0 to 1, or null when we do not know. Difficulty is how much of
  * the singer's range the song uses together with how little of it sits in their comfortable middle,
  * so the right end (Locked in) is songs that use your whole range and the left end (Light work) is
- * easy, centred songs.
+ * easy, centred songs. The score only sorts the songs; where a song sits on the track is its rank
+ * by this score (sliderPlaces).
  */
 export function sliderValue(m: Match, id: SliderId, user: VocalRange): number | null {
   if (id === 'difficulty') return clamp01((rangeCoverage(m, user) + (1 - (m.parts?.comfort ?? 0.5))) / 2);
@@ -98,11 +101,46 @@ export function sliderValue(m: Match, id: SliderId, user: VocalRange): number | 
   return m.parts?.popularityKnown ? clamp01(m.parts.popularity) : null;
 }
 
+/**
+ * Where each of `songs` sits on a slider's track, 0 (left end) to 1 (right end), or null for a song
+ * we know nothing about on it. A song's place is its rank by score within `songs`, as a share of the
+ * songs, not the score itself. Scores bunch up (every catalogue song's difficulty is under 0.4, and
+ * most library songs share one of two familiarity scores), and a track laid out by score then has
+ * long stretches with no songs, where moving the thumb changes nothing. By rank, each tenth of the
+ * track holds about a tenth of the songs, and the ends are still the lowest and the highest score.
+ *
+ * Songs with the same score are told apart by play rank, so a big tied group (every saved-only song
+ * scores 0.15) spreads out too. In a library the play rank is Spotify's order (top lists, recent
+ * plays, then saved songs newest first); in the catalogue it is the most-viewed-first order. The song
+ * with the lower play rank sits further right, then the one earlier in `songs` (the better Top pick).
+ */
+export function sliderPlaces(songs: Match[], id: SliderId, user: VocalRange): (number | null)[] {
+  const scored: { at: number; score: number }[] = [];
+  songs.forEach((m, at) => {
+    const score = sliderValue(m, id, user);
+    if (score !== null) scored.push({ at, score });
+  });
+  scored.sort((a, b) => a.score - b.score || songs[b.at]!.track.playRank - songs[a.at]!.track.playRank || b.at - a.at);
+  const places = songs.map((): number | null => null);
+  scored.forEach(({ at }, rank) => {
+    places[at] = scored.length > 1 ? rank / (scored.length - 1) : 0.5;
+  });
+  return places;
+}
+
 export const activeSliders = (view: ResultsView): SliderId[] => SLIDER_IDS.filter((id) => view[id] !== null);
+
+/** A song we know nothing about on a slider counts as farther from any target than a song we know. */
+const UNKNOWN_DISTANCE = 1.5;
 
 /**
  * Orders matches for the sliders that are set. `matches` arrives in the server's Top picks order,
  * which is also the final tie-break; with no slider set, that order is kept as it is.
+ *
+ * The list is shown in blocks that never mix: songs you know, then saved-only ones (unless you set
+ * "on repeat" yourself), with the Maybe songs after both. Each block is laid out on the sliders on
+ * its own (sliderPlaces), so the block shown first fills the whole track, whatever the songs after
+ * it look like. Within a block, the songs closest to every set target come first.
  */
 export function orderMatches(matches: Match[], view: ResultsView, user: VocalRange, mode: ResultsMode): Match[] {
   const sliders = activeSliders(view);
@@ -110,15 +148,28 @@ export function orderMatches(matches: Match[], view: ResultsView, user: VocalRan
   const maybe = (m: Match) => (m.difficulty === 'maybe' ? 1 : 0);
   // Setting "on repeat" yourself replaces the known-first rule; catalogue songs are all unknown.
   const tier = (m: Match) => (mode === 'library' && view.familiarity === null && !isKnown(m.track) ? 1 : 0);
+  const block = (m: Match) => maybe(m) * 2 + tier(m);
+
+  const inBlock = new Map<number, number[]>();
+  matches.forEach((m, i) => {
+    const b = block(m);
+    const indices = inBlock.get(b);
+    if (indices) indices.push(i);
+    else inBlock.set(b, [i]);
+  });
   // Distance to every set target; a song we know nothing about for a slider goes after the rest.
-  const distance = (m: Match) =>
-    sliders.reduce((sum, id) => {
-      const v = sliderValue(m, id, user);
-      return sum + (v === null ? 1.5 : Math.abs(v - view[id]!));
-    }, 0);
+  const distance = matches.map(() => 0);
+  for (const indices of inBlock.values()) {
+    const songs = indices.map((i) => matches[i]!);
+    for (const id of sliders) {
+      sliderPlaces(songs, id, user).forEach((place, k) => {
+        distance[indices[k]!]! += place === null ? UNKNOWN_DISTANCE : Math.abs(place - view[id]!);
+      });
+    }
+  }
   return matches
-    .map((m, i) => ({ m, i, d: distance(m) }))
-    .sort((a, b) => maybe(a.m) - maybe(b.m) || tier(a.m) - tier(b.m) || a.d - b.d || a.i - b.i)
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) => block(a.m) - block(b.m) || distance[a.i]! - distance[b.i]! || a.i - b.i)
     .map(({ m }) => m);
 }
 
