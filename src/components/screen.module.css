@@ -874,6 +874,20 @@
   border: 1px solid var(--faint);
 }
 
+/*
+ * Spotify's player: 152px is its compact size for one song, and it wants at least 280px of width.
+ * A 360px phone leaves the screen 264px, so the player reaches 12px into the padding on each side
+ * (288px). Not a min-width: that would make the whole TV wider than a small phone's page.
+ */
+.player {
+  width: calc(100% + 24px);
+  max-width: 460px;
+  height: 152px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(244, 241, 246, 0.06); /* a faint card while Spotify's page loads (about a second) */
+}
+
 .feedback {
   display: flex;
   align-items: center;

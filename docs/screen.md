@@ -34,12 +34,53 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    range, which stays on the device (`kd.range`). If the request fails the box says so and nothing changes.
 7. **Song detail**: range bar (song in neon pink over the user's range, note names at the
    ends), difficulty (or a quiet "Maybe"), "Fast lyrics", an "i" button explaining where the
-   data came from (for Maybe songs, also that the range is an estimate), Open in Spotify, and
-   "How'd it go?" thumbs that POST `/api/feedback`.
+   data came from (for Maybe songs, also that the range is an estimate), Spotify's own player
+   (see below), and "How'd it go?" thumbs that POST `/api/feedback`.
 8. **Returning user** with a saved range lands on results; "redo" restarts the test. Someone
    without Spotify whose range is kept on the device lands on catalogue results.
 9. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
    low and highest high become the range (`source: 'songs'`). Signed-out users sign in first.
+
+## Spotify player
+
+The song detail embeds Spotify's own player: the plain iframe from Spotify's
+[creating an embed](https://developer.spotify.com/documentation/embeds/tutorials/creating-an-embed)
+tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never signs in to Spotify for it.
+
+- **Address**: `https://open.spotify.com/embed/track/<id>`. The ID comes from the song's `spotifyUrl`
+  (`spotifyEmbed.ts`) and only letters and digits are copied, so the frame can only point at
+  Spotify's player. A link that is not a track link (the offline mock only has search links) shows
+  the plain "Open in Spotify" link instead.
+- **Size**: 152px tall, Spotify's compact size for one song. Spotify wants at least 280px of width.
+  A 360px phone leaves the screen 264px, so the player reaches 12px into the screen's padding
+  (288px); a page narrower than 352px gets less than 280px.
+- **Fit**: the player is about 110px taller than the old button. A one-line title still fits a
+  664px-high phone without scrolling; a three-line title or the open info tooltip makes the screen
+  scroll (the tooltip already did on short phones). The screen is one scroller shared with the song
+  list, so the song page resets it to the top when it opens.
+- **Playing**: all of it is Spotify's own controls. Seen in Chrome 156 with no Spotify sign-in: a
+  "Preview" badge, playback in the page, and after about 30 seconds a "Listen to the full track and
+  millions more on Spotify" panel with a Get Spotify button and a close button that brings the
+  player back. Not tried signed in to Spotify. Spotify also says the embed will in some situations
+  "only stream a preview clip of less than 30 seconds", and that without `encrypted-media` in the
+  iframe's `allow` list it only allows previews, so keep that list as Spotify gives it. Going back
+  to the list removes the frame and stops the song.
+- **Opening the song in the Spotify app**: the Spotify logo in the player's corner, the title and
+  (after the preview) Get Spotify all lead to `open.spotify.com/track/<id>?go=1...`. On a computer
+  that opens a new tab; with `go=1` the page navigates to `spotify://track/<id>` and stays on the
+  web page when nothing takes that over. All of this was seen in Chrome 156, except the browser's
+  own "Open Spotify?" prompt, which headless Chrome cannot show. The plain
+  `open.spotify.com/track/<id>` link the old button used did not try the app. On a phone the same
+  tap replaces our page with Spotify's mobile track page, whose deep link is what opens the app
+  (seen in phone emulation only, not on a real phone), and Back returns to the results list, not
+  to the song.
+- **Not handled**: if Spotify's page cannot load (an extension blocks it, no network) the frame shows
+  the browser's error page and no fallback link appears. The page cannot tell: Chrome still fires
+  `load` for the error page, and the frame is unreadable either way. Telling would take a second
+  request to Spotify or its iFrame API script.
+- **Cookies**: the player comes from `open.spotify.com` and sets Spotify's own cookies. The credits
+  page says so, as Spotify's embed terms ask of sites that embed.
+- There is no Content-Security-Policy today. If one is added, it needs `frame-src https://open.spotify.com`.
 
 ## Code
 
@@ -52,8 +93,10 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
 | `src/lib/client/storage.ts` | Guarded `sessionStorage` for test progress and the pick-songs intent; `localStorage` for a range kept on the device. |
 | `src/lib/songs/browse.ts` | Sliders, chips, counts and the "Saved, not played lately" divider, as pure functions over every match. |
 | `src/lib/client/funnel.ts`, `events.ts` | What each action records in the beta event log, and the batching tracker that sends it. |
+| `src/lib/client/spotifyEmbed.ts` | A song's `open.spotify.com/track/ID` link to the address of Spotify's player, or null. |
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,Results,SongDetail,PickSongs}.tsx` | The screen pieces. |
+| `src/components/SpotifyPlayer.tsx` | Spotify's player iframe, or the plain "Open in Spotify" link when there is no track to embed. |
 | `src/components/screen.module.css`, `app/globals.css` | Styles; `prefers-reduced-motion` stops all animation. |
 
 ## Tests
@@ -67,4 +110,6 @@ E2E_PORT=3107 npx playwright test  # same, on another port (avoids reusing anoth
 The e2e spec generates a 110 Hz (A2) and a 523.25 Hz (C5) WAV and feeds them to
 Chromium's fake microphone. Chromium takes one file per launch, so the low note is sung
 in one browser and the high note in a second one that picks up the saved progress.
-Named screenshots land in `test-results/screens/`.
+Named screenshots land in `test-results/screens/`. The specs never load Spotify's player from
+Spotify: the screen spec answers `https://open.spotify.com/embed/**` with a stand-in page, and the
+full-stack spec (offline mock, search links only) shows the plain link.
