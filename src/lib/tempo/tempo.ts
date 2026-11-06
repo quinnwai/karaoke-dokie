@@ -28,10 +28,22 @@ const VERSION_TAGS =
 /** Tags that still leave the studio recording: "Remastered 2011", "Mono", "Single Version", "Album Version". */
 const HARMLESS = /\b(remaster(ed)?( \d{4})?|\d{4} remaster(ed)?|mono|stereo|single version|album version|original version|deluxe|bonus track)\b/gi;
 
-/** True for a title that is probably the song as released: no live, acoustic, remix, karaoke or sped-up tag. */
-export function isStudioVersion(title: string): boolean {
-  const stripped = title.replace(HARMLESS, ' ');
-  return !VERSION_TAGS.test(stripped);
+/**
+ * True for a title that is probably the song as released: no live, acoustic, remix, karaoke or
+ * sped-up tag. A tag word the song's own title has ("Live and Let Die", "Cover Me") does not count.
+ */
+export function isStudioVersion(title: string, songTitle = ''): boolean {
+  // Each tag word the song's title has can be spent once: "Live Forever (Live)" still has a tag.
+  const own = new Map<string, number>();
+  for (const w of songTitle.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []) own.set(w, (own.get(w) ?? 0) + 1);
+  for (const m of title.replace(HARMLESS, ' ').matchAll(new RegExp(VERSION_TAGS.source, 'gi'))) {
+    for (const w of m[0].toLowerCase().split(' ')) {
+      const left = own.get(w) ?? 0;
+      if (!left) return false;
+      own.set(w, left - 1);
+    }
+  }
+  return true;
 }
 
 export function median(xs: number[]): number | null {

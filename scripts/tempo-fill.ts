@@ -42,13 +42,31 @@ function startTracker() {
   const child = spawn(process.env.TEMPO_PYTHON ?? 'python3', [join(import.meta.dirname, 'tempo-tracker.py')], { stdio: ['pipe', 'pipe', 'inherit'] });
   const lines = createInterface({ input: child.stdout });
   const waiting: ((v: { bpm?: number; error?: string }) => void)[] = [];
-  lines.on('line', (l) => waiting.shift()?.(JSON.parse(l)));
-  child.on('exit', () => waiting.splice(0).forEach((w) => w({ error: 'tracker exited' })));
+  let exited = false;
+  lines.on('line', (l) => {
+    try {
+      waiting.shift()?.(JSON.parse(l));
+    } catch {
+      waiting.shift()?.({ error: `unreadable tracker output: ${l.slice(0, 80)}` });
+    }
+  });
+  const gone = () => {
+    exited = true;
+    waiting.splice(0).forEach((w) => w({ error: 'tracker exited (is librosa installed for TEMPO_PYTHON?)' }));
+  };
+  child.on('exit', gone);
+  child.on('error', gone);
+  child.stdin.on('error', gone);
   let queue: Promise<unknown> = Promise.resolve();
   return {
     /** Serial: python reads one file at a time. */
     read(path: string): Promise<{ bpm?: number; error?: string }> {
-      const run = () => new Promise<{ bpm?: number; error?: string }>((res) => { waiting.push(res); child.stdin.write(`${path}\n`); });
+      const run = () =>
+        new Promise<{ bpm?: number; error?: string }>((res) => {
+          if (exited) return res({ error: 'tracker exited (is librosa installed for TEMPO_PYTHON?)' });
+          waiting.push(res);
+          child.stdin.write(`${path}\n`);
+        });
       const p = queue.then(run, run);
       queue = p;
       return p;
@@ -95,6 +113,8 @@ async function main() {
   const pending: SongTempoRecord[] = [];
   const counts = { deezer: 0, tracker: 0, none: 0, errors: 0 };
   let next = 0;
+  let processed = 0; // songs finished, counting each once
+  let previews = 0; // makes each preview's temp file name its own
   let inARow = 0;
   const flush = async () => {
     const batch = pending.splice(0);
@@ -104,20 +124,29 @@ async function main() {
   /** The preview's tempo, or undefined; the audio is deleted whatever happens. */
   async function trackPreview(previewUrl: string, name: string): Promise<number | undefined> {
     const file = join(dir, `${name}.mp3`);
+    let lastStatus: number | undefined;
     try {
       for (let i = 0; i < DOWNLOAD_TRIES; i++) {
         await deezer.wait();
-        const res = await fetch(previewUrl);
-        if (res.status === 403) throw new Error('Deezer CDN refused the preview download (HTTP 403)');
-        if (!res.ok) continue;
+        const res = await fetch(previewUrl, { signal: AbortSignal.timeout(20_000) }).catch(() => null);
+        if (res?.status === 403) throw new Error('Deezer CDN refused the preview download (HTTP 403)');
+        lastStatus = res?.status;
+        if (!res?.ok) {
+          await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
+          continue;
+        }
         const want = Number(res.headers.get('content-length') ?? 0);
         const bytes = new Uint8Array(await res.arrayBuffer().catch(() => new ArrayBuffer(0)));
         if (!bytes.length || (want && bytes.length < want)) continue; // cut off mid-file
         await writeFile(file, bytes);
         const out = await tracker.read(file);
+        // A tracker that fails is an error, not a miss: nothing is recorded, and 20 in a row stop the run.
+        if (out.bpm === undefined) throw new Error(`Beat tracker failed: ${out.error ?? 'no answer'}`);
         return out.bpm;
       }
-      return undefined;
+      // Out of tries: a preview Deezer says is gone is a miss; anything else (timeouts, cut-off files, 429, 5xx) is tried again next run.
+      if (lastStatus === 404 || lastStatus === 410) return undefined;
+      throw new Error(`Preview download failed (${lastStatus ?? 'no answer'}): ${previewUrl}`);
     } finally {
       await rm(file, { force: true });
     }
@@ -125,13 +154,14 @@ async function main() {
 
   async function work(row: Record<string, unknown>) {
     const key = String(row.song_key);
+    const ownTitle = key.split('|')[1] ?? '';
     const candidates: DeezerTrackDetail[] = [];
     const first = await deezer.track(Number(row.deezer_id));
-    if (first && matchesKey(key, first) && isStudioVersion(first.title)) candidates.push(first);
+    if (first && matchesKey(key, first) && isStudioVersion(first.title, ownTitle)) candidates.push(first);
     if (candidates.length < versions) {
       // More versions to take the median over, or the matched one was live: look for studio ones.
       const found: DeezerTrack[] = (await deezer.search(deezerQuery(String(row.artist ?? ''), String(row.title ?? ''))))
-        .filter((t) => t.id !== first?.id && matchesKey(key, t) && isStudioVersion(t.title))
+        .filter((t) => t.id !== first?.id && matchesKey(key, t) && isStudioVersion(t.title, ownTitle))
         .sort((a, b) => b.rank - a.rank);
       for (const t of found.slice(0, versions - candidates.length)) {
         const d = await deezer.track(t.id);
@@ -150,7 +180,7 @@ async function main() {
       const preview = candidates.find((c) => c.preview)?.preview;
       if (preview) {
         record.previewUrl = preview;
-        const bpm = await trackPreview(preview, key.replace(/[^a-z0-9]+/gi, '_').slice(0, 60) + next);
+        const bpm = await trackPreview(preview, `p${previews++}`);
         if (bpm !== undefined) {
           record.trackerBpm = Number(bpm.toFixed(2));
           counts.tracker++;
@@ -159,6 +189,7 @@ async function main() {
     }
     if (values['dry-run'] && next <= 40) console.log(`${record.deezerBpm ?? 'tracker ' + (record.trackerBpm ?? 'none')}\t${key}`);
     pending.push(record);
+    processed++;
     inARow = 0;
     if (pending.length >= BATCH) await flush();
   }
@@ -174,7 +205,7 @@ async function main() {
           inARow++;
           console.warn(err instanceof Error ? err.message : err);
         }
-        const n = counts.deezer + counts.tracker + counts.none + counts.errors;
+        const n = processed + counts.errors;
         if (n % 250 === 0) console.log(`${n}/${todo.length}: ${counts.deezer} Deezer, ${counts.tracker} tracker, ${counts.none} none, ${counts.errors} errors`);
       }
     }),
@@ -182,7 +213,7 @@ async function main() {
   await flush();
   tracker.stop();
   await rm(dir, { recursive: true, force: true });
-  const n = counts.deezer + counts.tracker + counts.none + counts.errors;
+  const n = processed + counts.errors;
   console.log(
     `Done: ${counts.deezer} Deezer bpm, ${counts.tracker} tracker, ${counts.none} none, ${counts.errors} errors${inARow >= STOP_AFTER_ERRORS ? `; stopped after ${inARow} failures in a row` : ''}${todo.length - n > 0 ? `; ${todo.length - n} left, run again to carry on` : ''}${values['dry-run'] ? ' (dry run, nothing saved)' : ''}`,
   );

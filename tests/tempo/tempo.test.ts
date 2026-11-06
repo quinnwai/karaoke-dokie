@@ -21,6 +21,12 @@ describe('isStudioVersion', () => {
       expect(isStudioVersion(t), t).toBe(false);
     }
   });
+  it('does not count a tag word the song\'s own title has', () => {
+    expect(isStudioVersion('Live and Let Die', 'Live and Let Die')).toBe(true);
+    expect(isStudioVersion('Live Forever - Remastered', 'Live Forever')).toBe(true);
+    expect(isStudioVersion('Cover Me', 'Cover Me')).toBe(true);
+    expect(isStudioVersion('Live Forever (Live)', 'Live Forever')).toBe(false); // one "live" is the song's, the other a tag
+  });
   it('keeps the recording as released, remasters and single versions included', () => {
     for (const t of ['Africa', 'Dancing Queen', 'Every Breath You Take (Remastered 2003)', 'Hey Jude - 2015 Remaster', 'Let It Be (Single Version)', "Don't Stop Believin' (Album Version)"]) {
       expect(isStudioVersion(t), t).toBe(true);
