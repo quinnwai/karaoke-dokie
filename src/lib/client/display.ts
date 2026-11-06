@@ -90,8 +90,8 @@ export function scalePosition(midi: number): number {
 
 /** Which reasons speak to each slider, so the reason line leads with why the song is where it is. */
 const SLIDER_REASONS: Record<SliderId, RegExp> = {
-  difficulty: /^(In your sweet spot|Mostly comfortable|A few notes near your (high|low) end|Spends time at your (high|low) end)$/,
-  familiarity: /^(In your top songs(?: this month|, past 6 months|, past year)|Played recently|In your playlists|You (play this a lot|know this one))$/,
+  difficulty: /^(In your sweet spot|Mostly comfortable|(?:Some|Lots of) (?:high|low) notes)$/,
+  familiarity: /^(Top songs(?: this month|, past 6 months| this past year)|Played recently|In your playlists|You (play this a lot|know this one))$/,
   popularity: /^Crowd favourite/,
 };
 

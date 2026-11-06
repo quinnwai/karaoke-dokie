@@ -199,7 +199,7 @@ describe('KaraokeApp', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(5);
     expect(screen.getAllByRole('img', { name: 'Sing it an octave lower than the artist' }).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /^Lemon by Kenshi Yonezu, Medium\. Sing it lower than the artist$/ })).toBeTruthy();
-    expect(reasonLines()).toContain('In your sweet spot · In your top songs this month');
+    expect(reasonLines()).toContain('In your sweet spot · Top songs this month');
     expect(screen.getAllByText('Easy').length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Load more songs' }));

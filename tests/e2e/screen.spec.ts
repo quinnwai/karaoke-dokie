@@ -8,7 +8,7 @@ import { chromium, devices, expect, test, type Browser, type BrowserContext, typ
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CatalogueFeedbackRequest, FeedbackRequest, MeResponse, VocalRange } from '../../src/lib/contracts';
-import { allMatches, allMatchesWithFacts, knownSongs, me } from '../fixtures/screen';
+import { allMatches, allMatchesWithFacts, knownSongs, match, me } from '../fixtures/screen';
 
 const SCREENS = path.resolve('test-results/screens');
 const AUDIO = path.resolve('test-results/audio');
@@ -226,7 +226,7 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   const yoru = page.locator('ol li').filter({ hasText: 'Yoru ni Kakeru' });
   await expect(yoru.getByRole('img', { name: 'Fast lyrics' })).toBeVisible();
   await expect(yoru.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeVisible();
-  await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByText('In your sweet spot · In your top songs this month')).toBeVisible();
+  await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByText('In your sweet spot · Top songs this month')).toBeVisible();
   await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByRole('img')).toHaveCount(0);
   await shot(page, '07b-results-icons');
 
@@ -448,3 +448,73 @@ test('sliders and decade chips: sliders reorder, chips filter with counts, all o
   await context.close();
 });
 
+// ---- Reason wording (QWW-30) ----
+
+/** Songs in the order shown, with the reasons their label can get: every new wording, and the widest pairs. */
+const REASON_SHOWCASE: [song: number, reasons: string[]][] = [
+  [0, ['In your sweet spot', 'Top songs this month']],
+  [1, ['Some high notes', 'Top songs this past year']],
+  [2, ['Lots of high notes', 'Top songs, past 6 months']],
+  [4, ['Some low notes', 'Played recently']],
+  [5, ['Lots of low notes', 'Top songs, past 6 months']],
+];
+
+for (const width of [375, 1280]) {
+  test(`reasons read short, and a card wraps only between reasons, at ${width} px`, async ({ browser, baseURL }) => {
+    const api = freshState();
+    api.user = me({ low: 45, high: 72, source: 'test' });
+    const phone = width < 600;
+    const context = await browser.newContext({
+      ...(phone ? iPhone : {}),
+      viewport: { width, height: phone ? 812 : 800 },
+      deviceScaleFactor: 2,
+      baseURL,
+      reducedMotion: 'reduce',
+    });
+    await mockApi(context, api);
+    // The route added last is tried first: it serves the showcase instead of the plain fixture.
+    const showcase = allMatches();
+    showcase.matches = REASON_SHOWCASE.map(([song, reasons]) => ({ ...match(song), reasons }));
+    await context.route('**/api/recommendations*', (route) => route.fulfill({ json: showcase }));
+    const page = await context.newPage();
+    await page.goto('/');
+    await expect(page.locator('ol li')).toHaveCount(REASON_SHOWCASE.length);
+
+    // Each card reads as its reasons joined by a dot (the words of one reason are joined by no-break spaces).
+    const lines = page.locator('ol li [data-reasons]');
+    expect((await lines.allTextContents()).map((t) => t.replace(/\s/g, ' '))).toEqual(REASON_SHOWCASE.map(([, r]) => r.join(' · ')));
+
+    // The height of every word on a card, grouped by reason: a reason broken over two lines has two heights.
+    const heights = await lines.evaluateAll((els) =>
+      els.map((el) => {
+        const reasons: number[][] = [[]];
+        for (const w of el.querySelectorAll<HTMLElement>('[class*="reasonWord"]')) {
+          if (w.textContent === '·') reasons.push([]);
+          else reasons[reasons.length - 1]!.push(Math.round(w.getBoundingClientRect().top));
+        }
+        return reasons;
+      }),
+    );
+    for (const card of heights) {
+      for (const reason of card) expect(new Set(reason).size, `a reason is split across lines: ${JSON.stringify(card)}`).toBe(1);
+    }
+    // On a phone the cards are narrow enough to wrap, so the check above has something to catch.
+    if (phone) expect(heights.some(([first, second]) => second![0]! > first![0]!)).toBe(true);
+    await page.waitForTimeout(300);
+    await shot(page, `reasons-${width}-results`);
+    if (phone) {
+      // The TV screen scrolls: the last card sits under the fold.
+      await page.locator('ol li').last().scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await shot(page, `reasons-${width}-results-end`);
+    }
+
+    // The song page says the same.
+    await page.getByRole('button', { name: /^Mr\. Brightside/ }).click();
+    await expect(page.getByRole('heading', { name: 'Mr. Brightside' })).toBeVisible();
+    await expect(page.locator('[class*="detailReasons"]')).toHaveText('Lots of low notes · Top songs, past 6 months');
+    await page.waitForTimeout(300);
+    await shot(page, `reasons-${width}-song`);
+    await context.close();
+  });
+}

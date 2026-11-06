@@ -50,7 +50,7 @@ describe('Results row', () => {
 
   it('shows octave and fast-lyrics icons, and reasons under the artist', () => {
     const matches = [
-      withMatch(match(0), { octave: 'up', fastLyrics: true, reasons: ['In your sweet spot', 'In your top songs this month'] }),
+      withMatch(match(0), { octave: 'up', fastLyrics: true, reasons: ['In your sweet spot', 'Top songs this month'] }),
       withMatch(match(1), { octave: 'down', fastLyrics: false, reasons: undefined }),
       withMatch(match(3), { octave: 'none', fastLyrics: false, reasons: [] }),
     ];
@@ -59,7 +59,7 @@ describe('Results row', () => {
 
     expect(within(first!).getByRole('img', { name: 'Sing it an octave higher than the artist' })).toBeTruthy();
     expect(within(first!).getByRole('img', { name: 'Fast lyrics' })).toBeTruthy();
-    expect(first!.querySelector('[data-reasons]')!.textContent!.replace(/\u00a0/g, ' ')).toBe('In your sweet spot · In your top songs this month');
+    expect(first!.querySelector('[data-reasons]')!.textContent!.replace(/\u00a0/g, ' ')).toBe('In your sweet spot · Top songs this month');
     expect(within(first!).getByRole('button').getAttribute('aria-label')).toBe(
       'Plastic Love by Mariya Takeuchi, Easy. Sing it higher than the artist. Fast lyrics',
     );

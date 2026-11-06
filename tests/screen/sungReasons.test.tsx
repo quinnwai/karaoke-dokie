@@ -50,7 +50,7 @@ afterEach(() => {
 describe('sung reasons', () => {
   it('waits faint until its row is mostly on screen, then sings once', () => {
     vi.stubGlobal('IntersectionObserver', FakeObserver);
-    const matches = [withReasons(0, ['In your sweet spot', 'In your top songs this month']), withReasons(1, ['Played recently'])];
+    const matches = [withReasons(0, ['In your sweet spot', 'Top songs this month']), withReasons(1, ['Played recently'])];
     const { container } = render(<Results {...resultsProps(range, matches)} />);
     const [first, second] = lines(container);
     expect(first!.dataset.sing).toBe('waiting');
@@ -66,16 +66,16 @@ describe('sung reasons', () => {
   });
 
   it('one word at a time, wrapping only between reasons', () => {
-    const matches = [withReasons(0, ['In your sweet spot', 'In your top songs this month'])];
+    const matches = [withReasons(0, ['In your sweet spot', 'Top songs this month'])];
     const { container } = render(<Results {...resultsProps(range, matches)} />);
     const [line] = lines(container);
     // Without IntersectionObserver there is no telling when it is seen, so it shows settled.
     expect(line!.dataset.sing).toBe('settled');
-    expect(line!.textContent).toBe('In your sweet spot · In your top songs this month');
+    expect(line!.textContent).toBe('In\u00a0your\u00a0sweet\u00a0spot · Top\u00a0songs\u00a0this\u00a0month');
     const words = Array.from(line!.querySelectorAll<HTMLElement>('[class*="reasonWord"]'));
-    expect(words.map((w) => w.textContent)).toEqual(['In', 'your', 'sweet', 'spot', '·', 'In', 'your', 'top', 'songs', 'this', 'month']);
+    expect(words.map((w) => w.textContent)).toEqual(['In', 'your', 'sweet', 'spot', '·', 'Top', 'songs', 'this', 'month']);
     expect(words.map((w) => w.style.animationDelay)).toEqual(
-      ['0.00s', '0.14s', '0.28s', '0.42s', '0.56s', '0.70s', '0.84s', '0.98s', '1.12s', '1.26s', '1.40s'],
+      ['0.00s', '0.14s', '0.28s', '0.42s', '0.56s', '0.70s', '0.84s', '0.98s', '1.12s'],
     );
   });
 

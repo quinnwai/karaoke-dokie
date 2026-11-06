@@ -167,10 +167,10 @@ type TrackListening = Pick<Track, 'known' | 'topLists' | 'recentPlays' | 'inPlay
  */
 function listeningReason(t: TrackListening | undefined, familiarity: number): string {
   const top = t?.topLists ?? [];
-  if (top.includes('short_term')) return 'In your top songs this month';
-  if (top.includes('medium_term')) return 'In your top songs, past 6 months';
+  if (top.includes('short_term')) return 'Top songs this month';
+  if (top.includes('medium_term')) return 'Top songs, past 6 months';
   if (t?.recentPlays) return 'Played recently';
-  if (top.includes('long_term')) return 'In your top songs, past year';
+  if (top.includes('long_term')) return 'Top songs this past year';
   if (t?.inPlaylist) return 'In your playlists';
   return familiarity >= 0.6 ? 'You play this a lot' : 'You know this one';
 }
@@ -187,16 +187,16 @@ function listeningReason(t: TrackListening | undefined, familiarity: number): st
 export function reasonsFor(p: ScoreParts, fit?: FitNote, track?: TrackListening): string[] {
   const candidates: { text: string; weight: number }[] = [];
   const comfortWeight = REASON_WEIGHTS.comfort * p.comfort;
-  const edge = fit?.side === 'bottom' ? 'low end' : 'high end';
+  const edge = fit?.side === 'bottom' ? 'low' : 'high';
   if (!fit) {
     if (p.comfort >= 0.8) candidates.push({ text: 'In your sweet spot', weight: comfortWeight });
     else if (p.comfort >= 0.5) candidates.push({ text: 'Mostly comfortable', weight: comfortWeight });
   } else if (fit.difficulty === 'easy') {
     candidates.push({ text: 'In your sweet spot', weight: comfortWeight });
   } else if (fit.difficulty === 'medium') {
-    candidates.push({ text: `A few notes near your ${edge}`, weight: comfortWeight });
+    candidates.push({ text: `Some ${edge} notes`, weight: comfortWeight });
   } else if (fit.difficulty === 'hard') {
-    candidates.push({ text: `Spends time at your ${edge}`, weight: Infinity });
+    candidates.push({ text: `Lots of ${edge} notes`, weight: Infinity });
   }
   if (track?.known !== false && p.familiarity >= 0.3) {
     candidates.push({ text: listeningReason(track, p.familiarity), weight: REASON_WEIGHTS.familiarity * p.familiarity });
