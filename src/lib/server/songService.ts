@@ -34,7 +34,7 @@ export interface SongServiceOptions {
   /** Max uncached lookups per request. Lookups only read the database, and ranking needs the
    * whole library, so the default (1000) covers a full library. */
   maxResolvesPerRequest?: number;
-  /** Uncached lookups run this many at a time. Default 5. */
+  /** Uncached lookups run this many at a time. Default DEFAULT_LOOKUP_CONCURRENCY. */
   concurrency?: number;
   /** Max songs returned by knownSongs. Default 50. */
   maxKnownSongs?: number;
@@ -43,6 +43,13 @@ export interface SongServiceOptions {
 
 /** Most songs a whole-list response carries: the best-ranked ones; any past it are left out. */
 export const MAX_ALL_MATCHES = 1000;
+
+/**
+ * Uncached lookups at a time. A first load of an 11,000 song library is mostly database round
+ * trips, so this sets how long it takes (QWW-31 bench: 116 s at 5, 35 s at 16, 19 s at 32, with
+ * 25 ms per query).
+ */
+export const DEFAULT_LOOKUP_CONCURRENCY = 20;
 
 export interface SongService {
   /**
@@ -127,7 +134,7 @@ function compact(m: Match): Match {
 
 export function createSongService(store: Store, deps: SongDeps, opts: SongServiceOptions = {}): SongService {
   const maxResolves = opts.maxResolvesPerRequest ?? 1000;
-  const concurrency = Math.max(1, opts.concurrency ?? 5);
+  const concurrency = Math.max(1, opts.concurrency ?? DEFAULT_LOOKUP_CONCURRENCY);
   const maxKnown = opts.maxKnownSongs ?? 50;
   const now = opts.now ?? (() => new Date());
 
@@ -248,6 +255,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       });
       if (all) {
         const items = ranked.slice(0, MAX_ALL_MATCHES).map(compact);
+        if (ranked.length > MAX_ALL_MATCHES) console.info(`[songs] ${ranked.length} songs fit; the whole-list response carries the best ${MAX_ALL_MATCHES}`);
         // Not complete while lookups have run out of budget: nextOffset is then set, and asking for
         // the whole list again carries on with them. Paging on from it would not line up, since
         // pages rank without the index's or karaoke popularity. A list cut at MAX_ALL_MATCHES is

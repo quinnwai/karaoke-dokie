@@ -115,6 +115,41 @@ describe('production song wiring', () => {
     expect(log.reason).toMatch(/1 other song by Queen/);
   });
 
+  it('asks the store once for an artist\'s measured ranges while many of their songs are looked up (QWW-31)', async () => {
+    const store = createMemoryStore();
+    await store.putSongRange(songKey('Queen', 'A'), { range: nf(50, 70), log: {} as never });
+    let asks = 0;
+    const counting = { ...store, listMeasuredRangesByArtist: (a: string) => (asks++, store.listMeasuredRangesByArtist(a)) };
+    const resolve = realResolver(counting, { getNoteFile: async () => null });
+    const results = await Promise.all(['B', 'C', 'D', 'E'].map((t) => resolve(track('Queen', t))));
+    expect(results.map((r) => r.range?.source)).toEqual(Array(4).fill('artist-typical'));
+    expect(asks).toBe(1);
+  });
+
+  it('asks again after the minute is up, and after a failed ask', async () => {
+    const store = createMemoryStore();
+    let asks = 0;
+    let fail = true;
+    const flaky = {
+      ...store,
+      listMeasuredRangesByArtist: async (a: string) => {
+        asks++;
+        if (fail) throw new Error('db down');
+        return store.listMeasuredRangesByArtist(a);
+      },
+    };
+    let clock = 0;
+    const resolve = realResolver(flaky, { getNoteFile: async () => null }, () => clock);
+    await expect(resolve(track('Queen', 'B'))).rejects.toThrow('db down');
+    fail = false;
+    await resolve(track('Queen', 'C'));
+    await resolve(track('Queen', 'D'));
+    expect(asks).toBe(2); // the failed ask was not kept; the next one was reused
+    clock = 61_000;
+    await resolve(track('Queen', 'E'));
+    expect(asks).toBe(3);
+  });
+
   it('skips and logs a song with no data at all', async () => {
     const resolve = realResolver(createMemoryStore(), { getNoteFile: async () => null });
     const { range, log } = await resolve(track('Omar Apollo', 'Evergreen'));
