@@ -106,6 +106,18 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(listed.map((r) => r.low).sort()).toEqual([50, 52, 53, 54]);
     expect(listed.find((r) => r.low === 53)).toMatchObject({ source: 'audio-full', method: 'pyin-v1/app-range-v1' });
     expect(await s.listMeasuredRangesByArtist('nobody')).toEqual([]);
+    // Every stored range for the artist, estimates included, keyed by song; skips and other artists left out.
+    const all = await s.listSongRangesByArtist('queen');
+    expect([...all.keys()].sort()).toEqual([
+      'queen|bohemian rhapsody',
+      'queen|guess',
+      'queen|published',
+      'queen|radio ga ga',
+      'queen|rough',
+      'queen|somebody to love',
+    ]);
+    expect(all.get('queen|radio ga ga')?.range).toMatchObject({ source: 'audio-full' });
+    expect((await s.listSongRangesByArtist('nobody')).size).toBe(0);
   });
 
   it('keeps a USDB song index: upserts by id, finds the most-viewed per key, reports size and newest change', async () => {

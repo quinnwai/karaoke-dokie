@@ -5,9 +5,11 @@
 // test progress carried over in sessionStorage like after a reload.
 
 import { chromium, devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { CatalogueFeedbackRequest, FeedbackRequest, MeResponse, VocalRange } from '../../src/lib/contracts';
+import type { CatalogueFeedbackRequest, FeedbackRequest, MeResponse, RecommendationsResponse, SongRange, VocalRange } from '../../src/lib/contracts';
+import { matchSong, toMatch } from '../../src/lib/songs/match';
+import { correctOctave, type OctaveEvidence } from '../../src/lib/songs/octave';
 import { allMatches, allMatchesWithFacts, knownSongs, longList, match, me } from '../fixtures/screen';
 
 const SCREENS = path.resolve('test-results/screens');
@@ -70,6 +72,8 @@ interface ApiState {
   facts?: boolean;
   /** Serve a long list whose difficulty scores bunch low, as a wide range makes them (QWW-33). */
   long?: boolean;
+  /** Serve exactly this list instead of the fixture songs. */
+  response?: RecommendationsResponse;
 }
 
 async function mockApi(context: BrowserContext, state: ApiState) {
@@ -96,7 +100,7 @@ async function mockApi(context: BrowserContext, state: ApiState) {
       }
       case 'GET /api/recommendations':
         state.recommendationCalls.push(`library ${url.search}`);
-        return json(state.long ? longList() : state.facts ? allMatchesWithFacts() : allMatches());
+        return json(state.response ?? (state.long ? longList() : state.facts ? allMatchesWithFacts() : allMatches()));
       case 'GET /api/catalogue/recommendations':
         state.recommendationCalls.push(`catalogue ${url.search}`);
         return json(state.long ? longList() : state.facts ? allMatchesWithFacts() : allMatches());
@@ -724,4 +728,33 @@ test('Spotify logo and Reset icon with a mouse at 375 px: pointing opens the box
 test('Spotify logo and Reset icon on a 1280 px desktop, with real transitions', async ({ browser, baseURL }) => {
   test.setTimeout(60_000);
   await walkLogoAndReset(browser, baseURL, { size: { width: 1280, height: 800 }, finger: false, motion: true });
+
+
+// QWW-31: Easy (Commodores) is stored from a note file written an octave above Lionel Richie's recording.
+// Its stored range goes through the real octave fix and matcher, then to the screen, for a singer who
+// sings F2 to C5 and sings Easy in Lionel Richie's octave.
+test('Easy by the Commodores shows no octave mark for F2 to C5', async ({ browser, baseURL }) => {
+  const evidence = JSON.parse(readFileSync(path.resolve('data/octave-evidence.json'), 'utf8')) as OctaveEvidence;
+  const user = { low: 41, high: 72, source: 'test' } as const;
+  const stored: SongRange = { low: 65, high: 78, tessitura: 71.15, source: 'note-file', confidence: 'high', fastLyrics: false };
+  const range = correctOctave('commodores|easy', stored, evidence);
+  const fit = matchSong(user, range)!;
+  const track = { id: 'easy', title: 'Easy', artist: 'Commodores', artistId: 'a-easy', spotifyUrl: 'https://open.spotify.com/track/easy', playRank: 0 };
+  const api = freshState();
+  api.user = me(user);
+  api.response = { matches: [toMatch(track, range, fit)], nextOffset: null, sources: {}, complete: true };
+  expect(fit.octave).toBe('none');
+
+  for (const [name, viewport] of [['375', { width: 375, height: 812 }], ['1280', { width: 1280, height: 800 }]] as const) {
+    const context = await browser.newContext({ ...iPhone, viewport, baseURL, reducedMotion: 'reduce' });
+    await mockApi(context, api);
+    const page = await context.newPage();
+    await page.goto('/');
+    await page.getByRole('button', { name: /^Easy/ }).click();
+    await expect(page.getByRole('heading', { name: 'Easy' })).toBeVisible();
+    await expect(page.getByRole('img', { name: /octave/ })).toHaveCount(0);
+    await expect(page.getByText(/lower than the artist|higher than the artist/)).toHaveCount(0);
+    await shot(page, `qww-31-easy-${name}`);
+    await context.close();
+  }
 });

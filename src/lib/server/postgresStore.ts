@@ -215,6 +215,16 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         .map((r) => toSongRecord(r).range)
         .filter((r): r is SongRange => r !== null && isMeasured(r));
     },
+    async listSongRangesByArtist(artistKey) {
+      const rows = await query(`SELECT * FROM song_ranges WHERE song_key LIKE $1 AND skipped = false`, [`${artistKey}|%`]);
+      const out = new Map<string, SongRangeRecord>();
+      for (const r of rows) {
+        const key = str(r.song_key);
+        const rec = toSongRecord(r);
+        if (key.startsWith(`${artistKey}|`) && rec.range) out.set(key, rec);
+      }
+      return out;
+    },
     async putUsdbSongs(entries) {
       // Multi-row inserts, 100 at a time, so a full index (about 32k songs) is a few hundred queries.
       for (let i = 0; i < entries.length; i += 100) {
