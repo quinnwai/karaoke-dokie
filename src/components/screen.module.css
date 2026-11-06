@@ -1287,10 +1287,18 @@
   box-shadow: 0 0 14px -2px var(--pink-glow);
 }
 
+/* No focus ring on the slider: Chrome shows it after a mouse or finger drag too, as a rounded border
+   around the row. Keyboard focus shows as a pink thumb instead. */
 .slider:focus-visible {
-  outline: 2px solid var(--pink);
-  outline-offset: 2px;
-  border-radius: var(--squircle);
+  outline: none;
+}
+
+.slider:focus-visible::-webkit-slider-thumb {
+  background: var(--pink);
+}
+
+.slider:focus-visible::-moz-range-thumb {
+  background: var(--pink);
 }
 
 /* One row of chips; it scrolls sideways on a phone instead of the page. */
