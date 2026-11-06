@@ -60,30 +60,13 @@ export function takeWantsPick(): boolean {
   }
 }
 
-// A range the user said to keep despite the warning, remembered on this device.
-const RANGE_OK_KEY = 'kd.rangeOk';
-const rangeKey = (low: number, high: number) => `${low}-${high}`;
-
+/** localStorage, which outlasts the tab; null where the browser blocks it. */
 function local(): Storage | null {
   try {
     return typeof window === 'undefined' ? null : window.localStorage;
   } catch {
     return null;
   }
-}
-
-export function isRangeKept(low: number, high: number): boolean {
-  try {
-    return local()?.getItem(RANGE_OK_KEY) === rangeKey(low, high);
-  } catch {
-    return false;
-  }
-}
-
-export function keepRange(low: number, high: number): void {
-  try {
-    local()?.setItem(RANGE_OK_KEY, rangeKey(low, high));
-  } catch {}
 }
 
 // ---- no-Spotify mode (QWW-2 Track B) ----

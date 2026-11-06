@@ -448,26 +448,6 @@
   transition: color 0.15s;
 }
 
-.rangeWarning {
-  margin: 8px 0 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--faint);
-  border-radius: 12px;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.rangeWarning p {
-  margin: 0 0 8px;
-}
-
-.rangeWarningActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
 .redo {
   border: 1px solid var(--faint);
   border-radius: var(--squircle);

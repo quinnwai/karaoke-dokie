@@ -24,6 +24,12 @@ describe('boot', () => {
     expect(s.range).toEqual({ low: 45, high: 72, source: 'test' });
   });
 
+  it('after sign-in, a very low or very high note in storage is saved as sung', () => {
+    const s = run([{ type: 'booted', me: me(), progress: { low: 37, high: 88 }, wantsPick: false }]);
+    expect(s.step).toBe('saving');
+    expect(s.range).toEqual({ low: 37, high: 88, source: 'test' });
+  });
+
   it('a fresh test result wins over an older saved range', () => {
     const s = run([{ type: 'booted', me: me({ low: 40, high: 60, source: 'songs' }), progress: { low: 45, high: 72 }, wantsPick: false }]);
     expect(s.step).toBe('saving');
@@ -65,6 +71,13 @@ describe('the singing test', () => {
     expect(s).toMatchObject({ step: 'high', low: 45, hold: 'ready' });
     s = run([{ type: 'holdStart' }, { type: 'holdEnd', midi: 72 }], s);
     expect(s).toMatchObject({ step: 'signin', high: 72, range: { low: 45, high: 72, source: 'test' } });
+  });
+
+  it('registers a very low note and a very high note as sung, without asking', () => {
+    let s = run([...toLow, { type: 'holdStart' }, { type: 'holdEnd', midi: 37 }]);
+    expect(s).toMatchObject({ step: 'high', hold: 'ready', low: 37 });
+    s = run([{ type: 'holdStart' }, { type: 'holdEnd', midi: 88 }], s);
+    expect(s).toMatchObject({ step: 'signin', range: { low: 37, high: 88, source: 'test' } });
   });
 
   it('asks again when nothing was held long enough', () => {

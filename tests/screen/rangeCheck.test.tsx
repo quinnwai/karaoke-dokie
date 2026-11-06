@@ -1,35 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Results } from '../../src/components/Results';
 import { DEFAULT_VIEW } from '../../src/lib/songs/browse';
-import { rangeWarning } from '../../src/lib/client/rangeCheck';
 import type { VocalRange } from '../../src/lib/contracts';
 
 const r = (low: number, high: number): VocalRange => ({ low, high, source: 'test' });
 
-describe('rangeWarning', () => {
-  it('flags a low note below E2, naming the low end', () => {
-    expect(rangeWarning(r(38, 63))).toEqual({ end: 'low', message: 'D2 is lower than almost any pop song goes. Was that a growl or vocal fry?' });
-  });
-
-  it('flags a high note above C6', () => {
-    expect(rangeWarning(r(55, 86))?.end).toBe('high');
-  });
-
-  it('flags a span over two and a half octaves without blaming one end', () => {
-    expect(rangeWarning(r(40, 71))?.end).toBeNull();
-  });
-
-  it('accepts ordinary ranges, including exactly E2 to C6 limits', () => {
-    expect(rangeWarning(r(45, 72))).toBeNull();
-    expect(rangeWarning(r(40, 70))).toBeNull();
-    expect(rangeWarning(r(54, 84))).toBeNull();
-  });
-});
-
-describe('range warning on the results screen', () => {
-  beforeEach(() => window.localStorage.clear());
+describe('the results screen', () => {
   afterEach(cleanup);
   const noop = () => {};
   const base = {
@@ -56,24 +34,25 @@ describe('range warning on the results screen', () => {
     onLogout: async () => {},
   };
 
-  it('offers to redo either end, and remembers "Keep it" for that range', () => {
-    const onRedoEnd = vi.fn();
-    render(<Results {...base} range={r(38, 63)} onRedoEnd={onRedoEnd} />);
-    expect(screen.getByRole('status').textContent).toContain('growl or vocal fry');
-    fireEvent.click(screen.getByRole('button', { name: 'Redo low note' }));
-    expect(onRedoEnd).toHaveBeenCalledWith('low');
-    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+  // Each of these used to bring up a card with Redo low note, Redo high note and Keep it.
+  it.each([
+    [38, 63], // D2 to D#4: a low note under E2
+    [55, 86], // G3 to D6: a high note over C6
+    [40, 71], // E2 to B4: wider than two and a half octaves
+  ])('asks nothing about a range of MIDI %i to %i', (low, high) => {
+    render(<Results {...base} range={r(low, high)} onRedoEnd={() => {}} />);
     expect(screen.queryByRole('status')).toBeNull();
-    cleanup();
-    render(<Results {...base} range={r(38, 63)} onRedoEnd={onRedoEnd} />);
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Redo (low|high) note$/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Keep it' })).toBeNull();
+    expect(screen.queryByText(/growl|vocal fry|whistle|squeak|wider than/i)).toBeNull();
   });
 
-  it('shows nothing for an ordinary range, and the range notes redo one end', () => {
+  it('keeps the range notes as the quiet way to redo one end', () => {
     const onRedoEnd = vi.fn();
-    render(<Results {...base} range={r(45, 72)} onRedoEnd={onRedoEnd} />);
-    expect(screen.queryByRole('status')).toBeNull();
+    render(<Results {...base} range={r(38, 72)} onRedoEnd={onRedoEnd} />);
     fireEvent.click(screen.getByRole('button', { name: 'Redo your high note, C5' }));
-    expect(onRedoEnd).toHaveBeenCalledWith('high');
+    expect(onRedoEnd).toHaveBeenLastCalledWith('high');
+    fireEvent.click(screen.getByRole('button', { name: 'Redo your low note, D2' }));
+    expect(onRedoEnd).toHaveBeenLastCalledWith('low');
   });
 });
