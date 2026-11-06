@@ -391,6 +391,38 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(read.get('artist 2499|song 2499')).toStrictEqual(many[2_499]);
   });
 
+  it('keeps Deezer ranks apart: popularity reads carry them, and a new popularity row leaves them alone (QWW-37)', async () => {
+    const s = make();
+    const karaoke: SongPopularityRecord = { key: 'toto|africa', karaokeViews: 40_000, source: 'karafun' };
+    await s.putSongPopularity([karaoke]);
+    await s.putSongDeezer([
+      { key: 'toto|africa', rank: 964_180, deezerId: 3_135_556_000, checkedAt: '2026-11-06T12:00:00.000Z' },
+      { key: 'kehlani|folded', rank: 794_554, checkedAt: '2026-11-06T12:00:01.000Z' },
+      { key: 'nobody|missing', checkedAt: '2026-11-06T12:00:02.000Z' }, // a miss
+    ]);
+    const read = await s.getSongPopularity(['toto|africa', 'kehlani|folded', 'nobody|missing']);
+    expect([...read.keys()].sort()).toEqual(['kehlani|folded', 'toto|africa']);
+    expect(read.get('toto|africa')).toStrictEqual({ ...karaoke, deezerRank: 964_180 });
+    expect(read.get('kehlani|folded')).toStrictEqual({ key: 'kehlani|folded', source: 'deezer', deezerRank: 794_554 });
+
+    // popularity:import replaces the whole popularity row; the Deezer rank stays.
+    await s.putSongPopularity([{ key: 'toto|africa', chartRank: 40, chartYear: 1983, source: 'billboard' }]);
+    expect((await s.getSongPopularity(['toto|africa'])).get('toto|africa')).toStrictEqual({
+      key: 'toto|africa',
+      chartRank: 40,
+      chartYear: 1983,
+      source: 'billboard',
+      deezerRank: 964_180,
+    });
+
+    // Every lookup, misses included, for the rerun to skip; a new lookup replaces the old one.
+    await s.putSongDeezer([{ key: 'nobody|missing', rank: 5, checkedAt: '2026-11-07T00:00:00.000Z' }]);
+    const all = await s.listSongDeezer();
+    expect(all.size).toBe(3);
+    expect(all.get('nobody|missing')).toStrictEqual({ key: 'nobody|missing', rank: 5, checkedAt: '2026-11-07T00:00:00.000Z' });
+    expect(all.get('toto|africa')!.deezerId).toBe(3_135_556_000);
+  });
+
   it('reads back the results view stored with feedback, and no view for a tap without one', async () => {
     const s = make();
     const filtered = {

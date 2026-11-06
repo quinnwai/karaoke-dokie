@@ -7,6 +7,7 @@ import {
   MAX_EVENTS_LIMIT,
   type CatalogueSong,
   type SongMoodsRecord,
+  type SongDeezerRecord,
   type SongPopularityRecord,
   type SongRangeRecord,
   type Store,
@@ -28,6 +29,14 @@ export function createMemoryStore(): Store {
   const events: StoredEvent[] = [];
   const songMoods = new Map<string, SongMoodsRecord>();
   const songPopularity = new Map<string, SongPopularityRecord>();
+  const songDeezer = new Map<string, SongDeezerRecord>();
+  /** A song's popularity row with its Deezer rank, as getSongPopularity reads it. */
+  const popularityOf = (key: string): SongPopularityRecord | undefined => {
+    const p = songPopularity.get(key);
+    const rank = songDeezer.get(key)?.rank;
+    if (rank === undefined) return p && clone(p);
+    return { ...(p ? clone(p) : { key, source: 'deezer' }), deezerRank: rank };
+  };
 
   const newestFirst = <T extends { at: string }>(items: T[]): T[] =>
     items
@@ -130,7 +139,7 @@ export function createMemoryStore(): Store {
         const song: CatalogueSong = { key, artist: log.artist, title: log.title, range, log };
         const usdb = best.get(key);
         if (usdb) song.usdb = usdb;
-        const popularity = songPopularity.get(key);
+        const popularity = popularityOf(key);
         out.push({ key, rank: catalogueRank(range, usdb, popularity), charted: popularity?.chartRank !== undefined, song });
       }
       return pickCatalogue(out, limit).map(({ song }) => clone(song));
@@ -171,10 +180,18 @@ export function createMemoryStore(): Store {
     async getSongPopularity(songKeys) {
       const out = new Map<string, SongPopularityRecord>();
       for (const k of songKeys) {
-        const p = songPopularity.get(k);
-        if (p) out.set(k, clone(p));
+        const p = popularityOf(k);
+        if (p) out.set(k, p);
       }
       return out;
+    },
+
+    // ---- Deezer track rank (QWW-37) ----
+    async putSongDeezer(entries) {
+      for (const e of entries) songDeezer.set(e.key, clone(e));
+    },
+    async listSongDeezer() {
+      return new Map([...songDeezer].map(([k, v]) => [k, clone(v)]));
     },
   };
 }

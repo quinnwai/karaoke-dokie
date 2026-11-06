@@ -92,4 +92,13 @@ CREATE TABLE IF NOT EXISTS song_popularity (
   chart_rank INTEGER,
   source TEXT NOT NULL
 );
+-- Deezer track rank per song (QWW-37), written by npm run popularity:deezer. Its own table, so
+-- popularity:import, which replaces whole song_popularity rows, leaves it alone. A null rank is a
+-- miss: Deezer had no matching track when checked_at, so a rerun skips it for a while.
+CREATE TABLE IF NOT EXISTS song_deezer (
+  song_key TEXT PRIMARY KEY,
+  rank INTEGER,
+  deezer_id BIGINT,
+  checked_at TEXT NOT NULL
+);
 `;

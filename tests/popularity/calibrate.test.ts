@@ -48,8 +48,19 @@ describe('calibrate', () => {
     expect(counts).toMatchObject({ anchor: 1000, karaokeViews: 1000, spotify: 0, top20: 100, top100: 200 });
   });
 
-  it('leaves Spotify empty when too few songs have its popularity', () => {
+  it('leaves Spotify and Deezer empty when too few songs have them', () => {
     expect(scale.spotify).toEqual([]);
+    expect(scale.deezer).toEqual([]);
+  });
+
+  it('links Deezer rank to USDB views on the songs that have both (QWW-37)', () => {
+    // Deezer rank in its own unit (500x the views, plus 100,000), same order.
+    const withDeezer = songs.map((s, i) => (i % 2 ? { ...s, deezerRank: 100_000 + s.usdbViews! * 500 } : s));
+    const linked = calibrate(withDeezer);
+    expect(linked.counts.deezer).toBe(500);
+    for (const v of [20, 377, 650, 990]) {
+      expect(onScale(linked.scale.deezer, 100_000 + v * 500)).toBeCloseTo(onScale(linked.scale.usdbViews, v), 1);
+    }
   });
 
   it('refuses to calibrate without enough USDB views', () => {

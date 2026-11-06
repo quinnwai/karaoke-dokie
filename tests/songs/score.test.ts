@@ -144,6 +144,17 @@ describe('karaoke popularity (KaraFun views, Billboard Year-End charts)', () => 
     expect(popularityScore(track('x', { popularity: 0 }), karaoke(undefined, 3))).toBe(Math.max(onSpotify(0), CHART_FLOOR.top20));
   });
 
+  it('scores a Deezer rank on the shared scale and counts it as known (QWW-37)', () => {
+    const deezer = (rank: number) => withKaraokePopularity(song(55, 65), { deezerRank: rank });
+    expect(POPULARITY_SCALE.deezer.length).toBeGreaterThan(0);
+    expect(popularityKnown(track('x'), deezer(647_498))).toBe(true);
+    expect(popularityScore(track('x'), deezer(647_498))).toBeCloseTo(onScale(POPULARITY_SCALE.deezer, 647_498));
+    // Higher rank, more popular; averaged with the other sources like them.
+    expect(popularityScore(track('x'), deezer(964_180))).toBeGreaterThan(popularityScore(track('x'), deezer(100_000)));
+    const both = withKaraokePopularity(song(55, 65), { deezerRank: 964_180, karaokeViews: 56_000 });
+    expect(popularityScore(track('x'), both)).toBeCloseTo((onScale(POPULARITY_SCALE.deezer, 964_180) + onKaraoke(56_000)) / 2);
+  });
+
   it('marks popularity as known with karaoke views or a chart entry alone', () => {
     expect(popularityKnown(track('x'), karaoke(0))).toBe(true);
     expect(popularityKnown(track('x'), karaoke(undefined, 100))).toBe(true);

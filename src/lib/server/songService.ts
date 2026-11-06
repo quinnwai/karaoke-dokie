@@ -127,7 +127,7 @@ function withoutPitchShare<T extends { pitchShare?: [number, number][] }>(x: T):
  */
 function compact(m: Match): Match {
   const scored: SongRange & KaraokePopularity = m.range;
-  const { karaokeViews: _views, chartRank: _rank, ...range } = withoutPitchShare(scored);
+  const { karaokeViews: _views, chartRank: _rank, deezerRank: _deezer, ...range } = withoutPitchShare(scored);
   if (range.parts) range.parts = range.parts.map(withoutPitchShare);
   return { ...m, range };
 }

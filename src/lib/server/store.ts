@@ -82,8 +82,23 @@ export interface SongPopularityRecord {
   /** The song's best (lowest) Billboard Year-End Hot 100 rank, 1 to 100, and the year of that chart. */
   chartRank?: number;
   chartYear?: number;
-  /** Which files the numbers came from: "karafun", "billboard" or "karafun+billboard". */
+  /** Deezer's track rank (QWW-37), from song_deezer; higher is more popular. */
+  deezerRank?: number;
+  /**
+   * Which files the numbers came from: "karafun", "billboard" or "karafun+billboard"; "deezer"
+   * when a song has only a Deezer rank.
+   */
   source: string;
+}
+
+/** One Deezer lookup (QWW-37): the best-ranked matching track, or a miss (no rank). */
+export interface SongDeezerRecord {
+  /** songKey(artist, title). */
+  key: string;
+  rank?: number;
+  deezerId?: number;
+  /** ISO time of the lookup. */
+  checkedAt: string;
 }
 
 export interface Store {
@@ -145,8 +160,17 @@ export interface Store {
   // ---- song popularity from karaoke data (QWW-6) ----
   /** Adds rows, or replaces a key's whole row; within one call the last entry for a key wins. */
   putSongPopularity(entries: SongPopularityRecord[]): Promise<void>;
-  /** Batch read; the map only has keys that have a row. */
+  /**
+   * Batch read; the map only has keys that have a row or a Deezer rank. Carries the song's Deezer
+   * rank (song_deezer) as well.
+   */
   getSongPopularity(songKeys: string[]): Promise<Map<string, SongPopularityRecord>>;
+
+  // ---- Deezer track rank (QWW-37) ----
+  /** Adds or replaces lookups; within one call the last entry for a key wins. */
+  putSongDeezer(entries: SongDeezerRecord[]): Promise<void>;
+  /** Every lookup, hits and misses, by song key. */
+  listSongDeezer(): Promise<Map<string, SongDeezerRecord>>;
 }
 
 export const DEFAULT_LIST_LIMIT = 200;
