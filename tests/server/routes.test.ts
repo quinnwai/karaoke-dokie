@@ -1,5 +1,5 @@
 // Integration tests: call the app/api route handlers directly with the memory store and mock Spotify.
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as login from '../../app/api/auth/login/route';
 import * as callback from '../../app/api/auth/callback/route';
 import * as logout from '../../app/api/auth/logout/route';
@@ -22,6 +22,7 @@ import type {
 } from '../../src/lib/contracts';
 import { getStore } from '../../src/lib/server/getStore';
 import { MOCK_USER } from '../../src/lib/server/mockSpotify';
+import { SpotifyError } from '../../src/lib/server/spotify';
 import { songKey } from '../../src/lib/songs/resolve';
 import { isMeasured } from '../../src/lib/songs/sourceRank';
 import { CHART_FLOOR } from '../../src/lib/songs/score';
@@ -118,6 +119,50 @@ describe('sign-in flow', () => {
       new Request(`${BASE}/api/auth/callback?error=access_denied&state=s`, { headers: { cookie: `${STATE_COOKIE}=s` } }),
     );
     expect(denied.headers.get('location')).toBe(`${BASE}/?authError=access_denied`);
+  });
+
+  // The browser only gets ?authError=spotify, so the server log line is the only record of why it failed.
+  it.each([
+    ['token exchange', '{"error":"invalid_client"}', () => void (getAppContext().spotify.exchangeCode = async () => { throw new SpotifyError('Spotify token request failed (400)', 400, '{"error":"invalid_client"}'); })],
+    ['profile (/me)', 'retry-after 48000 s', () => void (getAppContext().spotify.getMe = async () => { throw new SpotifyError('Spotify API /me failed (429)', 429, '{"error":{"status":429}}', '48000'); })],
+    ['saving the user', 'read-only transaction', () => void vi.spyOn(getAppContext().store, 'upsertUser').mockRejectedValue(new Error('cannot execute INSERT in a read-only transaction'))],
+  ])('callback logs the %s step when it fails, and still sends the browser to authError=spotify', async (step, said, breakIt) => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const jar = new Jar();
+      const r1 = jar.take(await login.GET(req('/api/auth/login')));
+      breakIt();
+      const r2 = await callback.GET(new Request(r1.headers.get('location')!, { headers: { cookie: jar.header() } }));
+      expect(r2.headers.get('location')).toBe(`${BASE}/?authError=spotify`);
+      expect(r2.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(false);
+      expect(spy).toHaveBeenCalledTimes(1);
+      const line = String(spy.mock.calls[0]![0]);
+      expect(line).toContain(`failed at the ${step} step`);
+      expect(line).toContain(said);
+      // Never the code or a token.
+      expect(line).not.toContain('mock-code');
+      expect(line).not.toContain('mock-access');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('logs why the library could not be read, and still answers 502 for a Spotify outage', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const jar = await signIn();
+      await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+      getAppContext().spotify.getSavedTracks = async () => {
+        throw new SpotifyError('Spotify API /me/tracks?limit=50&offset=0 failed (429)', 429, '', '48000');
+      };
+      const res = await recs.GET(req('/api/recommendations?all=1', jar));
+      expect(res.status).toBe(502);
+      expect(await res.json()).toMatchObject({ error: 'spotify-unavailable' });
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining('[spotify] could not load the library: Spotify API /me/tracks'));
+      expect(String(spy.mock.calls[0]![0])).toContain('retry-after 48000 s');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('logout clears the session', async () => {
