@@ -123,6 +123,8 @@ export type FlowEvent =
   | { type: 'saveFailed' }
   | { type: 'retrySave' }
   | { type: 'showCatalogue' }
+  /** The session ended (the Spotify logo's Log out): the library goes, the same range shows catalogue songs. */
+  | { type: 'loggedOut' }
   | { type: 'loadMore' }
   | { type: 'allLoaded'; page: RecommendationsResponse }
   | { type: 'loadFailed' }
@@ -218,6 +220,11 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       return { ...state, ...freshResults(state), step: 'results', mode: 'library', loading: true };
     case 'showCatalogue':
       return state.range ? { ...state, ...freshResults(state), step: 'results', mode: 'catalogue', loading: true } : state;
+    case 'loggedOut': {
+      // Nothing of the library stays: not its matches, not the songs offered to pick from.
+      const out = { ...state, signedIn: false, displayName: null, known: null, picks: [] };
+      return state.range ? { ...out, ...freshResults(state), step: 'results', mode: 'catalogue', loading: true } : out;
+    }
     case 'saveFailed':
       return { ...state, error: 'save' };
     case 'retrySave':

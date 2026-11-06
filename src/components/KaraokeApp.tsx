@@ -261,6 +261,14 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
     navigate(LOGIN_PATH);
   };
 
+  // Log out: end the session, then show catalogue songs for the same range, which stays on this
+  // device like it does for anyone without Spotify. A failed request throws, to be shown by the logo's box.
+  const logOut = async () => {
+    await api.logout();
+    if (state.range) saveRangeOnDevice(state.range);
+    dispatch({ type: 'loggedOut' });
+  };
+
   const selected = state.selectedId ? state.matches.find((m) => m.track.id === state.selectedId) : undefined;
 
   return (
@@ -360,6 +368,8 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
           onDuets={() => dispatch({ type: 'toggleDuets' })}
           onClear={() => dispatch({ type: 'clearFilters' })}
           onConnect={connectSpotify}
+          displayName={state.displayName}
+          onLogout={logOut}
         />
       )}
 

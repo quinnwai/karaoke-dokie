@@ -52,6 +52,8 @@ describe('range warning on the results screen', () => {
     onDuets: noop,
     onClear: noop,
     onConnect: noop,
+    displayName: 'Test Singer',
+    onLogout: async () => {},
   };
 
   it('offers to redo either end, and remembers "Keep it" for that range', () => {

@@ -145,3 +145,57 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
 
   await context.close();
 });
+
+test('Spotify (mock) account: the green logo names the singer, and Log out really ends the session', async ({ browser, baseURL }) => {
+  test.setTimeout(60_000);
+  // A desktop browser with a mouse: the config's default device is a phone, which cannot hover.
+  const context = await browser.newContext({ ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, baseURL, reducedMotion: 'reduce' });
+  // The test above counts event-log devices exactly; this walk stays out of that log.
+  await context.route('**/api/events', (route) => route.fulfill({ status: 204 }));
+  await context.addInitScript(() => {
+    if (!sessionStorage.getItem('kd.e2e')) {
+      sessionStorage.setItem('kd.e2e', '1');
+      sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
+    }
+  });
+  const page = await context.newPage();
+  await page.goto('/');
+
+  // Sign in with the finished test A2 to C5 (the mock Spotify answers at once): library songs.
+  await page.getByRole('button', { name: 'or use songs from your Spotify' }).click();
+  const songs = page.locator('ol li');
+  await expect(songs).toHaveCount(5, { timeout: 20_000 });
+  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(0);
+
+  // The logo is green, and pointing at it says who is signed in: the name comes from the real GET /api/me.
+  const logo = page.getByRole('button', { name: 'Spotify account' });
+  await expect(logo).toHaveCSS('color', 'rgb(29, 185, 84)');
+  await logo.hover();
+  await expect(page.getByText('Logged in as Test Singer')).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(SCREENS, 'fullstack-07-logged-in-as.png') });
+
+  // Log out: the real route clears the session cookie, so the server no longer knows this browser.
+  expect((await page.request.get('/api/me')).status()).toBe(200);
+  const loggedOut = page.waitForResponse((r) => r.url().endsWith('/api/auth/logout') && r.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Log out' }).click();
+  expect((await loggedOut).status()).toBe(200);
+  await expect(page.getByRole('button', { name: 'Connect to Spotify' }).first()).toBeVisible();
+  await expect(logo).toHaveCount(0);
+  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
+  // Catalogue songs for the same range (only catalogue results end with the invitation to connect).
+  await expect(songs).toHaveCount(5, { timeout: 20_000 });
+  await expect(page.getByText('Want personalized recommendations?')).toBeAttached();
+  expect((await page.request.get('/api/me')).status()).toBe(401);
+
+  // The same range stays on this device: a reload is still the catalogue, not the start screen.
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Connect to Spotify' }).first()).toBeVisible();
+  await expect(songs).toHaveCount(5, { timeout: 20_000 });
+
+  // The reset icon is credited on /credits, like the book.
+  await page.goto('/credits');
+  await expect(page.getByText('The fast-lyrics, book and reset icons (Apache 2.0).')).toBeVisible();
+  await context.close();
+});

@@ -24,6 +24,8 @@ export class ApiError extends Error {
 export interface Api {
   /** The signed-in user, or null when signed out (401). */
   me(): Promise<MeResponse | null>;
+  /** Ends the session. Rejects when the server could not be reached, so the screen can say so. */
+  logout(): Promise<void>;
   saveRange(range: VocalRange): Promise<void>;
   recommendations(offset: number, limit?: number): Promise<RecommendationsResponse>;
   /** Every match in the signed-in user's library, ranked (the phone orders and filters from here). */
@@ -56,6 +58,9 @@ export function createApi(fetchImpl: Fetch = (...args) => fetch(...args)): Api {
         if (err instanceof ApiError && err.status === 401) return null;
         throw err;
       }
+    },
+    async logout() {
+      await call('/api/auth/logout', { method: 'POST' });
     },
     async saveRange(range) {
       await call('/api/me/range', { method: 'PUT', body: JSON.stringify(range) });

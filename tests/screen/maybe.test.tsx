@@ -30,6 +30,8 @@ const props = {
   onDuets: vi.fn(),
   onClear: vi.fn(),
   onConnect: vi.fn(),
+  displayName: 'Test Singer',
+  onLogout: vi.fn(async () => {}),
 };
 const labels = (el: HTMLElement) => within(el).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
 
