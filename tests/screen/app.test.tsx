@@ -307,8 +307,7 @@ describe('KaraokeApp', () => {
     expect(screen.getByText('Played recently')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Open in Spotify' }).getAttribute('href')).toBe('https://open.spotify.com/track/t2');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Where this came from' }));
-    expect(screen.getByRole('tooltip').textContent).toBe('Measured from a note-by-note file of this song. Matched a note file by title and artist.');
+    expect(screen.queryByRole('button', { name: 'Where this came from' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
     expect(screen.getByText('Thanks! That helps.')).toBeTruthy();

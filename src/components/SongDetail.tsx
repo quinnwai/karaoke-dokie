@@ -1,15 +1,13 @@
-import { useId, useState } from 'react';
-import type { DataSourceLogEntry, Match, VocalRange } from '../lib/contracts';
-import { difficultyLabel, duetPartLine, isCatalogueTrack, octaveWording, rangeBar, sourceTooltip } from '../lib/client/display';
+import { useState } from 'react';
+import type { Match, VocalRange } from '../lib/contracts';
+import { difficultyLabel, duetPartLine, isCatalogueTrack, octaveWording, rangeBar } from '../lib/client/display';
 import { MOOD_LABELS } from '../lib/songs/browse';
-import { usdbSongUrl } from '../lib/usdb/client';
 import { FastLyricsIcon, OctaveIcon } from './Icon';
 import styles from './screen.module.css';
 
 interface SongDetailProps {
   match: Match;
   userRange: VocalRange;
-  source: DataSourceLogEntry | undefined;
   feedback: 'up' | 'down' | undefined;
   onFeedback(thumbs: 'up' | 'down'): void;
   /** "Open in Spotify" was tapped (for the beta event log). */
@@ -40,8 +38,8 @@ export function RangeBarView({ userRange, match }: { userRange: VocalRange; matc
         <span className={styles.barNameUser} style={{ left: `${bar.user.left + bar.user.width}%` }}>{bar.user.high}</span>
       </div>
       <div className={styles.barLegend} aria-hidden>
-        <span><i className={styles.legendSong} /> song</span>
-        <span><i className={styles.legendUser} /> you</span>
+        <span><i className={styles.legendSong} /> song range</span>
+        <span><i className={styles.legendUser} /> your range</span>
       </div>
     </div>
   );
@@ -61,9 +59,7 @@ function Thumb({ down }: { down?: boolean }) {
   );
 }
 
-export function SongDetail({ match, userRange, source, feedback, onFeedback, onSpotify, onBack }: SongDetailProps) {
-  const [infoOpen, setInfoOpen] = useState(false);
-  const tipId = useId();
+export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, onBack }: SongDetailProps) {
   const octave = octaveWording(match.octave);
   const maybe = match.difficulty === 'maybe';
   const duet = duetPartLine(match);
@@ -97,34 +93,7 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onS
             {MOOD_LABELS[mood]}
           </span>
         ))}
-        <span className={styles.infoWrap}>
-          <button
-            type="button"
-            className={styles.info}
-            aria-label="Where this came from"
-            aria-expanded={infoOpen}
-            aria-describedby={infoOpen ? tipId : undefined}
-            onClick={() => setInfoOpen((o) => !o)}
-            onKeyDown={(e) => e.key === 'Escape' && setInfoOpen(false)}
-          >
-            i
-          </button>
-        </span>
       </div>
-
-      {infoOpen && (
-        <p role="tooltip" id={tipId} className={styles.tooltip}>
-          {sourceTooltip(source, maybe)}
-          {match.range.usdbId !== undefined && (
-            <>
-              {' '}
-              <a href={usdbSongUrl(match.range.usdbId)} target="_blank" rel="noreferrer">
-                View on USDB
-              </a>
-            </>
-          )}
-        </p>
-      )}
 
       {octave && (
         <p className={styles.octave}>

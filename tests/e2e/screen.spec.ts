@@ -254,9 +254,16 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await expect(page.getByRole('link', { name: 'Open in Spotify' })).toHaveAttribute('href', 'https://open.spotify.com/track/t2');
   await shot(page, '09-song-detail');
 
-  await page.getByRole('button', { name: 'Where this came from' }).click();
-  await expect(page.getByRole('tooltip')).toHaveText(/note-by-note file of this song\. Matched a note file/);
-  await shot(page, '10-info-tooltip');
+  await expect(page.getByRole('button', { name: 'Where this came from' })).toHaveCount(0);
+  const bar = page.getByRole('img', { name: /Song goes from/ });
+  const legend = page.getByText('song range');
+  expect(await legend.evaluate((e) => getComputedStyle(e.parentElement!).opacity)).toBe('0');
+  const before = await page.getByRole('button', { name: 'It went well' }).boundingBox();
+  await bar.hover();
+  await expect.poll(() => legend.evaluate((e) => getComputedStyle(e.parentElement!).opacity)).toBe('1');
+  await expect(page.getByText('your range')).toBeVisible();
+  expect(await page.getByRole('button', { name: 'It went well' }).boundingBox()).toEqual(before);
+  await shot(page, '10-range-legend');
 
   await page.getByRole('button', { name: 'It went well' }).click();
   await expect(page.getByText('Thanks! That helps.')).toBeVisible();
@@ -302,8 +309,6 @@ test('a Maybe song has no difficulty, and its info says the range is an estimate
   await expect(page.getByRole('heading', { name: 'Sukiyaki' })).toBeVisible();
   await expect(page.getByText('Maybe', { exact: true })).toBeVisible();
   await expect(page.getByText(/^(Easy|Medium|Hard)$/)).toHaveCount(0);
-  await page.getByRole('button', { name: 'Where this came from' }).click();
-  await expect(page.getByRole('tooltip')).toHaveText(/9 s of clear singing\. This range is only an estimate/);
   await shot(page, '18-maybe-detail');
 
   await page.getByRole('button', { name: "It didn't go well" }).click();

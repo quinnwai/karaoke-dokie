@@ -368,7 +368,6 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
           key={selected.track.id}
           match={selected}
           userRange={state.range}
-          source={state.sources[selected.track.id]}
           feedback={state.feedback[selected.track.id]}
           onFeedback={(thumbs) => sendFeedback(selected.track.id, thumbs)}
           onSpotify={() =>

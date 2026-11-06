@@ -75,7 +75,7 @@ describe('Results row', () => {
 describe('SongDetail', () => {
   it('shows icons next to the wording and the reasons', () => {
     const m = withMatch(match(2), { reasons: ['Played recently'] });
-    render(<SongDetail match={m} userRange={range} source={undefined} feedback={undefined} onFeedback={vi.fn()} onBack={vi.fn()} />);
+    render(<SongDetail match={m} userRange={range} feedback={undefined} onFeedback={vi.fn()} onBack={vi.fn()} />);
     expect(screen.getByRole('img', { name: 'Fast lyrics' })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeTruthy();
     expect(screen.getByText('Sing it lower than the artist')).toBeTruthy();
@@ -84,14 +84,6 @@ describe('SongDetail', () => {
 });
 
 describe('sources', () => {
-  it('links the song to its USDB page from the info button when the id is known', async () => {
-    const { fireEvent } = await import('@testing-library/react');
-    const m = { ...match(0), range: { ...match(0).range, usdbId: 1234 } };
-    render(<SongDetail match={m} userRange={range} source={undefined} feedback={undefined} onFeedback={() => {}} onBack={() => {}} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Where this came from' }));
-    expect(screen.getByRole('link', { name: 'View on USDB' }).getAttribute('href')).toBe('https://usdb.animux.de/index.php?link=detail&id=1234');
-  });
-
   it('shows Sources and credits as a book icon under the results', () => {
     render(<Results {...resultsProps(range, [match(0)])} />);
     const credits = screen.getByRole('link', { name: 'Sources and credits' });
