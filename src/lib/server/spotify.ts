@@ -74,10 +74,31 @@ export class SpotifyError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** What Spotify answered (its error body, shortened to one line), for the server log only. */
+    readonly detail?: string,
+    /** A 429's Retry-After, in seconds as Spotify sent it, for the server log only. */
+    readonly retryAfter?: string,
   ) {
     super(message);
     this.name = 'SpotifyError';
   }
+}
+
+/** One line of a failed Spotify response's body, e.g. {"error":"invalid_grant"}; empty when it cannot be read. */
+async function errorDetail(res: Response): Promise<string> {
+  try {
+    return (await res.text()).replace(/\s+/g, ' ').trim().slice(0, 200);
+  } catch {
+    return '';
+  }
+}
+
+/** One line for the server log saying what failed. Never includes a token, the code or the client secret. */
+export function describeError(err: unknown): string {
+  if (err instanceof SpotifyError) {
+    return [err.message, err.detail, err.retryAfter ? `retry-after ${err.retryAfter} s` : ''].filter(Boolean).join(' | ');
+  }
+  return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
 }
 
 // ---- mapping ----
@@ -251,7 +272,7 @@ export function createSpotifyClient(
       headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(body).toString(),
     });
-    if (!res.ok) throw new SpotifyError(`Spotify token request failed (${res.status})`, res.status);
+    if (!res.ok) throw new SpotifyError(`Spotify token request failed (${res.status})`, res.status, await errorDetail(res));
     const j = (await res.json()) as { access_token: string; refresh_token?: string; expires_in: number };
     const refreshToken = j.refresh_token ?? previousRefresh;
     if (!j.access_token || !refreshToken) throw new SpotifyError('Spotify token response was incomplete', 502);
@@ -275,7 +296,10 @@ export function createSpotifyClient(
           continue;
         }
       }
-      if (!res.ok) throw new SpotifyError(`Spotify API ${url} failed (${res.status})`, res.status);
+      if (!res.ok) {
+        const retryAfter = res.status === 429 ? (res.headers.get('retry-after') ?? undefined) : undefined;
+        throw new SpotifyError(`Spotify API ${url} failed (${res.status})`, res.status, await errorDetail(res), retryAfter);
+      }
       return (await res.json()) as T;
     }
   }

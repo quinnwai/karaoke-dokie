@@ -24,7 +24,7 @@ import {
   serializeCookie,
   signSession,
 } from './session';
-import { ensureFreshTokens, getUserTracks, SpotifyError } from './spotify';
+import { describeError, ensureFreshTokens, getUserTracks, SpotifyError } from './spotify';
 import { DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT, type UserRecord } from './store';
 import { intParam, validateEvents, validateFeedback, validateVocalRange } from './validate';
 import type { AppContext } from './wiring';
@@ -90,6 +90,7 @@ async function loadTracks(user: UserRecord, ctx: AppContext): Promise<Track[] | 
       return getUserTracks(ctx.spotify, fresh.spotify.accessToken);
     });
   } catch (err) {
+    console.error(`[spotify] could not load the library: ${describeError(err)}`);
     if (err instanceof SpotifyError && (err.status === 400 || err.status === 401)) {
       return errorJson(401, 'signed-out', 'Spotify access expired; sign in again');
     }
@@ -124,16 +125,21 @@ export async function callback(req: Request, ctx: AppContext): Promise<Response>
   if (!expected || !state || !safeEqual(state, expected)) return fail('state');
   if (!code) return fail('missing-code');
 
+  let step = 'token exchange';
   try {
     const tokens = await ctx.spotify.exchangeCode(code);
+    step = 'profile (/me)';
     const me = await ctx.spotify.getMe(tokens.accessToken);
+    step = 'saving the user';
     await ctx.store.upsertUser({ id: me.id, displayName: me.displayName, spotify: tokens });
     ctx.tracks.invalidate(me.id);
     return redirect(`${home}/?signedIn=1`, [
       clearState,
       serializeCookie(SESSION_COOKIE, signSession(me.id, ctx.config.sessionSecret), { maxAge: SESSION_MAX_AGE_S, secure }),
     ]);
-  } catch {
+  } catch (err) {
+    // The browser only gets ?authError=spotify, so this line is the only record of why.
+    console.error(`[auth] Spotify sign-in failed at the ${step} step: ${describeError(err)}`);
     return fail('spotify');
   }
 }

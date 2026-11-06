@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createSpotifyClient,
+  describeError,
   ensureFreshTokens,
   getUserTracks,
   mapTrack,
@@ -87,6 +88,34 @@ describe('Spotify authorization', () => {
   it('throws SpotifyError on a failed token request', async () => {
     const f = fakeFetch({ 'https://accounts.spotify.com/api/token': () => new Response('{}', { status: 400 }) });
     await expect(createSpotifyClient(cfg, f).exchangeCode('x')).rejects.toBeInstanceOf(SpotifyError);
+  });
+
+  it('keeps what Spotify answered on a failed token request, so the server log can say why', async () => {
+    const body = '{"error":"invalid_client",\n "error_description":"Invalid client secret"}';
+    const f = fakeFetch({ 'https://accounts.spotify.com/api/token': () => new Response(body, { status: 400 }) });
+    const err = await createSpotifyClient(cfg, f).exchangeCode('x').catch((e) => e);
+    expect(err).toMatchObject({ status: 400, detail: '{"error":"invalid_client", "error_description":"Invalid client secret"}' });
+  });
+});
+
+describe('describing a failure for the server log', () => {
+  it('names the status, what Spotify said and a Retry-After, and nothing secret', async () => {
+    const f = fakeFetch({
+      'https://api.spotify.com/v1/me': () => new Response('{"error":{"status":429,"message":"API rate limit exceeded"}}', { status: 429, headers: { 'retry-after': '48000' } }),
+    });
+    const err = await createSpotifyClient(cfg, f, async () => {}).getMe('the-access-token').catch((e) => e);
+    // 48,000 s is far past what a request will wait, so it fails at once instead of sleeping.
+    expect(err).toMatchObject({ status: 429, retryAfter: '48000' });
+    const line = describeError(err);
+    expect(line).toBe('Spotify API /me failed (429) | {"error":{"status":429,"message":"API rate limit exceeded"}} | retry-after 48000 s');
+    expect(line).not.toContain('the-access-token');
+    expect(line).not.toContain(cfg.clientSecret);
+  });
+
+  it('copes with an unreadable body and with errors that are not from Spotify', () => {
+    expect(describeError(new SpotifyError('Spotify API /me failed (502)', 502))).toBe('Spotify API /me failed (502)');
+    expect(describeError(new TypeError('fetch failed'))).toBe('TypeError: fetch failed');
+    expect(describeError('boom')).toBe('boom');
   });
 });
 
