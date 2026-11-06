@@ -9,9 +9,9 @@
 // with a pitch histogram (pitchShare, from the note file) use it; others are estimated from
 // their typical note and their highest and lowest notes.
 // Familiarity (0-1): computed from Spotify listening (see server/spotify.ts buildLibrary).
-// Popularity (0-1): average of Spotify popularity, USDB karaoke popularity (views) and
-// KaraFun karaoke-video views, each on one shared scale, with a floor for Billboard Year-End hits
-// (popularityScore, POPULARITY_SCALE).
+// Popularity (0-1): average of Spotify popularity, USDB karaoke popularity (views), KaraFun
+// karaoke-video views and Deezer track rank, each on one shared scale, with a floor for Billboard
+// Year-End hits (popularityScore, POPULARITY_SCALE).
 // Penalties lower a song without hiding it.
 
 import type { Label, Match, OctaveShift, ScoreParts, SongRange, Track, VocalRange } from '../contracts';
@@ -34,20 +34,23 @@ export const CHART_FLOOR = POPULARITY_SCALE.chartFloor;
 
 /**
  * Popularity from our own karaoke data (song_popularity, QWW-6): the YouTube views of a song's
- * KaraFun karaoke videos and its best Billboard Year-End Hot 100 rank (1 to 100). It goes on a copy
- * of the song's range for scoring only and is never stored with the range.
+ * KaraFun karaoke videos and its best Billboard Year-End Hot 100 rank (1 to 100), plus its Deezer
+ * track rank (song_deezer, QWW-37). It goes on a copy of the song's range for scoring only and is
+ * never stored with the range.
  */
 export interface KaraokePopularity {
   karaokeViews?: number;
   chartRank?: number;
+  deezerRank?: number;
 }
 
 /** A copy of `range` carrying the song's karaoke popularity, to score with; `range` is left as it is. */
 export function withKaraokePopularity(range: SongRange, p: KaraokePopularity | undefined): SongRange & KaraokePopularity {
-  if (p?.karaokeViews === undefined && p?.chartRank === undefined) return range;
+  if (p?.karaokeViews === undefined && p?.chartRank === undefined && p?.deezerRank === undefined) return range;
   const scored: SongRange & KaraokePopularity = { ...range };
   if (p.karaokeViews !== undefined) scored.karaokeViews = p.karaokeViews;
   if (p.chartRank !== undefined) scored.chartRank = p.chartRank;
+  if (p.deezerRank !== undefined) scored.deezerRank = p.deezerRank;
   return scored;
 }
 
@@ -88,14 +91,15 @@ export function comfortScore(user: VocalRange, song: SongRange, octave: OctaveSh
  *   1. Spotify popularity, when Spotify sends it
  *   2. USDB views
  *   3. karaoke views (KaraFun karaoke videos on YouTube)
- *   4. a Billboard Year-End Hot 100 entry, as a floor (CHART_FLOOR)
+ *   4. Deezer track rank (QWW-37)
+ *   5. a Billboard Year-End Hot 100 entry, as a floor (CHART_FLOOR)
  * Each source is first put on one scale (POPULARITY_SCALE, src/lib/popularity/calibrate.ts): the
  * share of catalogue songs with fewer USDB views, the others linked to it on the songs that have
- * both, so a typical song scores the same whichever source we have. The first three measure the
+ * both, so a typical song scores the same whichever source we have. The first four measure the
  * same thing and none is reliably the best, so the ones present are averaged. The chart is a floor
  * instead: a Year-End hit is widely known whatever its views say, while a song missing from the
  * chart may still be well known (older songs, hits outside the US), so it can only raise a song.
- * With none of the four, UNKNOWN_POPULARITY. USDB stars are not used: nearly every song has 5.
+ * With none of the five, UNKNOWN_POPULARITY. USDB stars are not used: nearly every song has 5.
  */
 export function popularityScore(track: Pick<Track, 'popularity'>, song: PopularityInputs): number {
   const scale = POPULARITY_SCALE;
@@ -105,6 +109,7 @@ export function popularityScore(track: Pick<Track, 'popularity'>, song: Populari
   }
   if (typeof song.usdbViews === 'number') parts.push(onScale(scale.usdbViews, song.usdbViews));
   if (typeof song.karaokeViews === 'number') parts.push(onScale(scale.karaokeViews, song.karaokeViews));
+  if (typeof song.deezerRank === 'number' && scale.deezer.length) parts.push(onScale(scale.deezer, song.deezerRank));
   const floor = typeof song.chartRank !== 'number' ? undefined : song.chartRank <= 20 ? CHART_FLOOR.top20 : CHART_FLOOR.top100;
   if (!parts.length) return floor ?? UNKNOWN_POPULARITY;
   return Math.max(parts.reduce((a, b) => a + b, 0) / parts.length, floor ?? 0);
@@ -112,13 +117,15 @@ export function popularityScore(track: Pick<Track, 'popularity'>, song: Populari
 
 /**
  * False when popularityScore had nothing to go on (no Spotify popularity, USDB views,
- * karaoke views or Year-End chart entry) and gave the flat default.
+ * karaoke views, Deezer rank or Year-End chart entry) and gave the flat default. A Deezer rank
+ * counts only once the scale has a Deezer link (npm run popularity:calibrate).
  */
 export function popularityKnown(track: Pick<Track, 'popularity'>, song: PopularityInputs): boolean {
   return (
     typeof track.popularity === 'number' ||
     typeof song.usdbViews === 'number' ||
     typeof song.karaokeViews === 'number' ||
+    (typeof song.deezerRank === 'number' && POPULARITY_SCALE.deezer.length > 0) ||
     typeof song.chartRank === 'number'
   );
 }
@@ -126,7 +133,7 @@ export function popularityKnown(track: Pick<Track, 'popularity'>, song: Populari
 /**
  * Where a song goes in the no-Spotify catalogue, highest first (QWW-32): its popularityScore
  * without Spotify, from its USDB views (the range's own, else its USDB row's, as the
- * catalogue scores it) and its karaoke popularity. -1 when there is none of these, so a song we
+ * catalogue scores it), its karaoke popularity and its Deezer rank. -1 when there is none of these, so a song we
  * know nothing about never takes the place of one we do; scored, it would get UNKNOWN_POPULARITY,
  * above many known songs. Both stores pick the catalogue with this, so it reads the same anywhere.
  */
@@ -140,6 +147,7 @@ export function catalogueRank(
   if (views !== undefined) song.usdbViews = views;
   if (karaoke?.karaokeViews !== undefined) song.karaokeViews = karaoke.karaokeViews;
   if (karaoke?.chartRank !== undefined) song.chartRank = karaoke.chartRank;
+  if (karaoke?.deezerRank !== undefined) song.deezerRank = karaoke.deezerRank;
   return popularityKnown({}, song) ? popularityScore({}, song) : -1;
 }
 

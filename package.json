@@ -25,7 +25,8 @@
     "popularity:calibrate": "tsx scripts/popularity-calibrate.ts",
     "moods:mgphot-import": "tsx scripts/moods-mgphot-import.ts",
     "moods:mgphot-check": "tsx scripts/moods-mgphot.ts",
-    "moods:acousticbrainz": "tsx scripts/moods-acousticbrainz.ts"
+    "moods:acousticbrainz": "tsx scripts/moods-acousticbrainz.ts",
+    "popularity:deezer": "tsx scripts/popularity-deezer.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",

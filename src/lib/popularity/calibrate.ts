@@ -8,6 +8,7 @@
 //     linking): a value at the q-th quantile of that source, among those songs, scores what the
 //     q-th quantile of their anchor scores. So a song typical of the overlap on one source scores
 //     what it would on USDB views;
+//   - Deezer track rank (QWW-37) is linked the same way, on the songs with USDB views and a rank;
 //   - a Billboard Year-End entry is a floor at the lower quartile of the anchored score of the
 //     charting songs in its tier (top 20, 21 to 100), the rule CHART_FLOOR followed before.
 // USDB stars are left out: in November 2026, 97% of USDB songs had 5 stars and the rest 4.5, and
@@ -22,6 +23,8 @@ export interface PopularityScale {
   karaokeViews: ScalePoints;
   /** Empty when there was no Spotify popularity to link (Spotify then counts popularity / 100). */
   spotify: ScalePoints;
+  /** Deezer track rank (QWW-37). Empty when too few songs had one to link; Deezer then counts for nothing. */
+  deezer: ScalePoints;
   chartFloor: { top20: number; top100: number };
 }
 
@@ -30,6 +33,7 @@ export interface CalibrationSong {
   usdbViews?: number;
   karaokeViews?: number;
   spotify?: number;
+  deezerRank?: number;
   chartRank?: number;
 }
 
@@ -80,13 +84,13 @@ export const MIN_OVERLAP = 50;
 
 export interface CalibrationReport {
   scale: PopularityScale;
-  counts: { anchor: number; karaokeViews: number; spotify: number; top20: number; top100: number };
+  counts: { anchor: number; karaokeViews: number; spotify: number; deezer: number; top20: number; top100: number };
 }
 
 /**
  * Builds the scale from the catalogue's songs. Throws when the anchor or a link has fewer than
- * MIN_OVERLAP songs, except Spotify, which is left empty (Spotify no longer sends popularity to
- * Development Mode apps, so there may be none).
+ * MIN_OVERLAP songs, except Spotify and Deezer, which are left empty (Spotify no longer sends
+ * popularity to Development Mode apps, and Deezer ranks exist only after popularity:deezer).
  */
 export function calibrate(songs: CalibrationSong[]): CalibrationReport {
   const withViews = songs.filter((s) => typeof s.usdbViews === 'number');
@@ -96,7 +100,7 @@ export function calibrate(songs: CalibrationSong[]): CalibrationReport {
   const anchorPoints = pointsFrom(views, views.map((_, i) => (views.length === 1 ? 1 : i / (views.length - 1))));
   const anchor = (s: CalibrationSong) => onScale(anchorPoints, s.usdbViews!);
 
-  const link = (key: 'karaokeViews' | 'spotify', optional = false): [ScalePoints, number] => {
+  const link = (key: 'karaokeViews' | 'spotify' | 'deezerRank', optional = false): [ScalePoints, number] => {
     const both = withViews.filter((s) => typeof s[key] === 'number');
     if (both.length < MIN_OVERLAP) {
       if (optional) return [[], both.length];
@@ -106,6 +110,7 @@ export function calibrate(songs: CalibrationSong[]): CalibrationReport {
   };
   const [karaokeViews, nKaraoke] = link('karaokeViews');
   const [spotify, nSpotify] = link('spotify', true);
+  const [deezer, nDeezer] = link('deezerRank', true);
 
   // Chart floors: lower quartile of what charting songs score from everything but the chart.
   const scored = (s: CalibrationSong) => {
@@ -127,7 +132,7 @@ export function calibrate(songs: CalibrationSong[]): CalibrationReport {
   const [top100, nTop100] = floorOf((r) => r > 20);
 
   return {
-    scale: { usdbViews: anchorPoints, karaokeViews, spotify, chartFloor: { top20: Math.max(top20, top100), top100 } },
-    counts: { anchor: withViews.length, karaokeViews: nKaraoke, spotify: nSpotify, top20: nTop20, top100: nTop100 },
+    scale: { usdbViews: anchorPoints, karaokeViews, spotify, deezer, chartFloor: { top20: Math.max(top20, top100), top100 } },
+    counts: { anchor: withViews.length, karaokeViews: nKaraoke, spotify: nSpotify, deezer: nDeezer, top20: nTop20, top100: nTop100 },
   };
 }

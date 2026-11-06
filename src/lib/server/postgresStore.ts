@@ -10,6 +10,7 @@ import {
   MAX_EVENTS_LIMIT,
   type CatalogueSong,
   type SongMoodsRecord,
+  type SongDeezerRecord,
   type SongPopularityRecord,
   type SongRangeRecord,
   type Store,
@@ -311,11 +312,12 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       const sources = MEASURED_SOURCES.map((_, i) => `$${i + 1}`).join(', ');
       const candidates = await query(
         `SELECT s.song_key, s.range_json::json ->> 'usdbViews' AS range_views,
-           b.id AS usdb_id, b.views, p.karaoke_views, p.chart_rank
+           b.id AS usdb_id, b.views, p.karaoke_views, p.chart_rank, d.rank AS deezer_rank
          FROM song_ranges s
          LEFT JOIN (SELECT DISTINCT ON (song_key) song_key, id, views FROM usdb_songs ORDER BY song_key, COALESCE(views, 0) DESC, id) b
            ON (b.song_key || '') = s.song_key
          LEFT JOIN song_popularity p ON p.song_key = s.song_key
+         LEFT JOIN song_deezer d ON d.song_key = s.song_key
          WHERE s.skipped = false AND (s.range_json::json ->> 'source') IN (${sources})`,
         MEASURED_SOURCES,
       );
@@ -327,7 +329,7 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
           rank: catalogueRank(
             { usdbViews: opt(r.range_views) },
             { views: opt(r.views) },
-            { karaokeViews: opt(r.karaoke_views), chartRank: opt(r.chart_rank) },
+            { karaokeViews: opt(r.karaoke_views), chartRank: opt(r.chart_rank), deezerRank: opt(r.deezer_rank) },
           ),
           charted: isSet(r.chart_rank),
         })),
@@ -444,8 +446,44 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       for (let i = 0; i < unique.length; i += 1000) {
         const chunk = unique.slice(i, i + 1000);
         const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
-        const rows = await query(`SELECT * FROM song_popularity WHERE song_key IN (${placeholders})`, chunk);
+        const [rows, deezer] = await Promise.all([
+          query(`SELECT * FROM song_popularity WHERE song_key IN (${placeholders})`, chunk),
+          query(`SELECT song_key, rank FROM song_deezer WHERE rank IS NOT NULL AND song_key IN (${placeholders})`, chunk),
+        ]);
         for (const r of rows) out.set(str(r.song_key), toSongPopularity(r));
+        for (const r of deezer) {
+          const key = str(r.song_key);
+          out.set(key, { ...(out.get(key) ?? { key, source: 'deezer' }), deezerRank: num(r.rank) });
+        }
+      }
+      return out;
+    },
+
+    // ---- Deezer track rank (QWW-37) ----
+    async putSongDeezer(entries) {
+      // One row per key, the last entry winning, as for mood labels.
+      const unique = [...new Map(entries.map((e) => [e.key, e])).values()];
+      for (let i = 0; i < unique.length; i += 100) {
+        const params: unknown[] = [];
+        const rows = unique.slice(i, i + 100).map((e) => {
+          params.push(e.key, e.rank ?? null, e.deezerId ?? null, e.checkedAt);
+          const n = params.length;
+          return `($${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(
+          `INSERT INTO song_deezer (song_key, rank, deezer_id, checked_at) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET rank = EXCLUDED.rank, deezer_id = EXCLUDED.deezer_id, checked_at = EXCLUDED.checked_at`,
+          params,
+        );
+      }
+    },
+    async listSongDeezer() {
+      const out = new Map<string, SongDeezerRecord>();
+      for (const r of await query('SELECT * FROM song_deezer')) {
+        const d: SongDeezerRecord = { key: str(r.song_key), checkedAt: str(r.checked_at) };
+        if (isSet(r.rank)) d.rank = num(r.rank);
+        if (isSet(r.deezer_id)) d.deezerId = num(r.deezer_id);
+        out.set(d.key, d);
       }
       return out;
     },
