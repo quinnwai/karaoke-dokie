@@ -19,7 +19,6 @@ import {
   MOOD_LABELS,
   savedDividerIndex,
   SLIDERS,
-  sortedByLine,
   viewMatches,
   type SliderDef,
 } from '../lib/songs/browse';
@@ -83,7 +82,6 @@ export function Results(props: ResultsProps) {
   const divider = savedDividerIndex(visible, mode, view);
   const showPicks = facets.decades || facets.moods.length > 0 || facets.duets;
   const tuned = activeSliders(view).length > 0;
-  const sortedBy = sortedByLine(view, mode);
 
   const row = (m: Match, position: number) => {
     const octave = octaveWording(m.octave);
@@ -152,10 +150,6 @@ export function Results(props: ResultsProps) {
               <h2 id={tuneId} className={styles.tuneLabel}>
                 Tune
               </h2>
-              {/* What the order is, on one line beside the label, so a song's place is never a mystery. */}
-              <p className={styles.sortedBy} title={sortedBy} data-testid="sorted-by">
-                {sortedBy}
-              </p>
               {tuned && (
                 <button
                   type="button"

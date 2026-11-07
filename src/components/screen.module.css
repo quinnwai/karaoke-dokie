@@ -1224,18 +1224,6 @@
   }
 }
 
-.sortedBy {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 11px;
-  color: var(--dim);
-  /* One line, whatever is set, so the box never changes height. */
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .sliderRow {
   display: grid;
   grid-template-columns: 76px 1fr 76px;

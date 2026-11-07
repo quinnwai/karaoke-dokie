@@ -18,7 +18,6 @@ import {
   difficultyBand,
   sliderPlaces,
   sliderValue,
-  sortedByLine,
   toggleDuets,
   viewMatches,
 } from '../../src/lib/songs/browse';
@@ -197,14 +196,6 @@ describe('sliders', () => {
     expect(at(0)[0]).toBe('e0');
     expect(at(1)[0]).toBe('h1');
     expect(at(0.9)[0]).toBe('h1');
-  });
-
-  it('says what the order is', () => {
-    expect(sortedByLine(DEFAULT_VIEW, 'library')).toMatch(/^Top picks: songs you know/);
-    expect(sortedByLine(DEFAULT_VIEW, 'catalogue')).toMatch(/^Top picks: the best fit/);
-    expect(sortedByLine({ ...DEFAULT_VIEW, difficulty: 1, popularity: 0.1 }, 'library')).toBe('Sorted by: Locked in, Deep cuts');
-    expect(sortedByLine({ ...DEFAULT_VIEW, difficulty: 0.5 }, 'library')).toBe('Sorted by: Medium');
-    expect(sortedByLine({ ...DEFAULT_VIEW, tempo: 0.5 }, 'library')).toBe('Sorted by: Slow jams to Upbeat tracks, in between');
   });
 
   it('songs at the same distance from a target keep the server order', () => {

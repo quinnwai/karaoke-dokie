@@ -161,24 +161,6 @@ export function sliderPlaces(songs: Match[], id: SliderId, user: VocalRange): (n
 
 export const activeSliders = (view: ResultsView): SliderId[] => SLIDER_IDS.filter((id) => view[id] !== null);
 
-/**
- * One line under the sliders saying what the order is, so a song's place is never a mystery: the
- * words at the end each set slider is nearest to (Medium for the middle of the difficulty track),
- * or what the untouched order is.
- */
-export function sortedByLine(view: ResultsView, mode: ResultsMode): string {
-  const set = activeSliders(view);
-  if (!set.length) return mode === 'library' ? 'Top picks: songs you know that fit you' : 'Top picks: the best fit, then most popular';
-  const words = set.map((id) => {
-    const def = SLIDERS.find((s) => s.id === id)!;
-    const v = view[id]!;
-    if (v <= 0.33) return def.left;
-    if (v >= 0.67) return def.right;
-    return id === 'difficulty' ? 'Medium' : `${def.left} to ${def.right}, in between`;
-  });
-  return `Sorted by: ${words.join(', ')}`;
-}
-
 /** A song we know nothing about on a slider counts as farther from any target than a song we know. */
 const UNKNOWN_DISTANCE = 1.5;
 
