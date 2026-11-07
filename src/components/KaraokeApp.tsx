@@ -5,9 +5,19 @@ import { detectPitch } from '../lib/audio/pitch';
 import { detectHeldNote } from '../lib/audio/heldNote';
 import { frequencyToMidi, midiToNoteName } from '../lib/audio/notes';
 import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
-import { flowReducer, initialState } from '../lib/client/flow';
+import { createTracker, flushWhenHidden, loadAnonId, sendEvents, type Tracker } from '../lib/client/events';
+import { flowReducer, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
+import { eventsFor } from '../lib/client/funnel';
 import { browserMic, type Mic, type MicRecorder } from '../lib/client/mic';
-import { clearProgress, loadProgress, saveProgress, setWantsPick, takeWantsPick } from '../lib/client/storage';
+import {
+  clearProgress,
+  loadProgress,
+  loadSavedRange,
+  saveProgress,
+  saveRangeOnDevice,
+  setWantsPick,
+  takeWantsPick,
+} from '../lib/client/storage';
 import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';
 import { PickSongs } from './PickSongs';
@@ -18,6 +28,8 @@ import styles from './screen.module.css';
 
 export interface KaraokeAppProps {
   api?: Api;
+  /** The beta event log; tests pass a fake. */
+  track?: Pick<Tracker, 'track' | 'flush'>;
   mic?: Mic;
   /** Leaves the page (Spotify sign-in). */
   navigate?: (url: string) => void;
@@ -30,9 +42,27 @@ const LIVE_EVERY_MS = 50; // ~20 times a second
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 
-export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultNavigate, quietMs = 2600 }: KaraokeAppProps) {
+export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, quietMs = 2600 }: KaraokeAppProps) {
   const [api] = useState(() => apiProp ?? createApi());
-  const [state, dispatch] = useReducer(flowReducer, initialState);
+  const [state, rawDispatch] = useReducer(flowReducer, initialState);
+
+  // Beta event log (QWW-16, QWW-20): every action passes through here, and funnel.ts decides what
+  // it records. The server drops everything unless collection is switched on.
+  const [tracker] = useState(() => track ?? createTracker({ anonId: loadAnonId(), send: sendEvents }));
+  useEffect(() => (typeof window === 'undefined' ? undefined : flushWhenHidden(tracker)), [tracker]);
+  const stateRef = useRef<FlowState>(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+  const dispatch = useCallback(
+    (action: FlowEvent) => {
+      for (const e of eventsFor(stateRef.current, action)) tracker.track(e.name, e.props);
+      // Keep the ref ahead of React so a second action in the same tick sees this one's result.
+      stateRef.current = flowReducer(stateRef.current, action);
+      rawDispatch(action);
+    },
+    [tracker],
+  );
   const [live, setLive] = useState<number | null>(null);
   const recorder = useRef<MicRecorder | null>(null);
   const holding = useRef(false);
@@ -49,7 +79,13 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
         url.searchParams.delete('signedIn');
         window.history.replaceState(null, '', url.pathname + url.search + url.hash);
       }
-      dispatch({ type: 'booted', me, progress: loadProgress(), wantsPick: me ? takeWantsPick() : false });
+      dispatch({
+        type: 'booted',
+        me,
+        progress: loadProgress(),
+        wantsPick: me ? takeWantsPick() : false,
+        savedRange: me ? null : loadSavedRange(),
+      });
     })();
     return () => {
       cancelled = true;
@@ -88,18 +124,20 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
     };
   }, [api, step, range, error]);
 
-  const { loading, nextOffset } = state;
+  // Every match at once: the phone orders, filters and pages them (src/lib/songs/browse.ts).
+  const { loading, mode, attempt } = state;
   useEffect(() => {
-    if (step !== 'results' || !loading) return;
+    if (step !== 'results' || !loading || !range) return;
     let cancelled = false;
-    api.recommendations(nextOffset ?? 0).then(
-      (page) => !cancelled && dispatch({ type: 'pageLoaded', page }),
+    const load = mode === 'catalogue' ? api.catalogue({ low: range.low, high: range.high }) : api.allRecommendations();
+    load.then(
+      (page) => !cancelled && dispatch({ type: 'allLoaded', page }),
       () => !cancelled && dispatch({ type: 'loadFailed' }),
     );
     return () => {
       cancelled = true;
     };
-  }, [api, step, loading, nextOffset]);
+  }, [api, step, loading, mode, range, attempt]);
 
   const { known, signedIn } = state;
   useEffect(() => {
@@ -183,6 +221,8 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
   const pickSongs = () => {
     if (state.signedIn) dispatch({ type: 'pickStart' });
     else {
+      tracker.track('pick_songs_pressed', { signedIn: false });
+      tracker.flush();
       setWantsPick(true);
       navigate(LOGIN_PATH);
     }
@@ -195,9 +235,38 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
 
   const sendFeedback = (trackId: string, thumbs: 'up' | 'down') => {
     const match = state.matches.find((m) => m.track.id === trackId);
-    if (!match) return;
+    if (!match || !state.range) return;
     dispatch({ type: 'feedback', trackId, thumbs });
-    api.feedback({ trackId, thumbs, difficulty: match.difficulty, octave: match.octave }).catch(() => {});
+    const body = { trackId, thumbs, difficulty: match.difficulty, octave: match.octave, view: state.view };
+    const sent =
+      state.mode === 'catalogue'
+        ? api.catalogueFeedback({ ...body, anonId: loadAnonId(), range: { low: state.range.low, high: state.range.high } })
+        : api.feedback(body);
+    sent.catch(() => {});
+  };
+
+  // No Spotify: straight to songs from the catalogue, with the range kept on this device.
+  const showCatalogue = () => {
+    if (!state.range) return;
+    saveRangeOnDevice(state.range);
+    clearProgress();
+    dispatch({ type: 'showCatalogue' });
+  };
+
+  // Spotify as the upgrade: keep the range across the sign-in round trip, then it is saved to the account.
+  const connectSpotify = () => {
+    tracker.track('spotify_connect_pressed', { from: state.step, mode: state.mode });
+    tracker.flush();
+    if (state.range) saveProgress({ low: state.range.low, high: state.range.high });
+    navigate(LOGIN_PATH);
+  };
+
+  // Log out: end the session, then show catalogue songs for the same range, which stays on this
+  // device like it does for anyone without Spotify. A failed request throws, to be shown by the logo's box.
+  const logOut = async () => {
+    await api.logout();
+    if (state.range) saveRangeOnDevice(state.range);
+    dispatch({ type: 'loggedOut' });
   };
 
   const selected = state.selectedId ? state.matches.find((m) => m.track.id === state.selectedId) : undefined;
@@ -250,10 +319,13 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
             </span>
             <span data-testid="range-high">{midiToNoteName(state.range.high)}</span>
           </p>
-          <button type="button" className={styles.arrow} aria-label="Continue" onClick={() => navigate(LOGIN_PATH)}>
+          <button type="button" className={styles.arrow} aria-label="Continue" onClick={showCatalogue}>
             <svg viewBox="0 0 48 24" width="56" height="28" aria-hidden>
               <path d="M2 12h40M32 3l10 9-10 9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
+          </button>
+          <button type="button" className={styles.textButton} onClick={connectSpotify}>
+            or use songs from your Spotify
           </button>
         </div>
       )}
@@ -276,14 +348,28 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
       {step === 'results' && state.range && !selected && (
         <Results
           range={state.range}
+          mode={state.mode}
           matches={state.matches}
+          view={state.view}
+          shown={state.shown}
           loading={state.loading}
           error={state.error === 'load'}
-          hasMore={state.nextOffset !== null}
-          onSelect={(trackId) => dispatch({ type: 'select', trackId })}
+          onSelect={(trackId, position) => dispatch({ type: 'select', trackId, position })}
           onMore={() => dispatch({ type: 'loadMore' })}
+          onRetry={() => dispatch({ type: 'retryLoad' })}
           onRedo={redo}
           onRedoEnd={(end) => dispatch({ type: 'redoEnd', end })}
+          leadSlider={state.leadSlider}
+          onSlider={(slider, value) => dispatch({ type: 'setSlider', slider, value })}
+          onSliderDone={(slider) => dispatch({ type: 'sliderDone', slider })}
+          onResetSliders={() => dispatch({ type: 'resetSliders' })}
+          onDecade={(decade) => dispatch({ type: 'pickDecade', decade })}
+          onMood={(mood) => dispatch({ type: 'pickMood', mood })}
+          onDuets={() => dispatch({ type: 'toggleDuets' })}
+          onClear={() => dispatch({ type: 'clearFilters' })}
+          onConnect={connectSpotify}
+          displayName={state.displayName}
+          onLogout={logOut}
         />
       )}
 
@@ -292,9 +378,20 @@ export function KaraokeApp({ api: apiProp, mic = browserMic, navigate = defaultN
           key={selected.track.id}
           match={selected}
           userRange={state.range}
-          source={state.sources[selected.track.id]}
           feedback={state.feedback[selected.track.id]}
           onFeedback={(thumbs) => sendFeedback(selected.track.id, thumbs)}
+          onSpotify={() =>
+            tracker.track('spotify_link_pressed', {
+              mode: state.mode,
+              difficulty: state.view.difficulty,
+              familiarity: state.view.familiarity,
+              popularity: state.view.popularity,
+              tempo: state.view.tempo,
+              decade: state.view.decade,
+              mood: state.view.mood,
+              duetsOnly: state.view.duetsOnly,
+            })
+          }
           onBack={() => dispatch({ type: 'deselect' })}
         />
       )}

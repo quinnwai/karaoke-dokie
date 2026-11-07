@@ -1,19 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import type { Match, SongRange, Track, VocalRange } from '../../src/lib/contracts';
-import { matchSong } from '../../src/lib/songs/match';
+import type { Match, SongRange, TimeRange, Track, VocalRange } from '../../src/lib/contracts';
+import { matchSong, toMatch } from '../../src/lib/songs/match';
 import { rankMatches } from '../../src/lib/songs/rank';
 import {
+  byCatalogueRank,
+  pickCatalogue,
+  catalogueRank,
+  CHART_FLOOR,
   comfortScore,
   familiarityScore,
   pitchComfort,
+  popularityKnown,
   popularityScore,
   reasonsFor,
   scoreMatch,
   UNKNOWN_POPULARITY,
+  withKaraokePopularity,
 } from '../../src/lib/songs/score';
 import { songRangeFromUltrastar } from '../../src/lib/songs/range';
+import { onScale } from '../../src/lib/popularity/calibrate';
+import { POPULARITY_SCALE } from '../../src/lib/songs/popularityScale';
 
 const user: VocalRange = { low: 48, high: 72, source: 'test' }; // C3-C5, centre C4
+// Each source on the shared popularity scale (src/lib/popularity/calibrate.ts).
+const onUsdbViews = (v: number) => onScale(POPULARITY_SCALE.usdbViews, v);
+const onKaraoke = (v: number) => onScale(POPULARITY_SCALE.karaokeViews, v);
+const onSpotify = (v: number) => (POPULARITY_SCALE.spotify.length ? onScale(POPULARITY_SCALE.spotify, v) : v / 100);
+/** Karaoke views at the top of the scale. */
+const KARAOKE_TOP = POPULARITY_SCALE.karaokeViews[POPULARITY_SCALE.karaokeViews.length - 1]![0];
 const track = (id: string, extra: Partial<Track> = {}): Track => ({ id, title: id, artist: 'A', artistId: 'a', spotifyUrl: '', playRank: 0, ...extra });
 const song = (low: number, high: number, extra: Partial<SongRange> = {}): SongRange => ({
   low,
@@ -28,6 +42,39 @@ const match = (t: Track, r: SongRange): Match => {
   const fit = matchSong(user, r)!;
   return scoreMatch(user, { track: t, range: r, ...fit });
 };
+
+describe('strain and shape (QWW-33)', () => {
+  it('strain is the label’s own numbers: twice the edge share plus the share outside the middle half', () => {
+    // User C3 to C5 (48 to 72): middle half 54 to 66, edge eighths beyond 51 and 69.
+    const easy = match(track('e'), song(56, 64, { pitchShare: [[56, 0.5], [64, 0.5]] }));
+    const medium = match(track('m'), song(50, 64, { pitchShare: [[50, 0.05], [60, 0.95]] }));
+    const hard = match(track('h'), song(49, 64, { pitchShare: [[49, 0.3], [60, 0.7]] }));
+    expect([easy.difficulty, medium.difficulty, hard.difficulty]).toEqual(['easy', 'medium', 'hard']);
+    expect(easy.strain).toBe(0);
+    expect(medium.strain).toBeCloseTo(0.15);
+    expect(hard.strain).toBeCloseTo(2 * 0.3 + 0.3);
+    expect(easy.strain!).toBeLessThan(medium.strain!);
+    expect(medium.strain!).toBeLessThan(hard.strain!);
+  });
+
+  it('shape is the sung time per twelfth of the user’s range, as sung', () => {
+    const m = match(track('s'), song(48, 60, { pitchShare: [[48, 0.25], [60, 0.75]] }));
+    expect(m.shape).toHaveLength(12);
+    expect(m.shape![0]).toBe(25);
+    expect(m.shape![6]).toBe(75); // 60 is the middle of 48 to 72
+    expect(m.shape!.reduce((a, b) => a + b, 0)).toBe(100);
+    // Sung an octave down: the notes move down 12 semitones, half the range
+    const shifted = scoreMatch(user, { ...match(track('s'), song(60, 72, { pitchShare: [[60, 0.5], [72, 0.5]] })), range: song(60, 84, { pitchShare: [[60, 0.5], [84, 0.5]] }), octave: 'down' });
+    expect(shifted.shape![0]).toBe(50);
+    expect(shifted.shape![11]).toBe(50);
+  });
+
+  it('a song with no pitch histogram has a strain but no shape', () => {
+    const m = match(track('n'), song(55, 65));
+    expect(m.strain).toBeGreaterThanOrEqual(0);
+    expect(m.shape).toBeUndefined();
+  });
+});
 
 describe('comfort', () => {
   it('is 1 in the middle half of the range and falls to 0 at the edges', () => {
@@ -68,10 +115,113 @@ describe('familiarity and popularity', () => {
   });
 
   it('averages Spotify and USDB popularity, using whichever exists', () => {
-    expect(popularityScore(track('x', { popularity: 80 }), song(55, 65))).toBeCloseTo(0.8);
-    expect(popularityScore(track('x'), song(55, 65, { usdbViews: 99_999, usdbRating: 5 }))).toBeCloseTo(1);
-    expect(popularityScore(track('x', { popularity: 40 }), song(55, 65, { usdbRating: 4 }))).toBeCloseTo(0.6);
+    expect(popularityScore(track('x', { popularity: 80 }), song(55, 65))).toBeCloseTo(onSpotify(80));
+    expect(popularityScore(track('x', { popularity: 40 }), song(55, 65, { usdbViews: 500 }))).toBeCloseTo((onSpotify(40) + onUsdbViews(500)) / 2);
     expect(popularityScore(track('x'), song(55, 65))).toBe(UNKNOWN_POPULARITY);
+  });
+
+  it('leaves USDB stars out: nearly every USDB song has 5', () => {
+    expect(popularityScore(track('x'), song(55, 65, { usdbViews: 5_000, usdbRating: 1 }))).toBeCloseTo(onUsdbViews(5_000));
+    expect(popularityScore(track('x'), song(55, 65, { usdbRating: 3 }))).toBe(UNKNOWN_POPULARITY);
+    expect(popularityKnown(track('x'), song(55, 65, { usdbRating: 3 }))).toBe(false);
+  });
+
+  it('puts every source on one scale: more views never score less, and none leaves 0 to 1', () => {
+    const scales = [POPULARITY_SCALE.usdbViews, POPULARITY_SCALE.karaokeViews, POPULARITY_SCALE.spotify];
+    for (const points of scales) {
+      for (let i = 1; i < points.length; i++) {
+        expect(points[i]![0]).toBeGreaterThan(points[i - 1]![0]);
+        expect(points[i]![1]).toBeGreaterThanOrEqual(points[i - 1]![1]);
+      }
+      for (const [, score] of points) expect(score >= 0 && score <= 1).toBe(true);
+    }
+    // USDB views are the anchor: their percentile in the catalogue, 0 to 1.
+    expect(POPULARITY_SCALE.usdbViews[0]![1]).toBe(0);
+    expect(POPULARITY_SCALE.usdbViews[POPULARITY_SCALE.usdbViews.length - 1]![1]).toBe(1);
+  });
+
+  it('marks popularity as known when Spotify popularity or USDB views are there', () => {
+    const known = (t: Track, r: SongRange) => match(t, r).parts!.popularityKnown;
+    expect(known(track('x', { popularity: 0 }), song(55, 65))).toBe(true);
+    expect(known(track('x'), song(55, 65, { usdbViews: 0 }))).toBe(true);
+    const unknown = match(track('x'), song(55, 65));
+    expect(unknown.parts).toMatchObject({ popularityKnown: false, popularity: UNKNOWN_POPULARITY });
+  });
+});
+
+describe('karaoke popularity (KaraFun views, Billboard Year-End charts)', () => {
+  const plain = song(55, 65);
+  const karaoke = (views?: number, chartRank?: number, extra: Partial<SongRange> = {}) =>
+    withKaraokePopularity(song(55, 65, extra), { karaokeViews: views, chartRank });
+
+  it('scores karaoke views on the shared scale', () => {
+    expect(popularityScore(track('x'), karaoke(56_000))).toBeCloseTo(onKaraoke(56_000));
+    expect(popularityScore(track('x'), karaoke(KARAOKE_TOP * 20))).toBe(onKaraoke(KARAOKE_TOP));
+    expect(popularityScore(track('x'), karaoke(1_000))).toBeLessThan(popularityScore(track('x'), karaoke(56_000)));
+  });
+
+  it('averages karaoke views with Spotify and USDB, whichever are there', () => {
+    const both = karaoke(KARAOKE_TOP, undefined, { usdbViews: 500 });
+    expect(popularityScore(track('x'), both)).toBeCloseTo((onUsdbViews(500) + onKaraoke(KARAOKE_TOP)) / 2);
+    expect(popularityScore(track('x', { popularity: 40 }), both)).toBeCloseTo((onSpotify(40) + onUsdbViews(500) + onKaraoke(KARAOKE_TOP)) / 3);
+  });
+
+  it('gives a Year-End song at least the floor of its tier, higher for the top 20, without ever lowering a song', () => {
+    expect(CHART_FLOOR.top20).toBeGreaterThan(CHART_FLOOR.top100);
+    expect(popularityScore(track('x'), karaoke(undefined, 20))).toBe(CHART_FLOOR.top20);
+    expect(popularityScore(track('x'), karaoke(undefined, 21))).toBe(CHART_FLOOR.top100);
+    expect(popularityScore(track('x'), karaoke(undefined, 100))).toBe(CHART_FLOOR.top100);
+    // No karaoke views is raised to the floor; the most stays as it is.
+    expect(popularityScore(track('x'), karaoke(0, 50))).toBe(Math.max(onKaraoke(0), CHART_FLOOR.top100));
+    expect(popularityScore(track('x'), karaoke(KARAOKE_TOP, 90))).toBe(Math.max(onKaraoke(KARAOKE_TOP), CHART_FLOOR.top100));
+    expect(popularityScore(track('x', { popularity: 0 }), karaoke(undefined, 3))).toBe(Math.max(onSpotify(0), CHART_FLOOR.top20));
+  });
+
+  it('scores a Deezer rank on the shared scale and counts it as known (QWW-37)', () => {
+    const deezer = (rank: number) => withKaraokePopularity(song(55, 65), { deezerRank: rank });
+    expect(POPULARITY_SCALE.deezer.length).toBeGreaterThan(0);
+    expect(popularityKnown(track('x'), deezer(647_498))).toBe(true);
+    expect(popularityScore(track('x'), deezer(647_498))).toBeCloseTo(onScale(POPULARITY_SCALE.deezer, 647_498));
+    // Higher rank, more popular; averaged with the other sources like them.
+    expect(popularityScore(track('x'), deezer(964_180))).toBeGreaterThan(popularityScore(track('x'), deezer(100_000)));
+    const both = withKaraokePopularity(song(55, 65), { deezerRank: 964_180, karaokeViews: 56_000 });
+    expect(popularityScore(track('x'), both)).toBeCloseTo((onScale(POPULARITY_SCALE.deezer, 964_180) + onKaraoke(56_000)) / 2);
+  });
+
+  it('marks popularity as known with karaoke views or a chart entry alone', () => {
+    expect(popularityKnown(track('x'), karaoke(0))).toBe(true);
+    expect(popularityKnown(track('x'), karaoke(undefined, 100))).toBe(true);
+    expect(popularityKnown(track('x'), karaoke())).toBe(false);
+    expect(match(track('x'), karaoke(undefined, 100)).parts).toMatchObject({ popularityKnown: true, popularity: CHART_FLOOR.top100 });
+  });
+
+  it('calls a top-20 Year-End song a crowd favourite, and not one that only made the top 100', () => {
+    const catalogue = track('cat', { familiarity: 1, known: false });
+    expect(match(catalogue, karaoke(undefined, 12)).reasons).toEqual(['In your sweet spot', 'Crowd favourite']);
+    expect(match(catalogue, karaoke(undefined, 60)).reasons).toEqual(['In your sweet spot']);
+    expect(match(catalogue, karaoke(KARAOKE_TOP)).reasons).toEqual(['In your sweet spot', 'Crowd favourite']);
+  });
+
+  it('scores on a copy: the range passed in is left alone, and nothing to add means no copy', () => {
+    const record = { key: 'the examples|first song', karaokeViews: 9_000, chartRank: 7, chartYear: 2004, source: 'karafun+billboard' };
+    const scored = withKaraokePopularity(plain, record);
+    expect(scored).toStrictEqual({ ...plain, karaokeViews: 9_000, chartRank: 7 });
+    expect(plain).toStrictEqual(song(55, 65));
+    expect(withKaraokePopularity(plain, undefined)).toBe(plain);
+    expect(withKaraokePopularity(plain, { karaokeViews: undefined })).toBe(plain);
+  });
+
+  it('keeps the karaoke popularity when a duet is scored on one singer’s part', () => {
+    const duet = karaoke(undefined, 5, {
+      duet: true,
+      parts: [
+        { low: 56, high: 64, tessitura: 60, fastLyrics: false },
+        { low: 40, high: 80, tessitura: 60, fastLyrics: false },
+      ],
+    });
+    const m = scoreMatch(user, toMatch(track('d'), duet, matchSong(user, duet)!));
+    expect(m.part).toBe(1);
+    expect(m.parts).toMatchObject({ popularity: CHART_FLOOR.top20, popularityKnown: true });
   });
 });
 
@@ -136,8 +286,14 @@ describe('ranking', () => {
 });
 
 describe('reasons', () => {
+  // A library song in the user's 4-week top list, as buildLibrary records it.
+  const thisMonth = { known: true, topLists: ['short_term'] as TimeRange[] };
+
   it('names the one or two biggest contributors', () => {
-    expect(reasonsFor({ comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0 })).toEqual(['In your sweet spot', 'You play this a lot']);
+    expect(reasonsFor({ comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0 }, undefined, thisMonth)).toEqual([
+      'In your sweet spot',
+      'Top songs this month',
+    ]);
     expect(reasonsFor({ comfort: 0.3, familiarity: 0.1, popularity: 0.9, penalty: 0 })).toEqual(['Crowd favourite']);
     expect(reasonsFor({ comfort: 0.2, familiarity: 0.1, popularity: 0.2, penalty: 0 })).toEqual([]);
   });
@@ -145,23 +301,147 @@ describe('reasons', () => {
   it('follows the difficulty label, so a Hard song never says sweet spot', () => {
     const p = { comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0 };
     expect(reasonsFor(p, { difficulty: 'easy', side: 'top' })[0]).toBe('In your sweet spot');
-    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })[0]).toBe('A few notes near your top');
-    expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' })).toEqual(['Spends time at your low end', 'You play this a lot']);
+    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })[0]).toBe('Some high notes');
+    expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' }, thisMonth)).toEqual(['Lots of low notes', 'Top songs this month']);
+  });
+
+  it('says which end of your range a song leans on: high end or low end', () => {
+    const p = { comfort: 0.9, familiarity: 0, popularity: 0, penalty: 0 };
+    expect(reasonsFor(p, { difficulty: 'medium', side: 'top' })).toEqual(['Some high notes']);
+    expect(reasonsFor(p, { difficulty: 'medium', side: 'bottom' })).toEqual(['Some low notes']);
+    expect(reasonsFor(p, { difficulty: 'hard', side: 'top' })).toEqual(['Lots of high notes']);
+    expect(reasonsFor(p, { difficulty: 'hard', side: 'bottom' })).toEqual(['Lots of low notes']);
   });
 
   it('says nothing about where a Maybe song sits, since its range is an estimate', () => {
     const p = { comfort: 0.9, familiarity: 0.8, popularity: 0.9, penalty: 0.1 };
-    expect(reasonsFor(p, { difficulty: 'maybe', side: 'top' })).toEqual(['You play this a lot', 'Crowd favourite']);
-    const rough = match(track('r', { familiarity: 0.9 }), song(56, 64, { source: 'audio-full', confidence: 'low' }));
-    expect(rough).toMatchObject({ difficulty: 'maybe', reasons: ['You play this a lot'] });
+    expect(reasonsFor(p, { difficulty: 'maybe', side: 'top' }, thisMonth)).toEqual(['Top songs this month', 'Crowd favourite']);
+    const rough = match(track('r', { familiarity: 0.9, ...thisMonth }), song(56, 64, { source: 'audio-full', confidence: 'low' }));
+    expect(rough).toMatchObject({ difficulty: 'maybe', reasons: ['Top songs this month'] });
     expect(rough.parts!.penalty).toBeCloseTo(0.1);
   });
 
-  it('gives a scored match reasons that match its label', () => {
+  it('names the list that shows you know a song, and its time frame', () => {
+    const p = { comfort: 0, familiarity: 0.8, popularity: 0, penalty: 0 };
+    const reason = (t: Partial<Track>) => reasonsFor(p, undefined, { known: true, ...t });
+    expect(reason({ topLists: ['short_term'] })).toEqual(['Top songs this month']);
+    expect(reason({ topLists: ['medium_term'] })).toEqual(['Top songs, past 6 months']);
+    expect(reason({ recentPlays: 1 })).toEqual(['Played recently']);
+    expect(reason({ topLists: ['long_term'] })).toEqual(['Top songs this past year']);
+    expect(reason({ inPlaylist: true })).toEqual(['In your playlists']);
+  });
+
+  it('picks the 4-week list first, then the 6-month list, recent plays, the 1-year list, playlists', () => {
+    const p = { comfort: 0, familiarity: 0.8, popularity: 0, penalty: 0 };
+    const reason = (t: Partial<Track>) => reasonsFor(p, undefined, { known: true, ...t });
+    const everywhere: Partial<Track> = { topLists: ['short_term', 'medium_term', 'long_term'], recentPlays: 3, inPlaylist: true, saved: true };
+    expect(reason(everywhere)).toEqual(['Top songs this month']);
+    expect(reason({ ...everywhere, topLists: ['medium_term', 'long_term'] })).toEqual(['Top songs, past 6 months']);
+    expect(reason({ ...everywhere, topLists: ['long_term'] })).toEqual(['Played recently']);
+    expect(reason({ ...everywhere, topLists: ['long_term'], recentPlays: undefined })).toEqual(['Top songs this past year']);
+    expect(reason({ ...everywhere, topLists: undefined, recentPlays: undefined })).toEqual(['In your playlists']);
+  });
+
+  it('says how much you play a song when its track does not say where you heard it', () => {
+    // Libraries cached before buildLibrary recorded the lists, and test tracks.
+    const p = { comfort: 0, familiarity: 0.6, popularity: 0, penalty: 0 };
+    expect(reasonsFor(p)).toEqual(['You play this a lot']);
+    expect(reasonsFor(p, undefined, { known: true })).toEqual(['You play this a lot']);
+    expect(reasonsFor({ ...p, familiarity: 0.59 }, undefined, { known: true })).toEqual(['You know this one']);
+    expect(reasonsFor({ ...p, familiarity: 0.3 })).toEqual(['You know this one']);
+    expect(match(track('old', { familiarity: 0.9 }), song(57, 63)).reasons).toEqual(['In your sweet spot', 'You play this a lot']);
+  });
+
+  it('keeps the 0.3 threshold and the weight of the listening reason', () => {
+    const at = (familiarity: number, popularity = 0) => reasonsFor({ comfort: 0, familiarity, popularity, penalty: 0 }, undefined, thisMonth);
+    expect(at(0.29)).toEqual([]);
+    expect(at(0.3)).toEqual(['Top songs this month']);
+    // Weighed as 0.35 × familiarity against 0.15 × popularity: 0.35 × 0.35 < 0.15 × 0.9 < 0.35 × 0.4.
+    expect(at(0.35, 0.9)).toEqual(['Crowd favourite', 'Top songs this month']);
+    expect(at(0.4, 0.9)).toEqual(['Top songs this month', 'Crowd favourite']);
+  });
+
+  it('never gives a listening reason for a song you do not know, such as a catalogue song', () => {
+    const p = { comfort: 0.9, familiarity: 1, popularity: 0.9, penalty: 0 };
+    const easy = { difficulty: 'easy' as const, side: 'top' as const };
+    expect(reasonsFor(p, easy, { known: false })).toEqual(['In your sweet spot', 'Crowd favourite']);
+    expect(reasonsFor({ ...p, familiarity: 0.4 }, easy, { known: false })).toEqual(['In your sweet spot', 'Crowd favourite']);
+    // Not even when the track says where it was heard.
+    expect(reasonsFor(p, easy, { known: false, topLists: ['short_term'], recentPlays: 5, inPlaylist: true })).toEqual(['In your sweet spot', 'Crowd favourite']);
+    expect(reasonsFor(p, easy, thisMonth)).toEqual(['In your sweet spot', 'Top songs this month']);
+
+    // A catalogue track has familiarity 1 so comfort alone decides its fit, and is not known.
+    const popular = song(57, 63, { usdbViews: 99_999, usdbRating: 5 });
+    const catalogue = match(track('cat', { familiarity: 1, known: false }), popular);
+    const library = match(track('lib', { familiarity: 1, ...thisMonth }), popular);
+    expect(catalogue.reasons).toEqual(['In your sweet spot', 'Crowd favourite']);
+    expect(library.reasons).toEqual(['In your sweet spot', 'Top songs this month']);
+    expect(catalogue.score).toBeCloseTo(library.score!);
+  });
+
+  it('keeps the reasons of saved-only songs, whose familiarity is below the threshold', () => {
+    const savedOnly = match(track('saved', { familiarity: 0.15, known: false, saved: true }), song(57, 63));
+    const unflagged = match(track('old', { familiarity: 0.15 }), song(57, 63));
+    expect(savedOnly.reasons).toEqual(['In your sweet spot']);
+    expect(unflagged.reasons).toEqual(savedOnly.reasons);
+  });
+
+  it('gives a scored match reasons that match its label and its listening', () => {
     const hard = match(track('h', { familiarity: 0.9 }), song(60, 71, { pitchShare: [[60, 0.85], [71, 0.15]] }));
     expect(hard.difficulty).toBe('hard');
     expect(hard.parts!.comfort).toBeGreaterThan(0.8);
     expect(hard.reasons).not.toContain('In your sweet spot');
-    expect(hard.reasons![0]).toBe('Spends time at your top');
+    expect(hard.reasons![0]).toBe('Lots of high notes');
+    const played = match(track('p', { familiarity: 0.9, known: true, topLists: ['long_term'], recentPlays: 2 }), song(57, 63));
+    expect(played.reasons).toEqual(['In your sweet spot', 'Played recently']);
+  });
+});
+
+describe('catalogue rank: what the no-Spotify catalogue is picked by (QWW-32)', () => {
+  const none = song(55, 65);
+
+  it('is the popularity score without Spotify, from USDB and karaoke numbers alike', () => {
+    expect(catalogueRank(none, { views: 5_000 }, undefined)).toBeCloseTo(onUsdbViews(5_000));
+    expect(catalogueRank(none, undefined, { karaokeViews: KARAOKE_TOP })).toBeCloseTo(onKaraoke(KARAOKE_TOP));
+    expect(catalogueRank(none, undefined, { chartRank: 58 })).toBe(CHART_FLOOR.top100);
+    expect(catalogueRank(none, { views: 0 }, { karaokeViews: KARAOKE_TOP })).toBeCloseTo((onUsdbViews(0) + onKaraoke(KARAOKE_TOP)) / 2);
+  });
+
+  it('puts a song with no popularity at all below every song with some, even a score of 0', () => {
+    expect(catalogueRank(none, undefined, undefined)).toBe(-1);
+    expect(catalogueRank(none, {}, {})).toBe(-1);
+    expect(catalogueRank(none, { views: 0 }, undefined)).toBe(onUsdbViews(0));
+    expect(popularityScore(track('x'), none)).toBe(UNKNOWN_POPULARITY); // what scoring alone would give it
+  });
+
+  it("takes the range's own USDB views over the USDB row's, as the catalogue scores it", () => {
+    const own = song(55, 65, { usdbViews: 99_999 });
+    expect(catalogueRank(own, { views: 9 }, undefined)).toBeCloseTo(onUsdbViews(99_999));
+    expect(catalogueRank(none, { views: 9 }, undefined)).toBeCloseTo(onUsdbViews(9));
+  });
+
+  it('orders highest first, then by song key', () => {
+    const rows = [
+      { key: 'b|song', rank: 0.5 },
+      { key: 'a|song', rank: -1 },
+      { key: 'c|song', rank: 0.9 },
+      { key: 'a|other', rank: 0.5 },
+    ];
+    expect(rows.sort(byCatalogueRank).map((r) => r.key)).toEqual(['c|song', 'a|other', 'b|song', 'a|song']);
+  });
+});
+
+describe('pickCatalogue: which songs the catalogue holds (QWW-32)', () => {
+  it('keeps the most popular up to the limit, plus every Year-End song below them, in catalogue order', () => {
+    const rows = [
+      { key: 'a', rank: 0.9, charted: false },
+      { key: 'b', rank: 0.2, charted: true },
+      { key: 'c', rank: 0.8, charted: false },
+      { key: 'd', rank: 0.5, charted: false },
+      { key: 'e', rank: 0.95, charted: true },
+    ];
+    expect(pickCatalogue(rows, 2).map((r) => r.key)).toEqual(['e', 'a', 'b']);
+    expect(pickCatalogue(rows, 0).map((r) => r.key)).toEqual(['e', 'b']);
+    expect(pickCatalogue(rows, 10).map((r) => r.key)).toEqual(['e', 'a', 'c', 'd', 'b']);
   });
 });

@@ -1,6 +1,6 @@
 // Plain-words text and geometry for the screen. No music jargon reaches the user.
 
-import type { DataSourceLogEntry, Label, LogOutcome, Midi, OctaveShift, SongRange, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, Label, LogOutcome, Match, Midi, OctaveShift, SliderId, SongRange, VocalRange } from '../contracts';
 import { midiToNoteName } from '../audio/notes';
 
 export function difficultyLabel(d: Label): string {
@@ -49,7 +49,12 @@ export interface Span {
 
 export interface RangeBar {
   user: Span;
+  /** The song as the user will sing it (octave shift applied). */
   song: Span;
+  /** The song as recorded, drawn faintly, when it is sung an octave away; clipped to the bar. */
+  original?: { left: number; width: number };
+  /** Share of sung time per bin across the user's range, as bar heights 0 to 100 (tallest bin 100). */
+  shape?: number[];
 }
 
 const PAD = 2; // semitones of breathing room at each end
@@ -59,7 +64,7 @@ const PAD = 2; // semitones of breathing room at each end
  * When the song fits an octave up or down, the song span shows the notes the
  * user will actually sing.
  */
-export function rangeBar(user: VocalRange, song: SongRange, octave: OctaveShift): RangeBar {
+export function rangeBar(user: VocalRange, song: SongRange, octave: OctaveShift, shape?: number[]): RangeBar {
   const shift = octave === 'up' ? 12 : octave === 'down' ? -12 : 0;
   const songLow = song.low + shift;
   const songHigh = song.high + shift;
@@ -71,7 +76,15 @@ export function rangeBar(user: VocalRange, song: SongRange, octave: OctaveShift)
     low: midiToNoteName(lo),
     high: midiToNoteName(hi),
   });
-  return { user: span(user.low, user.high), song: span(songLow, songHigh) };
+  const bar: RangeBar = { user: span(user.low, user.high), song: span(songLow, songHigh) };
+  if (shift !== 0) {
+    const lo = Math.max(min, song.low);
+    const hi = Math.min(max, song.high);
+    if (hi > lo) bar.original = { left: span(lo, hi).left, width: span(lo, hi).width };
+  }
+  const tallest = Math.max(0, ...(shape ?? []));
+  if (shape && tallest > 0) bar.shape = shape.map((b) => Math.round((100 * b) / tallest));
+  return bar;
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
@@ -85,3 +98,36 @@ export function scalePosition(midi: number): number {
   const p = ((midi - SCALE_LOW) / (SCALE_HIGH - SCALE_LOW)) * 100;
   return Math.max(0, Math.min(100, round(p)));
 }
+
+// ---- results view (QWW-3) ----
+
+/** Which reasons speak to each slider, so the reason line leads with why the song is where it is. */
+const SLIDER_REASONS: Record<SliderId, RegExp> = {
+  difficulty: /^(In your sweet spot|Mostly comfortable|(?:Some|Lots of) (?:high|low) notes)$/,
+  familiarity: /^(Top songs(?: this month|, past 6 months| this past year)|Played recently|In your playlists|You (play this a lot|know this one))$/,
+  popularity: /^Crowd favourite/,
+  tempo: /^(?!)/, // no reason line speaks to tempo
+};
+
+/** The song's reasons with the one that matches the leading slider first (unchanged when no slider leads). */
+export function reasonsForSlider(reasons: string[] | undefined, lead: SliderId | null): string[] {
+  const list = reasons ?? [];
+  if (!lead) return list;
+  const re = SLIDER_REASONS[lead];
+  return [...list.filter((r) => re.test(r)), ...list.filter((r) => !re.test(r))];
+}
+
+/** "Take Lady Gaga's part" for a duet matched on one part; null for everything else. */
+export function duetPartLine(m: Pick<Match, 'part' | 'partSinger' | 'range'>): string | null {
+  if (!m.range.duet || !m.part) return null;
+  const singer = m.partSinger?.trim();
+  return singer ? `Duet: take ${singer}'s part` : `Duet: take part ${m.part}`;
+}
+
+/** "Queen · 1975", or just the artist when the year is unknown. */
+export function artistLine(m: Pick<Match, 'track' | 'year'>): string {
+  return typeof m.year === 'number' ? `${m.track.artist} · ${m.year}` : m.track.artist;
+}
+
+/** Catalogue songs have no Spotify track of their own, only a search. */
+export const isCatalogueTrack = (trackId: string) => trackId.startsWith('cat:');

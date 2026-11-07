@@ -1,11 +1,18 @@
+import type { Mood } from '../contracts';
+import { parseShippedMoods } from './moods';
+import { pickStoreKind } from './getStore';
 import type { SpotifyConfig } from './spotify';
 
 export interface ServerConfig {
   sessionSecret: string;
-  /** Empty = admin log disabled (always 403). */
+  /** Empty = admin pages disabled (always 403). */
   adminToken: string;
   spotifyMock: boolean;
   spotify: SpotifyConfig;
+  /** Whether POST /api/events stores the beta events it is sent (EVENTS; see eventsOn). */
+  collectEvents: boolean;
+  /** Moods allowed on screen (MOODS_SHIPPED), once they pass the QWW-11 gate. Empty = no mood chips. */
+  moodsShipped: Mood[];
 }
 
 export function readConfig(env: Record<string, string | undefined> = process.env): ServerConfig {
@@ -18,7 +25,21 @@ export function readConfig(env: Record<string, string | undefined> = process.env
       clientSecret: env.SPOTIFY_CLIENT_SECRET ?? '',
       redirectUri: env.SPOTIFY_REDIRECT_URI ?? '',
     },
+    collectEvents: eventsOn(env),
+    moodsShipped: parseShippedMoods(env.MOODS_SHIPPED),
   };
+}
+
+/**
+ * The beta event log's kill switch. EVENTS=on or EVENTS=off decides; any other value counts as
+ * off, so a typo never turns collection on. Unset, events are kept only by a production build
+ * with real Spotify and Postgres, so tests, e2e (production build, mock Spotify, memory store)
+ * and local dev collect nothing.
+ */
+export function eventsOn(env: Record<string, string | undefined>): boolean {
+  const v = env.EVENTS?.trim().toLowerCase();
+  if (v) return v === 'on';
+  return env.NODE_ENV === 'production' && env.SPOTIFY_MOCK !== '1' && pickStoreKind(env) === 'postgres';
 }
 
 /** Problems that stop sign-in from working, for a clear 500 instead of a confusing failure. */

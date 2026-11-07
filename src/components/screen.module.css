@@ -4,6 +4,9 @@
   min-height: 100vh;
   min-height: 100svh;
   display: grid;
+  /* minmax(0, 1fr) and min-width: 0 below keep wide content (the sideways-scrolling pill rows)
+     from stretching the TV past the screen; the rows scroll instead. */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   padding: 16px;
   background: radial-gradient(ellipse 70% 55% at 50% 45%, rgba(255, 46, 147, 0.07), transparent 70%), var(--bg);
@@ -11,6 +14,7 @@
 
 .tv {
   width: min(100%, 880px);
+  min-width: 0;
   height: min(calc(100svh - 32px), 660px);
   display: flex;
   flex-direction: column;
@@ -419,6 +423,12 @@
   align-items: center;
 }
 
+.rangeGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .rangeChip {
   font-size: 12px;
   letter-spacing: 0.06em;
@@ -435,36 +445,50 @@
   text-decoration: underline dotted;
   text-underline-offset: 3px;
   cursor: pointer;
-}
-
-.rangeWarning {
-  margin: 8px 0 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--faint);
-  border-radius: 12px;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.rangeWarning p {
-  margin: 0 0 8px;
-}
-
-.rangeWarningActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
+  transition: color 0.15s;
 }
 
 .redo {
   border: 1px solid var(--faint);
-  border-radius: 999px;
+  border-radius: var(--squircle);
   background: none;
   padding: 4px 12px;
   font-size: 12px;
   color: var(--dim);
   cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+/* Load more: the same quiet outline as redo, a little bigger. */
+.loadMore {
+  border: 1px solid var(--faint);
+  border-radius: var(--squircle);
+  background: none;
+  padding: 7px 18px;
+  font-size: 13px;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+/* Redo, Load more and the range notes are quiet until pointed at, then pink. Hover only where a
+   pointer can hover, so a tap on a phone does not leave them pink. */
+@media (hover: hover) {
+  .redo:hover,
+  .loadMore:hover {
+    border-color: var(--pink);
+    color: var(--pink);
+  }
+  .rangeNote:hover {
+    color: var(--pink);
+  }
+}
+
+.redo:focus-visible,
+.loadMore:focus-visible,
+.rangeNote:focus-visible {
+  border-color: var(--pink);
+  color: var(--pink);
 }
 
 .songList {
@@ -548,11 +572,35 @@
 
 .songReasons {
   font-size: 12px;
-  color: var(--pink);
-  opacity: 0.8;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.35;
+  /* Pink at 80%, as a colour rather than opacity, so a word being sung can flash brighter. */
+  color: rgba(255, 46, 147, 0.8);
+  /* Wraps between reasons (each keeps its own spaces), never mid-reason and never cut off. */
+  overflow-wrap: anywhere;
+}
+
+/* Each word waits faint until its row scrolls into view, then is sung in like a lyric. */
+.songReasons[data-sing='waiting'] .reasonWord {
+  opacity: 0.22;
+}
+
+.songReasons[data-sing='singing'] .reasonWord {
+  animation: singReason 0.9s ease-out both;
+}
+
+/* The lyric's flash (see sing), settling back to the line's own pink instead of white. */
+@keyframes singReason {
+  0% {
+    opacity: 0.22;
+  }
+  25% {
+    opacity: 1;
+    color: var(--pink);
+    text-shadow: 0 0 12px var(--pink-glow);
+  }
+  100% {
+    opacity: 1;
+  }
 }
 
 .songMeta {
@@ -587,7 +635,7 @@
   flex: none;
   display: inline-block;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -608,7 +656,7 @@
 .more {
   min-width: 160px;
   padding: 12px 22px;
-  border-radius: 999px;
+  border-radius: 16px;
   border: 1.5px solid var(--pink);
   background: rgba(255, 46, 147, 0.08);
   color: var(--ink);
@@ -687,71 +735,114 @@
   color: var(--dim);
 }
 
+/* The range bar: two shades only. Your range is the grey stretch, the song the pink one.
+   Note names wait below it and show on hover, focus or a tap. */
 .rangeBar {
   width: 100%;
   max-width: 460px;
   padding: 0 34px;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .barTrack {
   position: relative;
-  height: 64px;
+  height: 10px;
+  border-radius: 5px;
+}
+
+.barUser,
+.barSong {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 5px;
 }
 
 .barUser {
-  position: absolute;
-  top: 22px;
-  height: 22px;
-  border-radius: 11px;
-  border: 1px solid rgba(244, 241, 246, 0.22);
-  background: rgba(244, 241, 246, 0.05);
-}
-
-.barUser .barEndLow,
-.barUser .barEndHigh {
-  top: calc(100% + 6px);
+  background: rgba(244, 241, 246, 0.2);
 }
 
 .barSong {
-  position: absolute;
-  top: 30px;
-  height: 6px;
-  border-radius: 3px;
   background: var(--pink);
   box-shadow: 0 0 10px var(--pink-glow), 0 0 22px rgba(255, 46, 147, 0.35);
 }
 
-.barSong .barEndLow,
-.barSong .barEndHigh {
-  bottom: calc(100% + 22px);
-  color: var(--pink);
+.barOriginal {
+  position: absolute;
+  top: -3px;
+  height: calc(100% + 6px);
+  border: 1px dashed rgba(244, 241, 246, 0.35);
+  border-radius: 5px;
+  box-sizing: border-box;
 }
 
-.barEndLow,
-.barEndHigh {
+/* Where the song's singing time sits across your range: taller is more of the song. Sits over your
+   range, so a song that is mostly in the middle shows a hump there. */
+.barShape {
+  position: relative;
+  height: 28px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.barShape i {
+  flex: 1;
+  border-radius: 2px 2px 0 0;
+  background: rgba(255, 46, 147, 0.28);
+}
+
+.barNames {
+  position: relative;
+  height: 34px;
+  margin-top: 6px;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.rangeBar:hover .barNames,
+.rangeBar[data-open] .barNames {
+  opacity: 1;
+  transform: none;
+}
+
+.barNameSong,
+.barNameUser {
   position: absolute;
+  transform: translateX(-50%);
   font-size: 11px;
-  color: var(--dim);
+  line-height: 1;
   white-space: nowrap;
 }
 
-.barEndLow {
-  left: 0;
-  transform: translateX(-50%);
+.barNameSong {
+  top: 0;
+  color: var(--pink);
 }
 
-.barEndHigh {
-  right: 0;
-  transform: translateX(50%);
+.barNameUser {
+  top: 18px;
+  color: var(--dim);
 }
 
 .barLegend {
   display: flex;
   justify-content: center;
   gap: 18px;
-  margin-top: 18px;
+  margin-top: 4px;
   font-size: 11px;
   color: var(--dim);
+  /* Hidden, not removed, so nothing moves when it shows. */
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.rangeBar:hover .barLegend,
+.rangeBar[data-open] .barLegend {
+  opacity: 1;
 }
 
 .barLegend span {
@@ -763,52 +854,26 @@
 .legendSong,
 .legendUser {
   display: inline-block;
-  width: 16px;
-  height: 4px;
-  border-radius: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
   background: var(--pink);
 }
 
 .legendUser {
-  height: 8px;
-  border: 1px solid rgba(244, 241, 246, 0.3);
-  background: rgba(244, 241, 246, 0.05);
+  background: rgba(244, 241, 246, 0.2);
+}
+
+.legendOriginal {
+  background: transparent;
+  border: 1px dashed rgba(244, 241, 246, 0.5);
+  box-sizing: border-box;
 }
 
 .tags {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.infoWrap {
-  position: relative;
-}
-
-.info {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid var(--faint);
-  background: none;
-  font-size: 13px;
-  font-style: italic;
-  font-family: Georgia, serif;
-  color: var(--dim);
-  cursor: pointer;
-}
-
-.tooltip {
-  margin: -10px 0 0;
-  max-width: 300px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: #1d1a22;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--ink);
-  text-align: center;
 }
 
 .octave {
@@ -837,7 +902,7 @@
   color: var(--ink);
   text-decoration: none;
   padding: 10px 20px;
-  border-radius: 999px;
+  border-radius: 16px;
   border: 1px solid var(--faint);
 }
 
@@ -886,7 +951,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .word {
+  .word,
+  .songReasons[data-sing] .reasonWord {
     opacity: 1;
     animation: none;
   }
@@ -897,19 +963,499 @@
   }
   .holdButton,
   .holdDot,
-  .pitchDot {
+  .pitchDot,
+  .accountMenu {
     transition: none;
   }
 }
 
+/* Sources and credits: a pale book in the bottom right corner, there when wanted, never in the way. */
 .credits {
+  align-self: flex-end;
+  display: flex;
+  margin: 4px -6px -10px 0;
+  padding: 6px;
+  border-radius: var(--squircle);
+  color: rgba(244, 241, 246, 0.26);
+  transition: color 0.15s;
+}
+
+.credits:hover,
+.credits:focus-visible {
+  color: var(--dim);
+}
+
+/* ---- results view: Tune (sliders, pink) and Pick (chips, cyan) (QWW-3) ---- */
+
+/* Connect to Spotify: just the logo, grey until hovered, with its name in a tooltip. Signed in
+   (connectOn), it is Spotify green all the time. */
+.connect {
+  position: relative;
+  display: flex;
+  border: 0;
+  border-radius: var(--squircle);
+  background: none;
+  padding: 4px;
+  color: rgba(244, 241, 246, 0.4);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.connect:hover,
+.connect:focus-visible,
+.connectOn {
+  color: #1db954;
+}
+
+.connectTip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 2;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: #1c1a21;
+  box-shadow: 0 0 0 1px var(--faint);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.connect:hover .connectTip,
+.connect:focus-visible .connectTip {
+  opacity: 1;
+  transform: none;
+}
+
+/* Signed in: the green logo opens a small box saying who is signed in, with Log out. Pointing at the
+   logo shows it where a pointer can hover; a tap opens and closes it (data-open) everywhere else. */
+.account {
+  position: relative;
+  display: flex;
+}
+
+.accountMenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 2;
+  /* The padding bridges the gap to the logo, so the pointer can cross it without losing the box. */
+  padding-top: 6px;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.15s, transform 0.15s, visibility 0s linear 0.15s;
+}
+
+.account[data-open] .accountMenu {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  transition-delay: 0s;
+}
+
+@media (hover: hover) {
+  .account:hover .accountMenu {
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+    transition-delay: 0s;
+  }
+}
+
+.accountBox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+  width: max-content;
+  max-width: min(300px, 78vw);
+  padding: 4px 6px 4px 12px;
+  border-radius: 10px;
+  background: #1c1a21;
+  box-shadow: 0 0 0 1px var(--faint);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.accountName {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.logout {
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  padding: 6px;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--faint);
+  text-underline-offset: 3px;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+
+.logout:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .logout:hover:not(:disabled) {
+    color: var(--pink);
+    text-decoration-color: var(--pink);
+  }
+}
+
+.logout:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 1px;
+}
+
+.accountError {
+  flex-basis: 100%;
+  margin: 0 0 6px;
+}
+
+.controls {
+  width: 100%;
+  min-width: 0;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Two panels of the same shape, both about choosing: sliders in pink, chips in cyan. Same padding,
+   so the TUNE and PICK titles line up. */
+.tune,
+.pick {
+  min-width: 0;
+  padding: 8px 12px 10px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.tune {
+  padding-bottom: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 46, 147, 0.12);
+}
+
+.tune:focus:not(:focus-visible),
+.pick:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.pick {
+  box-shadow: inset 0 0 0 1px rgba(60, 229, 255, 0.12);
+}
+
+.controlsHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 16px;
+  margin-bottom: 2px;
+}
+
+.pick .controlsHead {
+  margin-bottom: 6px;
+}
+
+.tuneLabel,
+.pickLabel {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.tuneLabel {
+  color: var(--pink);
+}
+
+.pickLabel {
+  color: var(--cyan);
+}
+
+.controlsCount {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.headAction {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+/* Reset: a quiet circular-arrow icon button in the panel's header, grey, pink when pointed at. Its
+   box is padded for a finger and given negative margins, so the header does not grow with it. */
+.headIcon {
+  align-self: center;
+  display: flex;
+  margin: -6px -6px -6px auto;
+  border: 0;
+  border-radius: var(--squircle);
+  background: none;
+  padding: 6px;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+@media (hover: hover) {
+  .headIcon:hover {
+    color: var(--pink);
+  }
+}
+
+.sliderRow {
+  display: grid;
+  grid-template-columns: 76px 1fr 76px;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+}
+
+.sliderEnd {
+  font-size: 11px;
+  line-height: 1.1;
+  color: var(--dim);
+}
+
+.sliderEnd:last-child {
+  text-align: right;
+}
+
+.sliderRow[data-active] .sliderEnd {
+  color: var(--ink);
+}
+
+/* The range input, drawn by hand: a thin track and a squircle thumb that lights up once set. */
+.slider {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--faint);
+}
+
+.slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--faint);
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -9px;
+  border: 0;
+  border-radius: 8px;
+  /* 3.4:1 against the panel, so an untouched slider still reads as a control. */
+  background: #6b6675;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 8px;
+  background: #6b6675;
+}
+
+/* Pink up to the thumb's centre only, grey past it: how far along, not the whole line. */
+.sliderRow[data-active] .slider::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    90deg,
+    var(--pink) 0 calc(11px + (100% - 22px) * var(--fill)),
+    var(--faint) calc(11px + (100% - 22px) * var(--fill)) 100%
+  );
+}
+
+/* Pink up to the thumb's centre only, grey past it: how far along, not the whole line. */
+.sliderRow[data-active] .slider::-moz-range-track {
+  background: linear-gradient(
+    90deg,
+    var(--pink) 0 calc(11px + (100% - 22px) * var(--fill)),
+    var(--faint) calc(11px + (100% - 22px) * var(--fill)) 100%
+  );
+}
+
+.sliderRow[data-active] .slider::-webkit-slider-thumb {
+  background: var(--pink);
+  box-shadow: 0 0 14px -2px var(--pink-glow);
+}
+
+.sliderRow[data-active] .slider::-moz-range-thumb {
+  background: var(--pink);
+  box-shadow: 0 0 14px -2px var(--pink-glow);
+}
+
+/* No focus ring on the slider: Chrome shows it after a mouse or finger drag too, as a rounded border
+   around the row. Keyboard focus shows as a pink thumb instead. */
+.slider:focus-visible {
+  outline: none;
+}
+
+.slider:focus-visible::-webkit-slider-thumb {
+  background: var(--pink);
+}
+
+.slider:focus-visible::-moz-range-thumb {
+  background: var(--pink);
+}
+
+/* One row of chips; it scrolls sideways on a phone instead of the page. */
+.chipRows {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* One facet per line (decades, then moods and duets); a line wraps instead of scrolling sideways. */
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.chip {
+  flex: none;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--squircle);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.chip[aria-pressed='true'] {
+  background: var(--cyan);
+  color: var(--bg);
+  box-shadow: 0 0 16px -4px var(--cyan-glow);
+}
+
+.chip:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.chip:focus-visible,
+.connect:focus-visible,
+.headAction:focus-visible,
+.headIcon:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.chipCount {
+  margin-left: 3px;
+  font-weight: 500;
+  opacity: 0.6;
+}
+
+.chip[aria-pressed='true'] .chipCount {
+  opacity: 0.75;
+}
+
+.savedDivider {
   display: block;
-  margin: 24px auto 8px;
+  padding: 14px 4px 2px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.songList li.afterDivider {
+  border-top: none;
+}
+
+.catalogueNote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--dim);
   text-align: center;
+}
+
+.catalogueNote p {
+  margin: 0;
+}
+
+.detailFacts {
+  margin: 4px 0 0;
   font-size: 13px;
   color: var(--dim);
 }
 
-.tooltip a {
-  color: var(--ink);
+/* Squircles: where the browser can draw them (corner-shape), corners become continuous curves like
+   Apple's; elsewhere the same elements keep plain rounded corners. */
+@supports (corner-shape: squircle) {
+  .chip,
+  .connect,
+  .redo,
+  .loadMore,
+  .more,
+  .spotify,
+  .pill,
+  .pillQuiet,
+  .slider::-webkit-slider-thumb,
+  .tune,
+  .pick {
+    corner-shape: squircle;
+  }
+  .more,
+  .spotify {
+    border-radius: 22px;
+  }
+  .chip,
+  .connect,
+  .redo,
+  .loadMore {
+    border-radius: 16px;
+  }
+  .pill,
+  .pillQuiet {
+    border-radius: 12px;
+  }
+  .tune,
+  .pick {
+    border-radius: 26px;
+  }
 }

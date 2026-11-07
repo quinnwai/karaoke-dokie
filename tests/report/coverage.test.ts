@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { SongRange, Track } from '../../src/lib/contracts';
 import { coverageCsv, coverageReport, looseKey } from '../../src/lib/report/coverage';
+import { createMemoryStore } from '../../src/lib/server/memoryStore';
+import { productionSongDeps } from '../../src/lib/server/wiring';
 import { songKey } from '../../src/lib/songs/resolve';
 
 const track = (id: string, artist: string, title: string, playRank: number): Track => ({ id, artist, title, artistId: 'a', spotifyUrl: '', playRank });
@@ -48,6 +50,16 @@ describe('coverageReport', () => {
     expect(ob).toMatchObject({ status: 'artist estimate', why: 'Not on USDB (USDB has 2 other songs by this artist)' });
     expect(un).toMatchObject({ status: 'none', why: 'Artist not on USDB', fit: '' });
     expect(em).toMatchObject({ status: 'note file', fit: 'wider than your range', appRank: null });
+  });
+
+  it('scores a duet on the part that fits, as the app does', () => {
+    const t = track('1', 'Duo', 'Duet Song', 0);
+    const parts = [{ low: 40, high: 74, tessitura: 57, fastLyrics: false }, { low: 56, high: 64, tessitura: 60, fastLyrics: false }];
+    const duet: SongRange = { ...range(40, 74), duet: true, parts };
+    const { rows } = coverageReport({ tracks: [t], ranges: new Map([[songKey('Duo', 'Duet Song'), duet]]), index: [], userRange: user });
+    const app = productionSongDeps(createMemoryStore(), false).matchSong(t, duet, user)!;
+    expect(app.part).toBe(2);
+    expect(rows[0]).toMatchObject({ fit: 'fits', appRank: 1, score: Math.round(app.score! * 100) / 100 });
   });
 
   it('writes a CSV with a header and quotes cells that need it', () => {

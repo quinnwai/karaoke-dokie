@@ -15,11 +15,17 @@ export interface UsdbSongRow {
   id: number;
   artist: string;
   title: string;
+  /** The edition cell of a detailed list row, when filled in (e.g. "[DUET]" or "SingStar Duets"). */
+  edition?: string;
   /** Page views (last cell) and star rating 0-5 (cell before it), when the row has them. */
   views?: number;
   rating?: number;
   /** USDB's last-changed time (epoch seconds), from the row's data-lastchange. */
   lastChange?: number;
+  /** Genre, year and language as USDB lists them (the note file's #GENRE, #YEAR, #LANGUAGE), from a full row. */
+  genre?: string;
+  year?: number;
+  language?: string;
 }
 
 export interface UsdbSong {
@@ -51,8 +57,12 @@ export interface UsdbClient {
   login(): Promise<void>;
   /** Searches by artist and title and returns the note file text, or null when USDB has no match. */
   findNoteFile(artist: string, title: string): Promise<string | null>;
-  /** Like findNoteFile, plus the song's views and rating. `download: false` only searches (fast). */
-  findSong(artist: string, title: string, opts?: { download?: boolean }): Promise<UsdbSong | null>;
+  /**
+   * Like findNoteFile, plus the song's views and rating. `download: false` only searches (fast).
+   * `duet: true` only takes a row listed as a duet (isDuetListing), so when USDB has a song both
+   * as "Song" and "Song [DUET]" (one songKey) it gets the duet upload.
+   */
+  findSong(artist: string, title: string, opts?: { download?: boolean; duet?: boolean }): Promise<UsdbSong | null>;
   /** One page (100 rows) of USDB's song list, by id or by last change. Empty past the end. */
   listSongs(opts: { order: 'id' | 'lastchange'; descending?: boolean; start: number }): Promise<UsdbSongRow[]>;
   /** The note file for a known USDB id (waits out the countdown), or null. */
@@ -78,12 +88,25 @@ function decodeEntities(s: string): string {
 
 const stripTags = (s: string) => decodeEntities(s.replace(/<[^>]*>/g, '')).trim();
 
-/** Song rows from a search result page (rows carry data-songid; artist and title are cells 3 and 4). */
-export function parseSongList(html: string): UsdbSongRow[] {
+/**
+ * A list row with details: sample, cover, artist, title, genre, year, edition, golden notes,
+ * language, creator, rating, views. Genre, year and language are only read from a row with exactly
+ * this many cells, since their place in a different layout is unknown.
+ */
+const FULL_ROW_CELLS = 12;
+
+/**
+ * Song rows from a search result page (rows carry data-songid; artist and title are cells 3 and 4).
+ * `now` sets the latest year accepted (next year).
+ */
+export function parseSongList(html: string, now: Date = new Date()): UsdbSongRow[] {
   const rows: UsdbSongRow[] = [];
   const rowRe = /<tr([^>]*data-songid="(\d+)"[^>]*)>([\s\S]*?)<\/tr>/g;
   for (const m of html.matchAll(rowRe)) {
     const cells = [...m[3]!.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((c) => c[1]!);
+    // Since late 2026 a logged-in list ends each row with a download button, a cell with no text
+    // after Views; drop such trailing cells so Views is last again.
+    while (cells.length > 4 && !stripTags(cells[cells.length - 1]!) && !/<img[^>]*star/i.test(cells[cells.length - 1]!)) cells.pop();
     if (cells.length < 4) continue;
     const row: UsdbSongRow = { id: Number(m[2]), artist: stripTags(cells[2]!), title: stripTags(cells[3]!) };
     const changed = /data-lastchange="(\d+)"/.exec(m[1]!);
@@ -94,9 +117,37 @@ export function parseSongList(html: string): UsdbSongRow[] {
       if (views !== undefined) row.views = views;
       if (rating !== undefined) row.rating = rating;
     }
+    // A detailed row has 12 cells: sample, cover, artist, title, genre, year, edition, golden
+    // notes, language, creator, rating, views.
+    if (cells.length === FULL_ROW_CELLS) {
+      const genre = stripTags(cells[4]!);
+      const year = parseYear(cells[5]!, now);
+      const edition = stripTags(cells[6]!);
+      const language = stripTags(cells[8]!);
+      if (genre) row.genre = genre;
+      if (year !== undefined) row.year = year;
+      if (edition) row.edition = edition;
+      if (language) row.language = language;
+    }
     rows.push(row);
   }
   return rows;
+}
+
+/**
+ * True when USDB lists a song as a duet: "duet" anywhere in its title or edition, any case, with
+ * or without brackets ("Song [DUET]", "Song (Duet)", "SingStar Duets", German "Duett").
+ */
+export function isDuetListing(row: { title: string; edition?: string }): boolean {
+  return /duet/i.test(row.title) || /duet/i.test(row.edition ?? '');
+}
+
+/** A 4-digit year from 1900 to next year; undefined otherwise (the cell is whatever the note file's #YEAR says). */
+function parseYear(cell: string, now: Date): number | undefined {
+  const text = stripTags(cell);
+  if (!/^\d{4}$/.test(text)) return undefined;
+  const year = Number(text);
+  return year >= 1900 && year <= now.getUTCFullYear() + 1 ? year : undefined;
 }
 
 /** A whole number like "1000" or "1.234" (thousands separator); undefined when the cell is not one. */
@@ -192,12 +243,12 @@ export function createUsdbClient(opts: UsdbClientOptions): UsdbClient {
     return parseNoteText(await request(params, { wd: '1' }));
   }
 
-  async function findSong(artist: string, title: string, { download: fetchNotes = true } = {}): Promise<UsdbSong | null> {
+  async function findSong(artist: string, title: string, { download: fetchNotes = true, duet = false } = {}): Promise<UsdbSong | null> {
     await login();
     const cleanTitle = searchTitle(title);
     const list = await request({ link: 'list' }, { interpret: artist, title: cleanTitle, details: '1', limit: '30', start: '0' });
     const want = songKey(artist, cleanTitle);
-    const hit = parseSongList(list).find((row) => songKey(row.artist, row.title) === want);
+    const hit = parseSongList(list).find((row) => songKey(row.artist, row.title) === want && (!duet || isDuetListing(row)));
     if (!hit) return null;
     const song: UsdbSong = { id: hit.id, noteText: fetchNotes ? await download(hit.id) : null };
     if (hit.views !== undefined) song.views = hit.views;

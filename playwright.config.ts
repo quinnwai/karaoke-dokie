@@ -20,6 +20,14 @@ export default defineConfig({
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: true,
     timeout: 180_000,
-    env: { KARAOKE_STORE: 'memory', SPOTIFY_MOCK: '1', SESSION_SECRET: 'e2e-secret-e2e-secret-e2e-secret!!', ADMIN_TOKEN: 'e2e-admin' },
+    env: {
+      KARAOKE_STORE: 'memory',
+      SPOTIFY_MOCK: '1',
+      SESSION_SECRET: 'e2e-secret-e2e-secret-e2e-secret!!',
+      ADMIN_TOKEN: 'e2e-admin',
+      // The demo's placeholder mood labels on screen, and the event log on, so e2e covers both.
+      MOODS_SHIPPED: 'upbeat,heartfelt',
+      EVENTS: 'on',
+    },
   },
 });

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { difficultyLabel, octaveWording, rangeBar, scalePosition, sourceTooltip } from '../../src/lib/client/display';
-import type { SongRange, VocalRange } from '../../src/lib/contracts';
+import { difficultyLabel, octaveWording, rangeBar, reasonsForSlider, scalePosition, sourceTooltip } from '../../src/lib/client/display';
+import { SLIDER_IDS, type SongRange, type Track, type VocalRange } from '../../src/lib/contracts';
+import { reasonsFor } from '../../src/lib/songs/score';
 import { source } from '../fixtures/screen';
 
 const user: VocalRange = { low: 45, high: 72, source: 'test' }; // A2 to C5
@@ -30,6 +31,22 @@ describe('rangeBar', () => {
     expect(rangeBar(user, song(40, 52), 'up').song).toMatchObject({ low: 'E3', high: 'E4' });
   });
 
+  it('draws an octave song as it is sung, with the recording as a ghost clipped to the bar', () => {
+    // Rasputin-like: recorded F#3 to D5 (54 to 74) is sung an octave down, so the bar shows 42 to 62 and never passes the user's range.
+    const bar = rangeBar({ low: 39, high: 63, source: 'test' }, song(54, 74), 'down');
+    expect(bar.song).toMatchObject({ low: 'F#2', high: 'D4' });
+    expect(bar.song.left + bar.song.width).toBeLessThanOrEqual(bar.user.left + bar.user.width);
+    expect(bar.original).toBeDefined();
+    expect(bar.original!.left + bar.original!.width).toBeLessThanOrEqual(100);
+    expect(rangeBar(user, song(50, 64), 'none').original).toBeUndefined();
+  });
+
+  it('scales the time-in-range shape so the tallest bin is 100, and has none without a histogram', () => {
+    expect(rangeBar(user, song(50, 64), 'none', [0, 10, 40, 20, 0, 0, 0, 0, 0, 0, 0, 0]).shape).toEqual([0, 25, 100, 50, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(rangeBar(user, song(50, 64), 'none').shape).toBeUndefined();
+    expect(rangeBar(user, song(50, 64), 'none', new Array(12).fill(0)).shape).toBeUndefined();
+  });
+
   it('keeps spans inside 0..100', () => {
     for (const [lo, hi] of [[30, 90], [45, 72], [60, 61]] as const) {
       const bar = rangeBar(user, song(lo, hi), 'none');
@@ -51,6 +68,70 @@ describe('wording', () => {
 
   it('difficulty labels', () => {
     expect(['easy', 'medium', 'hard', 'maybe'].map((d) => difficultyLabel(d as 'easy'))).toEqual(['Easy', 'Medium', 'Hard', 'Maybe']);
+  });
+});
+
+describe('reasonsForSlider', () => {
+  const RANGE_REASONS = [
+    'In your sweet spot',
+    'Mostly comfortable',
+    'Some high notes',
+    'Some low notes',
+    'Lots of high notes',
+    'Lots of low notes',
+  ];
+
+  const LISTENING_REASONS = [
+    'Top songs this month',
+    'Top songs, past 6 months',
+    'Played recently',
+    'Top songs this past year',
+    'In your playlists',
+    'You play this a lot',
+    'You know this one',
+  ];
+
+  it('leads with the range reason when the difficulty slider moved last', () => {
+    for (const range of RANGE_REASONS) {
+      expect(reasonsForSlider(['Played recently', range], 'difficulty')).toEqual([range, 'Played recently']);
+      expect(reasonsForSlider(['Crowd favourite', range], 'popularity')).toEqual(['Crowd favourite', range]);
+    }
+  });
+
+  it('leads with the listening reason when the familiarity slider moved last', () => {
+    for (const heard of LISTENING_REASONS) {
+      expect(reasonsForSlider(['In your sweet spot', heard], 'familiarity')).toEqual([heard, 'In your sweet spot']);
+      expect(reasonsForSlider([heard, 'In your sweet spot'], 'difficulty')).toEqual(['In your sweet spot', heard]);
+      expect(reasonsForSlider([heard, 'Crowd favourite'], 'popularity')).toEqual(['Crowd favourite', heard]);
+    }
+  });
+
+  it('matches every reason a song can get to its own slider and to no other', () => {
+    const bySlider = { difficulty: new Set<string>(), familiarity: new Set<string>(), popularity: new Set<string>() };
+    const none = { comfort: 0, familiarity: 0, popularity: 0, penalty: 0 };
+    for (const difficulty of ['easy', 'medium', 'hard'] as const) {
+      for (const side of ['top', 'bottom'] as const) reasonsFor({ ...none, comfort: 0.9 }, { difficulty, side }).forEach((r) => bySlider.difficulty.add(r));
+    }
+    for (const comfort of [0.6, 0.9]) reasonsFor({ ...none, comfort }).forEach((r) => bySlider.difficulty.add(r));
+    const heard: Partial<Track>[] = [{}, { topLists: ['short_term'] }, { topLists: ['medium_term'] }, { recentPlays: 1 }, { topLists: ['long_term'] }, { inPlaylist: true }];
+    for (const t of heard) {
+      for (const familiarity of [0.3, 0.6]) reasonsFor({ ...none, familiarity }, undefined, t).forEach((r) => bySlider.familiarity.add(r));
+    }
+    reasonsFor({ ...none, popularity: 0.9 }).forEach((r) => bySlider.popularity.add(r));
+    expect([...bySlider.difficulty].sort()).toEqual([...RANGE_REASONS].sort());
+    expect([...bySlider.familiarity].sort()).toEqual([...LISTENING_REASONS].sort());
+    expect([...bySlider.popularity]).toEqual(['Crowd favourite']);
+
+    for (const [slider, reasons] of Object.entries(bySlider)) {
+      for (const reason of reasons) {
+        for (const lead of SLIDER_IDS) expect(reasonsForSlider(['Other', reason], lead)[0]).toBe(lead === slider ? reason : 'Other');
+      }
+    }
+  });
+
+  it('keeps the order when no slider leads, and copes with no reasons', () => {
+    expect(reasonsForSlider(['Crowd favourite', 'In your sweet spot'], null)).toEqual(['Crowd favourite', 'In your sweet spot']);
+    expect(reasonsForSlider(undefined, 'difficulty')).toEqual([]);
   });
 });
 
