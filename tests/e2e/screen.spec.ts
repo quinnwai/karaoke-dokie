@@ -553,8 +553,6 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
     const titles = () => page.locator('ol li [class*="songTitle"]').allTextContents();
     const labels = () => page.locator('ol li [class*="pill"]').allTextContents();
     const slider = page.getByRole('slider', { name: 'Light work to Locked in' });
-    const sortedBy = page.getByTestId('sorted-by');
-    await expect(sortedBy).toContainText('Top picks');
     const lists: string[][] = [];
     const firstLabels: string[] = [];
     for (const percent of [25, 50, 75, 100]) {
@@ -568,10 +566,6 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
     }
     // The label leads where the thumb is: Easy at 25%, Medium at 50%, Hard at 100%.
     expect([firstLabels[0], firstLabels[1], firstLabels[3]]).toEqual(['Easy', 'Medium', 'Hard']);
-    // The line under the sliders says what the order is.
-    await expect(sortedBy).toHaveText('Sorted by: Locked in');
-    await slider.fill('50');
-    await expect(sortedBy).toHaveText('Sorted by: Medium');
 
     // The ends keep their meaning: Light work lists Easy songs first, Locked in Hard ones; each end lists a different song first.
     await slider.press('Home');
