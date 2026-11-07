@@ -8,6 +8,7 @@
 // popularity (KaraFun views, Billboard Year-End rank), whatever measured its range.
 
 import type { DataSourceLogEntry, Match, RecommendationsResponse, SongRange, Track, VocalRange } from '../contracts';
+import { partRange } from '../songs/match';
 import { hasLittleSinging } from '../songs/resolve';
 import { withKaraokePopularity } from '../songs/score';
 import { tempoOf } from '../tempo/tempo';
@@ -117,7 +118,9 @@ export function recommendCatalogue(
     const scored = withKaraokePopularity(scoringRange(song.range, song.usdb), song.popularity);
     const fit = deps.matchSong(song.track, scored, userRange);
     if (!fit) continue;
-    const m: Match = { ...fit, range: song.range };
+    // The stored range, not the scored copy. A duet is shown as the part it matched (toMatch), so its
+    // range is that part's: the whole song's is part 1's, and the bar would draw the other singer's notes.
+    const m: Match = { ...fit, range: fit.part === undefined ? song.range : partRange(song.range, fit.part) };
     if (song.usdb?.year !== undefined) {
       m.year = song.usdb.year;
       m.yearSource = 'usdb';

@@ -154,6 +154,35 @@ describe('catalogue recommendations', () => {
     expect(tracks[0]!.range.parts![0]!.pitchShare).toEqual(share);
   });
 
+  it('sends a duet with the range of the part it matched, so the bar is the notes you sing (QWW-33, Rasputin)', () => {
+    // D#2 to D#4. Part 1 sings F#4 to D6, out of reach even an octave down; part 2 sings B3 to B4, which fits an octave down.
+    const part1: [number, number][] = [[66, 0.7], [86, 0.3]];
+    const rasputin = range(66, 86, {
+      duet: true,
+      usdbId: 12261,
+      pitchShare: part1,
+      parts: [
+        { low: 66, high: 86, tessitura: 71, pitchShare: part1, fastLyrics: false },
+        { low: 59, high: 71, tessitura: 65, pitchShare: [[59, 0.5], [64, 0.4], [71, 0.1]], fastLyrics: false },
+      ],
+    });
+    const mine: VocalRange = { low: 39, high: 63, source: 'test' };
+    const tracks = catalogueTracks([song('Boney M.', 'Rasputin', rasputin, { views: 99_999, rating: 5 })]);
+    const { matches } = recommendCatalogue(tracks, mine, deps, { all: true });
+    expect(matches).toHaveLength(1);
+    const [m] = matches;
+    expect(m).toMatchObject({ part: 2, octave: 'down' });
+    // Part 2's own range, not the whole song's (which is part 1's): sung an octave down it stays inside D#2 to D#4.
+    expect(m!.range).toMatchObject({ low: 59, high: 71, tessitura: 65, duet: true });
+    expect(m!.range.low - 12).toBeGreaterThanOrEqual(mine.low);
+    expect(m!.range.high - 12).toBeLessThanOrEqual(mine.high);
+    // Still the stored range: both parts kept, no histograms, none of the popularity it was scored with.
+    expect(m!.range.parts).toHaveLength(2);
+    expect(m!.range).not.toHaveProperty('pitchShare');
+    expect(m!.range).not.toHaveProperty('usdbViews');
+    expect(m!.range.usdbId).toBe(12261);
+  });
+
   it('pages never repeat or skip a song, and carry only their own sources', () => {
     const tracks = catalogueTracks(
       Array.from({ length: 8 }, (_, i) => song('Artist', `Song ${i}`, range(54 + (i % 4), 62 + (i % 3)), i % 2 ? { views: 100 * i } : undefined)),
