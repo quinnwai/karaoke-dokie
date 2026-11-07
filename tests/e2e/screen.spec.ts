@@ -604,16 +604,31 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
       strain: 0.1,
       shape: [0, 4, 12, 24, 30, 20, 8, 2, 0, 0, 0, 0],
     };
+    // Rasputin as the catalogue serves it (the real numbers): a duet matched on part 2, which sings B3 to B4
+    // (part 1 sings F#4 to D6, out of reach). The range sent is the matched part's, so sung an octave down it
+    // is B2 to B3, inside D#2 to D#4; with the whole song's range (part 1's) the bar ran past D5.
     const octave: Match = {
       track: track('b2', 'Rasputin [DUET]', 'Boney M.', 1),
-      // Recorded F#3 to D5, sung an octave down: F#2 to D4, inside D#2 to D#4.
-      range: { low: 54, high: 74, tessitura: 62, source: 'note-file', confidence: 'high', fastLyrics: false },
+      range: {
+        low: 59,
+        high: 71,
+        tessitura: 64.8,
+        source: 'note-file',
+        confidence: 'high',
+        fastLyrics: false,
+        duet: true,
+        parts: [
+          { low: 66, high: 86, tessitura: 71.5, fastLyrics: false },
+          { low: 59, high: 71, tessitura: 64.8, fastLyrics: false },
+        ],
+      },
+      part: 2,
       difficulty: 'easy',
       octave: 'down',
       parts: { comfort: 0.9, familiarity: 1, popularity: 0.8, popularityKnown: true, penalty: 0 },
       reasons: ['In your sweet spot'],
-      strain: 0.2,
-      shape: [0, 0, 6, 14, 22, 26, 18, 10, 4, 0, 0, 0],
+      strain: 0.06,
+      shape: [0, 0, 0, 1, 10, 21, 15, 25, 13, 9, 6, 0],
     };
     api.response = { matches: [easy, octave], nextOffset: null, sources: {}, complete: true } as RecommendationsResponse;
     const context = await browser.newContext({ ...(viewport.width < 600 ? iPhone : {}), viewport, baseURL, reducedMotion: 'reduce' });
@@ -631,6 +646,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
     await page.getByRole('button', { name: 'Back to songs' }).click();
     await page.getByRole('button', { name: /^Rasputin/ }).click();
     await expect(page.getByRole('heading', { name: 'Rasputin [DUET]' })).toBeVisible();
+    await expect(page.getByText('Duet: take part 2')).toBeVisible();
     await expect(page.locator('[class*="barOriginal"]')).toHaveCount(1);
     // The song as sung never passes the end of your range, so nothing looks like an overflow.
     const user = (await page.locator('[class*="barUser"]').boundingBox())!;
