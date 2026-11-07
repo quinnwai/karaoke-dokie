@@ -83,7 +83,10 @@ source as measured, and `combineTempo` (`src/lib/tempo/tempo.ts`) picks the song
 it is read, so changing the rule needs no refetch: Deezer's `bpm` (median over the studio versions
 looked at, each folded into range), else a beat tracker (librosa) on the 30 s Deezer preview, else
 UltraStar's `#BPM` divided by 4; when Deezer and the tracker disagree, whichever UltraStar's tempo
-agrees with. Preview audio is deleted as soon as it is measured.
+agrees with. A Deezer tempo of 130 or more is halved when the tracker or the grid sits at about half of it
+(Deezer's bpm for a slow song is often double: Hotel California 147, felt 74). Tempos checked by ear in
+`data/tempo-gold.json` (the felt tempo: the pulse where the snare lands on beats 2 and 4) stand ahead of
+every measured source (`tempoOf(record, key)`, `src/lib/tempo/reviewed.ts`). Preview audio is deleted as soon as it is measured.
 
 - `npm run tempo:fill -- --max-minutes 30`, repeated until it reports nothing left: Deezer bpm and the
   tracker, for songs `popularity:deezer` matched, most popular first. Needs `DATABASE_URL`, and

@@ -105,6 +105,14 @@ export function difficultyFromEdgeTime({ outer, edge }: EdgeTime): Difficulty {
   return 'easy';
 }
 
+/**
+ * How hard a song is inside its difficulty label, 0 to 3 (Match.strain): the edge-eighth share counts
+ * twice, since those notes are also outside the middle half. Same numbers as the label itself.
+ */
+export function strainOf({ outer, edge }: EdgeTime): number {
+  return 2 * edge + outer;
+}
+
 export const SHIFTS: { octave: OctaveShift; semitones: number }[] = [
   { octave: 'none', semitones: 0 },
   { octave: 'down', semitones: -12 },

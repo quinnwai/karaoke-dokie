@@ -128,6 +128,9 @@ export interface ScoreParts {
 export type Mood = 'upbeat' | 'heartfelt';
 export const MOODS: Mood[] = ['upbeat', 'heartfelt'];
 
+/** Bins in Match.shape. */
+export const SHAPE_BINS = 12;
+
 export interface Match {
   track: Track;
   range: SongRange;
@@ -138,6 +141,17 @@ export interface Match {
   parts?: ScoreParts;
   /** One or two short reasons for the rank, e.g. "In your sweet spot". */
   reasons?: string[];
+  /**
+   * How hard the song is inside its label, 0 to 3: twice the share of sung time in the edge eighths of
+   * the singer's range plus the share outside the middle half. The Light work to Locked in slider
+   * sorts by the label, then this (QWW-33), so the slider and the label are one measure.
+   */
+  strain?: number;
+  /**
+   * Where the song's sung time sits across the singer's range, as it is sung (octave shift applied):
+   * SHAPE_BINS whole percents, lowest note first. Unset for a song with no pitch histogram.
+   */
+  shape?: number[];
   /**
    * Release year: the earliest of USDB's year for the song and Spotify's album year. A song with
    * neither gets the year of its best Billboard Year-End rank ('chart'), which can be a year late.

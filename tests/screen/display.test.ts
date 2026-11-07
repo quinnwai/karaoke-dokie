@@ -31,6 +31,22 @@ describe('rangeBar', () => {
     expect(rangeBar(user, song(40, 52), 'up').song).toMatchObject({ low: 'E3', high: 'E4' });
   });
 
+  it('draws an octave song as it is sung, with the recording as a ghost clipped to the bar', () => {
+    // Rasputin-like: recorded F#3 to D5 (54 to 74) is sung an octave down, so the bar shows 42 to 62 and never passes the user's range.
+    const bar = rangeBar({ low: 39, high: 63, source: 'test' }, song(54, 74), 'down');
+    expect(bar.song).toMatchObject({ low: 'F#2', high: 'D4' });
+    expect(bar.song.left + bar.song.width).toBeLessThanOrEqual(bar.user.left + bar.user.width);
+    expect(bar.original).toBeDefined();
+    expect(bar.original!.left + bar.original!.width).toBeLessThanOrEqual(100);
+    expect(rangeBar(user, song(50, 64), 'none').original).toBeUndefined();
+  });
+
+  it('scales the time-in-range shape so the tallest bin is 100, and has none without a histogram', () => {
+    expect(rangeBar(user, song(50, 64), 'none', [0, 10, 40, 20, 0, 0, 0, 0, 0, 0, 0, 0]).shape).toEqual([0, 25, 100, 50, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(rangeBar(user, song(50, 64), 'none').shape).toBeUndefined();
+    expect(rangeBar(user, song(50, 64), 'none', new Array(12).fill(0)).shape).toBeUndefined();
+  });
+
   it('keeps spans inside 0..100', () => {
     for (const [lo, hi] of [[30, 90], [45, 72], [60, 61]] as const) {
       const bar = rangeBar(user, song(lo, hi), 'none');

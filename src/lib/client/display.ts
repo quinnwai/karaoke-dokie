@@ -49,7 +49,12 @@ export interface Span {
 
 export interface RangeBar {
   user: Span;
+  /** The song as the user will sing it (octave shift applied). */
   song: Span;
+  /** The song as recorded, drawn faintly, when it is sung an octave away; clipped to the bar. */
+  original?: { left: number; width: number };
+  /** Share of sung time per bin across the user's range, as bar heights 0 to 100 (tallest bin 100). */
+  shape?: number[];
 }
 
 const PAD = 2; // semitones of breathing room at each end
@@ -59,7 +64,7 @@ const PAD = 2; // semitones of breathing room at each end
  * When the song fits an octave up or down, the song span shows the notes the
  * user will actually sing.
  */
-export function rangeBar(user: VocalRange, song: SongRange, octave: OctaveShift): RangeBar {
+export function rangeBar(user: VocalRange, song: SongRange, octave: OctaveShift, shape?: number[]): RangeBar {
   const shift = octave === 'up' ? 12 : octave === 'down' ? -12 : 0;
   const songLow = song.low + shift;
   const songHigh = song.high + shift;
@@ -71,7 +76,15 @@ export function rangeBar(user: VocalRange, song: SongRange, octave: OctaveShift)
     low: midiToNoteName(lo),
     high: midiToNoteName(hi),
   });
-  return { user: span(user.low, user.high), song: span(songLow, songHigh) };
+  const bar: RangeBar = { user: span(user.low, user.high), song: span(songLow, songHigh) };
+  if (shift !== 0) {
+    const lo = Math.max(min, song.low);
+    const hi = Math.min(max, song.high);
+    if (hi > lo) bar.original = { left: span(lo, hi).left, width: span(lo, hi).width };
+  }
+  const tallest = Math.max(0, ...(shape ?? []));
+  if (shape && tallest > 0) bar.shape = shape.map((b) => Math.round((100 * b) / tallest));
+  return bar;
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;

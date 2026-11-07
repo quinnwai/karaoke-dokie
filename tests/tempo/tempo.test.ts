@@ -73,9 +73,28 @@ describe('combineTempo', () => {
     // no grid: Deezer
     expect(combineTempo({ deezerBpm: 90, trackerBpm: 117 })).toEqual({ tempo: 90, source: 'deezer' });
   });
+  it('takes the half when another source confirms it: Deezer 147 for Hotel California, tracker 74', () => {
+    expect(combineTempo({ deezerBpm: 147.1, trackerBpm: 74.2 })).toEqual({ tempo: 74.2, source: 'tracker' });
+    // The UltraStar grid (#BPM / 4, folded) can confirm it too.
+    expect(combineTempo({ deezerBpm: 148, ultrastarBpm: 296 })).toEqual({ tempo: 74, source: 'ultrastar' });
+  });
+  it('keeps Deezer when nothing confirms the half, below the double-time floor, or when the other source agrees with it', () => {
+    expect(combineTempo({ deezerBpm: 169 })).toEqual({ tempo: 169, source: 'deezer' }); // Take On Me: no second source
+    expect(combineTempo({ deezerBpm: 169, trackerBpm: 168 })).toEqual({ tempo: 169, source: 'deezer' });
+    expect(combineTempo({ deezerBpm: 120, trackerBpm: 60 })).toEqual({ tempo: 120, source: 'deezer' }); // 60 folds to 120, same thing
+    expect(combineTempo({ deezerBpm: 125, trackerBpm: 62 })).toEqual({ tempo: 125, source: 'deezer' }); // 125 is below 130
+  });
   it('tempoOf is the number only', () => {
     expect(tempoOf({ deezerBpm: 100 })).toBe(100);
     expect(tempoOf(undefined)).toBeUndefined();
     expect(tempoOf({})).toBeUndefined();
+  });
+  it('a tempo checked by ear stands ahead of every measured source (QWW-33)', () => {
+    // Deezer's 148 for Hey Jude is double time; the reviewed 74 wins, with or without a stored record.
+    expect(tempoOf({ deezerBpm: 148 }, 'the beatles|hey jude')).toBe(74);
+    expect(tempoOf(undefined, 'the beatles|hey jude')).toBe(74);
+    // A song nobody checked keeps what was measured.
+    expect(tempoOf({ deezerBpm: 148 }, 'some artist|some song')).toBe(148);
+    expect(tempoOf({ deezerBpm: 148 })).toBe(148);
   });
 });

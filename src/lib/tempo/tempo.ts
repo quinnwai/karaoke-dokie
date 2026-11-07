@@ -8,6 +8,8 @@
 // half its speed now and then and a singer feels a song's pulse in that range.
 // Spotify is not a source: its audio features are closed to new apps (Nov 2024).
 
+import { reviewedBpm } from './reviewed';
+
 export const TEMPO_MIN = 70;
 export const TEMPO_MAX = 180;
 
@@ -91,6 +93,9 @@ export interface SongTempoRecord {
 const AGREE = 0.06;
 const agree = (a: number, b: number) => Math.abs(a - b) / Math.max(a, b) <= AGREE;
 
+/** Deezer's bpm from here up is probably double the felt tempo when another source puts it at half (see combineTempo). */
+export const DOUBLE_TIME_FROM = 130;
+
 /**
  * The song's one tempo, with the source that supplied it. Deezer wins when it has one; the tracker
  * stands in when Deezer has none. UltraStar is the last resort, and also the tie-breaker: when
@@ -105,12 +110,23 @@ export function combineTempo(r: Pick<SongTempoRecord, 'deezerBpm' | 'trackerBpm'
   if (deezer !== null && tracker !== null && !agree(deezer, tracker) && grid !== null) {
     if (agree(tracker, grid) && !agree(deezer, grid)) return { tempo: tracker, source: 'tracker' };
   }
+  // Half when confirmed: Deezer's tempo for a slow song is often double (Hotel California 147, felt
+  // 74), and 130 to 180 is also where fast songs live, so Deezer's number alone cannot say. Another
+  // source sitting at half of it can: take that one.
+  if (deezer !== null && deezer >= DOUBLE_TIME_FROM) {
+    const half = deezer / 2;
+    if (tracker !== null && agree(tracker, half)) return { tempo: tracker, source: 'tracker' };
+    if (grid !== null && agree(grid, half)) return { tempo: grid, source: 'ultrastar' };
+  }
   if (deezer !== null) return { tempo: deezer, source: 'deezer' };
   if (tracker !== null) return { tempo: tracker, source: 'tracker' };
   if (grid !== null) return { tempo: grid, source: 'ultrastar' };
   return null;
 }
 
-/** The tempo to sort by, or undefined when no source has one. */
-export const tempoOf = (r: Pick<SongTempoRecord, 'deezerBpm' | 'trackerBpm' | 'ultrastarBpm'> | undefined): number | undefined =>
-  r ? (combineTempo(r)?.tempo ?? undefined) : undefined;
+/**
+ * The tempo to sort by, or undefined when no source has one. A tempo someone checked by ear
+ * (reviewedBpm) stands ahead of the measured ones; pass the song's key to use it.
+ */
+export const tempoOf = (r: Pick<SongTempoRecord, 'deezerBpm' | 'trackerBpm' | 'ultrastarBpm'> | undefined, key?: string): number | undefined =>
+  (key === undefined ? null : foldBpm(reviewedBpm(key))) ?? (r ? (combineTempo(r)?.tempo ?? undefined) : undefined);
