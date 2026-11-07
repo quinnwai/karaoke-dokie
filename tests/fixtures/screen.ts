@@ -202,7 +202,8 @@ export function longList(): RecommendationsResponse {
     return {
       track: { id: `l${i}`, title, artist, artistId: `la${i}`, spotifyUrl: `https://open.spotify.com/track/l${i}`, playRank: i },
       range: { low, high: low + span, tessitura: low + Math.round(span / 2), source: 'note-file', confidence: 'high', fastLyrics: false },
-      difficulty: span > 17 ? 'medium' : 'easy',
+      // Like a real list: mostly Easy, some Medium, a few Hard.
+      difficulty: span >= 18 ? 'hard' : span >= 14 ? 'medium' : 'easy',
       octave: 'none',
       // Comfort takes up what rounding the span to whole semitones left over, so the scores differ.
       parts: { comfort: 1 - (2 * score - span / 27), familiarity: 1, popularity: 0.4, popularityKnown: false, penalty: 0 },

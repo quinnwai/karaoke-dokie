@@ -13,13 +13,14 @@
 //   of the song's beats per minute. Sliders only reorder, so they can never empty
 //   the list either, and every view is computed on the phone in one pass.
 //
-// Two rules from the original ranking hold throughout: Maybe songs (estimated ranges) come last,
-// and, unless the singer sets the "on repeat" slider themselves, songs they know come before
-// saved-only ones. That second rule is the one taste assumption we keep, because every source
-// agrees on it ("pick a song that you know well").
+// Maybe songs (estimated ranges) come last in every view. With no slider set the list stays in the
+// server's Top picks order, which puts songs the singer knows before saved-only ones ("pick a song that
+// you know well"); once any slider is set, the sliders alone order the songs (QWW-33), so that rule
+// does not hold the other sliders back.
 
 import type { Decade, Match, Mood, ResultsMode, ResultsView, SliderId, VocalRange } from '../contracts';
 import { MOODS, SLIDER_IDS } from '../contracts';
+import { difficultyFromEdgeTime, edgeTime, strainOf } from './match';
 import { isKnown } from './rank';
 
 export interface SliderDef {
@@ -84,21 +85,34 @@ export function availableSliders(mode: ResultsMode, _matches: Match[]): SliderId
   return SLIDER_IDS.filter((id) => (id === 'familiarity' ? mode === 'library' : true));
 }
 
-/** Share of the singer's range the song covers: 1 = the song spans the whole range. */
-export function rangeCoverage(m: Match, user: VocalRange): number {
-  const span = user.high - user.low;
-  return span > 0 ? clamp01((m.range.high - m.range.low) / span) : 0;
+/** The three difficulty labels as bands on the Light work to Locked in track, easiest first. */
+const BANDS: Record<string, number> = { easy: 0, medium: 1, hard: 2 };
+
+/**
+ * A song's difficulty band (0 Easy, 1 Medium, 2 Hard) and its strain inside the band. The band is the
+ * label the song shows, from the same edge-time numbers (match.ts); a Maybe song shows no label but
+ * is banded the same way, as if its range were sure. The strain comes with the match (server side,
+ * from the pitch histogram) or is estimated from the range for a match without one.
+ */
+export function difficultyBand(m: Match, user: VocalRange): { band: number; strain: number } {
+  const shift = m.octave === 'up' ? 12 : m.octave === 'down' ? -12 : 0;
+  const edges = m.strain === undefined || BANDS[m.difficulty] === undefined ? edgeTime(user, m.range, shift) : null;
+  const band = BANDS[m.difficulty] ?? BANDS[difficultyFromEdgeTime(edges!)]!;
+  return { band, strain: m.strain ?? strainOf(edges!) };
 }
 
 /**
- * A song's score on a slider, 0 to 1, or null when we do not know. Difficulty is how much of
- * the singer's range the song uses together with how little of it sits in their comfortable middle,
- * so the right end (Locked in) is songs that use your whole range and the left end (Light work) is
- * easy, centred songs. The score only sorts the songs; where a song sits on the track is its rank
- * by this score (sliderPlaces).
+ * A song's score on a slider, or null when we do not know. Difficulty is its label's band plus its
+ * strain inside the band (the label first, then how hard within it), so the slider and the label
+ * are one measure: Locked in is Hard songs, hardest first, then Medium, then Easy. Familiarity,
+ * popularity and tempo are 0 to 1 or bpm. The score only sorts the songs; where a song sits on the
+ * track is its rank by this score (sliderPlaces).
  */
 export function sliderValue(m: Match, id: SliderId, user: VocalRange): number | null {
-  if (id === 'difficulty') return clamp01((rangeCoverage(m, user) + (1 - (m.parts?.comfort ?? 0.5))) / 2);
+  if (id === 'difficulty') {
+    const { band, strain } = difficultyBand(m, user);
+    return band + clamp01(strain / 3) * 0.999;
+  }
   if (id === 'familiarity') return typeof m.parts?.familiarity === 'number' ? clamp01(m.parts.familiarity) : null;
   if (id === 'tempo') return typeof m.tempo === 'number' ? m.tempo : null;
   return m.parts?.popularityKnown ? clamp01(m.parts.popularity) : null;
@@ -125,6 +139,20 @@ export function sliderPlaces(songs: Match[], id: SliderId, user: VocalRange): (n
   });
   scored.sort((a, b) => a.score - b.score || songs[b.at]!.track.playRank - songs[a.at]!.track.playRank || b.at - a.at);
   const places = songs.map((): number | null => null);
+  if (id === 'difficulty') {
+    // Each label gets a third of the track, whatever its share of the songs, and its songs spread
+    // evenly over that third by strain, none on its edge (so no Easy song ties with a Medium one). The
+    // middle of the track is then Medium songs, and the nearer the thumb is to an end the more that
+    // label's songs come first (QWW-33).
+    const byBand: number[][] = [[], [], []];
+    scored.forEach(({ score }, rank) => byBand[Math.floor(score)]!.push(rank));
+    byBand.forEach((ranks, band) =>
+      ranks.forEach((rank, k) => {
+        places[scored[rank]!.at] = (band + (k + 0.5) / ranks.length) / 3;
+      }),
+    );
+    return places;
+  }
   scored.forEach(({ at }, rank) => {
     places[at] = scored.length > 1 ? rank / (scored.length - 1) : 0.5;
   });
@@ -133,6 +161,24 @@ export function sliderPlaces(songs: Match[], id: SliderId, user: VocalRange): (n
 
 export const activeSliders = (view: ResultsView): SliderId[] => SLIDER_IDS.filter((id) => view[id] !== null);
 
+/**
+ * One line under the sliders saying what the order is, so a song's place is never a mystery: the
+ * words at the end each set slider is nearest to (Medium for the middle of the difficulty track),
+ * or what the untouched order is.
+ */
+export function sortedByLine(view: ResultsView, mode: ResultsMode): string {
+  const set = activeSliders(view);
+  if (!set.length) return mode === 'library' ? 'Top picks: songs you know that fit you' : 'Top picks: the best fit, then most popular';
+  const words = set.map((id) => {
+    const def = SLIDERS.find((s) => s.id === id)!;
+    const v = view[id]!;
+    if (v <= 0.33) return def.left;
+    if (v >= 0.67) return def.right;
+    return id === 'difficulty' ? 'Medium' : `${def.left} to ${def.right}, in between`;
+  });
+  return `Sorted by: ${words.join(', ')}`;
+}
+
 /** A song we know nothing about on a slider counts as farther from any target than a song we know. */
 const UNKNOWN_DISTANCE = 1.5;
 
@@ -140,18 +186,15 @@ const UNKNOWN_DISTANCE = 1.5;
  * Orders matches for the sliders that are set. `matches` arrives in the server's Top picks order,
  * which is also the final tie-break; with no slider set, that order is kept as it is.
  *
- * The list is shown in blocks that never mix: songs you know, then saved-only ones (unless you set
- * "on repeat" yourself), with the Maybe songs after both. Each block is laid out on the sliders on
- * its own (sliderPlaces), so the block shown first fills the whole track, whatever the songs after
- * it look like. Within a block, the songs closest to every set target come first.
+ * The Maybe songs come after all the others and are laid out on the sliders on their own
+ * (sliderPlaces), so the block shown first fills the whole track whatever the Maybe songs look like.
+ * Within a block, the songs closest to every set target come first. Songs you know and saved-only
+ * songs are not told apart here: only the unsorted list (and the "on repeat" slider) does that.
  */
-export function orderMatches(matches: Match[], view: ResultsView, user: VocalRange, mode: ResultsMode): Match[] {
+export function orderMatches(matches: Match[], view: ResultsView, user: VocalRange, _mode: ResultsMode): Match[] {
   const sliders = activeSliders(view);
   if (!sliders.length) return [...matches];
-  const maybe = (m: Match) => (m.difficulty === 'maybe' ? 1 : 0);
-  // Setting "on repeat" yourself replaces the known-first rule; catalogue songs are all unknown.
-  const tier = (m: Match) => (mode === 'library' && view.familiarity === null && !isKnown(m.track) ? 1 : 0);
-  const block = (m: Match) => maybe(m) * 2 + tier(m);
+  const block = (m: Match) => (m.difficulty === 'maybe' ? 1 : 0);
 
   const inBlock = new Map<number, number[]>();
   matches.forEach((m, i) => {
@@ -247,10 +290,11 @@ export function viewMatches(matches: Match[], view: ResultsView, user: VocalRang
 
 /**
  * Where the "Saved, not played lately" divider goes: the index of the first saved-only song in
- * the main (non-Maybe) part of the list, or -1 when the known-first rule is off or nothing precedes it.
+ * the main (non-Maybe) part of the list, or -1 when no divider belongs (a slider is set, so the list
+ * is not in Top picks order) or nothing precedes it.
  */
 export function savedDividerIndex(list: Match[], mode: ResultsMode, view: ResultsView = DEFAULT_VIEW): number {
-  if (mode !== 'library' || view.familiarity !== null) return -1;
+  if (mode !== 'library' || activeSliders(view).length > 0) return -1;
   const sure = list.filter((m) => m.difficulty !== 'maybe');
   const first = sure.findIndex((m) => !isKnown(m.track));
   return first > 0 ? first : -1;

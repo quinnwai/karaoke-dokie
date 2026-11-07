@@ -323,7 +323,7 @@ describe('KaraokeApp', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /^Yoru ni Kakeru/ }));
     expect(screen.getByRole('heading', { name: 'Yoru ni Kakeru' })).toBeTruthy();
-    expect(screen.getByRole('img', { name: /Song goes from A#2 to F4. You sing from A2 to C5/ })).toBeTruthy();
+    expect(screen.getByRole('img', { name: /Song goes from A#2 to F4 as you would sing it. You sing from A2 to C5/ })).toBeTruthy();
     expect(screen.getByText('Hard')).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Fast lyrics' })).toBeTruthy();
     expect(screen.getByText('Sing it lower than the artist')).toBeTruthy();

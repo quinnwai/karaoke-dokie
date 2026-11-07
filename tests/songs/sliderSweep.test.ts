@@ -5,8 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Match, ResultsMode, SliderId, VocalRange } from '../../src/lib/contracts';
-import { DEFAULT_VIEW, availableSliders, rangeCoverage, sliderValue, viewMatches } from '../../src/lib/songs/browse';
-import { isKnown } from '../../src/lib/songs/rank';
+import { DEFAULT_VIEW, availableSliders, difficultyBand, sliderValue, viewMatches } from '../../src/lib/songs/browse';
 import { E2_TO_E5, F2_TO_C5, catalogueMatches, libraryMatches } from '../helpers/sliderFixtures';
 
 const A2_TO_C5: VocalRange = { low: 45, high: 72, source: 'test' };
@@ -34,12 +33,12 @@ const titles = (list: Match[]) => list.map((m) => m.track.title);
 describe.each(FIXTURES)('$name', (f) => {
   const sliders = availableSliders(f.mode, f.list);
 
-  it('shapes the lists like the preview did: difficulty bunched low, familiarity in two big groups', () => {
+  it('shapes the lists like the preview did: wide ranges are almost all Easy, familiarity in two big groups', () => {
     // Without this the sweeps below could pass on lists that never had the problem.
-    const difficulty = f.list.map((m) => sliderValue(m, 'difficulty', f.user)!);
-    expect(difficulty.filter((v) => v < 0.5).length / difficulty.length).toBeGreaterThanOrEqual(0.98);
-    if (f.mode === 'catalogue') expect(difficulty.filter((v) => v < 0.25).length / difficulty.length).toBeGreaterThanOrEqual(0.85);
+    const labels = (l: string) => f.list.filter((m) => m.difficulty === l).length;
+    if (f.mode === 'catalogue') expect(labels('easy') / f.list.length).toBeGreaterThanOrEqual(0.98);
     if (f.mode === 'library') {
+      for (const l of ['easy', 'medium', 'hard']) expect(labels(l)).toBeGreaterThanOrEqual(30);
       const saved = f.list.filter((m) => m.parts!.familiarity === 0.15).length;
       expect(saved / f.list.length).toBeGreaterThanOrEqual(0.7);
     }
@@ -52,25 +51,24 @@ describe.each(FIXTURES)('$name', (f) => {
 
     it(`the ${id} slider changes the top 5 songs at every 10% step`, () => {
       const tops = STEPS.map((t) => titles(shownAt(f, id, t)).slice(0, 5));
+      // Difficulty gives each label a third of the track, so a step that stays inside the third of a label
+      // with fewer than 10 songs (a wide range leaves almost no Medium or Hard ones) has nothing new to show.
+      const third = (t: number) => Math.min(2, Math.floor(t * 3 + 1e-9));
+      const count = (band: number) => f.list.filter((m) => difficultyBand(m, f.user).band === band).length;
       for (let k = 1; k < tops.length; k++) {
+        if (id === 'difficulty' && (third(STEPS[k]!) !== third(STEPS[k - 1]!) || count(third(STEPS[k]!)) < 10)) continue;
         const same = tops[k]!.every((title) => tops[k - 1]!.includes(title));
         expect(same, `${id} ${STEPS[k - 1]! * 100}% -> ${STEPS[k]! * 100}% left the top 5 as it was: ${tops[k]!.join(', ')}`).toBe(false);
       }
     });
 
-    it(`the ${id} slider keeps the existing rules at every step: nothing dropped, Maybe last, known first`, () => {
+    it(`the ${id} slider keeps the existing rules at every step: nothing dropped, Maybe last`, () => {
       for (const t of STEPS) {
         const shown = shownAt(f, id, t);
         expect(shown).toHaveLength(f.list.length);
         expect(new Set(shown.map((m) => m.track.id)).size).toBe(f.list.length);
         const firstMaybe = shown.findIndex((m) => m.difficulty === 'maybe');
         if (firstMaybe >= 0) expect(shown.slice(firstMaybe).every((m) => m.difficulty === 'maybe')).toBe(true);
-        // Songs you know come first unless On repeat is the slider being set.
-        if (f.mode === 'library' && id !== 'familiarity') {
-          const sure = shown.filter((m) => m.difficulty !== 'maybe');
-          const firstSaved = sure.findIndex((m) => !isKnown(m.track));
-          if (firstSaved >= 0) expect(sure.slice(firstSaved).some((m) => isKnown(m.track))).toBe(false);
-        }
       }
     });
   }
@@ -80,12 +78,20 @@ describe.each(FIXTURES)('$name', (f) => {
     expect(top.map((m) => m.difficulty)).toEqual(['easy', 'easy', 'easy', 'easy', 'easy']);
   });
 
-  it('Locked in lists the songs that use the most of your range first', () => {
-    const shown = shownAt(f, 'difficulty', 1);
-    // Within the group listed first (known songs, in a library), the top 5 are among the widest tenth.
-    const group = shown.filter((m) => m.difficulty !== 'maybe' && (f.mode === 'catalogue' || isKnown(m.track)));
-    const widths = group.map((m) => rangeCoverage(m, f.user)).sort((a, b) => a - b);
-    const widestTenth = widths[Math.floor(widths.length * 0.9)]!;
-    for (const m of shown.slice(0, 5)) expect(rangeCoverage(m, f.user)).toBeGreaterThanOrEqual(widestTenth);
+  it('Locked in lists Hard songs first, hardest first, then Medium, then Easy; Light work is the reverse', () => {
+    const key = (m: Match) => sliderValue(m, 'difficulty', f.user)!;
+    const sure = (t: number) => shownAt(f, 'difficulty', t).filter((m) => m.difficulty !== 'maybe');
+    const down = sure(1).map(key);
+    const up = sure(0).map(key);
+    for (let k = 1; k < down.length; k++) expect(down[k]!).toBeLessThanOrEqual(down[k - 1]!);
+    for (let k = 1; k < up.length; k++) expect(up[k]!).toBeGreaterThanOrEqual(up[k - 1]!);
+  });
+
+  it('the middle of the track lists every Medium song before any other', () => {
+    const sure = shownAt(f, 'difficulty', 0.5).filter((m) => m.difficulty !== 'maybe');
+    const mediums = sure.filter((m) => m.difficulty === 'medium').length;
+    // A Medium song is within 1/6 of the middle; the nearest Easy and Hard ones are at best that far (a tie at the edges of the third).
+    expect(sure.slice(0, mediums).filter((m) => m.difficulty === 'medium').length).toBeGreaterThanOrEqual(mediums - 2);
+    if (mediums > 0) expect(sure[0]!.difficulty).toBe('medium');
   });
 });

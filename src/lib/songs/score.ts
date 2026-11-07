@@ -14,9 +14,9 @@
 // Year-End hits (popularityScore, POPULARITY_SCALE).
 // Penalties lower a song without hiding it.
 
-import type { Label, Match, OctaveShift, ScoreParts, SongRange, Track, VocalRange } from '../contracts';
+import { SHAPE_BINS, type Label, type Match, type OctaveShift, type ScoreParts, type SongRange, type Track, type VocalRange } from '../contracts';
 import { onScale } from '../popularity/calibrate';
-import { edgeTime } from './match';
+import { edgeTime, strainOf } from './match';
 import { POPULARITY_SCALE } from './popularityScale';
 
 export const WEIGHTS = { fit: 0.85, popularity: 0.15 } as const;
@@ -248,9 +248,33 @@ export function reasonsFor(p: ScoreParts, fit?: FitNote, track?: TrackListening)
     .map((c) => c.text);
 }
 
-/** Adds score, parts and reasons to a match. */
+/**
+ * The song's sung time across the user's range, as it is sung: SHAPE_BINS whole percents, lowest
+ * note first. Undefined when the song has no pitch histogram (its estimate is three lumps, not a shape).
+ */
+export function shapeOf(user: VocalRange, song: SongRange, octave: OctaveShift): number[] | undefined {
+  if (!song.pitchShare?.length || user.high <= user.low) return undefined;
+  const bins = new Array<number>(SHAPE_BINS).fill(0);
+  let total = 0;
+  for (const [midi, share] of song.pitchShare) {
+    const at = (midi + shiftOf(octave) - user.low) / (user.high - user.low);
+    bins[Math.min(SHAPE_BINS - 1, Math.max(0, Math.floor(at * SHAPE_BINS)))]! += share;
+    total += share;
+  }
+  return total > 0 ? bins.map((b) => Math.round((100 * b) / total)) : undefined;
+}
+
+/** Adds score, parts, reasons, strain and the time-in-range shape to a match. */
 export function scoreMatch(user: VocalRange, m: Match): Match {
   const parts = scoreParts(user, m.track, m.range, m.octave);
-  const { side } = edgeTime(user, m.range, shiftOf(m.octave));
-  return { ...m, parts, score: totalScore(parts), reasons: reasonsFor(parts, { difficulty: m.difficulty, side }, m.track) };
+  const edges = edgeTime(user, m.range, shiftOf(m.octave));
+  const shape = shapeOf(user, m.range, m.octave);
+  return {
+    ...m,
+    parts,
+    score: totalScore(parts),
+    reasons: reasonsFor(parts, { difficulty: m.difficulty, side: edges.side }, m.track),
+    strain: strainOf(edges),
+    ...(shape ? { shape } : {}),
+  };
 }

@@ -16,19 +16,27 @@ interface SongDetailProps {
 }
 
 export function RangeBarView({ userRange, match }: { userRange: VocalRange; match: Match }) {
-  const bar = rangeBar(userRange, match.range, match.octave);
+  const bar = rangeBar(userRange, match.range, match.octave, match.shape);
   // Note names stay out of the way until wanted: hover or focus shows them, and so does a tap on a phone.
   const [open, setOpen] = useState(false);
   return (
     <div
       className={styles.rangeBar}
       role="img"
-      aria-label={`Song goes from ${bar.song.low} to ${bar.song.high}. You sing from ${bar.user.low} to ${bar.user.high}.`}
+      aria-label={`Song goes from ${bar.song.low} to ${bar.song.high}${bar.original ? ' as you would sing it' : ''}. You sing from ${bar.user.low} to ${bar.user.high}.${bar.shape ? ' Most of the song sits where the taller bars are.' : ''}`}
       data-open={open || undefined}
       onClick={() => setOpen((o) => !o)}
     >
+      {bar.shape && (
+        <div className={styles.barShape} style={{ left: `${bar.user.left}%`, width: `${bar.user.width}%` }} aria-hidden>
+          {bar.shape.map((h, i) => (
+            <i key={i} style={{ height: `${Math.max(h, 3)}%` }} />
+          ))}
+        </div>
+      )}
       <div className={styles.barTrack}>
         <div className={styles.barUser} style={{ left: `${bar.user.left}%`, width: `${bar.user.width}%` }} />
+        {bar.original && <div className={styles.barOriginal} style={{ left: `${bar.original.left}%`, width: `${bar.original.width}%` }} />}
         <div className={styles.barSong} style={{ left: `${bar.song.left}%`, width: `${bar.song.width}%` }} />
       </div>
       <div className={styles.barNames} aria-hidden>
@@ -40,6 +48,7 @@ export function RangeBarView({ userRange, match }: { userRange: VocalRange; matc
       <div className={styles.barLegend} aria-hidden>
         <span><i className={styles.legendSong} /> song range</span>
         <span><i className={styles.legendUser} /> your range</span>
+        {bar.original && <span><i className={styles.legendOriginal} /> as recorded</span>}
       </div>
     </div>
   );

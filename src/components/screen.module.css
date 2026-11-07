@@ -768,6 +768,32 @@
   box-shadow: 0 0 10px var(--pink-glow), 0 0 22px rgba(255, 46, 147, 0.35);
 }
 
+.barOriginal {
+  position: absolute;
+  top: -3px;
+  height: calc(100% + 6px);
+  border: 1px dashed rgba(244, 241, 246, 0.35);
+  border-radius: 5px;
+  box-sizing: border-box;
+}
+
+/* Where the song's singing time sits across your range: taller is more of the song. Sits over your
+   range, so a song that is mostly in the middle shows a hump there. */
+.barShape {
+  position: relative;
+  height: 28px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.barShape i {
+  flex: 1;
+  border-radius: 2px 2px 0 0;
+  background: rgba(255, 46, 147, 0.28);
+}
+
 .barNames {
   position: relative;
   height: 34px;
@@ -836,6 +862,12 @@
 
 .legendUser {
   background: rgba(244, 241, 246, 0.2);
+}
+
+.legendOriginal {
+  background: transparent;
+  border: 1px dashed rgba(244, 241, 246, 0.5);
+  box-sizing: border-box;
 }
 
 .tags {
@@ -1190,6 +1222,18 @@
   .headIcon:hover {
     color: var(--pink);
   }
+}
+
+.sortedBy {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 11px;
+  color: var(--dim);
+  /* One line, whatever is set, so the box never changes height. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sliderRow {

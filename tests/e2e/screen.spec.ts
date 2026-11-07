@@ -7,7 +7,7 @@
 import { chromium, devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { CatalogueFeedbackRequest, FeedbackRequest, MeResponse, RecommendationsResponse, SongRange, VocalRange } from '../../src/lib/contracts';
+import type { CatalogueFeedbackRequest, FeedbackRequest, Match, MeResponse, RecommendationsResponse, SongRange, VocalRange } from '../../src/lib/contracts';
 import { matchSong, toMatch } from '../../src/lib/songs/match';
 import { correctOctave, type OctaveEvidence } from '../../src/lib/songs/octave';
 import { allMatches, allMatchesWithFacts, knownSongs, longList, match, me } from '../fixtures/screen';
@@ -534,10 +534,10 @@ for (const width of [375, 1280]) {
   });
 }
 
-// QWW-33: the difficulty slider changes the list along its whole length. The long list has the
-// difficulty scores a wide range gives (all under 0.4), so with songs placed by raw score the right
-// 60% of the track listed the same songs first. On a phone (375 px) and a desktop (1280 px), the
-// slider goes to 25, 50, 75 and 100%, and every step shows other songs first.
+// QWW-33: the difficulty slider changes the list along its whole length, and its position means the
+// label the song shows: Easy songs towards Light work, Medium in the middle, Hard towards Locked in.
+// The long list has a few Hard, some Medium and mostly Easy songs. On a phone (375 px) and a desktop
+// (1280 px), the slider goes to 25, 50, 75 and 100%, and every step shows other songs first.
 for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 }]) {
   test(`the difficulty slider changes the list along its whole length, at ${viewport.width} px`, async ({ browser, baseURL }) => {
     const api = freshState();
@@ -551,27 +551,100 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
     await expect(page.locator('ol li')).toHaveCount(5);
 
     const titles = () => page.locator('ol li [class*="songTitle"]').allTextContents();
+    const labels = () => page.locator('ol li [class*="pill"]').allTextContents();
     const slider = page.getByRole('slider', { name: 'Light work to Locked in' });
+    const sortedBy = page.getByTestId('sorted-by');
+    await expect(sortedBy).toContainText('Top picks');
     const lists: string[][] = [];
+    const firstLabels: string[] = [];
     for (const percent of [25, 50, 75, 100]) {
       const before = await titles();
       await slider.fill(String(percent));
       await expect.poll(titles, { message: `the list at ${percent}% is the list before it` }).not.toEqual(before);
       await page.waitForTimeout(300);
       lists.push(await titles());
+      firstLabels.push((await labels())[0]!);
       await shot(page, `qww33-difficulty-${percent}-${viewport.width}px`);
     }
-    // No step keeps a song of the step before it in the top five.
-    for (let k = 1; k < lists.length; k++) {
-      expect(lists[k]!.filter((t) => lists[k - 1]!.includes(t)), `steps ${k - 1} and ${k} share songs`).toEqual([]);
-    }
+    // The label leads where the thumb is: Easy at 25%, Medium at 50%, Hard at 100%.
+    expect([firstLabels[0], firstLabels[1], firstLabels[3]]).toEqual(['Easy', 'Medium', 'Hard']);
+    // The line under the sliders says what the order is.
+    await expect(sortedBy).toHaveText('Sorted by: Locked in');
+    await slider.fill('50');
+    await expect(sortedBy).toHaveText('Sorted by: Medium');
 
-    // The ends keep their meaning: Light work lists the narrowest range first, Locked in the widest.
-    const list = longList().matches;
+    // The ends keep their meaning: Light work lists Easy songs first, Locked in Hard ones; each end lists a different song first.
     await slider.press('Home');
-    await expect.poll(async () => (await titles())[0]).toBe(list[0]!.track.title);
+    await expect.poll(async () => (await labels())[0]).toBe('Easy');
+    const easiest = (await titles())[0];
     await slider.press('End');
-    await expect.poll(async () => (await titles())[0]).toBe(list[list.length - 1]!.track.title);
+    await expect.poll(async () => (await labels())[0]).toBe('Hard');
+    expect((await titles())[0]).not.toBe(easiest);
+    await context.close();
+  });
+}
+
+// QWW-33: the song page shows where the song's singing time sits across your range, so "Easy" is
+// explainable (a song that spans most of your range but sits in the middle), and a song sung an octave
+// away is drawn as you would sing it, with the recording as a dashed outline.
+for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 }]) {
+  test(`the song page shows time in your range and the octave shift, at ${viewport.width} px`, async ({ browser, baseURL }) => {
+    const api = freshState();
+    // D#2 to D#4, the range in the feedback that asked for this.
+    api.user = me({ low: 39, high: 63, source: 'test' });
+    const track = (id: string, title: string, artist: string, playRank: number) => ({
+      id,
+      title,
+      artist,
+      artistId: `a${id}`,
+      spotifyUrl: `https://open.spotify.com/track/${id}`,
+      playRank,
+    });
+    const easy: Match = {
+      track: track('b1', 'Song Sung Blue', 'Neil Diamond', 0),
+      range: { low: 43, high: 60, tessitura: 52, source: 'note-file', confidence: 'high', fastLyrics: false },
+      difficulty: 'easy',
+      octave: 'none',
+      parts: { comfort: 0.9, familiarity: 1, popularity: 0.8, popularityKnown: true, penalty: 0 },
+      reasons: ['In your sweet spot', 'Crowd favourite'],
+      strain: 0.1,
+      shape: [0, 4, 12, 24, 30, 20, 8, 2, 0, 0, 0, 0],
+    };
+    const octave: Match = {
+      track: track('b2', 'Rasputin [DUET]', 'Boney M.', 1),
+      // Recorded F#3 to D5, sung an octave down: F#2 to D4, inside D#2 to D#4.
+      range: { low: 54, high: 74, tessitura: 62, source: 'note-file', confidence: 'high', fastLyrics: false },
+      difficulty: 'easy',
+      octave: 'down',
+      parts: { comfort: 0.9, familiarity: 1, popularity: 0.8, popularityKnown: true, penalty: 0 },
+      reasons: ['In your sweet spot'],
+      strain: 0.2,
+      shape: [0, 0, 6, 14, 22, 26, 18, 10, 4, 0, 0, 0],
+    };
+    api.response = { matches: [easy, octave], nextOffset: null, sources: {}, complete: true } as RecommendationsResponse;
+    const context = await browser.newContext({ ...(viewport.width < 600 ? iPhone : {}), viewport, baseURL, reducedMotion: 'reduce' });
+    await mockApi(context, api);
+    const page = await context.newPage();
+    await page.goto('/');
+
+    await page.getByRole('button', { name: /^Song Sung Blue/ }).click();
+    await expect(page.getByRole('heading', { name: 'Song Sung Blue' })).toBeVisible();
+    await expect(page.locator('[class*="barShape"] i')).toHaveCount(12);
+    await expect(page.locator('[class*="barOriginal"]')).toHaveCount(0);
+    await page.waitForTimeout(300);
+    await shot(page, `qww33-bar-density-${viewport.width}px`);
+
+    await page.getByRole('button', { name: 'Back to songs' }).click();
+    await page.getByRole('button', { name: /^Rasputin/ }).click();
+    await expect(page.getByRole('heading', { name: 'Rasputin [DUET]' })).toBeVisible();
+    await expect(page.locator('[class*="barOriginal"]')).toHaveCount(1);
+    // The song as sung never passes the end of your range, so nothing looks like an overflow.
+    const user = (await page.locator('[class*="barUser"]').boundingBox())!;
+    const song = (await page.locator('[class*="barSong"]').boundingBox())!;
+    expect(song.x + song.width).toBeLessThanOrEqual(user.x + user.width + 0.5);
+    expect(song.x).toBeGreaterThanOrEqual(user.x - 0.5);
+    await page.waitForTimeout(300);
+    await shot(page, `qww33-bar-octave-${viewport.width}px`);
     await context.close();
   });
 }

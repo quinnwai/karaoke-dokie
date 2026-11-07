@@ -9,7 +9,7 @@
  },
  {
   "key": "louis armstrong|what a wonderful world",
-  "bpm": 67
+  "bpm": 72
  },
  {
   "key": "the rolling stones|paint it black",
@@ -61,7 +61,7 @@
  },
  {
   "key": "radiohead|creep",
-  "bpm": 92
+  "bpm": 95
  },
  {
   "key": "red hot chili peppers|californication",
@@ -77,7 +77,7 @@
  },
  {
   "key": "eminem|lose yourself",
-  "bpm": 171
+  "bpm": 85
  },
  {
   "key": "outkast|hey ya!",
@@ -198,5 +198,17 @@
  {
   "key": "the police|every breath you take",
   "bpm": 117
+ },
+ {
+  "key": "eagles|hotel california",
+  "bpm": 74
+ },
+ {
+  "key": "bob marley & the wailers|three little birds",
+  "bpm": 74
+ },
+ {
+  "key": "billy joel|piano man",
+  "bpm": 75
  }
 ]

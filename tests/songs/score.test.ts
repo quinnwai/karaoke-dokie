@@ -43,6 +43,39 @@ const match = (t: Track, r: SongRange): Match => {
   return scoreMatch(user, { track: t, range: r, ...fit });
 };
 
+describe('strain and shape (QWW-33)', () => {
+  it('strain is the label’s own numbers: twice the edge share plus the share outside the middle half', () => {
+    // User C3 to C5 (48 to 72): middle half 54 to 66, edge eighths beyond 51 and 69.
+    const easy = match(track('e'), song(56, 64, { pitchShare: [[56, 0.5], [64, 0.5]] }));
+    const medium = match(track('m'), song(50, 64, { pitchShare: [[50, 0.05], [60, 0.95]] }));
+    const hard = match(track('h'), song(49, 64, { pitchShare: [[49, 0.3], [60, 0.7]] }));
+    expect([easy.difficulty, medium.difficulty, hard.difficulty]).toEqual(['easy', 'medium', 'hard']);
+    expect(easy.strain).toBe(0);
+    expect(medium.strain).toBeCloseTo(0.15);
+    expect(hard.strain).toBeCloseTo(2 * 0.3 + 0.3);
+    expect(easy.strain!).toBeLessThan(medium.strain!);
+    expect(medium.strain!).toBeLessThan(hard.strain!);
+  });
+
+  it('shape is the sung time per twelfth of the user’s range, as sung', () => {
+    const m = match(track('s'), song(48, 60, { pitchShare: [[48, 0.25], [60, 0.75]] }));
+    expect(m.shape).toHaveLength(12);
+    expect(m.shape![0]).toBe(25);
+    expect(m.shape![6]).toBe(75); // 60 is the middle of 48 to 72
+    expect(m.shape!.reduce((a, b) => a + b, 0)).toBe(100);
+    // Sung an octave down: the notes move down 12 semitones, half the range
+    const shifted = scoreMatch(user, { ...match(track('s'), song(60, 72, { pitchShare: [[60, 0.5], [72, 0.5]] })), range: song(60, 84, { pitchShare: [[60, 0.5], [84, 0.5]] }), octave: 'down' });
+    expect(shifted.shape![0]).toBe(50);
+    expect(shifted.shape![11]).toBe(50);
+  });
+
+  it('a song with no pitch histogram has a strain but no shape', () => {
+    const m = match(track('n'), song(55, 65));
+    expect(m.strain).toBeGreaterThanOrEqual(0);
+    expect(m.shape).toBeUndefined();
+  });
+});
+
 describe('comfort', () => {
   it('is 1 in the middle half of the range and falls to 0 at the edges', () => {
     expect(pitchComfort(user, 60)).toBe(1);

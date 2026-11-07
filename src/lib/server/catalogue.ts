@@ -46,7 +46,7 @@ export async function loadCatalogue(
   const [popularity, tempos] = await Promise.all([store.getSongPopularity(keys), store.getSongTempos(keys)]);
   return songs.map((s) => {
     const p = popularity.get(s.key);
-    const tempo = tempoOf(tempos.get(s.key));
+    const tempo = tempoOf(tempos.get(s.key), s.key);
     return { ...s, ...(p ? { popularity: p } : {}), ...(tempo !== undefined ? { tempo } : {}) };
   });
 }

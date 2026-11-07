@@ -14,10 +14,11 @@ import {
   orderMatches,
   pickDecade,
   pickMood,
-  rangeCoverage,
   savedDividerIndex,
+  difficultyBand,
   sliderPlaces,
   sliderValue,
+  sortedByLine,
   toggleDuets,
   viewMatches,
 } from '../../src/lib/songs/browse';
@@ -40,6 +41,7 @@ interface Opts {
   fastLyrics?: boolean;
   duet?: boolean;
   moods?: Mood[];
+  strain?: number;
 }
 
 function match(o: Opts): Match {
@@ -66,6 +68,7 @@ function match(o: Opts): Match {
   };
   if (o.year !== undefined) m.year = o.year;
   if (o.tempo !== undefined) m.tempo = o.tempo;
+  if (o.strain !== undefined) m.strain = o.strain;
   if (o.moods) m.moods = o.moods;
   return m;
 }
@@ -87,13 +90,12 @@ describe('decadeOf', () => {
 });
 
 describe('sliders', () => {
-  // Difficulty values (range use and how little sits in the middle, user span 24):
-  // top1 0.45, top2 0.275, top3 0.81, saved 0.25.
+  // Difficulty: label band, then strain inside it. Easy: top2 0.05, saved 0.1, top1 0.2; Hard: top3 1.2.
   const list = [
-    match({ id: 'top1', familiarity: 0.2, comfort: 0.6, popularity: 0.9 }),
-    match({ id: 'top2', familiarity: 0.9, comfort: 0.95, popularity: 0.2 }),
-    match({ id: 'top3', familiarity: 0.5, comfort: 0.3, popularity: 0.6, difficulty: 'hard', low: 46, high: 68 }),
-    match({ id: 'saved', known: false, familiarity: 0.15, comfort: 1, popularity: 1 }),
+    match({ id: 'top1', familiarity: 0.2, comfort: 0.6, popularity: 0.9, strain: 0.2 }),
+    match({ id: 'top2', familiarity: 0.9, comfort: 0.95, popularity: 0.2, strain: 0.05 }),
+    match({ id: 'top3', familiarity: 0.5, comfort: 0.3, popularity: 0.6, difficulty: 'hard', strain: 1.2 }),
+    match({ id: 'saved', known: false, familiarity: 0.15, comfort: 1, popularity: 1, strain: 0.1 }),
     match({ id: 'maybe', difficulty: 'maybe', familiarity: 1, comfort: 1, popularity: 1 }),
   ];
   const order = (view: Partial<ResultsView>, mode: 'library' | 'catalogue' = 'library') =>
@@ -103,11 +105,17 @@ describe('sliders', () => {
     expect(order({})).toEqual(['top1', 'top2', 'top3', 'saved', 'maybe']);
   });
 
-  it('the difficulty slider runs from comfortable songs to ones using your whole range', () => {
-    expect(order({ difficulty: 0 })).toEqual(['top2', 'top1', 'top3', 'saved', 'maybe']);
-    expect(order({ difficulty: 1 })).toEqual(['top3', 'top1', 'top2', 'saved', 'maybe']);
-    expect(rangeCoverage(list[2]!, user)).toBeCloseTo(22 / 24);
-    expect(sliderValue(list[1]!, 'difficulty', user)).toBeCloseTo(0.275);
+  it('the difficulty slider runs from Easy songs to Hard ones, by the same label the song shows (QWW-33)', () => {
+    expect(order({ difficulty: 0 })).toEqual(['top2', 'saved', 'top1', 'top3', 'maybe']);
+    expect(order({ difficulty: 1 })).toEqual(['top3', 'top1', 'saved', 'top2', 'maybe']);
+    expect(sliderValue(list[2]!, 'difficulty', user)).toBeGreaterThanOrEqual(2);
+    expect(sliderValue(list[1]!, 'difficulty', user)).toBeLessThan(1);
+  });
+
+  it('a song with no strain (an older cached match) is banded from its range and label', () => {
+    // 50 to 62 sung as three lumps (70% at 56, 15% at each end) is Easy in A2 to A4: nothing in an edge eighth.
+    expect(difficultyBand(match({ id: 'x' }), user)).toEqual({ band: 0, strain: expect.any(Number) });
+    expect(difficultyBand(match({ id: 'y', difficulty: 'hard' }), user).band).toBe(2);
   });
 
   it('the on-repeat slider orders by how much you play a song, and replaces the known-first rule', () => {
@@ -147,19 +155,56 @@ describe('sliders', () => {
   });
 
   it('several sliders together put the song closest to every target first', () => {
-    // top2: 0.275 + 0.1; saved: 0.25 + 0.85; top1: 0.45 + 0.8; top3: 0.81 + 0.5.
-    expect(order({ difficulty: 0, familiarity: 1 })).toEqual(['top2', 'saved', 'top1', 'top3', 'maybe']);
+    // Places among the four songs shown first, difficulty then on repeat: top2 (1/18, 1), top1 (5/18, 1/3),
+    // saved (3/18, 0), top3 (15/18, 2/3). Targets 0 and 1: top2 0.06, top1 0.94, saved 1.17, top3 1.17 (a tie: server order).
+    expect(order({ difficulty: 0, familiarity: 1 })).toEqual(['top2', 'top1', 'top3', 'saved', 'maybe']);
   });
 
-  it('keeps known songs before saved-only ones and Maybe songs last, and drops nothing, for any setting', () => {
+  it('keeps Maybe songs last and drops nothing, for any setting', () => {
     for (const difficulty of [null, 0, 0.5, 1]) {
       for (const popularity of [null, 0, 1]) {
         const out = order({ difficulty, popularity });
         expect(out).toHaveLength(list.length);
-        expect(out.indexOf('saved')).toBe(3);
         expect(out[4]).toBe('maybe');
       }
     }
+  });
+
+  it('known songs come before saved-only ones only in the unsorted list and under the on-repeat slider (QWW-33)', () => {
+    // Unsorted: the server's order, known first, with the divider.
+    expect(order({}).indexOf('saved')).toBe(3);
+    expect(savedDividerIndex(list, 'library')).toBe(3);
+    // With only the difficulty slider set, the saved-only song sits where its difficulty puts it, and
+    // there is no divider to explain a split.
+    expect(order({ difficulty: 0 }).indexOf('saved')).toBe(1);
+    expect(savedDividerIndex(list, 'library', { ...DEFAULT_VIEW, difficulty: 0 })).toBe(-1);
+    expect(savedDividerIndex(list, 'library', { ...DEFAULT_VIEW, familiarity: 1 })).toBe(-1);
+  });
+
+  it('the middle of the difficulty track lists Medium songs first, and Easy and Hard fall away from it (QWW-33)', () => {
+    const songs = [
+      ...['e0', 'e1', 'e2', 'e3'].map((id, i) => match({ id, difficulty: 'easy', strain: i * 0.05 })),
+      ...['m0', 'm1', 'm2'].map((id, i) => match({ id, difficulty: 'medium', strain: 0.4 + i * 0.1 })),
+      ...['h0', 'h1'].map((id, i) => match({ id, difficulty: 'hard', strain: 1 + i * 0.3 })),
+    ];
+    const at = (difficulty: number) => ids(orderMatches(songs, { ...DEFAULT_VIEW, difficulty }, user, 'catalogue'));
+    // Each label has a third of the track: a Medium song sits at 1/3, 1/2 or 2/3 whatever the share of Medium songs.
+    const places = [0.5 / 4, 1.5 / 4, 2.5 / 4, 3.5 / 4, 1 + 0.5 / 3, 1 + 1.5 / 3, 1 + 2.5 / 3, 2 + 0.25, 2 + 0.75].map((x) => x / 3);
+    sliderPlaces(songs, 'difficulty', user).forEach((p, i) => expect(p).toBeCloseTo(places[i]!));
+    // In the middle every Medium song is within 1/6 of the thumb, the nearest Easy and Hard ones just as far.
+    expect(at(0.5)[0]).toBe('m1');
+    expect(at(0.5).slice(0, 5)).toEqual(expect.arrayContaining(['m0', 'm1', 'm2']));
+    expect(at(0)[0]).toBe('e0');
+    expect(at(1)[0]).toBe('h1');
+    expect(at(0.9)[0]).toBe('h1');
+  });
+
+  it('says what the order is', () => {
+    expect(sortedByLine(DEFAULT_VIEW, 'library')).toMatch(/^Top picks: songs you know/);
+    expect(sortedByLine(DEFAULT_VIEW, 'catalogue')).toMatch(/^Top picks: the best fit/);
+    expect(sortedByLine({ ...DEFAULT_VIEW, difficulty: 1, popularity: 0.1 }, 'library')).toBe('Sorted by: Locked in, Deep cuts');
+    expect(sortedByLine({ ...DEFAULT_VIEW, difficulty: 0.5 }, 'library')).toBe('Sorted by: Medium');
+    expect(sortedByLine({ ...DEFAULT_VIEW, tempo: 0.5 }, 'library')).toBe('Sorted by: Slow jams to Upbeat tracks, in between');
   });
 
   it('songs at the same distance from a target keep the server order', () => {
@@ -173,7 +218,7 @@ describe('sliders', () => {
   });
 
   it('in catalogue mode no song is treated as saved-only', () => {
-    expect(order({ difficulty: 0 }, 'catalogue')).toEqual(['saved', 'top2', 'top1', 'top3', 'maybe']);
+    expect(order({ difficulty: 0 }, 'catalogue')).toEqual(['top2', 'saved', 'top1', 'top3', 'maybe']);
     expect(savedDividerIndex(list, 'catalogue')).toBe(-1);
   });
 });
@@ -229,19 +274,20 @@ describe('where songs sit on a slider (QWW-33)', () => {
     expect(sliderPlaces([], 'popularity', user)).toEqual([]);
   });
 
-  it('known songs, saved-only songs and Maybe songs each fill the whole track, and stay in that order', () => {
+  it('known and saved-only songs share the track, and Maybe songs fill it on their own, after them (QWW-33)', () => {
     // Known songs are far more popular than the saved-only ones, and the Maybe ones sit in between.
     const pop = (id: string, popularity: number, extra: Partial<Opts> = {}) => match({ id, popularity, popularityKnown: true, ...extra });
     const block = (prefix: string, base: number, extra: Partial<Opts> = {}) =>
       Array.from({ length: 11 }, (_, i) => pop(`${prefix}${i}`, base + i * 0.01, extra));
     const list = [...block('m', 0.5, { difficulty: 'maybe' }), ...block('s', 0.1, { known: false }), ...block('k', 0.85)];
     const at = (t: number) => library(list, { popularity: t });
-    for (const [t, k] of [[0, 0], [0.5, 5], [1, 10]] as const) {
+    // Popularity alone orders them: at Deep cuts the saved-only (least popular) songs come first, at Pop hits the known ones.
+    expect(at(0)[0]).toBe('s0');
+    expect(at(1)[0]).toBe('k10');
+    for (const t of [0, 0.5, 1]) {
       const out = at(t);
-      expect(out.find((id) => id.startsWith('k'))).toBe(`k${k}`);
-      expect(out.find((id) => id.startsWith('s'))).toBe(`s${k}`);
-      expect(out.find((id) => id.startsWith('m'))).toBe(`m${k}`);
-      expect(out.map((id) => id[0]).join('')).toBe('k'.repeat(11) + 's'.repeat(11) + 'm'.repeat(11));
+      expect(out.map((id) => id[0]).join('')).toMatch(/^[ks]{22}m{11}$/);
+      expect(out.find((id) => id.startsWith('m'))).toBe(`m${t * 10}`);
     }
   });
 
