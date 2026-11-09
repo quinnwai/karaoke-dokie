@@ -67,6 +67,6 @@ export const CREDITS: Credit[] = [
   {
     name: 'Spotify',
     url: 'https://developer.spotify.com/',
-    what: 'Your saved songs, top tracks and recent plays.',
+    what: 'Your saved songs, top tracks and recent plays, and the song player (it loads from Spotify, which sets its own cookies).',
   },
 ];

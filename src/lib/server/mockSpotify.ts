@@ -36,6 +36,33 @@ const MOCK_LIBRARY: [string, string, number][] = [
 ];
 const MOCK_TOP_COUNT = 6;
 
+// Real Spotify track ids (each checked against Spotify's embed page for this title and artist), so the song
+// page shows Spotify's player in the offline demo. Songs not listed keep a search link and the plain link.
+const MOCK_TRACK_IDS: Record<string, string> = {
+  "Queen|Bohemian Rhapsody": '7tFiyTwD0nx5a1eklYtX2J',
+  "Omar Apollo|Evergreen": '2TktkzfozZifbQhXjT6I33',
+  "Whitney Houston|I Will Always Love You": '4eHbdreAnSOrDDsFfc4Fpm',
+  "Journey|Don't Stop Believin'": '4bHsxqR3GMrXTxEPLuK5ue',
+  "Justin Bieber|Baby": '6epn3r7S14KUqlReYr77hA',
+  "Adele|Someone Like You": '1zwMYTA5nlNjZxYrvBB2pV',
+  "Bon Jovi|Livin' on a Prayer": '37ZJ0p5Jm13JPevGcx4SkF',
+  "Elvis Presley|Can't Help Falling in Love": '44AyOl4qVkzS48vBsbNXaC',
+  "ABBA|Dancing Queen": '0GjEhVFGZW8afUYGChu3Rr',
+  "Frank Sinatra|My Way": '2yn2CndX7qLoKt0iWs7cy9',
+  "Queen|Don't Stop Me Now": '5T8EDUDqKcs6OSOwEsfqG7',
+  "Whitney Houston|I Wanna Dance with Somebody (Who Loves Me)": '2tUBqZG2AbRi7Q0BIrVrEj',
+  "Justin Bieber|Sorry": '09CtPGIpYB4BrO8qb1RGsF',
+  "Mariah Carey|All I Want for Christmas Is You": '0bYg9bo50gSsH3LtXe2SQn',
+  "Toto|Africa": '2374M0fQpWi3dLnB54qaLX',
+  "a-ha|Take On Me": '2WfaOiMkCvy7F5fcp2zZ8L',
+  "Lady Gaga|Shallow": '2VxeLyX666F8uXCJ0dZF8B',
+  "Ed Sheeran|Perfect": '0tgVpDi06FyKpA1z0VMD4v',
+  "Billy Joel|Piano Man": '70C4NyhjD5OZUMzvWZ3njJ',
+  "Spice Girls|Wannabe": '1Je1IMUlBXcx1Fz0WE7oPT',
+  "Backstreet Boys|I Want It That Way": '47BBI51FKFwOMlIiX6m8ya',
+  "The Killers|Mr. Brightside": '003vvx7Niy0yvhvHt4a68B',
+};
+
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 export const MOCK_TRACKS: Track[] = MOCK_LIBRARY.map(([artist, title, releaseYear], i) => ({
@@ -43,7 +70,9 @@ export const MOCK_TRACKS: Track[] = MOCK_LIBRARY.map(([artist, title, releaseYea
   title,
   artist,
   artistId: `mock-artist-${slug(artist)}`,
-  spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(`${artist} ${title}`)}`,
+  spotifyUrl: MOCK_TRACK_IDS[`${artist}|${title}`]
+    ? `https://open.spotify.com/track/${MOCK_TRACK_IDS[`${artist}|${title}`]}`
+    : `https://open.spotify.com/search/${encodeURIComponent(`${artist} ${title}`)}`,
   playRank: i,
   releaseYear,
 }));
