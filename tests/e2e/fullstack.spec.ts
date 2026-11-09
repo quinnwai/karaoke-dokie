@@ -3,7 +3,9 @@
 // browser. The singing test itself is covered in screen.spec.ts with a fake mic; here the
 // finished test (A2 to C5) is put in sessionStorage, as the screen does after the high note.
 // The placeholder seeds (data/seed-song-ranges.json) give the catalogue every decade, three
-// duets and mood labels; playwright.config.ts ships both moods and turns the event log on.
+// duets and mood labels; playwright.config.ts turns duets and moods on for this server
+// (DUETS_AND_MOODS=on, QWW-43; duets-moods-off.spec.ts covers them off), lists both moods and turns
+// the event log on.
 
 import { devices, expect, test } from '@playwright/test';
 import path from 'node:path';

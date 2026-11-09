@@ -43,7 +43,8 @@ ran out of budget (a first visit to a very large library), `all=1` returns `comp
 | `KARAOKE_STORE` | `memory` forces the in-memory store |
 | `ADMIN_TOKEN` | Token for `/api/admin/log` and `/api/admin/events`; unset disables both |
 | `EVENTS` | `on` or `off`: whether `POST /api/events` stores beta events. Unset or blank, it is on only when `NODE_ENV=production`, `SPOTIFY_MOCK` is not `1` and the store is Postgres, so tests, e2e and local dev collect nothing. Any other value counts as off |
-| `MOODS_SHIPPED` | Comma-separated moods (`upbeat`, `heartfelt`) allowed on screen as chips. Set a mood here only after it passes the QWW-11 precision gate (`npm run moods:report`). Unset = no mood chips |
+| `DUETS_AND_MOODS` | `on` shows duets and moods on screen; unset, blank or any other value (`1`, `true`, a typo) hides them (QWW-43). Off, the four recommendation responses (`/api/recommendations` and `/api/catalogue/recommendations`, paged or `all=1`) carry no `moods` and no duet markers (`range.duet`, `range.parts`, `part`, `partSinger`), so the Duets and mood chips, the "Duet: take ..." lines and the song-page mood pills never appear. It is applied after ranking (`src/lib/server/features.ts`), so the songs and their order are the same either way; a duet is still scored on the part that fits the singer |
+| `MOODS_SHIPPED` | Comma-separated moods (`upbeat`, `heartfelt`) allowed on screen as chips, while `DUETS_AND_MOODS=on`. Set a mood here only after it passes the QWW-11 precision gate (`npm run moods:report`). Unset = no mood chips |
 
 ## Store
 

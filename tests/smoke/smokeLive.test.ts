@@ -59,6 +59,17 @@ describe('the live-data smoke check, edge cases', () => {
     expect(check('x', list, range).join('\n')).toMatch(/no decade data/);
   });
 
+  it('wants duets in a list unless the deployment hides them (DUETS_AND_MOODS off, QWW-43)', () => {
+    const list = many(600, (m, i) => {
+      const { range, ...rest } = healthy(i, m);
+      const { duet: _d, ...solo } = range;
+      return { ...rest, range: solo };
+    });
+    expect(check('x', list, range).join('\n')).toMatch(/no duets/);
+    expect(check('x', list, range, { duets: true }).join('\n')).toMatch(/no duets/);
+    expect(check('x', list, range, { duets: false })).toEqual([]);
+  });
+
   it('fails when coverage is just under the bar', () => {
     const list = many(600, (m, i) => {
       const h = healthy(i, m);

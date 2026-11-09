@@ -23,7 +23,9 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    that reorder and never remove a song, untouched until moved, with a circular-arrow Reset icon
    (`aria-label` "Reset sliders") once one is set (a song sits on a slider by its rank in the list, so
    every tenth of the track holds about a tenth of the songs); and **Pick** (cyan),
-   chips for decades, moods and duets (one pick per row, a count on each, disabled at zero). The
+   chips for decades, and for moods and duets only while the server has `DUETS_AND_MOODS=on` (off by
+   default, QWW-43: it then sends no mood labels or duet markers, so those chips and the "Duet: take ..."
+   lines never appear, and the order of the songs does not change) (one pick per row, a count on each, disabled at zero). The
    lyric line says what the slider moved last does. Songs whose range is only an estimate
    (`difficulty: 'maybe'`) show last in their own "Maybe" list, without a difficulty pill. In
    catalogue mode "Connect Spotify" saves the range for the sign-in round trip; back from Spotify,

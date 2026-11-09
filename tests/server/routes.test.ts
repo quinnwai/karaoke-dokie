@@ -13,16 +13,21 @@ import * as events from '../../app/api/events/route';
 import * as adminEvents from '../../app/api/admin/events/route';
 import * as catalogueRecs from '../../app/api/catalogue/recommendations/route';
 import * as catalogueFeedback from '../../app/api/catalogue/feedback/route';
+import { SLIDER_IDS } from '../../src/lib/contracts';
 import type {
   AdminEventsResponse,
   DataSourceLogEntry,
   KnownSongsResponse,
+  Match,
   MeResponse,
   RecommendationsResponse,
+  ResultsView,
 } from '../../src/lib/contracts';
+import { withoutDuetsAndMoods } from '../../src/lib/server/features';
 import { getStore } from '../../src/lib/server/getStore';
 import { MOCK_USER } from '../../src/lib/server/mockSpotify';
 import { SpotifyError } from '../../src/lib/server/spotify';
+import { availableFacets, DEFAULT_VIEW, orderMatches } from '../../src/lib/songs/browse';
 import { songKey } from '../../src/lib/songs/resolve';
 import { isMeasured } from '../../src/lib/songs/sourceRank';
 import { CHART_FLOOR } from '../../src/lib/songs/score';
@@ -865,6 +870,12 @@ describe('request origin', () => {
 });
 
 describe('shipped mood labels (QWW-11)', () => {
+  // Moods need the DUETS_AND_MOODS switch (QWW-43) and then a mood listed in MOODS_SHIPPED.
+  beforeEach(() => {
+    process.env.DUETS_AND_MOODS = 'on';
+    resetAppContextForTests();
+  });
+
   const catalogueAll = async () =>
     ((await (await catalogueRecs.GET(req('/api/catalogue/recommendations?low=40&high=84&all=1'))).json()) as RecommendationsResponse).matches;
 
@@ -892,6 +903,120 @@ describe('shipped mood labels (QWW-11)', () => {
     await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
     const page = (await (await recs.GET(req('/api/recommendations?offset=0&limit=50', jar))).json()) as RecommendationsResponse;
     expect(page.matches.find((m) => m.track.title === 'Dancing Queen')?.moods).toEqual(['upbeat']);
+  });
+});
+
+// QWW-43: duets and moods are hidden for the first tester release behind one switch, off by default.
+// The promise that matters is that flipping it never changes the ranking for anyone, so these tests
+// run every route that returns songs, over the kinds of range the release is judged on.
+describe('duets and moods switch (QWW-43)', () => {
+  const RANGES: [string, number, number][] = [
+    ['everyone', 40, 84],
+    ['A2 to C5', 45, 72],
+    ['a low voice', 40, 62],
+    ['a high voice', 55, 82],
+    ['a narrow beginner', 50, 68],
+  ];
+
+  /** Every route that returns matches, for one range, with the switch on or off and every mood listed. */
+  async function everyRoute(on: boolean, low: number, high: number) {
+    process.env.DUETS_AND_MOODS = on ? 'on' : '';
+    process.env.MOODS_SHIPPED = 'upbeat,heartfelt';
+    resetAppContextForTests();
+    const get = async (handler: { GET(r: Request): Promise<Response> }, path: string, jar?: Jar) =>
+      (await (await handler.GET(req(path, jar))).json()) as RecommendationsResponse;
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: { low, high, source: 'test' } }));
+    const q = `low=${low}&high=${high}`;
+    return {
+      catalogueAll: await get(catalogueRecs, `/api/catalogue/recommendations?${q}&all=1`),
+      cataloguePage: await get(catalogueRecs, `/api/catalogue/recommendations?${q}&offset=0&limit=50`),
+      libraryAll: await get(recs, '/api/recommendations?all=1', jar),
+      libraryPage: await get(recs, '/api/recommendations?offset=0&limit=50', jar),
+    };
+  }
+  type Routes = Awaited<ReturnType<typeof everyRoute>>;
+  const routeNames = ['catalogueAll', 'cataloguePage', 'libraryAll', 'libraryPage'] as const;
+
+  const duetOrMoodFields = (m: Match) => [m.moods, m.part, m.partSinger, m.range.duet, m.range.parts].filter((v) => v !== undefined);
+  const ids = (ms: Match[]) => ms.map((m) => m.track.id);
+  /** The data-source lines with the time each seeded song was stored, which differs between two seedings. */
+  const sansTimes = (sources: RecommendationsResponse['sources']) =>
+    Object.fromEntries(Object.entries(sources).map(([id, line]) => [id, { ...line, at: '' }]));
+
+  it('is off by default: no mood label and no duet marker on any route, even with every mood listed', async () => {
+    const off = await everyRoute(false, 40, 84);
+    for (const name of routeNames) {
+      expect(off[name].matches.length, name).toBeGreaterThan(5);
+      for (const m of off[name].matches) expect(duetOrMoodFields(m), `${name}: ${m.track.title}`).toEqual([]);
+    }
+  });
+
+  it('only "on" turns it on: a typo or "1" leaves it off', async () => {
+    for (const value of ['1', 'true', 'yes', 'onn', 'off']) {
+      process.env.DUETS_AND_MOODS = value;
+      process.env.MOODS_SHIPPED = 'upbeat,heartfelt';
+      resetAppContextForTests();
+      const body = (await (await catalogueRecs.GET(req('/api/catalogue/recommendations?low=40&high=84&all=1'))).json()) as RecommendationsResponse;
+      expect(body.matches.filter((m) => duetOrMoodFields(m).length), value).toEqual([]);
+    }
+  });
+
+  it('hides, it does not delete: switched on, the duet parts and the listed moods are all there', async () => {
+    const on = await everyRoute(true, 40, 84);
+    const catalogue = on.catalogueAll.matches;
+    expect(catalogue.some((m) => m.range.duet === true && m.part !== undefined && m.partSinger !== undefined)).toBe(true);
+    expect(catalogue.some((m) => m.range.parts?.length)).toBe(true);
+    expect(catalogue.some((m) => m.moods?.includes('upbeat'))).toBe(true);
+    expect(catalogue.some((m) => m.moods?.includes('heartfelt'))).toBe(true);
+    expect(on.libraryAll.matches.some((m) => m.moods?.length)).toBe(true);
+  });
+
+  it.each(RANGES)('turning it off does not change the ranking for %s', async (_who, low, high) => {
+    const on = await everyRoute(true, low, high);
+    const off = await everyRoute(false, low, high);
+    for (const name of routeNames) {
+      expect(on[name].matches.length, name).toBeGreaterThan(0);
+      // The same songs in the same order, and off is on with the words about duets and moods taken out
+      // and nothing else: scores, labels, reasons and the paging fields all match.
+      expect(ids(off[name].matches), name).toEqual(ids(on[name].matches));
+      const { sources: offSources, ...offRest } = off[name];
+      const { sources: onSources, ...onRest } = on[name];
+      expect(offRest, name).toEqual({ ...onRest, matches: on[name].matches.map(withoutDuetsAndMoods) });
+      expect(sansTimes(offSources), name).toEqual(sansTimes(onSources));
+    }
+  });
+
+  it('leaves the order the phone works out from the list unchanged, and drops the chips', async () => {
+    const on = await everyRoute(true, 40, 84);
+    const off = await everyRoute(false, 40, 84);
+    const user = { low: 40, high: 84, source: 'test' as const };
+    const views: ResultsView[] = [
+      DEFAULT_VIEW,
+      ...SLIDER_IDS.flatMap((id) => [0, 0.5, 1].map((v) => ({ ...DEFAULT_VIEW, [id]: v }))),
+      { ...DEFAULT_VIEW, difficulty: 0.2, popularity: 0.9, tempo: 0.6 },
+      { ...DEFAULT_VIEW, decade: '80s' },
+    ];
+    const modes = [['catalogue', 'catalogueAll'], ['library', 'libraryAll']] as const;
+    for (const [mode, name] of modes) {
+      for (const view of views) {
+        const fromOn = orderMatches(on[name].matches, view, user, mode);
+        const fromOff = orderMatches(off[name].matches, view, user, mode);
+        expect(ids(fromOff), `${mode} ${JSON.stringify(view)}`).toEqual(ids(fromOn));
+      }
+    }
+    // The Pick row is built from the same fields: decades stay, the duet and mood chips go.
+    expect(availableFacets(on.catalogueAll.matches)).toMatchObject({ decades: true, duets: true, moods: ['upbeat', 'heartfelt'] });
+    expect(availableFacets(off.catalogueAll.matches)).toEqual({ decades: true, duets: false, moods: [] });
+  });
+
+  it('never changes what the catalogue keeps in memory: the cached songs still know they are duets', async () => {
+    const off = await everyRoute(false, 40, 84);
+    expect(off.catalogueAll.matches.some((m) => m.range.duet)).toBe(false);
+    // Same process, same cache, switch flipped on without a restart of the catalogue: the duets are back.
+    getAppContext().config.duetsAndMoods = true;
+    const body = (await (await catalogueRecs.GET(req('/api/catalogue/recommendations?low=40&high=84&all=1'))).json()) as RecommendationsResponse;
+    expect(body.matches.some((m) => m.range.duet === true && m.part !== undefined)).toBe(true);
   });
 });
 

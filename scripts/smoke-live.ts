@@ -2,13 +2,16 @@
 // fixtures, so they cannot tell when a deployment reads a database without the real data: that is how
 // a preview once showed unknown songs, no Pick row and sliders that changed nothing (QWW-40). This
 // checks what a person would see, for two ranges, and exits 1 when any check fails:
-//   - the Pick row has data (several decades), duets exist
+//   - the Pick row has data (several decades), duets exist (unless the deployment hides them, see --duets)
 //   - 95% of the shown songs have a known popularity, a tempo and a year (90%)
 //   - the first 20 songs are well known (median popularity score 0.7 or more)
 //   - each slider (difficulty, popularity, tempo) moves the list: the first 10 at each end differ
 // Usage: npm run smoke:live                      reads DATABASE_URL directly
 //        npm run smoke:live -- --url https://<deployment>   calls the deployed API instead
 //          (a protected preview needs VERCEL_BYPASS_TOKEN, the project's protection-bypass secret)
+//          Duets are hidden unless the deployment has DUETS_AND_MOODS=on (QWW-43), so its API sends none
+//          and this does not look for them; add --duets for a deployment that has the switch on. Reading
+//          the database always looks for them, because the data must be there for the day it is switched on.
 
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -35,7 +38,7 @@ const first10 = (ms: Match[], f: (m: Match) => number | undefined) => median(ms.
 // popularity known for all; the numbers below leave room under that and sit far above a database
 // without the data (0% on each). They are not tuned to be tight.
 
-export function check(label: string, matches: Match[], range: VocalRange): string[] {
+export function check(label: string, matches: Match[], range: VocalRange, opts: { duets: boolean } = { duets: true }): string[] {
   const fails: string[] = [];
   const need = (ok: boolean, what: string) => {
     if (!ok) fails.push(`${label}: ${what}`);
@@ -44,7 +47,7 @@ export function check(label: string, matches: Match[], range: VocalRange): strin
   const facets = availableFacets(matches);
   const decades = new Set(matches.filter((m) => typeof m.year === 'number').map((m) => Math.floor(m.year! / 10))).size;
   need(facets.decades && decades >= 3, `Pick row has no decade data (${decades} decades); a deployment without USDB years looks like this`);
-  need(facets.duets, 'no duets');
+  if (opts.duets) need(facets.duets, 'no duets');
   need(share(matches, (m) => !!m.parts?.popularityKnown) >= 0.95, `popularity known for only ${(100 * share(matches, (m) => !!m.parts?.popularityKnown)).toFixed(0)}% (want 95%)`);
   need(share(matches, (m) => typeof m.tempo === 'number') >= 0.95, `tempo for only ${(100 * share(matches, (m) => typeof m.tempo === 'number')).toFixed(0)}% (want 95%)`);
   need(share(matches, (m) => typeof m.year === 'number') >= 0.9, `year for only ${(100 * share(matches, (m) => typeof m.year === 'number')).toFixed(0)}% (want 90%)`);
@@ -65,7 +68,9 @@ export function check(label: string, matches: Match[], range: VocalRange): strin
 }
 
 async function main() {
-  const { values } = parseArgs({ options: { url: { type: 'string' } } });
+  const { values } = parseArgs({ options: { url: { type: 'string' }, duets: { type: 'boolean' } } });
+  // A deployment sends duets only with DUETS_AND_MOODS=on; the database always has them (QWW-43).
+  const duets = !values.url || values.duets === true;
   let load: (range: VocalRange) => Promise<Match[]>;
   if (values.url) {
     const base = values.url.replace(/\/$/, '');
@@ -89,7 +94,7 @@ async function main() {
   const fails: string[] = [];
   for (const [label, range] of RANGES) {
     const matches = await load(range);
-    const f = check(label, matches, range);
+    const f = check(label, matches, range, { duets });
     console.log(`${f.length ? 'FAIL' : 'ok  '} ${label}: ${matches.length} songs; first 5: ${matches.slice(0, 5).map((m) => `${m.track.artist} - ${m.track.title}`).join('; ')}`);
     fails.push(...f);
   }

@@ -11,7 +11,9 @@ export interface ServerConfig {
   spotify: SpotifyConfig;
   /** Whether POST /api/events stores the beta events it is sent (EVENTS; see eventsOn). */
   collectEvents: boolean;
-  /** Moods allowed on screen (MOODS_SHIPPED), once they pass the QWW-11 gate. Empty = no mood chips. */
+  /** Duets and moods on screen at all (DUETS_AND_MOODS; see duetsAndMoodsOn and features.ts). Off by default. */
+  duetsAndMoods: boolean;
+  /** Moods allowed on screen (MOODS_SHIPPED), once they pass the QWW-11 gate, and only while duetsAndMoods is on. Empty = no mood chips. */
   moodsShipped: Mood[];
 }
 
@@ -26,8 +28,18 @@ export function readConfig(env: Record<string, string | undefined> = process.env
       redirectUri: env.SPOTIFY_REDIRECT_URI ?? '',
     },
     collectEvents: eventsOn(env),
+    duetsAndMoods: duetsAndMoodsOn(env),
     moodsShipped: parseShippedMoods(env.MOODS_SHIPPED),
   };
+}
+
+/**
+ * The one switch for duets and moods (QWW-43), off by default. Only DUETS_AND_MOODS=on turns them
+ * on; unset, empty or any other value (a typo, "1", "true") leaves them off, so a mistake never
+ * shows a half-finished feature to testers.
+ */
+export function duetsAndMoodsOn(env: Record<string, string | undefined>): boolean {
+  return env.DUETS_AND_MOODS?.trim().toLowerCase() === 'on';
 }
 
 /**
