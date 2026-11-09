@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>QWW-44 spike: inline play</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.35 -apple-system, system-ui, sans-serif; background: #111; color: #eee; padding-bottom: 260px; }
+  header { padding: 10px 12px; background: #222; position: sticky; top: 0; z-index: 3; }
+  header b { font-size: 13px; }
+  .tabs button, .ctrl button { font: inherit; padding: 6px 10px; margin: 4px 4px 0 0; border-radius: 8px; border: 1px solid #555; background: #333; color: #eee; }
+  .tabs button.on { background: #1db954; color: #000; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #2a2a2a; }
+  .row .t { flex: 1; min-width: 0; }
+  .row .t small { color: #999; display: block; }
+  .row .r { font-size: 12px; color: #999; width: 74px; text-align: right; }
+  .row .r.ok { color: #1db954; } .row .r.bad { color: #f55; }
+  .play { width: 44px; height: 44px; border-radius: 50%; border: 0; background: #1db954; color: #000; font-size: 18px; flex: none; }
+  .row.cur { background: #1b2a1f; }
+  /* Shared player sits directly above the mock tuner sheet. */
+  #dock { position: fixed; left: 0; right: 0; bottom: 64px; z-index: 4; padding: 0 8px; }
+  #dock.hidden { display: none; }
+  #sheet { position: fixed; left: 0; right: 0; bottom: 0; height: 64px; z-index: 5; background: #2b2540; border-radius: 16px 16px 0 0; display: flex; align-items: center; justify-content: center; color: #cbb; font-size: 13px; }
+  #sheet.open { height: 60vh; }
+  #log { font: 11px/1.3 ui-monospace, monospace; white-space: pre-wrap; background: #000; color: #8f8; padding: 8px 12px; max-height: 30vh; overflow: auto; }
+  #ua { font-size: 11px; color: #888; }
+</style>
+</head>
+<body>
+<header>
+  <b>QWW-44 inline play spike</b> <span id="ua"></span>
+  <div class="tabs">
+    <button data-mode="spotify" class="on">Spotify shared player</button>
+    <button data-mode="deezer">Deezer &lt;audio&gt;</button>
+  </div>
+  <div class="ctrl">
+    Height: <button data-h="80">80</button><button data-h="152">152</button>
+    <button id="copy">Copy log</button>
+    <button id="sheetBtn">Open sheet</button>
+  </div>
+</header>
+<div id="log"></div>
+<div id="list"></div>
+<div id="dock"><div id="embed"></div></div>
+<div id="sheet">Mock tuner bottom sheet (tap "Open sheet")</div>
+
+<script>
+// Spotify IDs from Wikidata (P2207); Deezer IDs from Deezer search. Tap a row's green button.
+const SPOTIFY = [
+  ['4aebBr4JAihzJQR0CiIZJv', 'Hello', 'Adele'],
+  ['3KiexfmhxHvG5IgAElmTkd', 'I Saw Her Standing There', 'The Beatles'],
+  ['4joiWvli4qJVEW6qZV2i2J', 'All My Loving', 'The Beatles'],
+  ['1gFNm7cXfG1vSMcxPpSxec', 'Ob-La-Di, Ob-La-Da', 'The Beatles'],
+  ['5Qe7NHxeLAn8KoLTNLSdwe', 'I Want to Hold Your Hand', 'The Beatles'],
+  ['3sswiHyFe3eXhNknhLCLyn', 'Cut to the Feeling', 'Carly Rae Jepsen'],
+  ['6wfK1R6FoLpmUA9lk5ll4T', 'Please Mister Postman', 'The Beatles'],
+  ['40qXGg5nRbcWzcFb26KWkQ', 'Misery', 'The Beatles'],
+];
+const DEEZER = [
+  ['3135556', 'Harder, Better, Faster, Stronger', 'Daft Punk'],
+  ['4091937401', 'Bohemian Rhapsody', 'Queen'],
+  ['884025', 'Dancing Queen', 'ABBA'],
+  ['75981528', 'I Wanna Dance with Somebody', 'Whitney Houston'],
+  ['625643', "Don't Stop Believin'", 'Journey'],
+  ['1079668', 'Africa', 'Toto'],
+];
+
+const $ = (s) => document.querySelector(s);
+const t0 = performance.now();
+const lines = [];
+function log(msg) {
+  const line = `${((performance.now() - t0) / 1000).toFixed(2)}s ${msg}`;
+  lines.push(line);
+  $('#log').textContent = lines.slice(-200).join('\n');
+  $('#log').scrollTop = 1e9;
+  console.log('[spike]', line);
+}
+$('#ua').textContent = navigator.userAgent.replace(/^Mozilla\/5.0 /, '').slice(0, 90);
+log('UA ' + navigator.userAgent);
+log('viewport ' + innerWidth + 'x' + innerHeight + ' dpr ' + devicePixelRatio);
+
+let pendingPlay = false;
+let mode = 'spotify', height = 152, controller = null, taps = [], lastTapUri = null;
+const result = {};  // row id -> status
+
+function render() {
+  const rows = mode === 'spotify' ? SPOTIFY : DEEZER;
+  $('#list').innerHTML = rows.map(([id, title, artist]) =>
+    `<div class="row" id="r-${id}"><button class="play" data-id="${id}" aria-label="Play ${title}">▶</button>` +
+    `<div class="t">${title}<small>${artist}</small></div><div class="r" id="s-${id}">${result[id] || ''}</div></div>`).join('');
+  $('#dock').classList.toggle('hidden', mode !== 'spotify');
+}
+function mark(id, text, cls) {
+  result[id] = text;
+  const el = document.getElementById('s-' + id);
+  if (el) { el.textContent = text; el.className = 'r ' + (cls || ''); }
+}
+
+// ---------- Spotify: one shared controller driven from our row buttons ----------
+window.onSpotifyIframeApiReady = (IFrameAPI) => {
+  log('iframe API ready');
+  IFrameAPI.createController($('#embed'), { uri: 'spotify:track:' + SPOTIFY[0][0], width: '100%', height }, (c) => {
+    controller = c; window.__c = c;
+    c.addListener('ready', () => log('controller ready'));
+    c.addListener('playback_started', (e) => log('playback_started ' + e.data.playingURI));
+    let lastPos = -1;
+    c.addListener('playback_update', (e) => {
+      const d = e.data;
+      const id = (d.playingURI || '').split(':').pop();
+      // The embed reloads on loadUri; a play() sent before it reports the new track is dropped.
+      window.__state = { uri: d.playingURI, paused: d.isPaused };
+      const sig = `${id} paused=${d.isPaused} buf=${d.isBuffering}`;
+      if (sig !== window.__lastSig) { window.__lastSig = sig; log(`update ${sig} pos=${d.position}`); }
+      if (!d.isPaused && !d.isBuffering && d.position > 0 && d.position !== lastPos) {
+        if (result[id] !== 'PLAYING') {
+          mark(id, 'PLAYING', 'ok');
+          const tap = taps.findLast((x) => x.id === id);
+          log(`PLAYING ${id} pos=${d.position} dur=${d.duration}` + (tap ? ` latency=${Math.round(performance.now() - tap.at)}ms` : '') +
+              (lastTapUri && !lastTapUri.endsWith(id) ? ' (NOT the last tapped track!)' : ''));
+        }
+      }
+      lastPos = d.position;
+    });
+  });
+};
+
+let loading = null;  // uri whose load is in flight
+function startLoad(uri) {
+  loading = uri;
+  const t = performance.now();
+  log('loadUri ' + uri.split(':').pop());
+  controller.loadUri(uri);
+  controller.play();
+  // The embed reloads on loadUri and drops a play() sent too early, so re-send it every 300 ms
+  // until this track reports playing. Then, if the user tapped another row meanwhile, load that.
+  let sends = 1;
+  (function retry() {
+    const st = window.__state || {};
+    const settled = st.uri === uri && !st.paused;
+    if (settled || performance.now() - t > 5000) {
+      log(settled ? `playing after ${sends} play() sends` : 'gave up on ' + uri.split(':').pop());
+      loading = null;
+      if (lastTapUri !== uri) startLoad(lastTapUri);
+      return;
+    }
+    if (lastTapUri !== uri && st.uri === uri) { loading = null; startLoad(lastTapUri); return; }
+    controller.play(); sends++;
+    setTimeout(retry, 300);
+  })();
+}
+
+function spotifyTap(id) {
+  if (!controller) { log('tap before controller ready'); return; }
+  taps.push({ id, at: performance.now() });
+  const recent = taps.filter((x) => performance.now() - x.at < 5000).length;
+  lastTapUri = 'spotify:track:' + id;
+  for (const k of Object.keys(result)) if (result[k] === 'PLAYING') delete result[k];
+  render();
+  mark(id, 'tapped…');
+  document.querySelectorAll('.row').forEach((r) => r.classList.toggle('cur', r.id === 'r-' + id));
+  log(`TAP ${id} (taps in last 5s: ${recent})`);
+  // Latest tap wins: never start a load while one is in flight; when it settles, load the newest.
+  if (!loading) startLoad(lastTapUri);
+  // If nothing plays within 6 s, record it as blocked.
+  setTimeout(() => { if (result[id] === 'tapped…' && lastTapUri.endsWith(id)) { mark(id, 'NO PLAY', 'bad'); log('NO PLAY within 6s for ' + id); } }, 6000);
+}
+
+// ---------- Deezer: one shared <audio>, fresh preview URLs (they expire after 15 min) ----------
+const audio = new Audio();
+audio.preload = 'none';
+const fresh = {};
+function jsonp(url) {
+  return new Promise((ok, fail) => {
+    const cb = 'dz' + Math.random().toString(36).slice(2);
+    const s = document.createElement('script');
+    window[cb] = (d) => { delete window[cb]; s.remove(); ok(d); };
+    s.onerror = fail;
+    s.src = url + (url.includes('?') ? '&' : '?') + 'output=jsonp&callback=' + cb;
+    document.head.appendChild(s);
+  });
+}
+async function refreshDeezer() {
+  await Promise.all(DEEZER.map(async ([id]) => {
+    try { const d = await jsonp('https://api.deezer.com/track/' + id); fresh[id] = d.preview; } catch { log('deezer fetch failed ' + id); }
+  }));
+  log('deezer previews fetched: ' + Object.values(fresh).filter(Boolean).length + '/' + DEEZER.length);
+}
+audio.addEventListener('playing', () => {
+  const id = audio.dataset.id;
+  mark(id, 'PLAYING', 'ok');
+  const tap = taps.findLast((x) => x.id === id);
+  log(`PLAYING deezer ${id}` + (tap ? ` latency=${Math.round(performance.now() - tap.at)}ms` : ''));
+});
+audio.addEventListener('error', () => { mark(audio.dataset.id, 'ERROR', 'bad'); log('audio error ' + (audio.error && audio.error.code)); });
+function deezerTap(id) {
+  taps.push({ id, at: performance.now() });
+  for (const k of Object.keys(result)) if (result[k] === 'PLAYING') delete result[k];
+  render();
+  if (!fresh[id]) { mark(id, 'no preview', 'bad'); log('no fresh preview for ' + id); return; }
+  mark(id, 'tapped…');
+  audio.dataset.id = id;
+  audio.src = fresh[id];
+  // play() runs synchronously inside the tap handler, so iOS counts it as a user gesture.
+  audio.play().then(() => log('play() resolved ' + id), (e) => { mark(id, e.name, 'bad'); log('play() rejected ' + id + ' ' + e.name); });
+}
+
+// ---------- wiring ----------
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.play');
+  if (b) return mode === 'spotify' ? spotifyTap(b.dataset.id) : deezerTap(b.dataset.id);
+  const m = e.target.closest('[data-mode]');
+  if (m) {
+    mode = m.dataset.mode;
+    document.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('on', x === m));
+    if (mode === 'deezer') { controller && controller.pause(); } else { audio.pause(); }
+    render();
+    log('mode ' + mode);
+  }
+  const h = e.target.closest('[data-h]');
+  if (h) { height = +h.dataset.h; const f = $('#dock iframe'); if (f) f.height = height; log('player height ' + height); }
+});
+$('#copy').onclick = () => navigator.clipboard.writeText(lines.join('\n')).then(() => log('log copied'), () => log('copy failed'));
+$('#sheetBtn').onclick = () => { const o = $('#sheet').classList.toggle('open'); $('#sheetBtn').textContent = o ? 'Close sheet' : 'Open sheet'; log('sheet ' + (o ? 'open' : 'closed')); };
+const p = new URLSearchParams(location.search);
+if (p.get('mode') === 'deezer') { mode = 'deezer'; document.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('on', x.dataset.mode === 'deezer')); }
+if (p.get('h')) height = +p.get('h');
+render();
+refreshDeezer();
+</script>
+<script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
+</body>
+</html>
