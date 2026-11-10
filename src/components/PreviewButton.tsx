@@ -4,8 +4,9 @@ import { DeezerIcon } from './Icon';
 import styles from './screen.module.css';
 
 // The ▶ in a song row (QWW-48): it plays the song's 30 s Deezer preview without leaving the list. Self-contained, so
-// any row can mount it with the song's Deezer id; every button on the page shares one player (lib/client/preview.ts).
-// There is no visible player: the playing button shows ⏸ and a thin ring that fills as the preview plays.
+// any row can mount it with the song's track id and Deezer id; every button on the page shares one player
+// (lib/client/preview.ts). There is no visible player: the playing button shows ⏸ and a thin ring that fills as the
+// preview plays.
 
 /** The page's one player. Made here, but it touches the page only on the first tap, so this is safe on the server. */
 const shared = createPreviewPlayer();
@@ -13,30 +14,32 @@ const shared = createPreviewPlayer();
 /** Which player the buttons use. Tests provide one with a fake <audio>. */
 export const PreviewPlayerContext = createContext<PreviewPlayer>(shared);
 
-/** What a track's button shows: the player's state for it, or 'unavailable' when it has nothing to play. */
+/** What a row's button shows: the player's state for it, or 'unavailable' when it has nothing to play. */
 export type PreviewButtonState = PreviewStatus | 'unavailable';
 
-export function previewStateOf(s: PreviewSnapshot, id: string | undefined): PreviewButtonState {
-  if (id === undefined || s.failed.has(id)) return 'unavailable';
-  return s.id === id ? s.status : 'idle';
+export function previewStateOf(s: PreviewSnapshot, id: string, deezerId: number | undefined): PreviewButtonState {
+  if (deezerId === undefined || s.missing.has(deezerId)) return 'unavailable';
+  return s.key === id ? s.status : 'idle';
 }
 
-/** One track's preview: its state, and the toggle for a tap. `deezerId` unset = nothing to play. */
-export function usePreview(deezerId: number | undefined): { state: PreviewButtonState; toggle(): void; player: PreviewPlayer } {
+/**
+ * One row's preview: its state, and the toggle for a tap. `id` is the row's own id (the song's track id); `deezerId`
+ * unset means nothing to play.
+ */
+export function usePreview(id: string, deezerId: number | undefined): { state: PreviewButtonState; toggle(): void; player: PreviewPlayer } {
   const player = useContext(PreviewPlayerContext);
-  const id = deezerId === undefined ? undefined : String(deezerId);
-  // A string, so a change to another track's state does not redraw this one.
+  // A string, so a change to another row's state does not redraw this one.
   const state = useSyncExternalStore(
     player.subscribe,
-    () => previewStateOf(player.snapshot(), id),
-    () => (id === undefined ? 'unavailable' : 'idle'),
+    () => previewStateOf(player.snapshot(), id, deezerId),
+    () => (deezerId === undefined ? 'unavailable' : 'idle'),
   );
   // When its row goes (the song page opens, or a filter takes the song off the list), its preview stops.
-  useEffect(() => (id === undefined ? undefined : () => player.release(id)), [player, id]);
+  useEffect(() => () => player.release(id), [player, id]);
   return {
     state,
     toggle: () => {
-      if (id !== undefined) player.toggle(id);
+      if (deezerId !== undefined) player.toggle(id, deezerId);
     },
     player,
   };
@@ -47,6 +50,8 @@ const RING_R = 16.5;
 const RING = 2 * Math.PI * RING_R;
 
 interface PreviewButtonProps {
+  /** The row's own id (the song's track id): which row plays, even when two rows share one Deezer track. */
+  id: string;
   /** The song's Deezer track id (Match.deezerId); unset shows a disabled button. */
   deezerId: number | undefined;
   title: string;
@@ -54,8 +59,8 @@ interface PreviewButtonProps {
   className?: string;
 }
 
-export function PreviewButton({ deezerId, title, artist, className }: PreviewButtonProps) {
-  const { state, toggle, player } = usePreview(deezerId);
+export function PreviewButton({ id, deezerId, title, artist, className }: PreviewButtonProps) {
+  const { state, toggle, player } = usePreview(id, deezerId);
   const ring = useRef<SVGCircleElement>(null);
 
   // The ring follows the preview a frame at a time while it plays, and stays where it stopped when paused.
@@ -103,17 +108,20 @@ export function PreviewButton({ deezerId, title, artist, className }: PreviewBut
 }
 
 /**
- * Deezer's API terms ask every app that uses it to show Deezer's logo where it can be seen. One quiet line over the
- * list says where the previews come from; the credits page says the rest.
+ * Deezer's API terms ask every app that uses it to show Deezer's logo where it can be seen, and to tell listeners the
+ * previews are for private use. One quiet line over the list says where they come from and links to the credits
+ * page, which says the rest.
  */
 export function DeezerCredit({ className }: { className?: string }) {
   return (
     <p className={className ? `${styles.deezerCredit} ${className}` : styles.deezerCredit}>
-      Previews from
-      <span className={styles.deezerMark}>
-        <DeezerIcon />
-        Deezer
-      </span>
+      <a href="/credits" aria-label="Previews from Deezer, for private listening. Sources and credits">
+        Previews from
+        <span className={styles.deezerMark}>
+          <DeezerIcon />
+          Deezer
+        </span>
+      </a>
     </p>
   );
 }

@@ -662,6 +662,14 @@
   color: var(--dim);
 }
 
+.deezerCredit a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: inherit;
+  text-decoration: none;
+}
+
 .deezerMark {
   display: inline-flex;
   align-items: center;

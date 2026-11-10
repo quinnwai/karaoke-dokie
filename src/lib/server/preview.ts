@@ -11,8 +11,8 @@
 
 /** No cache hands out a link with less than this left (seconds). */
 export const LINK_MARGIN_S = 300;
-/** How long Deezer's links last, for a link that does not say (seconds). */
-export const LINK_LIFETIME_S = 900;
+/** A link whose expiry cannot be read (Deezer changed its format) is kept this long at most (seconds). */
+export const UNKNOWN_EXPIRY_KEEP_S = 60;
 /** The browser keeps a redirect at most this long (seconds). */
 export const BROWSER_MAX_AGE_S = 60;
 /** A track with no preview is not asked about again for this long. */
@@ -41,11 +41,14 @@ export function isDeezerPreviewLink(url: string): boolean {
   }
 }
 
-/** When a Deezer preview link expires (epoch ms): the `exp=` in its token, else LINK_LIFETIME_S after `now`. */
+/**
+ * When a Deezer preview link expires (epoch ms): the `exp=` in its token. A link that does not say is treated as
+ * expiring just after the margin, so every cache keeps it UNKNOWN_EXPIRY_KEEP_S at most.
+ */
 export function linkExpiry(url: string, now: number): number {
   const exp = /[?&~]hdnea=exp=(\d+)/.exec(url) ?? /exp=(\d{9,})/.exec(url);
   const at = exp ? Number(exp[1]) * 1000 : NaN;
-  return Number.isFinite(at) && at > 0 ? at : now + LINK_LIFETIME_S * 1000;
+  return Number.isFinite(at) && at > 0 ? at : now + (LINK_MARGIN_S + UNKNOWN_EXPIRY_KEEP_S) * 1000;
 }
 
 type Fetch = (url: string, init?: { signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;

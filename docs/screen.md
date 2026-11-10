@@ -71,22 +71,30 @@ button and must stay on screen (spike QWW-44).
 
 - **One player.** Every button shares one `<audio>` element (`src/lib/client/preview.ts`), so one song plays at a
   time and a tap on another row switches at once. The latest tap always wins: five taps in five seconds end with the
-  fifth song playing.
+  fifth song playing. The player holds a row (its track id), not a Deezer track, so two rows that share a Deezer
+  track never both show ⏸.
 - **iOS.** The tap handler sets the element's address to `/api/preview/<deezerId>` and calls `play()` in the same
   tick; iOS plays audio only when it starts inside the tap. That route redirects to Deezer's preview link (see
   backend.md), which expires after 15 minutes, so links are never stored.
 - **What it shows.** ▶ until tapped; then ⏸, a thin pink ring that fills as the preview plays, and the row's title in
-  pink, as Spotify marks the track it is on. Tapped again it pauses, and the ring stays where it stopped. At the end it
-  goes back to ▶. A song with no Deezer match (`Match.deezerId` unset), or whose preview fails to load, gets a disabled
-  button for the rest of the visit. The button is 44 px square.
+  pink, as Spotify marks the track it is on. Tapped again it pauses, and the ring stays where it stopped; a pause by
+  the phone (a call, the lock screen, headphones) shows the same, and a resume from there shows ⏸ again. At the end it
+  goes back to ▶. The button is 44 px square.
+- **When there is nothing to play.** A song with no Deezer match (`Match.deezerId` unset) gets a disabled button. A
+  preview that fails to load before making a sound goes back to ▶ at once, and the player asks the route why: only a
+  404 (Deezer has no preview) disables the button for the rest of the visit. Any other failure (Deezer slow or down,
+  the network) leaves ▶ ready for another tap. A resume after a pause of more than 4 minutes, or after the load failed
+  while paused, starts from a fresh link at the same spot, since a link can run out.
 - **The row.** The play button and the song button sit side by side, never one inside the other: the play button
   never opens the song page, and the rest of the row still does. Opening the song page (or a filter taking the song off
   the list) stops the preview.
 - **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly, so a line over the list reads
-  "Previews from [logo] Deezer" whenever a song on it has a preview. The credits page says the previews stream from
-  Deezer for private, non-commercial listening and that no audio is kept.
-- **For the round 5 rows (QWW-46).** `PreviewButton` takes the song's `deezerId`, title and artist, and needs nothing
-  else; `DeezerCredit` is the logo line. Both draw in `currentColor` and the pink accent, so a new row can restyle them.
+  "Previews from [logo] Deezer" whenever a song on it has a preview. It links to the credits page, which says the
+  previews stream from Deezer for private, non-commercial listening and that no audio is kept, as the terms ask
+  listeners to be told.
+- **For the round 5 rows (QWW-46).** `PreviewButton` takes the row's track id (`id`), the song's `deezerId`, title and
+  artist, and needs nothing else; `DeezerCredit` is the logo line. Both draw in `currentColor` and the pink accent, so
+  a new row can restyle them.
 
 ## Spotify player
 

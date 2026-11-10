@@ -1,9 +1,10 @@
 // The play button in each song row (QWW-48), with a real browser's <audio>: Chromium as the Android phone and, where
 // it is installed, WebKit as the iPhone (both emulated: neither is a real phone, so the review guide asks for one).
-// The API is mocked. /api/preview/<id> serves a short tone after a delay, in byte ranges as Deezer's CDN does. The
-// real route answers with a redirect to Deezer's CDN instead, which Playwright cannot stand in for (it fulfils no
-// redirect for a media request): tests/server/preview.test.ts covers the redirect, and the live check of the preview
-// deployment follows it to Deezer.
+// The API is mocked, and /api/preview/<id> answers with a short tone after a delay, in byte ranges as Deezer's CDN does
+// (Safari asks for media in ranges). The app's route answers with a redirect to Deezer's CDN instead, and that hop
+// cannot be stood in for here: Playwright neither fulfils a redirect for a media request nor routes the request a
+// redirect leads to (tried in Chromium and WebKit, Nov 2026: the follow-up goes to the real CDN). So the redirect is
+// covered by tests/server/preview.test.ts and by `smoke:live --url`, which follows it to Deezer on a deployment.
 
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync } from 'node:fs';

@@ -6,6 +6,8 @@ export class FakeAudio extends EventTarget {
   ended = false;
   currentTime = 0;
   duration = NaN;
+  /** Set when the current load failed, as a browser sets it. */
+  error: { code: number } | null = null;
   /** Every address set, in order. */
   readonly srcs: string[] = [];
   /** What happened, in order: 'src:<address>', 'play', 'pause', 'load'. */
@@ -26,6 +28,7 @@ export class FakeAudio extends EventTarget {
     this.ended = false;
     this.currentTime = 0;
     this.duration = NaN;
+    this.error = null;
   }
 
   removeAttribute(name: string): void {
@@ -55,9 +58,10 @@ export class FakeAudio extends EventTarget {
 
   // ---- what the network and the media stack would do ----
 
-  /** The current load started: play() resolves and 'playing' fires. */
+  /** The current load started: its length is known ('loadedmetadata'), then play() resolves and 'playing' fires. */
   start(duration = 30): void {
     this.duration = duration;
+    this.dispatchEvent(new Event('loadedmetadata'));
     const p = this.pending;
     this.pending = null;
     this.dispatchEvent(new Event('playing'));
@@ -69,6 +73,7 @@ export class FakeAudio extends EventTarget {
     const p = this.pending;
     this.pending = null;
     this.paused = true;
+    this.error = { code: 4 };
     this.dispatchEvent(new Event('error'));
     p?.reject(new DOMException('The element has no supported sources.', 'NotSupportedError'));
   }
@@ -79,6 +84,33 @@ export class FakeAudio extends EventTarget {
     this.pending = null;
     this.paused = true;
     p?.reject(new DOMException('play() can only be initiated by a user gesture.', 'NotAllowedError'));
+  }
+
+  /** Played again by something outside the page: the lock screen, headphones. */
+  resumeFromOutside(): void {
+    this.paused = false;
+    this.dispatchEvent(new Event('play'));
+    this.dispatchEvent(new Event('playing'));
+  }
+
+  /** A 'playing' event that was already queued when the page paused the element. */
+  latePlaying(): void {
+    this.dispatchEvent(new Event('playing'));
+  }
+
+  /** The download broke off after it had played (the network, or a link that ran out). */
+  breakOff(): void {
+    this.error = { code: 2 };
+    this.dispatchEvent(new Event('error'));
+  }
+
+  /** Paused by the phone itself (a call, Siri) while still loading: play() is cut short and 'pause' fires. */
+  interrupt(): void {
+    const p = this.pending;
+    this.pending = null;
+    this.paused = true;
+    this.dispatchEvent(new Event('pause'));
+    p?.reject(new DOMException('The play() request was interrupted by a call to pause().', 'AbortError'));
   }
 
   /** The preview played to its end. */

@@ -5,11 +5,11 @@ import {
   BROWSER_MAX_AGE_S,
   createPreviewResolver,
   isDeezerPreviewLink,
-  LINK_LIFETIME_S,
   LINK_MARGIN_S,
   linkExpiry,
   MISS_TTL_MS,
   previewResponse,
+  UNKNOWN_EXPIRY_KEEP_S,
 } from '../../src/lib/server/preview';
 
 const T0 = Date.UTC(2026, 10, 10, 14, 0, 0);
@@ -54,9 +54,17 @@ afterEach(() => {
 });
 
 describe('preview links', () => {
-  it('reads when a link expires from its token, and assumes 15 minutes when it does not say', () => {
+  it('reads when a link expires from its token, and keeps one that does not say for a minute at most', async () => {
     expect(linkExpiry(link('1', 900), 0)).toBe(T0 + 900_000);
-    expect(linkExpiry('https://cdnt-preview.dzcdn.net/a.mp3', T0)).toBe(T0 + LINK_LIFETIME_S * 1000);
+    expect(linkExpiry('https://cdnt-preview.dzcdn.net/a.mp3', T0)).toBe(T0 + (LINK_MARGIN_S + UNKNOWN_EXPIRY_KEEP_S) * 1000);
+    const s = setup({ '3': { body: { id: 3, preview: 'https://cdnt-preview.dzcdn.net/a.mp3' } } });
+    const res = await s.get('3');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('cache-control')).toBe(`public, max-age=${UNKNOWN_EXPIRY_KEEP_S}`);
+    expect(res.headers.get('vercel-cdn-cache-control')).toBe(`max-age=${UNKNOWN_EXPIRY_KEEP_S}`);
+    s.advance(UNKNOWN_EXPIRY_KEEP_S * 1000);
+    await s.get('3');
+    expect(s.calls).toEqual(['3', '3']);
   });
 
   it("redirects only to https links on Deezer's CDN", () => {

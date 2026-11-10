@@ -6,16 +6,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeezerCredit, PreviewButton, PreviewPlayerContext } from '../../src/components/PreviewButton';
 import { Results } from '../../src/components/Results';
 import type { Match } from '../../src/lib/contracts';
-import { createPreviewPlayer } from '../../src/lib/client/preview';
+import { createPreviewPlayer, type PreviewCheck } from '../../src/lib/client/preview';
 import { FakeAudio, settle } from '../helpers/fakeAudio';
 import { resultsProps } from '../helpers/results';
 import { match } from '../fixtures/screen';
 
 afterEach(cleanup);
 
-function withPlayer() {
+function withPlayer(check: PreviewCheck = async () => 'retry') {
   const audio = new FakeAudio();
-  const player = createPreviewPlayer(() => audio as unknown as HTMLAudioElement);
+  const player = createPreviewPlayer({ makeAudio: () => audio as unknown as HTMLAudioElement, check });
   const wrap = (ui: ReactNode) => <PreviewPlayerContext.Provider value={player}>{ui}</PreviewPlayerContext.Provider>;
   return { audio, player, wrap };
 }
@@ -26,7 +26,7 @@ const withId = (m: Match, deezerId: number): Match => ({ ...m, deezerId });
 describe('PreviewButton', () => {
   it('is a disabled button, not a broken one, for a song with nothing to play', () => {
     const { wrap } = withPlayer();
-    render(wrap(<PreviewButton deezerId={undefined} title="Lemon" artist="Kenshi Yonezu" />));
+    render(wrap(<PreviewButton id="t1" deezerId={undefined} title="Lemon" artist="Kenshi Yonezu" />));
     const button = screen.getByRole('button', { name: 'No preview of Lemon by Kenshi Yonezu' });
     expect(button).toHaveProperty('disabled', true);
     expect(button.getAttribute('data-preview')).toBe('unavailable');
@@ -34,7 +34,7 @@ describe('PreviewButton', () => {
 
   it('plays on a tap, shows pause while it plays, and plays again after a second tap pauses it', async () => {
     const { audio, wrap } = withPlayer();
-    render(wrap(<PreviewButton deezerId={3135556} title="Africa" artist="Toto" />));
+    render(wrap(<PreviewButton id="t1" deezerId={3135556} title="Africa" artist="Toto" />));
     fireEvent.click(screen.getByRole('button', { name: 'Play Africa by Toto' }));
     expect(audio.log).toEqual(['src:/api/preview/3135556', 'play']);
     const button = screen.getByRole('button', { name: 'Pause Africa by Toto' });
@@ -48,9 +48,9 @@ describe('PreviewButton', () => {
     expect(screen.getByRole('button', { name: 'Play Africa by Toto' }).getAttribute('data-preview')).toBe('paused');
   });
 
-  it('turns disabled when its preview fails to load', async () => {
-    const { audio, wrap } = withPlayer();
-    render(wrap(<PreviewButton deezerId={1} title="Gone" artist="Nobody" />));
+  it('turns disabled when its preview fails to load and the route says Deezer has none', async () => {
+    const { audio, wrap } = withPlayer(async () => 'missing');
+    render(wrap(<PreviewButton id="t1" deezerId={1} title="Gone" artist="Nobody" />));
     fireEvent.click(screen.getByRole('button', { name: 'Play Gone by Nobody' }));
     await act(async () => {
       audio.fail();
@@ -62,21 +62,21 @@ describe('PreviewButton', () => {
   it('never passes its tap on to the row around it', () => {
     const { wrap } = withPlayer();
     const row = vi.fn();
-    render(wrap(<div onClick={row}><PreviewButton deezerId={5} title="A" artist="B" /></div>));
+    render(wrap(<div onClick={row}><PreviewButton id="t1" deezerId={5} title="A" artist="B" /></div>));
     fireEvent.click(screen.getByRole('button', { name: 'Play A by B' }));
     expect(row).not.toHaveBeenCalled();
   });
 
   it('stops its song when it goes away (the song page opened, or a filter took the row off)', async () => {
     const { audio, player, wrap } = withPlayer();
-    const { unmount } = render(wrap(<PreviewButton deezerId={7} title="A" artist="B" />));
+    const { unmount } = render(wrap(<PreviewButton id="t1" deezerId={7} title="A" artist="B" />));
     fireEvent.click(screen.getByRole('button', { name: 'Play A by B' }));
     await act(async () => {
       audio.start();
       await settle();
     });
     unmount();
-    expect(player.snapshot()).toMatchObject({ id: null, status: 'idle' });
+    expect(player.snapshot()).toMatchObject({ key: null, status: 'idle' });
     expect(audio.paused).toBe(true);
   });
 
@@ -85,8 +85,8 @@ describe('PreviewButton', () => {
     render(
       wrap(
         <>
-          <PreviewButton deezerId={1} title="One" artist="X" />
-          <PreviewButton deezerId={2} title="Two" artist="X" />
+          <PreviewButton id="t1" deezerId={1} title="One" artist="X" />
+          <PreviewButton id="t2" deezerId={2} title="Two" artist="X" />
         </>,
       ),
     );
@@ -98,6 +98,30 @@ describe('PreviewButton', () => {
     });
     expect(screen.getByRole('button', { name: 'Play One by X' }).getAttribute('data-preview')).toBe('idle');
     expect(screen.getByRole('button', { name: 'Pause Two by X' }).getAttribute('data-preview')).toBe('playing');
+  });
+});
+
+describe('two rows with one Deezer track', () => {
+  it('only the tapped row shows pause, and the other leaving the list does not stop it', async () => {
+    const { audio, wrap } = withPlayer();
+    const { rerender } = render(
+      wrap(
+        <>
+          <PreviewButton id="t1" deezerId={9} title="September" artist="Earth, Wind & Fire" />
+          <PreviewButton id="t2" deezerId={9} title="September" artist="Earth Wind and Fire" />
+        </>,
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Play September by Earth, Wind & Fire' }));
+    await act(async () => {
+      audio.start();
+      await settle();
+    });
+    expect(screen.getByRole('button', { name: 'Pause September by Earth, Wind & Fire' }).getAttribute('data-preview')).toBe('playing');
+    expect(screen.getByRole('button', { name: 'Play September by Earth Wind and Fire' }).getAttribute('data-preview')).toBe('idle');
+    rerender(wrap(<PreviewButton id="t1" deezerId={9} title="September" artist="Earth, Wind & Fire" />));
+    expect(screen.getByRole('button', { name: 'Pause September by Earth, Wind & Fire' }).getAttribute('data-preview')).toBe('playing');
+    expect(audio.paused).toBe(false);
   });
 });
 
@@ -134,8 +158,10 @@ describe('play button in the result rows', () => {
     expect(screen.queryByText('Previews from')).toBeNull();
   });
 
-  it('the Deezer line names Deezer in words, beside its logo', () => {
+  it('the Deezer line names Deezer in words beside its logo, and links to the credits, which say the previews are for private listening', () => {
     render(<DeezerCredit />);
-    expect(screen.getByText('Previews from').textContent).toContain('Deezer');
+    const link = screen.getByRole('link', { name: 'Previews from Deezer, for private listening. Sources and credits' });
+    expect(link.getAttribute('href')).toBe('/credits');
+    expect(link.textContent).toBe('Previews fromDeezer');
   });
 });
