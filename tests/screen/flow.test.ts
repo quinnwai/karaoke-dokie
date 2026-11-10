@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { flowReducer, initialState, rangeFromPicks, type FlowEvent, type FlowState } from '../../src/lib/client/flow';
 import { allMatches, knownSongs, me } from '../fixtures/screen';
+import { INSTAGRAM, IOS_SAFARI, micOn } from '../helpers/micFlow';
 
 const run = (events: FlowEvent[], from: FlowState = initialState) => events.reduce(flowReducer, from);
 const signedOut: FlowEvent = { type: 'booted', me: null, progress: null, wantsPick: false };
@@ -36,8 +37,10 @@ describe('boot', () => {
     expect(s.range?.low).toBe(45);
   });
 
-  it('resumes a half-done test', () => {
-    expect(run([{ type: 'booted', me: null, progress: { low: 45, high: null }, wantsPick: false }]).step).toBe('high');
+  it('resumes a half-done test, by way of the mic step, since the microphone is closed after a reload', () => {
+    const half = run([{ type: 'booted', me: null, progress: { low: 45, high: null }, wantsPick: false }]);
+    expect(half).toMatchObject({ step: 'mic', low: 45, mic: { view: 'checking', next: 'high' } });
+    expect(run(micOn, half)).toMatchObject({ step: 'high', low: 45 });
     expect(run([{ type: 'booted', me: null, progress: { low: 45, high: 72 }, wantsPick: false }]).step).toBe('signin');
   });
 
@@ -51,19 +54,21 @@ describe('boot', () => {
   });
 
   it('a half-done test wins over a range kept on the device, and Spotify wins over both', () => {
-    expect(run([{ type: 'booted', me: null, progress: { low: 45, high: null }, wantsPick: false, savedRange: { low: 40, high: 60 } }]).step).toBe('high');
+    expect(run([{ type: 'booted', me: null, progress: { low: 45, high: null }, wantsPick: false, savedRange: { low: 40, high: 60 } }])).toMatchObject({ step: 'mic', mic: { next: 'high' } });
     const signedIn = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false, savedRange: { low: 40, high: 60 } }]);
     expect(signedIn).toMatchObject({ step: 'results', mode: 'library', range: { low: 45, high: 72 } });
   });
 });
 
 describe('the singing test', () => {
-  const toLow = [signedOut, { type: 'start' }, { type: 'quietDone' }] as FlowEvent[];
+  const toLow = [signedOut, { type: 'start' }, { type: 'quietDone' }, ...micOn] as FlowEvent[];
 
-  it('walks landing, quiet spot, low, high, sign-in', () => {
+  it('walks landing, quiet spot, mic, low, high, sign-in', () => {
     let s = run([signedOut, { type: 'start' }]);
     expect(s.step).toBe('quiet');
     s = run([{ type: 'quietDone' }], s);
+    expect(s.step).toBe('mic');
+    s = run(micOn, s);
     expect(s.step).toBe('low');
     s = run([{ type: 'holdStart' }], s);
     expect(s.hold).toBe('holding');
@@ -90,12 +95,8 @@ describe('the singing test', () => {
     expect(s).toMatchObject({ step: 'high', hold: 'order', high: null });
   });
 
-  it('shows the mic-denied line', () => {
-    expect(run([...toLow, { type: 'holdStart' }, { type: 'micDenied' }]).hold).toBe('denied');
-  });
-
   it('a signed-in user skips the arrow and saves', () => {
-    const s = run([{ type: 'booted', me: me(), progress: null, wantsPick: false }, { type: 'start' }, { type: 'quietDone' }, { type: 'holdEnd', midi: 45 }, { type: 'holdEnd', midi: 72 }]);
+    const s = run([{ type: 'booted', me: me(), progress: null, wantsPick: false }, { type: 'start' }, { type: 'quietDone' }, ...micOn, { type: 'holdEnd', midi: 45 }, { type: 'holdEnd', midi: 72 }]);
     expect(s.step).toBe('saving');
   });
 
@@ -104,6 +105,94 @@ describe('the singing test', () => {
     expect(s.step).toBe('landing');
     expect(s.low).toBeNull();
   });
+});
+
+describe('the mic step (QWW-50)', () => {
+  const atMic = run([signedOut, { type: 'start' }, { type: 'quietDone' }]);
+  const gate = (events: FlowEvent[], from: FlowState = atMic) => run(events, from).mic;
+
+  it('starts by looking at the browser, and leads on to the low note', () => {
+    expect(atMic).toMatchObject({ step: 'mic', mic: { view: 'checking', next: 'low', env: null, problem: null, fails: 0 } });
+  });
+
+  it('shows our own screen first when the browser has not been asked, or cannot say', () => {
+    expect(gate([{ type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' }])).toMatchObject({ view: 'prompt', env: IOS_SAFARI });
+    expect(gate([{ type: 'micChecked', env: IOS_SAFARI, permission: 'unknown' }]).view).toBe('prompt');
+  });
+
+  it('skips that screen when the microphone is already allowed: it opens by itself, then the level meter', () => {
+    const opening = run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'granted' }], atMic);
+    expect(opening.mic.view).toBe('opening');
+    expect(run([{ type: 'micGranted' }], opening).mic.view).toBe('level');
+    expect(run([{ type: 'micFailed', reason: 'busy' }], opening).mic).toMatchObject({ view: 'recovery', problem: 'busy', fails: 1 });
+  });
+
+  it('goes straight to what to do when the microphone is already blocked', () => {
+    expect(gate([{ type: 'micChecked', env: IOS_SAFARI, permission: 'denied' }])).toMatchObject({ view: 'recovery', problem: 'denied', fails: 1 });
+  });
+
+  it('inside another app it says so before anything else, whatever the permission says; "Try here anyway" goes on', () => {
+    for (const permission of ['prompt', 'granted', 'denied', 'unknown'] as const) {
+      expect(gate([{ type: 'micChecked', env: INSTAGRAM, permission }]).view).toBe('inapp');
+    }
+    const s = run([{ type: 'micChecked', env: INSTAGRAM, permission: 'prompt' }, { type: 'micTryHere' }], atMic);
+    expect(s.mic).toMatchObject({ view: 'prompt', env: INSTAGRAM });
+  });
+
+  it('a tap asks, a yes shows the level meter, Continue goes to the note', () => {
+    let s = run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' }, { type: 'micAsk' }], atMic);
+    expect(s.mic.view).toBe('asking');
+    s = run([{ type: 'micGranted' }], s);
+    expect(s.mic.view).toBe('level');
+    expect(s.step).toBe('mic');
+    expect(run([{ type: 'micDone' }], s)).toMatchObject({ step: 'low', hold: 'ready' });
+  });
+
+  it('a no goes to recovery, "Try again" asks again, and a second no counts', () => {
+    let s = run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' }, { type: 'micAsk' }, { type: 'micFailed', reason: 'denied' }], atMic);
+    expect(s.mic).toMatchObject({ view: 'recovery', problem: 'denied', fails: 1 });
+    s = run([{ type: 'micAsk' }], s);
+    expect(s.mic.view).toBe('asking');
+    s = run([{ type: 'micFailed', reason: 'denied' }], s);
+    expect(s.mic).toMatchObject({ view: 'recovery', fails: 2 });
+    s = run([{ type: 'micAsk' }, { type: 'micGranted' }], s);
+    expect(s.mic).toMatchObject({ view: 'level', problem: null });
+  });
+
+  it('keeps going to the end it was heading for', () => {
+    const toHigh = run([{ type: 'booted', me: null, progress: { low: 45, high: null }, wantsPick: false }, ...micOn]);
+    expect(toHigh).toMatchObject({ step: 'high', low: 45 });
+  });
+
+  it('answers only count on the screen they belong to, so a late one cannot undo a later one', () => {
+    const prompt = run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' }], atMic);
+    expect(run([{ type: 'micGranted' }], prompt)).toBe(prompt);
+    expect(run([{ type: 'micFailed', reason: 'denied' }], prompt)).toBe(prompt);
+    expect(run([{ type: 'micDone' }], prompt)).toBe(prompt);
+    expect(run([{ type: 'micTryHere' }], prompt)).toBe(prompt);
+    expect(run([{ type: 'micChecked', env: INSTAGRAM, permission: 'denied' }], prompt)).toBe(prompt);
+    expect(run([{ type: 'micAsk' }], atMic)).toBe(atMic);
+    expect(run([{ type: 'holdEnd', midi: 45 }, { type: 'holdStart' }], prompt)).toMatchObject({ step: 'mic', low: null });
+    // Outside the mic step none of it does anything.
+    const landing = run([signedOut]);
+    expect(run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' }, { type: 'micAsk' }, { type: 'micGranted' }, { type: 'micDone' }], landing)).toBe(landing);
+  });
+
+  it('a microphone lost during a hold goes back to the mic step, and on to the same note', () => {
+    const atHigh = run([...toLowEvents(), { type: 'holdEnd', midi: 45 }]);
+    expect(atHigh.step).toBe('high');
+    const lost = run([{ type: 'micLost' }], atHigh);
+    expect(lost).toMatchObject({ step: 'mic', low: 45, mic: { view: 'checking', next: 'high', fails: 0 } });
+    expect(run(micOn, lost)).toMatchObject({ step: 'high', low: 45 });
+    // Only a hold step can lose it.
+    const landing = run([signedOut]);
+    expect(run([{ type: 'micLost' }], landing)).toBe(landing);
+  });
+
+  /** Landing to the low note through the usual mic step. */
+  function toLowEvents(): FlowEvent[] {
+    return [signedOut, { type: 'start' }, { type: 'quietDone' }, ...micOn];
+  }
 });
 
 describe('results', () => {
@@ -183,7 +272,10 @@ describe('results', () => {
   });
 
   it('re-sings just the low note and keeps the high one', () => {
+    // The microphone was let go at the results, so even one end goes by way of the mic step.
     let s = run([{ type: 'redoEnd', end: 'low' }], loaded);
+    expect(s).toMatchObject({ step: 'mic', low: null, high: 72, redoing: 'low', mic: { next: 'low' } });
+    s = run(micOn, s);
     expect(s).toMatchObject({ step: 'low', low: null, high: 72, redoing: 'low' });
     expect(run([{ type: 'holdEnd', midi: 74 }], s)).toMatchObject({ step: 'low', hold: 'order' });
     s = run([{ type: 'holdEnd', midi: 48 }], s);
@@ -192,7 +284,7 @@ describe('results', () => {
   });
 
   it('re-sings just the high note and keeps the low one', () => {
-    let s = run([{ type: 'redoEnd', end: 'high' }], atResults);
+    let s = run([{ type: 'redoEnd', end: 'high' }, ...micOn], atResults);
     expect(s).toMatchObject({ step: 'high', low: 45, high: null, redoing: 'high' });
     s = run([{ type: 'holdEnd', midi: 70 }], s);
     expect(s).toMatchObject({ step: 'saving', range: { low: 45, high: 70 } });
@@ -206,7 +298,7 @@ describe('results', () => {
 });
 
 describe('no Spotify (catalogue mode)', () => {
-  const tested = run([signedOut, { type: 'start' }, { type: 'quietDone' }, { type: 'holdEnd', midi: 45 }, { type: 'holdEnd', midi: 72 }]);
+  const tested = run([signedOut, { type: 'start' }, { type: 'quietDone' }, ...micOn, { type: 'holdEnd', midi: 45 }, { type: 'holdEnd', midi: 72 }]);
 
   it('after the test, the arrow shows catalogue songs with no sign-in', () => {
     expect(tested.step).toBe('signin');
@@ -219,7 +311,7 @@ describe('no Spotify (catalogue mode)', () => {
   });
 
   it('a catalogue singer who redoes the test comes back to the arrow, not to Spotify', () => {
-    const s = run([{ type: 'showCatalogue' }, { type: 'allLoaded', page: allMatches() }, { type: 'redoEnd', end: 'high' }, { type: 'holdEnd', midi: 70 }], tested);
+    const s = run([{ type: 'showCatalogue' }, { type: 'allLoaded', page: allMatches() }, { type: 'redoEnd', end: 'high' }, ...micOn, { type: 'holdEnd', midi: 70 }], tested);
     expect(s).toMatchObject({ step: 'signin', range: { low: 45, high: 70 } });
   });
 });

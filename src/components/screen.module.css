@@ -218,10 +218,6 @@
   padding: 28px 56px 28px 24px;
 }
 
-.holdText .hint {
-  max-width: 24ch;
-}
-
 .holdText {
   align-self: end;
   display: flex;
@@ -359,6 +355,189 @@
   margin-left: 4px;
   color: var(--ink);
   font-weight: 600;
+}
+
+/* ---------- mic step (QWW-50) ---------- */
+
+/* Older singers must not get stuck here: type is 18px or more, every button is at least 48px tall (the main ones 56px),
+   and each screen fits a small phone without hiding its button. */
+
+.mic {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px 20px 28px;
+  text-align: center;
+}
+
+.micBody,
+.micNote,
+.micStatus,
+.micWarn {
+  margin: 0;
+  max-width: 30ch;
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.micBody {
+  color: var(--ink);
+}
+
+.micNote {
+  color: var(--dim);
+}
+
+.micStatus {
+  min-height: 26px;
+  font-weight: 700;
+}
+
+.micWarn {
+  color: #ff9cc9;
+}
+
+.micBody strong,
+.micSteps strong {
+  color: var(--pink);
+  font-weight: 700;
+}
+
+.micSteps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: micstep;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 30ch;
+  font-size: 18px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.micSteps li {
+  counter-increment: micstep;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.micSteps li::before {
+  content: counter(micstep);
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--pink);
+  border-radius: 50%;
+  color: var(--pink);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* The one thing to tap on each screen. */
+.micButton {
+  width: min(100%, 320px);
+  min-height: 56px;
+  padding: 12px 24px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--pink);
+  border-radius: 18px;
+  background: rgba(255, 46, 147, 0.14);
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: 0 0 22px -6px var(--pink-glow);
+}
+
+.micButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+  box-shadow: none;
+}
+
+.micButtonQuiet {
+  border-color: var(--faint);
+  background: none;
+  box-shadow: none;
+  font-weight: 600;
+}
+
+/* A way out that is there but not the main road: "Try here anyway", "Reload this page". */
+.micLink {
+  min-height: 48px;
+  padding: 10px 16px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font-size: 18px;
+  text-decoration: underline;
+  text-decoration-color: var(--faint);
+  text-underline-offset: 5px;
+  cursor: pointer;
+}
+
+/* The page's address, to copy by hand when the copy button cannot. 18px keeps iOS from zooming in on focus. */
+.micField {
+  width: min(100%, 320px);
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid var(--faint);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--dim);
+  font: inherit;
+  font-size: 18px;
+  text-overflow: ellipsis;
+}
+
+.meter {
+  width: min(100%, 320px);
+  height: 30px;
+  overflow: hidden;
+  border: 1.5px solid var(--faint);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.meter[data-heard='true'] {
+  border-color: var(--pink);
+}
+
+.meterFill {
+  width: 100%;
+  height: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: linear-gradient(90deg, var(--pink), #ff8fc4);
+  box-shadow: 0 0 16px var(--pink-glow);
+}
+
+.micArt {
+  flex: none;
+  width: 104px;
+  height: auto;
+}
+
+.micPulse {
+  animation: micPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes micPulse {
+  50% {
+    opacity: 0.2;
+  }
 }
 
 /* ---------- range + sign-in arrow ---------- */
@@ -976,6 +1155,7 @@
   }
   .sign,
   .arrow,
+  .micPulse,
   .holding .holdDot {
     animation: none;
   }

@@ -22,8 +22,6 @@ function lyricFor(kind: 'low' | 'high', status: HoldStatus): string {
       return 'Try again and hold the note a little longer';
     case 'order':
       return kind === 'low' ? 'That was higher than your high note. Go lower' : 'That was lower than your low note. Go higher';
-    case 'denied':
-      return 'We need your mic to hear you';
     default:
       return kind === 'low' ? 'Hold the button and sing your lowest note' : 'Now hold and sing your highest note';
   }
@@ -70,9 +68,6 @@ export function HoldStep({ kind, status, live, lowNote, onPress, onRelease }: Ho
     <div className={styles.holdStep}>
       <div className={styles.holdText}>
         <Lyric text={lyricFor(kind, status)} />
-        {status === 'denied' && (
-          <p className={styles.hint}>Allow microphone access in your browser, then press again.</p>
-        )}
       </div>
 
       <div className={styles.holdCenter}>

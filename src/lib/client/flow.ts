@@ -21,11 +21,14 @@ import type {
   VocalRange,
 } from '../contracts';
 import { availableSliders, DEFAULT_VIEW, fitViewTo, pickDecade, pickMood, toggleDuets } from '../songs/browse';
+import type { BrowserInfo } from './browser';
+import type { MicPermission, MicProblem } from './mic';
 
 export type Step =
   | 'boot' // asking /api/me who this is
   | 'landing' // the screen alone
   | 'quiet' // "Find a quiet spot"
+  | 'mic' // getting the microphone working (QWW-50); see MicGate
   | 'low' // hold for the lowest note
   | 'high' // hold for the highest note
   | 'signin' // "That's your range" and the arrow on to the songs (catalogue), or Spotify
@@ -34,7 +37,32 @@ export type Step =
   | 'pick'; // "pick songs you sing well"
 
 /** What the hold button is doing on the low/high steps. */
-export type HoldStatus = 'ready' | 'holding' | 'short' | 'order' | 'denied';
+export type HoldStatus = 'ready' | 'holding' | 'short' | 'order';
+
+/**
+ * The mic step's screens (QWW-50). Older singers often miss, dismiss or block the browser's own microphone
+ * question, so the step walks them through it:
+ * - checking: looking at the browser and what it already says about the microphone (no screen yet)
+ * - inapp: this page is inside another app's built-in browser, which often cannot use the microphone
+ * - prompt: "We need to hear you sing", before the browser's own question; its button asks
+ * - asking: the browser's question is up (or the microphone is opening after a tap)
+ * - opening: the browser had already said yes, so the microphone opens by itself (no screen)
+ * - level: the microphone is on; "Say ahh, see the bar move"
+ * - recovery: it did not work; what to do, for this browser
+ */
+export type MicView = 'checking' | 'inapp' | 'prompt' | 'asking' | 'opening' | 'level' | 'recovery';
+
+export interface MicGate {
+  view: MicView;
+  /** The hold step the "Continue" on the level screen leads to. */
+  next: 'low' | 'high';
+  /** What the browser is, once the step has looked. */
+  env: BrowserInfo | null;
+  /** Why the microphone is not on, on the recovery screen. */
+  problem: MicProblem | null;
+  /** How many times the answer was no. The recovery screen says "still" from the second. */
+  fails: number;
+}
 
 /** Test progress kept in sessionStorage so it survives the Spotify round trip. */
 export interface TestProgress {
@@ -53,6 +81,8 @@ export const MAX_LOAD_ATTEMPTS = 5;
 export interface FlowState {
   step: Step;
   hold: HoldStatus;
+  /** The mic step's own state; only read while `step` is 'mic'. */
+  mic: MicGate;
   low: Midi | null;
   high: Midi | null;
   signedIn: boolean;
@@ -89,6 +119,7 @@ export interface FlowState {
 export const initialState: FlowState = {
   step: 'boot',
   hold: 'ready',
+  mic: { view: 'checking', next: 'low', env: null, problem: null, fails: 0 },
   low: null,
   high: null,
   signedIn: false,
@@ -124,7 +155,18 @@ export type FlowEvent =
   | { type: 'quietDone' }
   | { type: 'holdStart' }
   | { type: 'holdEnd'; midi: Midi | null }
-  | { type: 'micDenied' }
+  /** The mic step looked at the browser and asked what it already knows about the microphone (this never shows a question). */
+  | { type: 'micChecked'; env: BrowserInfo; permission: MicPermission }
+  /** "Turn on microphone" or "Try again" was tapped: the browser's own question comes up. */
+  | { type: 'micAsk' }
+  | { type: 'micGranted' }
+  | { type: 'micFailed'; reason: MicProblem }
+  /** "Try here anyway" on the in-app screen. */
+  | { type: 'micTryHere' }
+  /** "Continue" on the level screen. */
+  | { type: 'micDone' }
+  /** The microphone went away during a hold step (the permission was taken back, another app took it): the mic step again. */
+  | { type: 'micLost' }
   | { type: 'rangeSaved' }
   | { type: 'saveFailed' }
   | { type: 'retrySave' }
@@ -173,6 +215,18 @@ function freshResults(state: FlowState) {
 /** A view change shows the new list from its first song. */
 const withView = (state: FlowState, view: ResultsView): FlowState => ({ ...state, view, shown: SHOW_STEP, selectedId: null });
 
+/**
+ * The way into a hold step when the microphone is not open (QWW-50): the mic step first, then `next`.
+ * Starts it from the top every time, since the browser may have been asked since and the answer may
+ * have changed; what the browser is stays.
+ */
+function enterMic(state: FlowState, next: 'low' | 'high'): FlowState {
+  return { ...state, step: 'mic', hold: 'ready', mic: { ...initialState.mic, next, env: state.mic.env } };
+}
+
+/** The mic step moves only on an event meant for the screen it is on, so a late answer cannot undo a later one. */
+const inMic = (state: FlowState, ...views: MicView[]): boolean => state.step === 'mic' && views.includes(state.mic.view);
+
 export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
   switch (event.type) {
     case 'booted': {
@@ -184,11 +238,11 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
         if (low !== null && high !== null) return { ...base, step: 'saving', range: testRange(low, high) };
         if (wantsPick) return { ...base, step: 'pick', range: me.range };
         if (me.range) return { ...base, step: 'results', range: me.range, loading: true };
-        if (low !== null) return { ...base, step: 'high' };
+        if (low !== null) return enterMic(base, 'high');
         return { ...base, step: 'landing' };
       }
       if (low !== null && high !== null) return { ...state, step: 'signin', low, high, range: testRange(low, high) };
-      if (low !== null) return { ...state, step: 'high', low };
+      if (low !== null) return enterMic({ ...state, low }, 'high');
       if (savedRange) {
         const range = testRange(savedRange.low, savedRange.high);
         return { ...state, ...freshResults(state), step: 'results', mode: 'catalogue', range, loading: true };
@@ -198,7 +252,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
     case 'start':
       return { ...state, step: 'quiet', hold: 'ready', low: null, high: null, redoing: null };
     case 'quietDone':
-      return state.step === 'quiet' ? { ...state, step: 'low', hold: 'ready' } : state;
+      return state.step === 'quiet' ? enterMic(state, 'low') : state;
     case 'holdStart':
       return isHoldStep(state) ? { ...state, hold: 'holding' } : state;
     case 'holdEnd': {
@@ -221,8 +275,30 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       if (state.low !== null && midi <= state.low) return { ...state, hold: 'order' };
       return done(state.low ?? midi, midi);
     }
-    case 'micDenied':
-      return isHoldStep(state) ? { ...state, hold: 'denied' } : state;
+    case 'micChecked': {
+      if (!inMic(state, 'checking')) return state;
+      const { env, permission } = event;
+      const mic = { ...state.mic, env };
+      // Inside another app: say so before anything else. Already blocked: no point asking, go straight to what to do.
+      if (env.inApp) return { ...state, mic: { ...mic, view: 'inapp' } };
+      if (permission === 'denied') return { ...state, mic: { ...mic, view: 'recovery', problem: 'denied', fails: mic.fails + 1 } };
+      // Already allowed: the microphone opens by itself and the singer goes straight to the level meter.
+      return { ...state, mic: { ...mic, view: permission === 'granted' ? 'opening' : 'prompt' } };
+    }
+    case 'micAsk':
+      return inMic(state, 'prompt', 'recovery') ? { ...state, mic: { ...state.mic, view: 'asking' } } : state;
+    case 'micGranted':
+      return inMic(state, 'asking', 'opening') ? { ...state, mic: { ...state.mic, view: 'level', problem: null } } : state;
+    case 'micFailed':
+      return inMic(state, 'asking', 'opening')
+        ? { ...state, mic: { ...state.mic, view: 'recovery', problem: event.reason, fails: state.mic.fails + 1 } }
+        : state;
+    case 'micTryHere':
+      return inMic(state, 'inapp') ? { ...state, mic: { ...state.mic, view: 'prompt' } } : state;
+    case 'micDone':
+      return inMic(state, 'level') ? { ...state, step: state.mic.next, hold: 'ready' } : state;
+    case 'micLost':
+      return state.step === 'low' || state.step === 'high' ? enterMic(state, state.step) : state;
     case 'rangeSaved':
       return { ...state, ...freshResults(state), step: 'results', mode: 'library', loading: true };
     case 'showCatalogue':
@@ -284,7 +360,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
     case 'redoEnd': {
       if (!state.range) return state;
       const keep = event.end === 'low' ? { low: null, high: state.range.high } : { low: state.range.low, high: null };
-      return { ...state, ...keep, step: event.end, hold: 'ready', redoing: event.end, selectedId: null };
+      return enterMic({ ...state, ...keep, redoing: event.end, selectedId: null }, event.end);
     }
     case 'pickStart':
       return { ...state, step: 'pick', picks: [], selectedId: null };

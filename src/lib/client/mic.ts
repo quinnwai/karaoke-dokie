@@ -9,35 +9,116 @@ export interface MicRecorder {
   latest(n: number): Float32Array;
   /** Everything since the last reset. */
   take(): Float32Array;
+  /** False once the microphone has been taken away (the permission was withdrawn, a headset was pulled). */
+  live(): boolean;
+  /** Starts the audio if the browser held it back; call it from a tap. Safe to call any time. */
+  resume(): void;
   /** Releases the microphone. */
   close(): void;
 }
 
+/** What the browser already says about the microphone, without asking. 'unknown' where it cannot tell (Safari before 16). */
+export type MicPermission = 'granted' | 'denied' | 'prompt' | 'unknown';
+
 export interface Mic {
-  /** Asks for the microphone. Rejects with MicDeniedError when the user says no. */
+  /** Never prompts, never rejects. */
+  permission(): Promise<MicPermission>;
+  /** Asks for the microphone, which shows the browser's own question the first time. Rejects with MicError when the answer is no. */
   open(): Promise<MicRecorder>;
 }
 
-export class MicDeniedError extends Error {
-  constructor(message = 'Microphone access was denied') {
+/**
+ * Why the microphone is not on. Blocked and closed are told apart because closing the question leaves the
+ * way open to ask again; the rest are not about permission at all.
+ */
+export type MicProblem = 'denied' | 'dismissed' | 'missing' | 'busy' | 'unsupported';
+
+export class MicError extends Error {
+  constructor(
+    readonly reason: MicProblem,
+    message = `Microphone problem: ${reason}`,
+  ) {
     super(message);
-    this.name = 'MicDeniedError';
+    this.name = 'MicError';
   }
 }
+
+/** Reads getUserMedia's failure. Chrome says "Permission dismissed" when the question was closed without an answer. */
+export function classifyMicError(err: unknown): MicProblem {
+  const { name = '', message = '' } = (err ?? {}) as { name?: string; message?: string };
+  switch (name) {
+    case 'NotAllowedError':
+    case 'PermissionDeniedError':
+    case 'SecurityError':
+      return /dismiss/i.test(message) ? 'dismissed' : 'denied';
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+      return 'missing';
+    case 'NotReadableError':
+    case 'TrackStartError':
+    case 'AbortError':
+      return 'busy';
+    default:
+      return 'unsupported';
+  }
+}
+
+/** How long to wait for the browser's answer before saying 'unknown', so a browser that never answers cannot hold up the screen. */
+const PERMISSION_WAIT_MS = 400;
+
+export async function queryMicPermission(): Promise<MicPermission> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const status = await Promise.race([
+      navigator.permissions.query({ name: 'microphone' as PermissionName }),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), PERMISSION_WAIT_MS);
+      }),
+    ]);
+    return status ? status.state : 'unknown';
+  } catch {
+    // No Permissions API, or this browser does not know the name "microphone".
+    return 'unknown';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** How much of the latest sound is kept while nobody is recording: enough for the level meter and the live pitch. */
+export const IDLE_KEEP = 8192;
 
 /** Collects Float32 chunks and hands back slices of them. */
 export class SampleBuffer {
   private chunks: Float32Array[] = [];
   private length = 0;
+  /** From reset() (a hold begins) to stop() (it ends) everything is kept; the rest of the time only the latest IDLE_KEEP. */
+  private recording = false;
 
   push(chunk: Float32Array): void {
     this.chunks.push(chunk);
     this.length += chunk.length;
+    if (!this.recording) this.trim();
   }
 
   reset(): void {
     this.chunks = [];
     this.length = 0;
+    this.recording = true;
+  }
+
+  /** Everything since reset(). The hold is over, so the buffer goes back to keeping only the latest sound. */
+  stop(): Float32Array {
+    const all = this.all();
+    this.recording = false;
+    this.trim();
+    return all;
+  }
+
+  /** Drops the oldest chunks while IDLE_KEEP samples or more would still be left. */
+  private trim(): void {
+    while (this.chunks.length > 1 && this.length - this.chunks[0]!.length >= IDLE_KEEP) {
+      this.length -= this.chunks.shift()!.length;
+    }
   }
 
   latest(n: number): Float32Array {
@@ -76,9 +157,11 @@ registerProcessor('kd-tap', KdTap);
 `;
 
 export const browserMic: Mic = {
+  permission: queryMicPermission,
+
   async open() {
-    if (!navigator.mediaDevices?.getUserMedia) throw new MicDeniedError('No microphone available');
-    // Create the context before any await so it starts inside the press gesture (iOS Safari).
+    if (!navigator.mediaDevices?.getUserMedia) throw new MicError('unsupported', 'No microphone available');
+    // Create the context before any await so it starts inside the tap (iOS Safari).
     const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const ctx = new Ctx();
     const resumed = ctx.resume().catch(() => {});
@@ -89,9 +172,12 @@ export const browserMic: Mic = {
       });
     } catch (err) {
       void ctx.close().catch(() => {});
-      throw new MicDeniedError(err instanceof Error ? err.message : undefined);
+      throw new MicError(classifyMicError(err), err instanceof Error ? err.message : undefined);
     }
     await resumed;
+    // A microphone the browser had already allowed opens without a tap, so the first resume() may have been
+    // refused. Once the page is capturing, the browser lets the audio start.
+    if (ctx.state !== 'running') await ctx.resume().catch(() => {});
 
     const source = ctx.createMediaStreamSource(stream);
     const silent = ctx.createGain();
@@ -119,7 +205,11 @@ export const browserMic: Mic = {
       sampleRate: ctx.sampleRate,
       reset: () => buffer.reset(),
       latest: (n) => buffer.latest(n),
-      take: () => buffer.all(),
+      take: () => buffer.stop(),
+      live: () => stream.getAudioTracks().some((t) => t.readyState === 'live'),
+      resume() {
+        void ctx.resume().catch(() => {});
+      },
       close() {
         source.disconnect();
         node.disconnect();

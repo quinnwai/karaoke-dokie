@@ -6,6 +6,7 @@
 // songs (no Spotify) may carry their catalogue key; library songs carry only their position.
 
 import type { EventValue } from '../contracts';
+import { browserLabel } from './browser';
 import { flowReducer, type FlowEvent, type FlowState, type Step } from './flow';
 
 export interface FunnelEvent {
@@ -50,9 +51,6 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
       else out.push({ name: 'note_detected', props: { step, midi: action.midi } });
       break;
     }
-    case 'micDenied':
-      if (prev.step === 'low' || prev.step === 'high') out.push({ name: 'mic_denied', props: { step: prev.step } });
-      break;
     case 'showCatalogue':
       out.push({ name: 'catalogue_chosen' });
       break;
@@ -115,8 +113,37 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
     default:
       break;
   }
+  out.push(...micEvents(prev, next));
   if (next.step !== prev.step) out.push(...stepEvents(next.step, next));
   return out;
+}
+
+/**
+ * Events for the mic step (QWW-50), one per screen it arrives at. `mic_prompt_shown` is our own screen ahead of the
+ * browser's question, the closest we can get: the browser does not say when its own box appears. `mic_denied` is any
+ * way the answer was no (blocked, closed, no microphone, in use), told apart by `reason`. `via` says whether a tap
+ * asked ('prompt') or the browser had already said ('already'). `browser` is 'ios-safari', 'android-chrome', ...
+ */
+function micEvents(prev: FlowState, next: FlowState): FunnelEvent[] {
+  if (prev.step !== 'mic' || next.mic.view === prev.mic.view) return [];
+  const { env, problem } = next.mic;
+  const browser = env ? browserLabel(env) : 'other';
+  const via = prev.mic.view === 'asking' ? 'prompt' : 'already';
+  switch (next.mic.view) {
+    case 'inapp':
+      return [{ name: 'inapp_browser_detected', props: { app: env?.inApp ?? 'webview', browser } }];
+    case 'prompt':
+      return [{ name: 'mic_prompt_shown', props: { browser } }];
+    case 'level':
+      return [{ name: 'mic_granted', props: { via, browser } }];
+    case 'recovery':
+      return [
+        { name: 'mic_denied', props: { reason: problem ?? 'denied', via, browser } },
+        { name: 'mic_recovery_shown', props: { reason: problem ?? 'denied', browser } },
+      ];
+    default:
+      return [];
+  }
 }
 
 /** Events for arriving at a step. */
