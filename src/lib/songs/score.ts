@@ -251,17 +251,31 @@ export function reasonsFor(p: ScoreParts, fit?: FitNote, track?: TrackListening)
 /**
  * The song's sung time across the user's range, as it is sung: SHAPE_BINS whole percents, lowest
  * note first. Undefined when the song has no pitch histogram (its estimate is three lumps, not a shape).
+ *
+ * Only notes inside the song's own range count. The range skips the outlier notes at each end (range.ts
+ * trimmedRange) but the histogram keeps every note, so counting them all drew bars past the pink range on
+ * the song page. A note outside the user's range has no bin: it used to be piled into the edge bin, which
+ * showed sung time at the very edge of the range that is not there. A bin with any sung time is at least 1,
+ * so 0 means no notes.
  */
 export function shapeOf(user: VocalRange, song: SongRange, octave: OctaveShift): number[] | undefined {
-  if (!song.pitchShare?.length || user.high <= user.low) return undefined;
+  const span = user.high - user.low;
+  if (!song.pitchShare?.length || span <= 0) return undefined;
+  const shift = shiftOf(octave);
   const bins = new Array<number>(SHAPE_BINS).fill(0);
   let total = 0;
   for (const [midi, share] of song.pitchShare) {
-    const at = (midi + shiftOf(octave) - user.low) / (user.high - user.low);
-    bins[Math.min(SHAPE_BINS - 1, Math.max(0, Math.floor(at * SHAPE_BINS)))]! += share;
+    if (!(share > 0) || midi < song.low || midi > song.high) continue;
+    const note = midi + shift;
+    if (note < user.low || note > user.high) continue;
+    const at = ((note - user.low) * SHAPE_BINS) / span;
+    // A note on a bin's edge goes up a bin, except the song's top note, which goes down: the song page cuts a
+    // bar at the song's top note, so the bin above it would be left with no width to draw in.
+    const bin = midi === song.high && at > 0 && Number.isInteger(at) ? at - 1 : Math.min(SHAPE_BINS - 1, Math.floor(at));
+    bins[bin]! += share;
     total += share;
   }
-  return total > 0 ? bins.map((b) => Math.round((100 * b) / total)) : undefined;
+  return total > 0 ? bins.map((b) => (b > 0 ? Math.max(1, Math.round((100 * b) / total)) : 0)) : undefined;
 }
 
 /** Adds score, parts, reasons, strain and the time-in-range shape to a match. */

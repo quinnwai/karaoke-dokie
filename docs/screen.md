@@ -40,7 +40,10 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
 7. **Song detail**: range bar (song in neon pink over the user's range, note names at the
    ends; a song sung an octave away is drawn as sung, with the recording as a dashed outline;
    faint bars above it show where the song's singing time sits across your range, `Match.shape`,
-   so an Easy song that spans most of your range reads as Easy), difficulty (or a quiet "Maybe"), "Fast lyrics", an "i" button explaining where the
+   so an Easy song that spans most of your range reads as Easy: one bar for each twelfth of your range
+   that has singing in it, none for a twelfth without, and each cut to the song's pink stretch so none
+   sticks out of it (the shape only counts notes inside the song's range, `shapeOf` in `score.ts`;
+   `rangeBar` in `display.ts` does the cutting)), difficulty (or a quiet "Maybe"), "Fast lyrics", an "i" button explaining where the
    data came from (for Maybe songs, also that the range is an estimate), Spotify's own player
    (see below), and "How'd it go?" thumbs that POST `/api/feedback`.
 8. **Returning user** with a saved range lands on results; "redo" restarts the test. Someone

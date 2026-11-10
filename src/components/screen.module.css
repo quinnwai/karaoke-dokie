@@ -777,21 +777,25 @@
   box-sizing: border-box;
 }
 
-/* Where the song's singing time sits across your range: taller is more of the song. Sits over your
-   range, so a song that is mostly in the middle shows a hump there. */
+/* Where the song's singing time sits across your range: taller is more of the song. One bar for each
+   stretch of your range that has singing in it, placed on the same scale as the bar below and never
+   past the song's pink stretch (rangeBar in display.ts), so a song that is mostly in the middle shows a
+   hump there. A clear 1px border on each side leaves the gap between neighbours. */
 .barShape {
   position: relative;
   height: 28px;
   margin-bottom: 4px;
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
 }
 
 .barShape i {
-  flex: 1;
+  position: absolute;
+  bottom: 0;
+  box-sizing: border-box;
+  border: solid transparent;
+  border-width: 0 1px;
   border-radius: 2px 2px 0 0;
   background: rgba(255, 46, 147, 0.28);
+  background-clip: padding-box;
 }
 
 .barNames {

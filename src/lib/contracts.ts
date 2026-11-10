@@ -128,7 +128,7 @@ export interface ScoreParts {
 export type Mood = 'upbeat' | 'heartfelt';
 export const MOODS: Mood[] = ['upbeat', 'heartfelt'];
 
-/** Bins in Match.shape. */
+/** Bins in Match.shape: equal slices of the singer's range. */
 export const SHAPE_BINS = 12;
 
 export interface Match {
@@ -149,7 +149,9 @@ export interface Match {
   strain?: number;
   /**
    * Where the song's sung time sits across the singer's range, as it is sung (octave shift applied):
-   * SHAPE_BINS whole percents, lowest note first. Unset for a song with no pitch histogram.
+   * SHAPE_BINS whole percents, lowest note first. Only notes inside the song's own range count (not the
+   * outliers its range skips), so every bin with a value lies where the song is drawn. A bin with any sung
+   * time is at least 1, so 0 means no notes. Unset for a song with no pitch histogram.
    */
   shape?: number[];
   /**
