@@ -31,7 +31,7 @@ describe('postHogSettings (QWW-51)', () => {
     }
   });
 
-  it('takes only an https host, and tidies it to its origin', () => {
+  it('takes only an https host, and tidies it', () => {
     expect(postHogSettings({ ...env, NEXT_PUBLIC_POSTHOG_HOST: 'https://eu.i.posthog.com/' })?.host).toBe('https://eu.i.posthog.com');
     expect(postHogSettings({ ...env, NEXT_PUBLIC_POSTHOG_HOST: ' https://eu.i.posthog.com ' })?.host).toBe('https://eu.i.posthog.com');
     for (const host of ['http://us.i.posthog.com', 'us.i.posthog.com', 'ftp://x.test', 'javascript:alert(1)', 'not a url']) {
@@ -39,7 +39,40 @@ describe('postHogSettings (QWW-51)', () => {
     }
   });
 
+  it('keeps the path of a reverse proxy, and drops a query or fragment', () => {
+    const host = (value: string) => postHogSettings({ ...env, NEXT_PUBLIC_POSTHOG_HOST: value })?.host;
+    expect(host('https://app.example.com/ingest')).toBe('https://app.example.com/ingest');
+    expect(host('https://app.example.com/ingest/')).toBe('https://app.example.com/ingest');
+    expect(host('https://app.example.com/ingest?x=1#top')).toBe('https://app.example.com/ingest');
+    expect(host('https://us.i.posthog.com/')).toBe('https://us.i.posthog.com');
+  });
+
   it('trims the key, as a pasted value often carries a newline', () => {
     expect(postHogSettings({ ...env, NEXT_PUBLIC_POSTHOG_KEY: `${KEY}\n` })?.key).toBe(KEY);
+  });
+
+  it('reaches the page as a prop, read at request time', async () => {
+    const { default: Home } = await import('../../app/page');
+    const names = ['NEXT_PUBLIC_POSTHOG_KEY', 'NEXT_PUBLIC_POSTHOG_HOST', 'VERCEL_ENV'] as const;
+    const was = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    try {
+      for (const name of names) delete process.env[name];
+      expect(Home().props.postHog).toBeNull();
+      process.env.NEXT_PUBLIC_POSTHOG_KEY = KEY;
+      process.env.NEXT_PUBLIC_POSTHOG_HOST = 'https://us.i.posthog.com';
+      process.env.VERCEL_ENV = 'preview';
+      expect(Home().props.postHog).toEqual({ key: KEY, host: 'https://us.i.posthog.com', environment: 'preview' });
+      // Read again on the next request, not fixed when the module loaded.
+      process.env.VERCEL_ENV = 'production';
+      expect(Home().props.postHog?.environment).toBe('production');
+      process.env.NEXT_PUBLIC_POSTHOG_KEY = 'phx_notaprojecttoken';
+      expect(Home().props.postHog).toBeNull();
+    } finally {
+      for (const name of names) {
+        const value = was[name];
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
   });
 });

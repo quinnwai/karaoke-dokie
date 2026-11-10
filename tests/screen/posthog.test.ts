@@ -4,11 +4,11 @@
 // device's own random id and nothing that identifies a person.
 import type { CaptureResult } from 'posthog-js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppEvent, EventsRequest } from '../../src/lib/contracts';
+import type { AppEvent, EventsRequest, PostHogSettings } from '../../src/lib/contracts';
 import { createTracker } from '../../src/lib/client/events';
-import { beforeSend, createPostHogSink, postHogConfig, type PostHogClient, type PostHogSettings } from '../../src/lib/client/posthog';
-import { EVENT_NAME } from '../../src/lib/eventRules';
-import { EVENT } from '../../src/lib/eventNames';
+import { beforeSend, createPostHogSink, postHogConfig, type PostHogClient } from '../../src/lib/client/posthog';
+import { EVENT_NAME, isForbiddenProp, PROP_KEY } from '../../src/lib/eventRules';
+import { EVENT, POSTHOG_PROPS } from '../../src/lib/eventNames';
 
 const ANON = '0f8fad5b-d9cb-469f-a165-70867728950e';
 const SETTINGS: PostHogSettings = { key: 'phc_testtoken', host: 'https://us.i.posthog.com', environment: 'preview' };
@@ -156,17 +156,25 @@ describe('createPostHogSink', () => {
     expect(calls.init[0]![1]).toMatchObject({ api_host: SETTINGS.host, bootstrap: { distinctID: ANON } });
   });
 
-  it('gives up quietly when posthog-js cannot load, and stops keeping events', async () => {
-    const { sink, load, fail } = sinkWithSlowLoad();
-    sink.capture(event('title_view'));
-    fail();
-    await settle();
-    expect(() => sink.capture(event('list_view'))).not.toThrow();
-    expect(() => sink.setReplay(true)).not.toThrow();
-    expect(load).toHaveBeenCalledTimes(1);
+  it('gives up when posthog-js cannot load, says so once in the console, and stops keeping events', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { sink, load, fail } = sinkWithSlowLoad();
+      sink.capture(event('title_view'));
+      fail();
+      await settle();
+      expect(() => sink.capture(event('list_view'))).not.toThrow();
+      expect(() => sink.setReplay(true)).not.toThrow();
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]![0])).toMatch(/PostHog is off for this page.*did not load.*event log is not affected/);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('survives a load that throws at once, an init that throws, and a capture that throws', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const throwingLoad = createPostHogSink(SETTINGS, ANON, () => {
       throw new Error('boom');
     });
@@ -191,15 +199,18 @@ describe('createPostHogSink', () => {
     afterBadCapture.capture(event('title_view'));
     await settle();
     expect(() => afterBadCapture.capture(event('list_view'))).not.toThrow();
+    // The two that could not start said so, once each; a capture that throws is not worth a line.
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 
   it('does not keep events forever while posthog-js is still loading', async () => {
     const { sink, calls, finish } = sinkWithSlowLoad();
-    for (let i = 0; i < 150; i++) sink.capture(event('tap', { i }));
+    for (let i = 0; i < 150; i++) sink.capture(event('tap', { position: i }));
     finish();
     await settle();
     expect(calls.capture).toHaveLength(100);
-    expect(calls.capture[0]![1]).toEqual({ i: 0 });
+    expect(calls.capture[0]![1]).toEqual({ position: 0 });
   });
 
   describe('session replay', () => {
@@ -299,6 +310,32 @@ describe('the tracker with PostHog behind it', () => {
     expect(everything).not.toMatch(/spotify:|4uLU6h|ann\.singer|user-5|Ann Singer|example\.com/i);
   });
 
+  it('gives PostHog only the props on the allowlist, whatever else a caller adds', async () => {
+    const { tracker, calls } = wired();
+    // A play button that passes the song it plays, the way a future emitter might.
+    tracker.track(EVENT.rowPlay, {
+      position: 4,
+      songKey: 'abba|dancing queen',
+      name: 'Dancing Queen',
+      title: 'Dancing Queen',
+      songTitle: 'Dancing Queen',
+      trackName: 'Dancing Queen',
+      artist: 'ABBA',
+      spotifyUri: 'spotify:track:4uLU6hMCjMI75M1A2tKUQC',
+      uri: 'spotify:track:4uLU6hMCjMI75M1A2tKUQC',
+      'spotify-id': '4uLU6hMCjMI75M1A2tKUQC',
+      id: '4uLU6hMCjMI75M1A2tKUQC',
+      playlistId: '37i9dQZF1DXcBWIGoYBM5M',
+      username: 'ann.singer',
+      userName: 'Ann Singer',
+      fullName: 'Ann Singer',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.capture).toHaveLength(1);
+    expect(calls.capture[0]![1]).toEqual({ position: 4, songKey: 'abba|dancing queen' });
+    expect(JSON.stringify(calls.capture)).not.toMatch(/Dancing Queen|ABBA|spotify|4uLU6h|37i9dQ|ann\.singer|Ann Singer/);
+  });
+
   it('gives PostHog the device id and nothing that identifies a person', async () => {
     const { tracker, calls } = wired();
     tracker.track('title_view');
@@ -359,6 +396,19 @@ describe('the tracker with PostHog behind it', () => {
     tracker.track('title_view');
     await tracker.flush();
     expect(sent[0]!.events.map((e) => e.name)).toEqual(['title_view']);
+  });
+});
+
+describe('POSTHOG_PROPS', () => {
+  it('lists only valid prop names, none of which the server would drop as forbidden', () => {
+    for (const key of POSTHOG_PROPS) {
+      expect(key).toMatch(PROP_KEY);
+      expect(isForbiddenProp(key), key).toBe(false);
+    }
+  });
+
+  it('has every prop the tuner, the mic flow and the play row are documented to send', () => {
+    for (const key of ['gear', 'value', 'on', 'era', 'eras', 'off', 'position', 'step']) expect(POSTHOG_PROPS.has(key), key).toBe(true);
   });
 });
 

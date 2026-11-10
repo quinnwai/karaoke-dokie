@@ -41,3 +41,48 @@ export const EVENT = {
   /** The tester pressed Connect to Spotify. */
   spotifyConnect: 'spotify_connect',
 } as const;
+
+/**
+ * The prop names an event may carry to PostHog (QWW-51), a third party. Any other prop is dropped on the way there; our own
+ * log keeps whatever the tracker accepts. Adding a name here is a privacy decision: never a Spotify id or URI, a person's
+ * name or email, or the title or artist of a song from someone's library (a catalogue song's key is public, and fine). A prop
+ * an event needs that is missing here is missing in PostHog only, so add it here together with the event that sends it.
+ */
+export const POSTHOG_PROPS: ReadonlySet<string> = new Set([
+  // How the list was viewed: the screen's mode and the setting of each control.
+  'mode',
+  'difficulty',
+  'familiarity',
+  'popularity',
+  'tempo',
+  'decade',
+  'mood',
+  'duetsOnly',
+  // Where and how much: place in the list, a catalogue song's key (a library song carries only its place), counts.
+  'position',
+  'songKey',
+  'matchCount',
+  'maybeCount',
+  'libraryUnavailable',
+  'shown',
+  // The range test.
+  'step',
+  'midi',
+  'low',
+  'high',
+  'spanSemitones',
+  'end',
+  // Controls, including the tuner's gears and eras.
+  'slider',
+  'kind',
+  'value',
+  'on',
+  'gear',
+  'era',
+  'eras',
+  'off',
+  // The rest of the funnel.
+  'from',
+  'signedIn',
+  'thumbs',
+]);

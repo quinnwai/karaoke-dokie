@@ -7,8 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KaraokeApp } from '../../src/components/KaraokeApp';
 import type { Api } from '../../src/lib/client/api';
 import type { Mic } from '../../src/lib/client/mic';
-import type { PostHogSettings } from '../../src/lib/client/posthog';
-import type { MeResponse, VocalRange } from '../../src/lib/contracts';
+import type { EventsRequest, MeResponse, PostHogSettings, VocalRange } from '../../src/lib/contracts';
 import { allMatches, knownSongs, me, recommendationsPage } from '../fixtures/screen';
 
 const posthog = vi.hoisted(() => ({
@@ -41,12 +40,17 @@ function fakeApi(user: MeResponse | null) {
 const mic: Mic = { open: async () => Promise.reject(new Error('no mic in this test')) };
 const captured = () => posthog.capture.mock.calls.map(([name]) => name as string);
 
+/** The tracker's own log posts to /api/events; nothing here is listening, so the requests are what it recorded. */
+const fetchMock = vi.fn(async (..._args: unknown[]) => new Response(null, { status: 204 }));
+const logRequests = () => fetchMock.mock.calls.map((call, i) => ({ url: call[0], body: (call[1] as { body?: string } | undefined)?.body ?? '', order: fetchMock.mock.invocationCallOrder[i]! })).filter((r) => r.url === '/api/events');
+const loggedNames = () => logRequests().flatMap((r) => (JSON.parse(r.body) as EventsRequest).events.map((e) => e.name));
+
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
   window.history.replaceState(null, '', '/');
-  // The tracker's own log would post to /api/events; nothing here is listening.
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
+  fetchMock.mockClear();
+  vi.stubGlobal('fetch', fetchMock);
   for (const fn of Object.values(posthog)) fn.mockClear();
 });
 afterEach(() => {
@@ -98,13 +102,23 @@ describe('KaraokeApp with PostHog', () => {
     await waitFor(() => expect(posthog.startSessionRecording).toHaveBeenCalledTimes(1));
   });
 
-  it('puts the Spotify connect press in PostHog before the page leaves', async () => {
+  it('has the Spotify connect press in both our log and PostHog before the page leaves', async () => {
     sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
     const navigate = vi.fn();
     render(<KaraokeApp api={fakeApi(null)} mic={mic} navigate={navigate} postHog={SETTINGS} pickSongs />);
+    // PostHog has loaded once it has taken this screen's first event.
+    await waitFor(() => expect(captured()).toContain('range_shown'));
     fireEvent.click(await screen.findByRole('button', { name: 'or use songs from your Spotify' }));
     expect(navigate).toHaveBeenCalledWith('/api/auth/login');
-    await waitFor(() => expect(captured()).toContain('spotify_connect'));
+    const left = navigate.mock.invocationCallOrder[0]!;
+
+    const posthogCall = posthog.capture.mock.calls.findIndex(([name]) => name === 'spotify_connect');
+    expect(posthogCall).toBeGreaterThanOrEqual(0);
+    expect(posthog.capture.mock.invocationCallOrder[posthogCall]!).toBeLessThan(left);
+    // Our log's flush starts its request at once, so that went out before the page was left too.
+    const logged = logRequests().find((r) => r.body.includes('spotify_connect'));
+    expect(logged).toBeTruthy();
+    expect(logged!.order).toBeLessThan(left);
     expect(captured()).not.toContain('spotify_connect_pressed');
   });
 
@@ -127,14 +141,22 @@ describe('KaraokeApp with PostHog', () => {
     expect(posthog.init).not.toHaveBeenCalled();
   });
 
-  it('still works, and still logs, when posthog-js is broken', async () => {
-    posthog.init.mockImplementationOnce(() => {
-      throw new Error('bad token');
-    });
-    render(<KaraokeApp api={fakeApi(null)} mic={mic} postHog={SETTINGS} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
-    await waitFor(() => expect(posthog.init).toHaveBeenCalledTimes(1));
-    await screen.findByRole('button', { name: 'Find a quiet spot. Tap to continue' });
-    expect(posthog.capture).not.toHaveBeenCalled();
+  it('still works, and our log still gets the events, when posthog-js is broken', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      posthog.init.mockImplementationOnce(() => {
+        throw new Error('bad token');
+      });
+      render(<KaraokeApp api={fakeApi(null)} mic={mic} postHog={SETTINGS} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+      await screen.findByRole('button', { name: 'Find a quiet spot. Tap to continue' });
+      await waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+      expect(posthog.capture).not.toHaveBeenCalled();
+      // The page going away sends what our log recorded, PostHog or not.
+      window.dispatchEvent(new Event('pagehide'));
+      await waitFor(() => expect(loggedNames()).toEqual(expect.arrayContaining(['title_view', 'start_pressed'])));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

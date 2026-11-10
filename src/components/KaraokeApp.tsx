@@ -9,7 +9,7 @@ import { createTracker, flushWhenHidden, loadAnonId, sendEvents, type Tracker } 
 import { flowReducer, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
 import { eventsFor } from '../lib/client/funnel';
 import { browserMic, type Mic, type MicRecorder } from '../lib/client/mic';
-import { createPostHogSink, type PostHogSettings } from '../lib/client/posthog';
+import { createPostHogSink } from '../lib/client/posthog';
 import {
   clearProgress,
   loadProgress,
@@ -19,6 +19,7 @@ import {
   setWantsPick,
   takeWantsPick,
 } from '../lib/client/storage';
+import type { PostHogSettings } from '../lib/contracts';
 import { EVENT } from '../lib/eventNames';
 import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';

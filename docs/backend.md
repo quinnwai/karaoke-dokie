@@ -53,7 +53,7 @@ ran out of budget (a first visit to a very large library), `all=1` returns `comp
 | `EVENTS` | `on` or `off`: whether `POST /api/events` stores beta events. Unset or blank, it is on only when `NODE_ENV=production`, `SPOTIFY_MOCK` is not `1` and the store is Postgres, so tests, e2e and local dev collect nothing. Any other value counts as off |
 | `DUETS_AND_MOODS` | `on` shows duets and moods on screen; unset, blank or any other value (`1`, `true`, a typo) hides them (QWW-43). Off, the four recommendation responses (`/api/recommendations` and `/api/catalogue/recommendations`, paged or `all=1`) carry no `moods` and no duet markers (`range.duet`, `range.parts`, `part`, `partSinger`), so the Duets and mood chips, the "Duet: take ..." lines and the song-page mood pills never appear. It is applied after ranking (`src/lib/server/features.ts`), so the songs and their order are the same either way; a duet is still scored on the part that fits the singer |
 | `MOODS_SHIPPED` | Comma-separated moods (`upbeat`, `heartfelt`) allowed on screen as chips, while `DUETS_AND_MOODS=on`. Set a mood here only after it passes the QWW-11 precision gate (`npm run moods:report`). Unset = no mood chips |
-| `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | PostHog as the event log's second sink (QWW-51). The key is the project token (`phc_...`, public by design; a personal API key is refused), the host the region's ingest address (`https://us.i.posthog.com` or `https://eu.i.posthog.com`, https only). Either missing or malformed and the app records to our own log alone. Read per request by `app/page.tsx` (`postHogSettings` in `src/lib/server/config.ts`) and handed to the screen. `VERCEL_ENV` (set by Vercel) tags every event `production`, `preview` or, anywhere else, `local` |
+| `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | PostHog as the event log's second sink (QWW-51). The key is the project token (`phc_...`, public by design; a personal API key is refused), the host the region's ingest address (`https://us.i.posthog.com` or `https://eu.i.posthog.com`; https only, and a reverse proxy's path is kept). Either missing or malformed and the app records to our own log alone. Read per request by `app/page.tsx` (`postHogSettings` in `src/lib/server/config.ts`) and handed to the screen. `VERCEL_ENV` (set by Vercel) tags every event `production`, `preview` or, anywhere else, `local` |
 | `PICK_SONGS` | `on` shows "or pick songs you sing well" on the title screen and "or use songs from your Spotify" under the range; unset, blank or any other value hides both (QWW-55: one onboarding flow for the first release; the Spotify logo on the list is then the one way to sign in). Read per request by `app/page.tsx` (`pickSongsOn` in `src/lib/server/config.ts`), not baked in at build time, so one build can serve it on or off; no API response changes |
 
 ## Store
@@ -203,14 +203,17 @@ be switched off (no key) and nothing else changes. What the sink keeps to:
 - **Identity**: the device's own random id (`loadAnonId`) is the PostHog distinct id, set at every
   load. Nobody is identified and no person profile is made. PostHog stores nothing on the device
   (`persistence: 'memory'`: no cookie, no localStorage).
-- **What leaves**: only events our tracker named. Autocapture (and with it click text), pageviews,
-  heatmaps, dead clicks, exception capture, surveys and the rest are off, and `beforeSend` drops any
-  event whose name is not one of ours (PostHog's own start with `$`; the replay's `$snapshot` is the
+- **What leaves**: only events our tracker named, and only the props on an allowlist
+  (`POSTHOG_PROPS` in `src/lib/eventNames.ts`); our log keeps whatever the tracker accepts. A new
+  prop reaches PostHog only once it is added there, which is a privacy decision: never a Spotify id
+  or URI, a name, an email, or the title or artist of a song from a library (a catalogue song's key
+  is public and fine). Autocapture (and with it click text), pageviews, heatmaps, dead clicks,
+  exception capture and surveys are off, and `beforeSend` drops every other event whose name is not
+  one of ours, web vitals included (PostHog's own start with `$`; the replay's `$snapshot` is the
   one exception). `beforeSend` also strips props named `trackId`, `spotifyId`, `userId`,
-  `displayName` or `email` (any case, underscores ignored), whoever added them. The props are the
-  ones our log has: no Spotify id, no name, no song from a library; a catalogue song's key is fine.
-  IP-based location is a PostHog project setting ("Discard client IP data"), not something the page
-  can switch off.
+  `displayName` or `email` (any case, underscores ignored), whoever added them, even from a call
+  that goes around the tracker. IP-based location is a PostHog project setting ("Discard client IP
+  data"), not something the page can switch off.
 - **Environment**: previews and production send to one PostHog project, so every event carries
   `environment` (`production`, `preview` or `local`, from `VERCEL_ENV`). The "Release funnel"
   insight should filter on `environment = production`, to leave out preview and local traffic.

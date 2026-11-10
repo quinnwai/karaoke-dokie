@@ -314,6 +314,19 @@ export interface EventsRequest {
   events: AppEvent[];
 }
 
+/**
+ * What the screen needs to send events to PostHog, the event log's second sink (QWW-51). app/page.tsx reads it from the
+ * environment (postHogSettings in src/lib/server/config.ts) and hands it to KaraokeApp.
+ */
+export interface PostHogSettings {
+  /** The project token ("phc_..."), public by design: it ships to every browser. */
+  key: string;
+  /** The ingest address, https and without a trailing slash; it has a path only when it is a reverse proxy's. */
+  host: string;
+  /** production, preview or local. Sent on every event so the release funnel can leave the rest out. */
+  environment: string;
+}
+
 export interface AdminEventsResponse {
   /** How many distinct devices reached each funnel step, in funnel order. */
   funnel: { name: string; devices: number }[];

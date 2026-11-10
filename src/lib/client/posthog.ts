@@ -5,27 +5,20 @@
 // What the sink promises:
 // - The device's own random id (loadAnonId) is the PostHog distinct id, on every load. Nobody is identified, no
 //   person profile is made, and PostHog stores nothing on the device (no cookie, no localStorage).
-// - Only events our tracker named reach PostHog. Whatever posthog-js makes up itself (pageviews, autocapture and
-//   its click text, heatmaps, web vitals) is switched off and, as a backstop, dropped in beforeSend. Props that
-//   could name a Spotify account or a song from a library are dropped there too, whoever added them.
+// - Only events our tracker named reach PostHog, and only with props on the allowlist (POSTHOG_PROPS in
+//   eventNames.ts). Whatever posthog-js makes up itself (pageviews, autocapture and its click text, heatmaps, dead
+//   clicks, exceptions, surveys) is switched off, and anything else it might send (web vitals, say) is dropped in
+//   beforeSend, which also strips props that name a Spotify account, whoever added them.
 // - Every event says which environment sent it, because previews and production share one PostHog project.
 // - Session replay masks inputs and is on only while the visitor is known to be signed out (setReplay): a signed-in
 //   screen shows their Spotify name and songs from their library.
 // - posthog-js loads on demand, after the screen is up, and every call is guarded.
 
 import type { CaptureResult, PostHog, PostHogConfig } from 'posthog-js';
-import type { AppEvent } from '../contracts';
+import type { AppEvent, EventValue, PostHogSettings } from '../contracts';
+import { POSTHOG_PROPS } from '../eventNames';
 import { EVENT_NAME, isForbiddenProp } from '../eventRules';
 import type { EventSink } from './events';
-
-export interface PostHogSettings {
-  /** The project token ("phc_..."), public by design: it ships to every browser. */
-  key: string;
-  /** The ingest origin, e.g. https://us.i.posthog.com. */
-  host: string;
-  /** production, preview or local. Sent on every event so the release funnel can leave the rest out. */
-  environment: string;
-}
 
 /** The slice of posthog-js the sink drives. Tests pass a fake. */
 export type PostHogClient = Pick<PostHog, 'init' | 'capture' | 'startSessionRecording' | 'stopSessionRecording'>;
@@ -67,8 +60,8 @@ export function postHogConfig(settings: PostHogSettings, anonId: string): Partia
     bootstrap: { distinctID: anonId },
     persistence: 'memory',
     person_profiles: 'identified_only',
-    // Only our own events, so no clicks with their text, no pageviews with their URLs and nothing the PostHog project
-    // settings could switch on later. beforeSend drops these again if one slips through.
+    // Only our own events: no clicks with their text, no pageviews with their URLs, and none of the extras the PostHog
+    // project settings could switch on later. beforeSend drops whatever else slips through (web vitals, say).
     autocapture: false,
     capture_pageview: false,
     capture_pageleave: false,
@@ -85,6 +78,11 @@ export function postHogConfig(settings: PostHogSettings, anonId: string): Partia
     session_recording: { maskAllInputs: true },
     before_send: beforeSend(settings.environment),
   };
+}
+
+/** The props PostHog may have: those whose names are on POSTHOG_PROPS. */
+function allowedProps(props: AppEvent['props']): Record<string, EventValue> {
+  return Object.fromEntries(Object.entries(props ?? {}).filter(([key]) => POSTHOG_PROPS.has(key)));
 }
 
 async function loadPostHog(): Promise<PostHogClient> {
@@ -104,21 +102,28 @@ export function createPostHogSink(settings: PostHogSettings, anonId: string, loa
   let recording = false;
   let waiting: AppEvent[] = [];
 
+  /** PostHog cannot run on this page: say so once in the console, and our log carries on alone. */
+  function giveUp(reason: string): void {
+    gone = true;
+    waiting = [];
+    try {
+      console.warn(`PostHog is off for this page (${reason}). Our own event log is not affected.`);
+    } catch {
+      // No console: nothing to tell.
+    }
+  }
+
   function start(): void {
     if (loading || gone) return;
     loading = true;
     Promise.resolve()
       .then(load)
-      .then(ready, () => {
-        // Blocked or offline: our log carries on alone.
-        gone = true;
-        waiting = [];
-      });
+      .then(ready, () => giveUp('posthog-js did not load'));
   }
 
   function send(c: PostHogClient, event: AppEvent): void {
     try {
-      c.capture(event.name, event.props ?? {}, { timestamp: new Date(event.at) });
+      c.capture(event.name, allowedProps(event.props), { timestamp: new Date(event.at) });
     } catch {
       // PostHog failing is its own loss.
     }
@@ -139,8 +144,7 @@ export function createPostHogSink(settings: PostHogSettings, anonId: string, loa
     try {
       c.init(settings.key, postHogConfig(settings, anonId));
     } catch {
-      gone = true;
-      waiting = [];
+      giveUp('posthog-js did not start');
       return;
     }
     client = c;

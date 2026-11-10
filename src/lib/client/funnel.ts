@@ -52,7 +52,7 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
       break;
     }
     case 'micDenied':
-      if (prev.step === 'low' || prev.step === 'high') out.push({ name: 'mic_denied', props: { step: prev.step } });
+      if (prev.step === 'low' || prev.step === 'high') out.push({ name: EVENT.micDenied, props: { step: prev.step } });
       break;
     case 'showCatalogue':
       out.push({ name: 'catalogue_chosen' });

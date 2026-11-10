@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { catalogueKey, eventsFor } from '../../src/lib/client/funnel';
 import { flowReducer, initialState, type FlowEvent, type FlowState } from '../../src/lib/client/flow';
+import { POSTHOG_PROPS } from '../../src/lib/eventNames';
 import { allMatches, me } from '../fixtures/screen';
 
 const run = (events: FlowEvent[], from: FlowState = initialState) => events.reduce(flowReducer, from);
@@ -79,5 +80,48 @@ describe('funnel events', () => {
     const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
     const partial = run([{ type: 'allLoaded', page: { ...allMatches(3), complete: false } }], atResults);
     expect(names(partial, { type: 'allLoaded', page: allMatches() })).toEqual([]);
+  });
+
+  it('records only props that PostHog may have (POSTHOG_PROPS), so a new prop is a conscious choice', () => {
+    const seen = new Set<string>();
+    let state = initialState;
+    const walk: FlowEvent[] = [
+      signedOut,
+      { type: 'start' },
+      { type: 'quietDone' },
+      { type: 'holdStart' },
+      { type: 'holdEnd', midi: null },
+      { type: 'micDenied' },
+      { type: 'holdEnd', midi: 45 },
+      { type: 'holdEnd', midi: 40 },
+      { type: 'holdEnd', midi: 72 },
+      { type: 'showCatalogue' },
+      { type: 'loadFailed' },
+      { type: 'retryLoad' },
+      { type: 'allLoaded', page: { ...allMatches(), libraryUnavailable: true } },
+      { type: 'loadMore' },
+      { type: 'setSlider', slider: 'difficulty', value: 0.3 },
+      { type: 'sliderDone', slider: 'difficulty' },
+      { type: 'resetSliders' },
+      { type: 'pickDecade', decade: '80s' },
+      { type: 'pickMood', mood: 'upbeat' },
+      { type: 'toggleDuets' },
+      { type: 'clearFilters' },
+      { type: 'select', trackId: 'cat:queen|bohemian rhapsody', position: 2 },
+      { type: 'feedback', trackId: 'cat:queen|bohemian rhapsody', thumbs: 'up' },
+      { type: 'deselect' },
+      { type: 'redoEnd', end: 'low' },
+      { type: 'redo' },
+      { type: 'pickStart' },
+    ];
+    for (const action of walk) {
+      for (const e of eventsFor(state, action)) for (const key of Object.keys(e.props ?? {})) seen.add(key);
+      state = flowReducer(state, action);
+    }
+    expect([...seen].filter((key) => !POSTHOG_PROPS.has(key))).toEqual([]);
+    // The walk reached the events that carry props, so the check above means something.
+    for (const key of ['step', 'midi', 'low', 'high', 'spanSemitones', 'mode', 'matchCount', 'libraryUnavailable', 'shown', 'slider', 'kind', 'value', 'on', 'decade', 'position', 'songKey', 'thumbs', 'end', 'from', 'signedIn']) {
+      expect(seen.has(key), key).toBe(true);
+    }
   });
 });
