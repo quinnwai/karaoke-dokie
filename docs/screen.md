@@ -41,7 +41,10 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    - Type is 18 px or more and every button 48 px or more (the main one 56 px or more: the round button is 112 px). The
      one thing to tap on each screen is sticky at the bottom of the scrolling screen, so a small phone, or one set to
      larger text, never hides it. `mic-permission.spec.ts` checks the sizes, and that the main button is in view, on
-     375x553: an iPhone SE with Safari's toolbars showing.
+     375x553: an iPhone SE with Safari's toolbars showing. The button has a dark backdrop (to hide the words that scroll
+     under it) only while it is held up over them: `Main` in `MicStep.tsx` turns it on when the browser reports a sliver
+     of the button cut off at the bottom edge (it is set 2px below it), and off once everything fits or the screen is
+     scrolled to its end. A backdrop on a screen that fits would be a dark band across the glow of the screen.
    - Events: `inapp_browser_detected`, `mic_prompt_shown`, `mic_granted`, `mic_denied` (any way the answer was no, with
      a `reason`) and `mic_recovery_shown`, with only `browser`, `app`, `reason` and `via` (asked by a tap, or already
      answered) as props. They come from the flow's own transitions (`funnel.ts`), through the usual tracker.

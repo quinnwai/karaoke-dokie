@@ -156,6 +156,8 @@ test('first run on an iPhone: our screen, then the browser\'s question, and stra
   await expect(turnOn).toBeEnabled();
   await page.waitForTimeout(900);
   await shot(page, '19-mic-prompt-iphone');
+  // Everything fits, so the button sits where it falls, and there is no dark band behind it.
+  await expect(page.locator('[class*="micMain"]')).toHaveCSS('background-image', 'none');
   const micStyle = await roundStyle(turnOn);
   expect(micStyle).toMatchObject({ width: 112, height: 112 });
   const micPress = await pressStyle(turnOn);
@@ -200,6 +202,21 @@ test('on Android Chrome it reads the same, and the events say which browser it w
     { name: 'mic_granted', props: { via: 'prompt', browser: 'android-chrome' } },
   ]);
   await browser.close();
+});
+
+test('on a computer it says "browser", and there is no dark band behind the button', async ({ browser, baseURL }) => {
+  // As wide as the TV gets (880px), where a band behind the button runs the whole width of the screen. The project's
+  // default is an iPhone, which `newContext` would carry over, so the computer is named in full.
+  const context = await browser.newContext({ ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, baseURL });
+  await mockApi(context);
+  const page = await context.newPage();
+  await startTest(page);
+  await expect(view(page)).toHaveAttribute('data-mic-view', 'prompt');
+  await expect(page.getByText('Your browser will ask to use the microphone. Tap Allow.')).toBeVisible();
+  await expect(page.locator('[class*="micMain"]')).toHaveCSS('background-image', 'none');
+  await page.waitForTimeout(900);
+  await shot(page, '29-mic-prompt-desktop');
+  await context.close();
 });
 
 test('while the browser\'s question is up the round button shows it waits, and after 12 seconds a reload is offered', async ({ baseURL }) => {
@@ -461,6 +478,35 @@ test('a quick tap on the record button says to hold a little longer, and stays o
     await expect(view(page)).toHaveCount(0);
     await expect(lowNote(page)).toBeVisible();
   }
+  await browser.close();
+});
+
+test('on a small phone the backdrop is on only while the steps scroll under the pinned button', async ({ baseURL }) => {
+  const browser = await launchWithMic(tone);
+  const context = await browser.newContext({ ...iPhone, viewport: SMALL, baseURL });
+  await mockApi(context);
+  await controlMic(context, 'deny');
+  const page = await context.newPage();
+  await startTest(page);
+  await page.getByRole('button', { name: 'Turn on microphone' }).click();
+  await expect(page.getByText('The microphone is blocked')).toBeVisible();
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText(/Still not working/)).toBeVisible();
+
+  // The steps are longer than the screen (that is why the button is pinned), so words pass under it: it needs its backdrop.
+  const scroller = page.locator('[class*="screenInner"]');
+  const pinned = page.locator('[class*="micMain"]');
+  expect(await scroller.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeGreaterThan(0);
+  await expect(pinned).toHaveCSS('background-image', /linear-gradient/);
+  await page.waitForTimeout(900);
+  await shot(page, '30-mic-steps-pinned-button-small');
+
+  // Scrolled to the end, the button is back in its place with nothing under it, so the backdrop goes...
+  await scroller.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await expect(pinned).toHaveCSS('background-image', 'none');
+  // ...and comes back as soon as the words move under it again.
+  await scroller.evaluate((el) => el.scrollTo(0, 0));
+  await expect(pinned).toHaveCSS('background-image', /linear-gradient/);
   await browser.close();
 });
 

@@ -472,10 +472,11 @@
 }
 
 /* The one thing to tap on each screen stays at the bottom while the words scroll under it, so a small phone, or one set to
-   larger text, never hides it. When everything fits, it sits where it falls. */
+   larger text, never hides it. When everything fits, it sits where it falls. It is set 2px below the bottom edge, so that
+   exactly when it is held up there, the browser cuts a sliver off it, and Main (MicStep.tsx) can tell. */
 .micMain {
   position: sticky;
-  bottom: 0;
+  bottom: -2px;
   z-index: 1;
   align-self: stretch;
   display: flex;
@@ -483,6 +484,11 @@
   align-items: center;
   margin: 0 -20px;
   padding: 12px 20px 10px;
+}
+
+/* Held up like that, words pass under it, so it needs a backdrop to hide them. At the bottom edge the backdrop is the
+   screen's own colour. Where the button sits when everything fits it is not: it would be a dark band across the glow. */
+.micHeld {
   background: linear-gradient(to top, #09080c 78%, rgba(9, 8, 12, 0));
 }
 

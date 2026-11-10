@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { chromeIntentUrl, type BrowserInfo, type InApp } from '../lib/client/browser';
 import type { MicGate } from '../lib/client/flow';
 import type { MicProblem } from '../lib/client/mic';
@@ -56,9 +56,47 @@ export function MicStep({ gate, onAsk, onTryHere, onReload }: MicStepProps) {
 
 const deviceOf = (env: BrowserInfo) => (env.os === 'other' ? 'browser' : 'phone');
 
-/** The one thing to tap, kept on screen while the rest scrolls under it. */
+/** The nearest ancestor that scrolls: where the words go when they pass under the main button. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  for (let up = el.parentElement; up; up = up.parentElement) {
+    const { overflowY } = getComputedStyle(up);
+    if (overflowY === 'auto' || overflowY === 'scroll') return up;
+  }
+  return null;
+}
+
+/**
+ * The one thing to tap, kept on screen while the rest scrolls under it. Held up like that, words pass under it and it
+ * needs a backdrop to hide them. When everything fits it sits where it falls, and a backdrop there would only be a dark
+ * band across the screen. So the backdrop is on only while it is held up, which is when a sliver of it is cut off at the
+ * bottom edge (see .micMain).
+ */
 function Main({ children }: { children: ReactNode }) {
-  return <div className={styles.micMain}>{children}</div>;
+  const box = useRef<HTMLDivElement>(null);
+  const [held, setHeld] = useState(false);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    // Looked at once before the first paint, so a screen that scrolls never shows words through the button for a frame...
+    const scroller = scrollerOf(el);
+    if (scroller) setHeld(el.getBoundingClientRect().bottom > scroller.getBoundingClientRect().bottom + 1);
+    // ...and from then on the browser says when that changes.
+    if (typeof IntersectionObserver === 'undefined') return;
+    const watch = new IntersectionObserver(
+      (entries) => {
+        const latest = entries[entries.length - 1];
+        if (latest) setHeld(latest.intersectionRatio < 0.999);
+      },
+      { threshold: [0.99, 0.999, 1] },
+    );
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
+  return (
+    <div ref={box} className={held ? `${styles.micMain} ${styles.micHeld}` : styles.micMain}>
+      {children}
+    </div>
+  );
 }
 
 /** Blank on purpose, since it lasts a moment. If it does not, the singer is not left looking at nothing. */

@@ -236,6 +236,88 @@ describe('MicStep: the main button stays on screen', () => {
   });
 });
 
+describe('MicStep: the backdrop behind the main button', () => {
+  // The backdrop hides words that scroll under the button, so it is on only while the button is held up over them. Where
+  // the button sits when everything fits, a backdrop would be a dark band across the screen. Which of the two it is, the
+  // browser decides (mic-permission.spec.ts checks that in one); here, that the screen follows what it is told.
+  class FakeObserver {
+    static all: FakeObserver[] = [];
+    observe = vi.fn();
+    disconnect = vi.fn();
+    constructor(private callback: (entries: { intersectionRatio: number }[]) => void) {
+      FakeObserver.all.push(this);
+    }
+    report(ratio: number) {
+      act(() => this.callback([{ intersectionRatio: ratio }]));
+    }
+  }
+  const backdrop = () => /micHeld/.test(document.querySelector('[class*="micMain"]')!.className);
+
+  /** The prompt inside a scroller, with the bottom edge of the scroller at 500 and of the button where the test says. */
+  function inScroller(bottomOfButton: number) {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const bottom = /micMain/.test(this.className) ? bottomOfButton : 500;
+      return { bottom, top: bottom - 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: bottom - 100, toJSON() {} } as DOMRect;
+    });
+    const gate: MicGate = { ...initialState.mic, view: 'prompt', env: IOS_SAFARI };
+    return render(
+      <div style={{ overflowY: 'auto' }}>
+        <MicStep gate={gate} onAsk={vi.fn()} onTryHere={vi.fn()} onReload={vi.fn()} />
+      </div>,
+    );
+  }
+
+  beforeEach(() => {
+    FakeObserver.all = [];
+    vi.stubGlobal('IntersectionObserver', FakeObserver);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('has none where everything fits: the button sits well inside the screen', () => {
+    inScroller(300);
+    expect(backdrop()).toBe(false);
+    FakeObserver.all[0]!.report(1);
+    expect(backdrop()).toBe(false);
+  });
+
+  it('has it from the first paint when the screen scrolls and the button is held up at the bottom edge', () => {
+    inScroller(502); // the button is set 2px below the edge, and the browser holds it there
+    expect(backdrop()).toBe(true);
+  });
+
+  it('follows the browser as the scrolling holds the button up and lets it go', () => {
+    inScroller(300);
+    const [watch] = FakeObserver.all;
+    watch!.report(0.985); // a sliver of it is cut off at the edge
+    expect(backdrop()).toBe(true);
+    watch!.report(1); // scrolled to the end: it is back in its place, with nothing under it
+    expect(backdrop()).toBe(false);
+    watch!.report(0.9995); // rounding, not a sliver
+    expect(backdrop()).toBe(false);
+  });
+
+  it('watches the one button, and stops when the screen goes away', () => {
+    const { unmount } = inScroller(300);
+    expect(FakeObserver.all).toHaveLength(1);
+    const [watch] = FakeObserver.all;
+    expect(watch!.observe).toHaveBeenCalledTimes(1);
+    expect(String((watch!.observe.mock.calls[0]![0] as HTMLElement).className)).toMatch(/micMain/);
+    unmount();
+    expect(watch!.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('works in a browser with no IntersectionObserver: the first look decides', () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    inScroller(300);
+    expect(backdrop()).toBe(false);
+    cleanup();
+    inScroller(502);
+    expect(backdrop()).toBe(true);
+  });
+});
+
 describe('MicStep: when it did not work', () => {
   const recovery = (problem: MicProblem, env: BrowserInfo, fails = 1) => show('recovery', env, { problem, fails });
 
