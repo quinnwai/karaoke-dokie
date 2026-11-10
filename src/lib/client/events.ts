@@ -2,6 +2,7 @@
 // POST /api/events. Analytics must never break the screen, so nothing here throws and a failed
 // send is a lost batch. Events carry this device's random id (loadAnonId), never a Spotify id,
 // and props that could name an account or a song from someone's library never leave the device.
+// Each accepted event also goes to an optional second sink (QWW-51: PostHog), cleaned the same way.
 
 import type { AppEvent, EventsRequest, EventValue } from '../contracts';
 import { ANON_ID, EVENT_NAME, isEventValue, isForbiddenProp, MAX_PROP_STRING, MAX_PROPS, PROP_KEY } from '../eventRules';
@@ -18,15 +19,22 @@ export interface Tracker {
   flush(): Promise<void>;
 }
 
+/** A second place for events to go (QWW-51: PostHog). It is given a copy of each event after cleaning, so it sees what our log sees. */
+export interface EventSink {
+  capture(event: AppEvent): void;
+}
+
 export interface TrackerOptions {
   anonId: string;
   /** Delivers one batch: sendEvents in the browser, a fake in tests. Its failures are swallowed. */
   send: (body: EventsRequest) => Promise<void>;
   now?: () => Date;
   flushMs?: number;
+  /** Gets every event the tracker accepts, as it is tracked. A sink that throws never costs our log an event. */
+  mirror?: EventSink;
 }
 
-export function createTracker({ anonId, send, now = () => new Date(), flushMs = FLUSH_MS }: TrackerOptions): Tracker {
+export function createTracker({ anonId, send, now = () => new Date(), flushMs = FLUSH_MS, mirror }: TrackerOptions): Tracker {
   let queue: AppEvent[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -45,6 +53,15 @@ export function createTracker({ anonId, send, now = () => new Date(), flushMs = 
     }
   }
 
+  function mirrorTo(event: AppEvent): void {
+    if (!mirror) return;
+    try {
+      mirror.capture(event.props ? { ...event, props: { ...event.props } } : { ...event });
+    } catch {
+      // The second sink failing is its own loss; our log already has the event.
+    }
+  }
+
   return {
     track(name, props) {
       try {
@@ -55,6 +72,7 @@ export function createTracker({ anonId, send, now = () => new Date(), flushMs = 
         queue.push(event);
         if (queue.length >= BATCH_SIZE) void flush();
         else if (timer === null) timer = setTimeout(() => void flush(), flushMs);
+        mirrorTo(event);
       } catch {
         // A broken clock, or props that throw when read: skip this event.
       }

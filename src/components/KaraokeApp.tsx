@@ -9,6 +9,7 @@ import { createTracker, flushWhenHidden, loadAnonId, sendEvents, type Tracker } 
 import { flowReducer, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
 import { eventsFor } from '../lib/client/funnel';
 import { browserMic, type Mic, type MicRecorder } from '../lib/client/mic';
+import { createPostHogSink, type PostHogSettings } from '../lib/client/posthog';
 import {
   clearProgress,
   loadProgress,
@@ -18,6 +19,7 @@ import {
   setWantsPick,
   takeWantsPick,
 } from '../lib/client/storage';
+import { EVENT } from '../lib/eventNames';
 import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';
 import { PickSongs } from './PickSongs';
@@ -42,6 +44,11 @@ export interface KaraokeAppProps {
    * visit is ignored.
    */
   pickSongs?: boolean;
+  /**
+   * PostHog as the event log's second sink (QWW-51; app/page.tsx reads it from the environment). Null or absent, or with a
+   * `track` of your own, events go to our own log alone.
+   */
+  postHog?: PostHogSettings | null;
 }
 
 const LIVE_FRAME = 2048;
@@ -49,13 +56,23 @@ const LIVE_EVERY_MS = 50; // ~20 times a second
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 
-export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, quietMs = 2600, pickSongs: canPick = false }: KaraokeAppProps) {
+export function KaraokeApp({
+  api: apiProp,
+  track,
+  mic = browserMic,
+  navigate = defaultNavigate,
+  quietMs = 2600,
+  pickSongs: canPick = false,
+  postHog = null,
+}: KaraokeAppProps) {
   const [api] = useState(() => apiProp ?? createApi());
   const [state, rawDispatch] = useReducer(flowReducer, initialState);
 
   // Beta event log (QWW-16, QWW-20): every action passes through here, and funnel.ts decides what
-  // it records. The server drops everything unless collection is switched on.
-  const [tracker] = useState(() => track ?? createTracker({ anonId: loadAnonId(), send: sendEvents }));
+  // it records. The server drops everything unless collection is switched on. PostHog is the tracker's
+  // second sink (QWW-51), when the environment has a key for it.
+  const [posthog] = useState(() => (track || !postHog ? null : createPostHogSink(postHog, loadAnonId())));
+  const [tracker] = useState(() => track ?? createTracker({ anonId: loadAnonId(), send: sendEvents, mirror: posthog ?? undefined }));
   useEffect(() => (typeof window === 'undefined' ? undefined : flushWhenHidden(tracker)), [tracker]);
   const stateRef = useRef<FlowState>(state);
   useEffect(() => {
@@ -70,6 +87,10 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
     },
     [tracker],
   );
+  // Session replay records only a visitor known to be signed out: a signed-in screen shows their Spotify name and
+  // songs from their library, which must not reach PostHog.
+  const replayAllowed = state.step !== 'boot' && !state.signedIn;
+  useEffect(() => posthog?.setReplay(replayAllowed), [posthog, replayAllowed]);
   const [live, setLive] = useState<number | null>(null);
   // Spotify refused the sign-in the singer just tried: the server sends them back with ?authError=<reason> and nothing else.
   const [signInFailed, setSignInFailed] = useState(false);
@@ -270,7 +291,7 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
 
   // Spotify as the upgrade: keep the range across the sign-in round trip, then it is saved to the account.
   const connectSpotify = () => {
-    tracker.track('spotify_connect_pressed', { from: state.step, mode: state.mode });
+    tracker.track(EVENT.spotifyConnect, { from: state.step, mode: state.mode });
     tracker.flush();
     if (state.range) saveProgress({ low: state.range.low, high: state.range.high });
     navigate(LOGIN_PATH);

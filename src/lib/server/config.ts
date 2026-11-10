@@ -1,4 +1,5 @@
 import type { Mood } from '../contracts';
+import type { PostHogSettings } from '../client/posthog';
 import { parseShippedMoods } from './moods';
 import { pickStoreKind } from './getStore';
 import type { SpotifyConfig } from './spotify';
@@ -63,6 +64,29 @@ export function duetsAndMoodsOn(env: Record<string, string | undefined>): boolea
  */
 export function pickSongsOn(env: Record<string, string | undefined>): boolean {
   return env.PICK_SONGS?.trim().toLowerCase() === 'on';
+}
+
+/**
+ * PostHog as the event log's second sink (QWW-51): NEXT_PUBLIC_POSTHOG_KEY (the project token) and
+ * NEXT_PUBLIC_POSTHOG_HOST (the region's ingest address, e.g. https://us.i.posthog.com). Either missing or malformed
+ * means null, and the app records to our own log alone. The key must be a project token ("phc_..."): a personal API
+ * key ("phx_...") is a secret and is never passed to a browser. The host must be https. Like pickSongsOn it is read
+ * per request by app/page.tsx and handed to the screen, so a build does not have to be redone to change it.
+ * The environment (VERCEL_ENV: production, preview, else local) tags every event: previews and production share one
+ * PostHog project, and the release funnel must leave out preview and local traffic.
+ */
+export function postHogSettings(env: Record<string, string | undefined>): PostHogSettings | null {
+  const key = env.NEXT_PUBLIC_POSTHOG_KEY?.trim() ?? '';
+  if (!/^phc_[A-Za-z0-9_-]+$/.test(key)) return null;
+  let host: URL;
+  try {
+    host = new URL(env.NEXT_PUBLIC_POSTHOG_HOST?.trim() ?? '');
+  } catch {
+    return null;
+  }
+  if (host.protocol !== 'https:') return null;
+  const environment = env.VERCEL_ENV === 'production' || env.VERCEL_ENV === 'preview' ? env.VERCEL_ENV : 'local';
+  return { key, host: host.origin, environment };
 }
 
 /**

@@ -302,7 +302,7 @@ export type EventValue = string | number | boolean | null;
 
 /** One thing a tester did. Never carries a Spotify id or a song from someone's Spotify library. */
 export interface AppEvent {
-  /** e.g. 'landing_viewed', 'range_shown', 'results_viewed', 'slider_changed', 'song_opened'. */
+  /** e.g. 'title_view', 'range_shown', 'list_view', 'slider_changed', 'song_open'. The release funnel's names are in eventNames.ts. */
   name: string;
   /** ISO time on the device. */
   at: string;

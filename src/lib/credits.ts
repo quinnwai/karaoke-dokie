@@ -70,3 +70,16 @@ export const CREDITS: Credit[] = [
     what: 'Your saved songs, top tracks and recent plays, and the song player (it loads from Spotify, which sets its own cookies).',
   },
 ];
+
+/**
+ * What the beta records about its testers, shown on /credits (QWW-51). Kept in step with the README's Beta event log
+ * row and docs/backend.md: if what is recorded changes, this changes with it.
+ */
+export const ANALYTICS_NOTE = {
+  title: 'Analytics while we test',
+  paragraphs: [
+    'To fix what trips people up, we record what you tap and which screens you reach, under a random number made on your phone. It is never your name, your email or your Spotify account.',
+    'We also record a replay of your screen. Anything you type is hidden, and the replay is off while you are signed in to Spotify, so your name and your own songs are never in it. Your voice is worked out on your phone and is never recorded or sent.',
+    'These records are kept by us and by PostHog (posthog.com), the service we use to look at them.',
+  ],
+};

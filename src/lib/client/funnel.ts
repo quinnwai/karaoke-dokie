@@ -6,6 +6,7 @@
 // songs (no Spotify) may carry their catalogue key; library songs carry only their position.
 
 import type { EventValue } from '../contracts';
+import { EVENT } from '../eventNames';
 import { flowReducer, type FlowEvent, type FlowState, type Step } from './flow';
 
 export interface FunnelEvent {
@@ -47,7 +48,7 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
       if (step !== 'low' && step !== 'high') break;
       if (action.midi === null) out.push({ name: 'hold_too_short', props: { step } });
       else if (next.hold === 'order') out.push({ name: 'note_out_of_order', props: { step, midi: action.midi } });
-      else out.push({ name: 'note_detected', props: { step, midi: action.midi } });
+      else out.push({ name: step === 'low' ? EVENT.lowNoteDone : EVENT.highNoteDone, props: { midi: action.midi } });
       break;
     }
     case 'micDenied':
@@ -64,7 +65,7 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
       // A library the server could not read comes back as catalogue songs, whatever the screen asked for (QWW-55).
       const unavailable = action.page.libraryUnavailable === true;
       const mode = unavailable ? 'catalogue' : prev.mode;
-      out.push({ name: 'results_viewed', props: { mode, matchCount, maybeCount, ...(unavailable ? { libraryUnavailable: true } : {}) } });
+      out.push({ name: EVENT.listView, props: { mode, matchCount, maybeCount, ...(unavailable ? { libraryUnavailable: true } : {}) } });
       if (action.page.matches.length === 0) out.push({ name: 'results_empty', props: { mode } });
       break;
     }
@@ -97,7 +98,7 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
       const props: Record<string, EventValue> = { ...viewProps(prev), position: action.position ?? null };
       const key = catalogueKey(action.trackId);
       if (key) props.songKey = key;
-      out.push({ name: 'song_opened', props });
+      out.push({ name: EVENT.songOpen, props });
       break;
     }
     case 'feedback':
@@ -123,7 +124,7 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
 export function stepEvents(step: Step, s: FlowState): FunnelEvent[] {
   switch (step) {
     case 'landing':
-      return [{ name: 'landing_viewed' }];
+      return [{ name: EVENT.titleView }];
     case 'quiet':
       return [{ name: 'quiet_shown' }];
     case 'signin':

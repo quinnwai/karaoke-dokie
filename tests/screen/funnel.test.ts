@@ -8,17 +8,17 @@ const names = (prev: FlowState, action: FlowEvent) => eventsFor(prev, action).ma
 const signedOut: FlowEvent = { type: 'booted', me: null, progress: null, wantsPick: false };
 
 describe('funnel events', () => {
-  it('follows the onboarding: landing, start, quiet spot, both notes, range', () => {
-    expect(names(initialState, signedOut)).toEqual(['landing_viewed']);
+  it('follows the onboarding: title, start, quiet spot, both notes, range', () => {
+    expect(names(initialState, signedOut)).toEqual(['title_view']);
     const landing = run([signedOut]);
     expect(names(landing, { type: 'start' })).toEqual(['start_pressed', 'quiet_shown']);
     const low = run([{ type: 'start' }, { type: 'quietDone' }], landing);
     expect(eventsFor(low, { type: 'holdEnd', midi: null })).toEqual([{ name: 'hold_too_short', props: { step: 'low' } }]);
-    expect(eventsFor(low, { type: 'holdEnd', midi: 45 })).toEqual([{ name: 'note_detected', props: { step: 'low', midi: 45 } }]);
+    expect(eventsFor(low, { type: 'holdEnd', midi: 45 })).toEqual([{ name: 'low_note_done', props: { midi: 45 } }]);
     const high = run([{ type: 'holdEnd', midi: 45 }], low);
     expect(names(high, { type: 'holdEnd', midi: 40 })).toEqual(['note_out_of_order']);
     expect(eventsFor(high, { type: 'holdEnd', midi: 72 })).toEqual([
-      { name: 'note_detected', props: { step: 'high', midi: 72 } },
+      { name: 'high_note_done', props: { midi: 72 } },
       { name: 'range_shown', props: { low: 45, high: 72, spanSemitones: 27 } },
     ]);
     expect(names(high, { type: 'micDenied' })).toEqual(['mic_denied']);
@@ -27,10 +27,10 @@ describe('funnel events', () => {
   it('records results, views and opened songs with the view they came from', () => {
     const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
     expect(eventsFor(atResults, { type: 'allLoaded', page: allMatches() })).toEqual([
-      { name: 'results_viewed', props: { mode: 'library', matchCount: 8, maybeCount: 2 } },
+      { name: 'list_view', props: { mode: 'library', matchCount: 8, maybeCount: 2 } },
     ]);
     const empty = { ...allMatches(0) };
-    expect(names(atResults, { type: 'allLoaded', page: empty })).toEqual(['results_viewed', 'results_empty']);
+    expect(names(atResults, { type: 'allLoaded', page: empty })).toEqual(['list_view', 'results_empty']);
     const loaded = run([{ type: 'allLoaded', page: allMatches() }], atResults);
     // Dragging records nothing; letting go records the adjustment once, with the view it left.
     expect(names(loaded, { type: 'setSlider', slider: 'difficulty', value: 0.333 })).toEqual([]);
@@ -47,7 +47,7 @@ describe('funnel events', () => {
     expect(eventsFor(loaded, { type: 'pickDecade', decade: '80s' })[0]!.props).toMatchObject({ kind: 'decade', value: '80s', on: true, decade: '80s' });
     expect(eventsFor(loaded, { type: 'select', trackId: 't3', position: 4 })).toEqual([
       {
-        name: 'song_opened',
+        name: 'song_open',
         props: { mode: 'library', difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false, position: 4 },
       },
     ]);
@@ -58,10 +58,10 @@ describe('funnel events', () => {
     const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
     const page = { ...allMatches(), libraryUnavailable: true };
     expect(eventsFor(atResults, { type: 'allLoaded', page })).toEqual([
-      { name: 'results_viewed', props: { mode: 'catalogue', matchCount: 8, maybeCount: 2, libraryUnavailable: true } },
+      { name: 'list_view', props: { mode: 'catalogue', matchCount: 8, maybeCount: 2, libraryUnavailable: true } },
     ]);
     expect(eventsFor(atResults, { type: 'allLoaded', page: { ...allMatches(0), libraryUnavailable: true } })).toEqual([
-      { name: 'results_viewed', props: { mode: 'catalogue', matchCount: 0, maybeCount: 0, libraryUnavailable: true } },
+      { name: 'list_view', props: { mode: 'catalogue', matchCount: 0, maybeCount: 0, libraryUnavailable: true } },
       { name: 'results_empty', props: { mode: 'catalogue' } },
     ]);
   });
