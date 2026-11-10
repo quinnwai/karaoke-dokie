@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HEARD_LEVEL, LEVEL_CEIL_DB, LEVEL_FLOOR_DB, levelOf } from '../../src/lib/audio/level';
+import { HEARD_LEVEL, isDigitalSilence, LEVEL_CEIL_DB, LEVEL_FLOOR_DB, levelOf } from '../../src/lib/audio/level';
 import { noise, sine, voice } from '../helpers/synth';
 
 /** A constant signal at this many dBFS (its RMS is its amplitude). */
@@ -48,5 +48,22 @@ describe('levelOf', () => {
 
   it('takes any array of numbers', () => {
     expect(levelOf([0.1, -0.1, 0.1, -0.1])).toBeCloseTo(levelOf(atDb(-20)), 5);
+  });
+});
+
+describe('isDigitalSilence', () => {
+  it('is true for nothing and for exact zeros: a microphone the system muted, or audio that never started', () => {
+    expect(isDigitalSilence(new Float32Array(0))).toBe(true);
+    expect(isDigitalSilence(new Float32Array(48000))).toBe(true);
+    expect(isDigitalSilence([0, 0, 0])).toBe(true);
+  });
+
+  it('is false for any sound at all, even a quiet room\'s hiss far below the meter\'s floor', () => {
+    expect(isDigitalSilence(noise(0.5, 1e-6))).toBe(false);
+    expect(levelOf(noise(0.5, 1e-6))).toBe(0); // the meter shows nothing, but the microphone is working
+    expect(isDigitalSilence(voice(220, 0.1))).toBe(false);
+    const oneSample = new Float32Array(48000);
+    oneSample[47999] = 1e-9;
+    expect(isDigitalSilence(oneSample)).toBe(false);
   });
 });

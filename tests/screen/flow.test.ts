@@ -139,6 +139,19 @@ describe('the mic step (QWW-50)', () => {
     expect(s.mic).toMatchObject({ view: 'prompt', env: INSTAGRAM });
   });
 
+  it('"Try here anyway" is remembered for the visit: the in-app screen does not come back on the next pass', () => {
+    const tried = run([{ type: 'micChecked', env: INSTAGRAM, permission: 'prompt' }, { type: 'micTryHere' }], atMic);
+    expect(tried.mic.triedHere).toBe(true);
+    // The next time through the mic step (a microphone lost mid-note, a redo) it goes by permission like anywhere else.
+    const again = run([{ type: 'micAsk' }, { type: 'micGranted' }, { type: 'micDone' }, { type: 'micLost' }], tried);
+    expect(again).toMatchObject({ step: 'mic', mic: { view: 'checking', triedHere: true, env: INSTAGRAM } });
+    expect(run([{ type: 'micChecked', env: INSTAGRAM, permission: 'prompt' }], again).mic.view).toBe('prompt');
+    expect(run([{ type: 'micChecked', env: INSTAGRAM, permission: 'granted' }], again).mic.view).toBe('opening');
+    expect(run([{ type: 'micChecked', env: INSTAGRAM, permission: 'denied' }], again).mic.view).toBe('recovery');
+    // Not before it was tapped.
+    expect(atMic.mic.triedHere).toBe(false);
+  });
+
   it('a tap asks, a yes shows the level meter, Continue goes to the note', () => {
     let s = run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' }, { type: 'micAsk' }], atMic);
     expect(s.mic.view).toBe('asking');

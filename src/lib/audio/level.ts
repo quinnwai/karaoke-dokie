@@ -21,3 +21,12 @@ export function levelOf(samples: ArrayLike<number>): number {
   const db = 20 * Math.log10(rms);
   return Math.min(1, Math.max(0, (db - LEVEL_FLOOR_DB) / (LEVEL_CEIL_DB - LEVEL_FLOOR_DB)));
 }
+
+/**
+ * True for nothing at all, or only exact zeros: not a quiet room (even a quiet room's microphone wobbles), but a
+ * microphone the system has muted (a call, another app, a permission taken back) or audio that never started.
+ */
+export function isDigitalSilence(samples: ArrayLike<number>): boolean {
+  for (let i = 0; i < samples.length; i++) if (samples[i] !== 0) return false;
+  return true;
+}

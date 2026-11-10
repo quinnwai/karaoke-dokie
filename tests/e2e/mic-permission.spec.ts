@@ -15,8 +15,12 @@ import { launchWithMic, writeTone } from './fakeMic';
 const SCREENS = path.resolve('test-results/screens');
 const iPhone = devices['iPhone 13'];
 const pixel = devices['Pixel 7'];
-/** The smallest phone the screens must fit (an iPhone SE). */
-const SMALL = { width: 375, height: 667 };
+/**
+ * The smallest screen the mic step must work on: an iPhone SE with Safari's toolbars showing leaves a page about 375 by
+ * 553 (its 667 is the whole screen). The same screens must also work with larger text, which is why the main button
+ * stays at the bottom while the words scroll under it.
+ */
+const SMALL = { width: 375, height: 553 };
 
 const INSTAGRAM_IPHONE = `${iPhone.userAgent} Instagram 336.0.0.35.121 (iPhone14,5; iOS 17_5; en_US; en-US; scale=3.00; 1170x2532; 599165981)`;
 const INSTAGRAM_ANDROID = `${pixel.userAgent} Instagram 336.0.0.40.109 Android (34/14; 420dpi; 1080x2400; Google/google; Pixel 7; panther; panther; en_US; 599165981)`;
@@ -314,6 +318,23 @@ for (const [app, userAgent, name] of [
   });
 }
 
+test('"Reload this page" really reloads the page, which is how Safari comes to ask again', async ({ baseURL }) => {
+  const browser = await launchWithMic(tone);
+  const context = await browser.newContext({ ...iPhone, baseURL });
+  await mockApi(context);
+  await alreadyBlocked(context);
+  const page = await context.newPage();
+  await startTest(page);
+  await expect(page.getByText('The microphone is blocked')).toBeVisible();
+  // A marker that only survives while this document does.
+  await page.evaluate(() => ((window as unknown as { __marker: string }).__marker = 'same document'));
+  await page.getByRole('button', { name: 'Reload this page' }).click();
+  // The new document starts again at the title screen.
+  await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __marker?: string }).__marker)).toBeUndefined();
+  await browser.close();
+});
+
 test('a microphone taken away during the note sends the singer back through the mic step, to the same note', async ({ baseURL }) => {
   const browser = await launchWithMic(tone);
   const context = await browser.newContext({ ...iPhone, baseURL });
@@ -341,7 +362,7 @@ test('a microphone taken away during the note sends the singer back through the 
 });
 
 // "Large touch targets (at least 48 px) and at least 18 px body text on these screens", and the one thing to tap on
-// each is on the screen without scrolling, on the smallest phone.
+// each is on the screen without scrolling, on the smallest phone: for the longest screens that is the sticky button.
 const SCREENS_TO_CHECK: [string, 'iphone' | 'pixel', (context: BrowserContext, page: Page) => Promise<void>, string, string][] = [
   ['the prompt on an iPhone', 'iphone', async () => {}, 'prompt', 'Turn on microphone'],
   ['the prompt on Android', 'pixel', async () => {}, 'prompt', 'Turn on microphone'],

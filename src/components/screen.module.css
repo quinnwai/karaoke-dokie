@@ -442,7 +442,21 @@
   line-height: 1;
 }
 
-/* The one thing to tap on each screen. */
+/* The one thing to tap on each screen stays at the bottom while the words scroll under it, so a small phone, or one set to
+   larger text, never hides it. When everything fits, it sits where it falls. */
+.micMain {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 -20px;
+  padding: 12px 20px 10px;
+  background: linear-gradient(to top, #09080c 78%, rgba(9, 8, 12, 0));
+}
+
 .micButton {
   width: min(100%, 320px);
   min-height: 56px;
@@ -468,7 +482,7 @@
 }
 
 .micButtonQuiet {
-  border-color: var(--faint);
+  border-color: rgba(244, 241, 246, 0.34);
   background: none;
   box-shadow: none;
   font-weight: 600;
@@ -526,7 +540,7 @@
 
 .micArt {
   flex: none;
-  width: 104px;
+  width: 124px;
   height: auto;
 }
 

@@ -7,10 +7,15 @@ export interface MicRecorder {
   reset(): void;
   /** The most recent `n` samples (fewer if not that many yet). */
   latest(n: number): Float32Array;
-  /** Everything since the last reset. */
+  /** Everything since the last reset. Ends that recording: the buffer goes back to keeping only the latest sound. */
   take(): Float32Array;
   /** False once the microphone has been taken away (the permission was withdrawn, a headset was pulled). */
   live(): boolean;
+  /**
+   * Whether the audio is running. A microphone the browser had already allowed opens without a tap, and the browser
+   * may hold the audio back until one: the microphone is on, but nothing is heard until resume() runs in a tap.
+   */
+  running(): boolean;
   /** Starts the audio if the browser held it back; call it from a tap. Safe to call any time. */
   resume(): void;
   /** Releases the microphone. */
@@ -29,9 +34,10 @@ export interface Mic {
 
 /**
  * Why the microphone is not on. Blocked and closed are told apart because closing the question leaves the
- * way open to ask again; the rest are not about permission at all.
+ * way open to ask again, and 'system' is the phone's own switch for the browser (Android asks a second question of its
+ * own, and a no to it is not something the page's settings can undo); the rest are not about permission at all.
  */
-export type MicProblem = 'denied' | 'dismissed' | 'missing' | 'busy' | 'unsupported';
+export type MicProblem = 'denied' | 'dismissed' | 'system' | 'missing' | 'busy' | 'unsupported';
 
 export class MicError extends Error {
   constructor(
@@ -43,14 +49,17 @@ export class MicError extends Error {
   }
 }
 
-/** Reads getUserMedia's failure. Chrome says "Permission dismissed" when the question was closed without an answer. */
+/**
+ * Reads getUserMedia's failure. Chrome says "Permission dismissed" when the question was closed without an answer,
+ * and "Permission denied by system" when Android's own switch for the browser is off.
+ */
 export function classifyMicError(err: unknown): MicProblem {
   const { name = '', message = '' } = (err ?? {}) as { name?: string; message?: string };
   switch (name) {
     case 'NotAllowedError':
     case 'PermissionDeniedError':
     case 'SecurityError':
-      return /dismiss/i.test(message) ? 'dismissed' : 'denied';
+      return /dismiss/i.test(message) ? 'dismissed' : /system/i.test(message) ? 'system' : 'denied';
     case 'NotFoundError':
     case 'DevicesNotFoundError':
       return 'missing';
@@ -161,10 +170,12 @@ export const browserMic: Mic = {
 
   async open() {
     if (!navigator.mediaDevices?.getUserMedia) throw new MicError('unsupported', 'No microphone available');
-    // Create the context before any await so it starts inside the tap (iOS Safari).
+    // Create the context before any await so it starts inside the tap (iOS Safari). Nothing below waits for it to
+    // start: with no tap (a microphone the browser had already allowed) the browser may hold the audio back, and
+    // then resume() neither settles nor fails until it is allowed.
     const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const ctx = new Ctx();
-    const resumed = ctx.resume().catch(() => {});
+    void ctx.resume().catch(() => {});
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -174,48 +185,56 @@ export const browserMic: Mic = {
       void ctx.close().catch(() => {});
       throw new MicError(classifyMicError(err), err instanceof Error ? err.message : undefined);
     }
-    await resumed;
-    // A microphone the browser had already allowed opens without a tap, so the first resume() may have been
-    // refused. Once the page is capturing, the browser lets the audio start.
-    if (ctx.state !== 'running') await ctx.resume().catch(() => {});
-
-    const source = ctx.createMediaStreamSource(stream);
-    const silent = ctx.createGain();
-    silent.gain.value = 0;
-    silent.connect(ctx.destination);
-    const buffer = new SampleBuffer();
-    let node: AudioNode;
+    // Now the page is capturing, which is when a browser lets the audio start without a tap: ask again. If it still
+    // holds it back, the recorder's resume() starts it from the next tap, and running() says which it is.
+    void ctx.resume().catch(() => {});
 
     try {
-      const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
-      await ctx.audioWorklet.addModule(url);
-      URL.revokeObjectURL(url);
-      const worklet = new AudioWorkletNode(ctx, 'kd-tap');
-      worklet.port.onmessage = (e: MessageEvent<Float32Array>) => buffer.push(e.data);
-      node = worklet;
-    } catch {
-      const processor = ctx.createScriptProcessor(2048, 1, 1);
-      processor.onaudioprocess = (e) => buffer.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-      node = processor;
-    }
-    source.connect(node);
-    node.connect(silent);
+      const source = ctx.createMediaStreamSource(stream);
+      const silent = ctx.createGain();
+      silent.gain.value = 0;
+      silent.connect(ctx.destination);
+      const buffer = new SampleBuffer();
+      let node: AudioNode;
 
-    return {
-      sampleRate: ctx.sampleRate,
-      reset: () => buffer.reset(),
-      latest: (n) => buffer.latest(n),
-      take: () => buffer.stop(),
-      live: () => stream.getAudioTracks().some((t) => t.readyState === 'live'),
-      resume() {
-        void ctx.resume().catch(() => {});
-      },
-      close() {
-        source.disconnect();
-        node.disconnect();
-        stream.getTracks().forEach((t) => t.stop());
-        void ctx.close().catch(() => {});
-      },
-    };
+      try {
+        const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+        await ctx.audioWorklet.addModule(url);
+        URL.revokeObjectURL(url);
+        const worklet = new AudioWorkletNode(ctx, 'kd-tap');
+        worklet.port.onmessage = (e: MessageEvent<Float32Array>) => buffer.push(e.data);
+        node = worklet;
+      } catch {
+        const processor = ctx.createScriptProcessor(2048, 1, 1);
+        processor.onaudioprocess = (e) => buffer.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        node = processor;
+      }
+      source.connect(node);
+      node.connect(silent);
+
+      return {
+        sampleRate: ctx.sampleRate,
+        reset: () => buffer.reset(),
+        latest: (n) => buffer.latest(n),
+        take: () => buffer.stop(),
+        live: () => stream.getAudioTracks().some((t) => t.readyState === 'live'),
+        running: () => ctx.state === 'running',
+        resume() {
+          void ctx.resume().catch(() => {});
+        },
+        close() {
+          source.disconnect();
+          node.disconnect();
+          stream.getTracks().forEach((t) => t.stop());
+          void ctx.close().catch(() => {});
+        },
+      };
+    } catch (err) {
+      // The microphone is on by now: nothing that goes wrong after the question may leave it on, with the browser's
+      // red dot lit and no screen to turn it off.
+      stream.getTracks().forEach((t) => t.stop());
+      void ctx.close().catch(() => {});
+      throw new MicError('unsupported', err instanceof Error ? err.message : undefined);
+    }
   },
 };

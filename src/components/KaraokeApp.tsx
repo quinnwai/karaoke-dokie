@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { detectPitch } from '../lib/audio/pitch';
 import { detectHeldNote } from '../lib/audio/heldNote';
-import { levelOf } from '../lib/audio/level';
+import { isDigitalSilence, levelOf } from '../lib/audio/level';
 import { frequencyToMidi, midiToNoteName } from '../lib/audio/notes';
 import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
 import { detectBrowser } from '../lib/client/browser';
@@ -36,6 +36,8 @@ export interface KaraokeAppProps {
   mic?: Mic;
   /** Leaves the page (Spotify sign-in). */
   navigate?: (url: string) => void;
+  /** Reloads the page ("Reload this page" on the mic step). Not `navigate(location.href)`: that does nothing when the address has a #fragment. */
+  reload?: () => void;
   /** How long "Find a quiet spot" stays up. */
   quietMs?: number;
   /**
@@ -49,11 +51,11 @@ export interface KaraokeAppProps {
 
 const LIVE_FRAME = 2048;
 const LIVE_EVERY_MS = 50; // ~20 times a second
-const NO_SOUND = new Float32Array(0);
 
 const defaultNavigate = (url: string) => window.location.assign(url);
+const defaultReload = () => window.location.reload();
 
-export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, quietMs = 2600, pickSongs: canPick = false }: KaraokeAppProps) {
+export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, reload = defaultReload, quietMs = 2600, pickSongs: canPick = false }: KaraokeAppProps) {
   const [api] = useState(() => apiProp ?? createApi());
   const [state, rawDispatch] = useReducer(flowReducer, initialState);
 
@@ -219,8 +221,10 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
   const openMic = useCallback(async () => {
     try {
       const rec = await mic.open();
-      // Left the mic step (or the page) while the question was up: nobody wants this microphone any more.
-      if (!mounted.current || stateRef.current.step !== 'mic') {
+      // Left the mic step (or the page), or the screen no longer waits for one, while the question was up: nobody
+      // wants this microphone any more.
+      const { step: at, mic: now } = stateRef.current;
+      if (!mounted.current || at !== 'mic' || (now.view !== 'asking' && now.view !== 'opening')) {
         rec.close();
         return;
       }
@@ -245,7 +249,12 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
     void openMic();
   };
 
-  const readLevel = useCallback(() => levelOf(recorder.current?.latest(LIVE_FRAME) ?? NO_SOUND), []);
+  // null while the microphone is on but the browser has held the audio back until a tap: nothing to measure yet.
+  const readLevel = useCallback(() => {
+    const rec = recorder.current;
+    if (!rec) return 0;
+    return rec.running() ? levelOf(rec.latest(LIVE_FRAME)) : null;
+  }, []);
 
   const holdStart = () => {
     if (holding.current) return;
@@ -282,6 +291,14 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
       return;
     }
     const samples = rec.take();
+    // Nothing at all came in, or only exact zeros. A quiet singer's microphone still wobbles; this is one the system has
+    // muted (a call, another app) or audio that never started, and "hold the note a little longer" would be said for
+    // ever. Back to the mic step, which asks again and shows what the microphone hears.
+    if (isDigitalSilence(samples)) {
+      releaseMic();
+      dispatch({ type: 'micLost' });
+      return;
+    }
     // Let the button repaint before the analysis runs.
     setTimeout(() => {
       const held = detectHeldNote(samples, rec.sampleRate);
@@ -382,7 +399,8 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
             recorder.current?.resume();
             dispatch({ type: 'micDone' });
           }}
-          onReload={() => navigate(window.location.href)}
+          onWake={() => recorder.current?.resume()}
+          onReload={reload}
         />
       )}
 

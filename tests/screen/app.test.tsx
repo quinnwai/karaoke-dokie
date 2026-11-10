@@ -5,18 +5,20 @@ import { KaraokeApp } from '../../src/components/KaraokeApp';
 import type { Api } from '../../src/lib/client/api';
 import { MicError, type Mic, type MicPermission, type MicRecorder } from '../../src/lib/client/mic';
 import type { MeResponse, VocalRange } from '../../src/lib/contracts';
-import { SAMPLE_RATE, voice } from '../helpers/synth';
+import { noise, SAMPLE_RATE, voice } from '../helpers/synth';
 import { allMatches, knownSongs, me, recommendationsPage } from '../fixtures/screen';
 import { DEFAULT_VIEW } from '../../src/lib/songs/browse';
 
 /**
  * A mic that "hears" whatever tone the test queues for the next hold. `permission` is what the browser says
- * before anyone asks (QWW-50); `hear` is what is in the air on the level screen; `lose` takes the microphone away.
+ * before anyone asks (QWW-50); `hear` is what is in the air on the level screen; `lose` takes the microphone away;
+ * `stall` is a browser holding the audio back until a tap (nothing runs until `resume`).
  */
 function fakeMic(permission: MicPermission = 'prompt') {
   const queue: Float32Array[] = [];
   let current: Float32Array = new Float32Array(0);
   let alive = true;
+  let stalled = false;
   const opened = { count: 0, closed: 0, resumed: 0 };
   const recorder: MicRecorder = {
     sampleRate: SAMPLE_RATE,
@@ -26,7 +28,11 @@ function fakeMic(permission: MicPermission = 'prompt') {
     latest: (n) => current.subarray(Math.max(0, current.length - n)),
     take: () => current,
     live: () => alive,
-    resume: () => void opened.resumed++,
+    running: () => !stalled,
+    resume: () => {
+      opened.resumed++;
+      stalled = false;
+    },
     close: () => void opened.closed++,
   };
   const mic: Mic = {
@@ -40,8 +46,11 @@ function fakeMic(permission: MicPermission = 'prompt') {
   return {
     mic,
     sing: (hz: number, seconds = 1.5) => queue.push(voice(hz, seconds)),
+    /** Whatever the microphone gives for the next hold. */
+    play: (samples: Float32Array) => queue.push(samples),
     hear: (samples: Float32Array) => void (current = samples),
     lose: () => void (alive = false),
+    stall: () => void (stalled = true),
     opened,
   };
 }
@@ -384,6 +393,7 @@ describe('KaraokeApp', () => {
         [Object.assign(new Error('Permission dismissed'), { name: 'NotAllowedError' }), 'The question was closed', 'dismissed'],
         [new DOMException('Requested device not found', 'NotFoundError'), 'We can’t find a microphone', 'missing'],
         [new DOMException('Could not start audio source', 'NotReadableError'), 'The microphone is busy', 'busy'],
+        [Object.assign(new Error('Permission denied by system'), { name: 'NotAllowedError' }), 'Your phone is blocking the microphone', 'system'],
       ] as const) {
         const { unmount } = render(<KaraokeApp api={fakeApi(null)} mic={{ permission: async () => 'prompt', open: () => Promise.reject(error) }} quietMs={0} />);
         fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
@@ -498,11 +508,97 @@ describe('KaraokeApp', () => {
 
     it('"Reload this page" reloads the page, which is how Safari comes to ask again', async () => {
       asBrowser(IPHONE);
+      // `reload`, not `navigate(location.href)`: assigning the address you are on does nothing when it has a #fragment.
+      const reload = vi.fn();
       const navigate = vi.fn();
-      render(<KaraokeApp api={fakeApi(null)} mic={fakeMic('denied').mic} navigate={navigate} quietMs={0} />);
+      render(<KaraokeApp api={fakeApi(null)} mic={fakeMic('denied').mic} navigate={navigate} reload={reload} quietMs={0} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Reload this page' }));
-      expect(navigate).toHaveBeenCalledWith(window.location.href);
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(navigate).not.toHaveBeenCalled();
+    });
+
+    it('a hold that records nothing but zeros is a microphone the system muted, not a note held too short', async () => {
+      asBrowser(IPHONE);
+      const { mic, play, sing, opened } = fakeMic('prompt');
+      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
+      await startTest();
+
+      // A call, another app or the system has muted it: all zeros. "Hold a little longer" would be said for ever.
+      play(new Float32Array(48000));
+      await hold(/lowest note/);
+      await screen.findByRole('button', { name: 'Turn on microphone' });
+      expect(opened.closed).toBe(1);
+      expect(lyrics()).not.toContain('Try again and hold the note a little longer');
+
+      await throughMic();
+      await screen.findByRole('button', { name: /lowest note/ });
+      sing(110);
+      await hold(/lowest note/);
+      expect((await screen.findByTestId('low-note')).textContent).toBe('A2');
+    });
+
+    it('but a quiet singer is not a muted microphone: hiss, however faint, still says to hold the note longer', async () => {
+      asBrowser(IPHONE);
+      const { mic, play, opened } = fakeMic('prompt');
+      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
+      await startTest();
+      play(noise(1.5, 1e-5));
+      await hold(/lowest note/);
+      await waitFor(() => expect(lyrics()).toContain('Try again and hold the note a little longer'));
+      expect(screen.queryByRole('button', { name: 'Turn on microphone' })).toBeNull();
+      expect(opened.closed).toBe(0);
+    });
+
+    it('a microphone that is on while the browser holds the audio back says to tap, and a tap starts it', async () => {
+      asBrowser(PIXEL);
+      const { mic, stall, hear, opened } = fakeMic('granted');
+      stall();
+      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+
+      // Opened by itself with no tap, so the audio waits for one: the screen says so, not "we hear nothing".
+      expect(await screen.findByText('Tap anywhere to start listening')).toBeTruthy();
+      expect(opened.resumed).toBe(0);
+      hear(voice(220, 0.2));
+      await act(async () => {
+        fireEvent.pointerDown(document.querySelector('[data-mic-view="level"]')!);
+      });
+      expect(opened.resumed).toBe(1);
+      expect(await screen.findByText('We can hear you ✓')).toBeTruthy();
+    });
+
+    it('"Try here anyway" is not asked again this visit: a lost microphone goes by permission, not back to the in-app screen', async () => {
+      asBrowser(INSTAGRAM_IPHONE);
+      const { mic, lose } = fakeMic('prompt');
+      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Try here anyway' }));
+      await throughMic();
+      await screen.findByRole('button', { name: /lowest note/ });
+
+      lose();
+      await hold(/lowest note/);
+      await screen.findByRole('button', { name: 'Turn on microphone' });
+      expect(lyrics()).toContain('We need to hear you sing');
+      expect(screen.queryByRole('button', { name: 'Try here anyway' })).toBeNull();
+    });
+
+    it('a refusal inside Instagram shows the way out of the app, since that browser has no settings to open', async () => {
+      asBrowser(INSTAGRAM_IPHONE);
+      const open = vi.fn(() => Promise.reject(new MicError('denied')));
+      render(<KaraokeApp api={fakeApi(null)} mic={{ permission: async () => 'prompt', open }} quietMs={0} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Try here anyway' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Turn on microphone' }));
+
+      await waitFor(() => expect(document.querySelector('[data-mic-view="recovery"]')).not.toBeNull());
+      expect(lyrics()).toContain('Open this in Safari');
+      expect(screen.queryByText('Website Settings')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Copy link' })).toBeTruthy();
+      // And it is still a way on: Try again asks once more.
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      await waitFor(() => expect(open).toHaveBeenCalledTimes(2));
     });
 
     it('lets go of a microphone that arrives after the page is gone', async () => {

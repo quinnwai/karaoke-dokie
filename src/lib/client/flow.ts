@@ -62,6 +62,8 @@ export interface MicGate {
   problem: MicProblem | null;
   /** How many times the answer was no. The recovery screen says "still" from the second. */
   fails: number;
+  /** "Try here anyway" was tapped: the in-app screen does not come back this visit, since the guess may be wrong. */
+  triedHere: boolean;
 }
 
 /** Test progress kept in sessionStorage so it survives the Spotify round trip. */
@@ -119,7 +121,7 @@ export interface FlowState {
 export const initialState: FlowState = {
   step: 'boot',
   hold: 'ready',
-  mic: { view: 'checking', next: 'low', env: null, problem: null, fails: 0 },
+  mic: { view: 'checking', next: 'low', env: null, problem: null, fails: 0, triedHere: false },
   low: null,
   high: null,
   signedIn: false,
@@ -218,10 +220,10 @@ const withView = (state: FlowState, view: ResultsView): FlowState => ({ ...state
 /**
  * The way into a hold step when the microphone is not open (QWW-50): the mic step first, then `next`.
  * Starts it from the top every time, since the browser may have been asked since and the answer may
- * have changed; what the browser is stays.
+ * have changed; what the browser is, and that "Try here anyway" was tapped, stay.
  */
 function enterMic(state: FlowState, next: 'low' | 'high'): FlowState {
-  return { ...state, step: 'mic', hold: 'ready', mic: { ...initialState.mic, next, env: state.mic.env } };
+  return { ...state, step: 'mic', hold: 'ready', mic: { ...initialState.mic, next, env: state.mic.env, triedHere: state.mic.triedHere } };
 }
 
 /** The mic step moves only on an event meant for the screen it is on, so a late answer cannot undo a later one. */
@@ -279,8 +281,9 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       if (!inMic(state, 'checking')) return state;
       const { env, permission } = event;
       const mic = { ...state.mic, env };
-      // Inside another app: say so before anything else. Already blocked: no point asking, go straight to what to do.
-      if (env.inApp) return { ...state, mic: { ...mic, view: 'inapp' } };
+      // Inside another app: say so before anything else (unless the singer said to try here anyway). Already blocked: no
+      // point asking, go straight to what to do.
+      if (env.inApp && !mic.triedHere) return { ...state, mic: { ...mic, view: 'inapp' } };
       if (permission === 'denied') return { ...state, mic: { ...mic, view: 'recovery', problem: 'denied', fails: mic.fails + 1 } };
       // Already allowed: the microphone opens by itself and the singer goes straight to the level meter.
       return { ...state, mic: { ...mic, view: permission === 'granted' ? 'opening' : 'prompt' } };
@@ -294,7 +297,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
         ? { ...state, mic: { ...state.mic, view: 'recovery', problem: event.reason, fails: state.mic.fails + 1 } }
         : state;
     case 'micTryHere':
-      return inMic(state, 'inapp') ? { ...state, mic: { ...state.mic, view: 'prompt' } } : state;
+      return inMic(state, 'inapp') ? { ...state, mic: { ...state.mic, view: 'prompt', triedHere: true } } : state;
     case 'micDone':
       return inMic(state, 'level') ? { ...state, step: state.mic.next, hold: 'ready' } : state;
     case 'micLost':

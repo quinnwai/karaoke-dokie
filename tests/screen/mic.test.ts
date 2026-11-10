@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { classifyMicError, IDLE_KEEP, MicError, queryMicPermission, SampleBuffer } from '../../src/lib/client/mic';
+import { browserMic, classifyMicError, IDLE_KEEP, MicError, queryMicPermission, SampleBuffer } from '../../src/lib/client/mic';
 
 describe('SampleBuffer', () => {
   const buf = () => {
@@ -77,6 +77,8 @@ describe('classifyMicError', () => {
     expect(classifyMicError(err('NotAllowedError', 'Permission denied'))).toBe('denied');
     expect(classifyMicError(err('NotAllowedError', 'Permission dismissed'))).toBe('dismissed');
     expect(classifyMicError(err('NotAllowedError', 'The request is not allowed by the user agent or the platform in the current context.'))).toBe('denied');
+    // Android asks a second question of its own; a no to it is not something the page's settings can undo.
+    expect(classifyMicError(err('NotAllowedError', 'Permission denied by system'))).toBe('system');
     expect(classifyMicError(err('PermissionDeniedError'))).toBe('denied');
     expect(classifyMicError(err('SecurityError'))).toBe('denied');
   });
@@ -149,5 +151,158 @@ describe('queryMicPermission', () => {
     expect(await answer).toBe('unknown');
     // And it leaves no timer behind.
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// browserMic.open() against a browser that is only pretended: the real one is a phone, and what a phone does with
+// these calls is checked by hand. What is pinned here is what open() does for each thing a browser may do.
+describe('browserMic.open', () => {
+  type Behaviour = 'allow' | 'hold-back' | 'allow-after-capture';
+
+  /** An AudioContext that starts, holds the audio back (resume() waits, as the spec says), or starts only once asked again. */
+  function installAudio(behaviour: Behaviour, hooks: { source?: () => unknown } = {}) {
+    const made: FakeCtx[] = [];
+    class FakeCtx {
+      state: 'suspended' | 'running' | 'closed' = behaviour === 'allow' ? 'running' : 'suspended';
+      sampleRate = 48000;
+      destination = {};
+      resumeCalls = 0;
+      closed = false;
+      constructor() {
+        made.push(this);
+      }
+      resume() {
+        this.resumeCalls++;
+        if (behaviour === 'allow') return Promise.resolve();
+        // Held back: this promise settles only when the browser lets the audio start, which a tap does.
+        if (behaviour === 'allow-after-capture' && this.resumeCalls >= 2) {
+          this.state = 'running';
+          return Promise.resolve();
+        }
+        return new Promise<void>(() => {});
+      }
+      close() {
+        this.closed = true;
+        this.state = 'closed';
+        return Promise.resolve();
+      }
+      createMediaStreamSource() {
+        return (hooks.source ?? (() => ({ connect() {}, disconnect() {} })))();
+      }
+      createGain() {
+        return { gain: { value: 1 }, connect() {} };
+      }
+      createScriptProcessor() {
+        return { connect() {}, disconnect() {}, onaudioprocess: null };
+      }
+    }
+    Object.defineProperty(window, 'AudioContext', { value: FakeCtx, configurable: true });
+    return made;
+  }
+
+  function installMic(result: 'allow' | Error) {
+    const track = { readyState: 'live' as 'live' | 'ended', stop: vi.fn(() => void (track.readyState = 'ended')) };
+    const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
+    const getUserMedia = vi.fn(async () => {
+      if (result !== 'allow') throw result;
+      return stream;
+    });
+    Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true });
+    return { track, getUserMedia };
+  }
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).AudioContext;
+    delete (navigator as unknown as Record<string, unknown>).mediaDevices;
+  });
+
+  it('opens at once when the browser lets the audio start, and asks for audio with no filtering (a voice, not a call)', async () => {
+    const [ctx] = [installAudio('allow')];
+    const { getUserMedia } = installMic('allow');
+    const rec = await browserMic.open();
+    expect(rec.running()).toBe(true);
+    expect(rec.live()).toBe(true);
+    expect(rec.sampleRate).toBe(48000);
+    expect(getUserMedia).toHaveBeenCalledWith({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    expect(ctx).toHaveLength(1);
+  });
+
+  it('does not wait for audio the browser holds back: a microphone allowed earlier, opened with no tap, still opens', async () => {
+    // The first resume() never settles (no tap yet), and open() has to finish anyway or the singer sees a blank screen.
+    const made = installAudio('hold-back');
+    installMic('allow');
+    const rec = await Promise.race([browserMic.open(), new Promise<'stuck'>((resolve) => setTimeout(() => resolve('stuck'), 200))]);
+    expect(rec).not.toBe('stuck');
+    if (rec === 'stuck') return;
+    // The microphone is on, the audio is not, and the recorder says so, so the screen can ask for a tap.
+    expect(rec.live()).toBe(true);
+    expect(rec.running()).toBe(false);
+    expect(made[0]!.resumeCalls).toBe(2); // once at the start, once more now that the page is capturing
+    // The tap starts it (a real browser settles resume() then).
+    made[0]!.state = 'running';
+    rec.resume();
+    expect(made[0]!.resumeCalls).toBe(3);
+    expect(rec.running()).toBe(true);
+  });
+
+  it('asks again once the page is capturing, which is when a browser lets the audio start without a tap', async () => {
+    const made = installAudio('allow-after-capture');
+    installMic('allow');
+    const rec = await browserMic.open();
+    expect(rec.running()).toBe(true);
+    expect(made[0]!.resumeCalls).toBe(2);
+  });
+
+  it('turns every way the question can fail into a MicError with its reason, and lets go of the audio', async () => {
+    for (const [name, message, reason] of [
+      ['NotAllowedError', 'Permission denied', 'denied'],
+      ['NotAllowedError', 'Permission dismissed', 'dismissed'],
+      ['NotAllowedError', 'Permission denied by system', 'system'],
+      ['NotFoundError', 'Requested device not found', 'missing'],
+      ['NotReadableError', 'Could not start audio source', 'busy'],
+      ['OverconstrainedError', 'x', 'unsupported'],
+    ] as const) {
+      const made = installAudio('allow');
+      installMic(Object.assign(new Error(message), { name }));
+      const failure = await browserMic.open().catch((e: unknown) => e);
+      expect(failure).toBeInstanceOf(MicError);
+      expect((failure as MicError).reason).toBe(reason);
+      expect((failure as MicError).message).toBe(message);
+      expect(made[0]!.closed).toBe(true);
+    }
+  });
+
+  it('says "unsupported" where there is no microphone API at all (a page that is not secure, an old browser)', async () => {
+    installAudio('allow');
+    const failure = await browserMic.open().catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(MicError);
+    expect((failure as MicError).reason).toBe('unsupported');
+  });
+
+  it('lets go of the microphone if anything after the question goes wrong: no red dot with no screen to turn it off', async () => {
+    const made = installAudio('allow', {
+      source: () => {
+        throw new Error('cannot build the graph');
+      },
+    });
+    const { track } = installMic('allow');
+    const failure = await browserMic.open().catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(MicError);
+    expect((failure as MicError).reason).toBe('unsupported');
+    expect(track.stop).toHaveBeenCalledTimes(1);
+    expect(made[0]!.closed).toBe(true);
+  });
+
+  it('live() follows the microphone: false once the browser ends it, and close() lets everything go', async () => {
+    const made = installAudio('allow');
+    const { track } = installMic('allow');
+    const rec = await browserMic.open();
+    expect(rec.live()).toBe(true);
+    track.readyState = 'ended';
+    expect(rec.live()).toBe(false);
+    track.readyState = 'live';
+    rec.close();
+    expect(track.stop).toHaveBeenCalled();
+    expect(made[0]!.closed).toBe(true);
   });
 });
