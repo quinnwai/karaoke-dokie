@@ -1,67 +1,50 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Results } from '../../src/components/Results';
+import { SetlistScreen } from '../../src/components/setlist/SetlistScreen';
 import { SongDetail } from '../../src/components/SongDetail';
+import { initialTuner } from '../../src/lib/setlist/tuner';
 import { match } from '../fixtures/screen';
-import { DEFAULT_VIEW } from '../../src/lib/songs/browse';
+import { all, ranked, SEL, setlistProps } from '../helpers/setlist';
 
 afterEach(cleanup);
 
 const range = { low: 45, high: 72, source: 'test' as const };
-const props = {
-  range,
-  mode: 'library' as const,
-  view: DEFAULT_VIEW,
-  leadSlider: null,
-  shown: 10,
-  loading: false,
-  error: false,
-  onSelect: vi.fn(),
-  onMore: vi.fn(),
-  onRetry: vi.fn(),
-  onRedo: vi.fn(),
-  onRedoEnd: vi.fn(),
-  onSlider: vi.fn(),
-  onSliderDone: vi.fn(),
-  onResetSliders: vi.fn(),
-  onDecade: vi.fn(),
-  onMood: vi.fn(),
-  onDuets: vi.fn(),
-  onClear: vi.fn(),
-  onConnect: vi.fn(),
-  displayName: 'Test Singer',
-  onLogout: vi.fn(async () => {}),
-};
-const labels = (el: HTMLElement) => within(el).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
+/** The accessible name of each row's button that opens the song, top to bottom. */
+const labels = () => all(SEL.row).map((li) => li.querySelector('button')!.getAttribute('aria-label'));
 
-describe('Maybe group', () => {
-  it('lists low-confidence songs after the main list, under Maybe, without a difficulty', () => {
-    render(<Results {...props} matches={[0, 1, 8, 9].map(match)} />);
-    const [main] = screen.getAllByRole('list');
-    expect(labels(main!)).toEqual(['Plastic Love by Mariya Takeuchi, Easy', 'Lemon by Kenshi Yonezu, Medium. Sing it lower than the artist']);
-    expect(within(main!).getByText('Easy')).toBeTruthy();
-
-    const maybe = screen.getByRole('region', { name: 'Maybe' });
-    expect(within(maybe).getByText(/only have an estimate/)).toBeTruthy();
-    expect(labels(maybe)).toEqual(['Linda Linda by The Blue Hearts, Maybe. Fast lyrics', 'Sukiyaki by Kyu Sakamoto, Maybe']);
-    for (const li of within(maybe).getAllByRole('listitem')) expect(li.querySelector('[data-difficulty]')).toBeNull();
-    expect(main!.compareDocumentPosition(maybe) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+describe('Maybe songs on the Setlist screen', () => {
+  // The old list had a Maybe section after the main one, under its own heading. The ranking engine puts Maybe songs last
+  // (tests/setlist/engine.test.ts); the screen draws the one list it is given, and a Maybe song says so in its row.
+  it('sit in the one ranked list with no Maybe section, and say Maybe in their row label instead of a difficulty', () => {
+    render(<SetlistScreen {...setlistProps(range, [0, 1, 8, 9].map((i) => ranked(match(i))))} />);
+    expect(screen.getAllByRole('list')).toHaveLength(1);
+    expect(labels()).toEqual([
+      'Plastic Love by Mariya Takeuchi, Easy',
+      'Lemon by Kenshi Yonezu, Medium',
+      'Linda Linda by The Blue Hearts, Maybe',
+      'Sukiyaki by Kyu Sakamoto, Maybe',
+    ]);
+    expect(screen.queryByRole('region', { name: 'Maybe' })).toBeNull();
+    expect(screen.queryByText(/only have an estimate/)).toBeNull();
+    expect(screen.queryByText(/^(Easy|Medium|Hard)$/)).toBeNull();
   });
 
-  it('shows the Maybe group alone when no song is a sure fit', () => {
-    render(<Results {...props} matches={[8, 9].map(match)} />);
-    expect(screen.getAllByRole('list')).toHaveLength(1);
-    expect(labels(screen.getByRole('region', { name: 'Maybe' }))).toHaveLength(2);
+  it('keep the position the engine gave them, even when it is above a sure fit', () => {
+    render(<SetlistScreen {...setlistProps(range, [8, 0].map((i) => ranked(match(i))))} />);
+    expect(labels()).toEqual(['Linda Linda by The Blue Hearts, Maybe', 'Plastic Love by Mariya Takeuchi, Easy']);
+  });
+
+  it('can be the whole list: no note that nothing fits, and the end of the list says so', () => {
+    render(<SetlistScreen {...setlistProps(range, [8, 9].map((i) => ranked(match(i))), { mode: 'library', tuner: initialTuner() })} />);
+    expect(all(SEL.row)).toHaveLength(2);
+    expect(labels().every((label) => label!.endsWith(', Maybe'))).toBe(true);
     expect(screen.queryByText(/None of your songs/)).toBeNull();
     expect(screen.getByText('That’s every song that fits, for now.')).toBeTruthy();
   });
+});
 
-  it('has no Maybe heading when every song is a sure fit', () => {
-    render(<Results {...props} matches={[0, 1].map(match)} />);
-    expect(screen.queryByRole('region', { name: 'Maybe' })).toBeNull();
-  });
-
+describe('Maybe songs on the song page', () => {
   it('song detail says Maybe instead of a difficulty', () => {
     render(<SongDetail match={match(9)} userRange={range} feedback={undefined} onFeedback={vi.fn()} onBack={vi.fn()} />);
     expect(screen.getByText('Maybe')).toBeTruthy();

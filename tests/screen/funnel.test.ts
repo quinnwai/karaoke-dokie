@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { catalogueKey, eventsFor } from '../../src/lib/client/funnel';
-import { flowReducer, initialState, type FlowEvent, type FlowState } from '../../src/lib/client/flow';
+import { catalogueKey, eventsFor, feedbackView, viewProps } from '../../src/lib/client/funnel';
+import { flowReducer, initialState, SHOW_STEP, type FlowEvent, type FlowState } from '../../src/lib/client/flow';
+import { DEFAULTS } from '../../src/lib/setlist/defaults';
+import { isOn, type TunerAction } from '../../src/lib/setlist/tuner';
 import { allMatches, me } from '../fixtures/screen';
 import { ANDROID_CHROME, INSTAGRAM, IOS_SAFARI, micOn } from '../helpers/micFlow';
 
 const run = (events: FlowEvent[], from: FlowState = initialState) => events.reduce(flowReducer, from);
 const names = (prev: FlowState, action: FlowEvent) => eventsFor(prev, action).map((e) => e.name);
 const signedOut: FlowEvent = { type: 'booted', me: null, progress: null, wantsPick: false };
+/** A tuner action as a flow event, and several of them in order. */
+const tuner = (action: TunerAction): FlowEvent => ({ type: 'tuner', action });
+const tune = (...actions: TunerAction[]): FlowEvent[] => actions.map(tuner);
+const gearDone = (gear: 'difficulty' | 'history' | 'popularity' | 'tempo'): FlowEvent => ({ type: 'gearDone', gear });
 
 describe('funnel events', () => {
   it('follows the onboarding: landing, start, quiet spot, both notes, range', () => {
@@ -126,7 +132,7 @@ describe('funnel events', () => {
     });
   });
 
-  it('records results, views and opened songs with the view they came from', () => {
+  it('records results, and the songs opened and rated with the tuner they were found in', () => {
     const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
     expect(eventsFor(atResults, { type: 'allLoaded', page: allMatches() })).toEqual([
       { name: 'results_viewed', props: { mode: 'library', matchCount: 8, maybeCount: 2 } },
@@ -134,26 +140,18 @@ describe('funnel events', () => {
     const empty = { ...allMatches(0) };
     expect(names(atResults, { type: 'allLoaded', page: empty })).toEqual(['results_viewed', 'results_empty']);
     const loaded = run([{ type: 'allLoaded', page: allMatches() }], atResults);
-    // Dragging records nothing; letting go records the adjustment once, with the view it left.
-    expect(names(loaded, { type: 'setSlider', slider: 'difficulty', value: 0.333 })).toEqual([]);
-    const tuned = run([{ type: 'setSlider', slider: 'difficulty', value: 0.333 }], loaded);
-    expect(eventsFor(tuned, { type: 'sliderDone', slider: 'difficulty' })).toEqual([
-      {
-        name: 'slider_changed',
-        props: { slider: 'difficulty', mode: 'library', difficulty: 0.33, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false },
-      },
-    ]);
-    expect(eventsFor(tuned, { type: 'resetSliders' })).toEqual([
-      { name: 'sliders_reset', props: { mode: 'library', difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false } },
-    ]);
-    expect(eventsFor(loaded, { type: 'pickDecade', decade: '80s' })[0]!.props).toMatchObject({ kind: 'decade', value: '80s', on: true, decade: '80s' });
-    expect(eventsFor(loaded, { type: 'select', trackId: 't3', position: 4 })).toEqual([
-      {
-        name: 'song_opened',
-        props: { mode: 'library', difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false, position: 4 },
-      },
-    ]);
-    expect(eventsFor(loaded, { type: 'feedback', trackId: 't3', thumbs: 'down' })[0]).toMatchObject({ name: 'feedback_tapped', props: { thumbs: 'down' } });
+    // An untouched tuner, signed in or not: Difficulty and Popularity on at their defaults; History, Tempo and Era start off.
+    const untouched = {
+      mode: 'library',
+      difficulty: DEFAULTS.difficulty / 100,
+      familiarity: null,
+      popularity: DEFAULTS.popularity / 100,
+      tempo: null,
+      eras: null,
+    };
+    expect(eventsFor(loaded, { type: 'select', trackId: 't3', position: 4 })).toEqual([{ name: 'song_opened', props: { ...untouched, position: 4 } }]);
+    expect(eventsFor(loaded, { type: 'feedback', trackId: 't3', thumbs: 'down' })).toEqual([{ name: 'feedback_tapped', props: { thumbs: 'down', ...untouched } }]);
+    expect(eventsFor(loaded, { type: 'loadMore' })).toEqual([{ name: 'generate_more_pressed', props: { shown: SHOW_STEP, ...untouched } }]);
   });
 
   it('records a library the server could not read as catalogue results, and says so (QWW-55)', () => {
@@ -181,5 +179,190 @@ describe('funnel events', () => {
     const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
     const partial = run([{ type: 'allLoaded', page: { ...allMatches(3), complete: false } }], atResults);
     expect(names(partial, { type: 'allLoaded', page: allMatches() })).toEqual([]);
+  });
+});
+
+describe('the Setlist tuner events', () => {
+  const signedInRange = { low: 45, high: 72, source: 'test' as const };
+  const atResults = run([{ type: 'booted', me: me(signedInRange), progress: null, wantsPick: false }]);
+  const loaded = run([{ type: 'allLoaded', page: allMatches() }], atResults);
+
+  describe('while a control is being dragged or pressed', () => {
+    it.each<[string, TunerAction]>([
+      ['a slider moving', { type: 'input', gear: 'difficulty', value: 33 }],
+      ['a press on an off slider', { type: 'touch', gear: 'tempo' }],
+      ['a tab', { type: 'open', gear: 'era' }],
+      ['the handle', { type: 'mini', mini: true }],
+      ['the test hook', { type: 'patch', patch: { tempo: 10 } }],
+    ])('%s records nothing', (_what, action) => {
+      expect(eventsFor(loaded, tuner(action))).toEqual([]);
+    });
+
+    it('a whole drag of one slider, value by value, records nothing', () => {
+      let s = loaded;
+      for (const value of [21, 25, 30, 33, 38, 40]) {
+        expect(eventsFor(s, tuner({ type: 'input', gear: 'popularity', value }))).toEqual([]);
+        s = flowReducer(s, tuner({ type: 'input', gear: 'popularity', value }));
+      }
+    });
+  });
+
+  describe('gear_change', () => {
+    it('is one record per adjustment, when the thumb is let go, with where it ended and that the gear is on', () => {
+      const dragged = run(tune({ type: 'input', gear: 'difficulty', value: 33 }), loaded);
+      expect(eventsFor(dragged, gearDone('difficulty'))).toEqual([
+        { name: 'gear_change', props: { gear: 'difficulty', value: 33, on: true, mode: 'library' } },
+      ]);
+    });
+
+    it('a tap that moved nothing on an off slider is recorded at the default value, on', () => {
+      const pressed = run(tune({ type: 'touch', gear: 'tempo' }), loaded);
+      expect(eventsFor(pressed, gearDone('tempo'))).toEqual([
+        { name: 'gear_change', props: { gear: 'tempo', value: DEFAULTS.tempo, on: true, mode: 'library' } },
+      ]);
+    });
+
+    it('says a gear is off when it is still off at the end of the adjustment', () => {
+      expect(eventsFor(loaded, gearDone('tempo'))).toEqual([
+        { name: 'gear_change', props: { gear: 'tempo', value: DEFAULTS.tempo, on: false, mode: 'library' } },
+      ]);
+    });
+
+    it('a reset is a gear going off at its default value, recorded when it is pressed', () => {
+      const moved = run(tune({ type: 'input', gear: 'difficulty', value: 80 }), loaded);
+      expect(eventsFor(moved, tuner({ type: 'reset', gear: 'difficulty' }))).toEqual([
+        { name: 'gear_change', props: { gear: 'difficulty', value: DEFAULTS.difficulty, on: false, mode: 'library' } },
+      ]);
+      expect(eventsFor(loaded, tuner({ type: 'reset', gear: 'history' }))[0]!.props).toMatchObject({ gear: 'history', value: DEFAULTS.history, on: false });
+    });
+
+    it('carries the results mode the singer is in', () => {
+      const catalogue = run([{ type: 'booted', me: null, progress: null, wantsPick: false, savedRange: { low: 45, high: 72 } }, { type: 'allLoaded', page: allMatches() }]);
+      expect(eventsFor(catalogue, gearDone('difficulty'))[0]!.props).toMatchObject({ mode: 'catalogue' });
+      expect(eventsFor(catalogue, tuner({ type: 'reset', gear: 'popularity' }))[0]!.props).toMatchObject({ mode: 'catalogue' });
+    });
+  });
+
+  describe('era_change', () => {
+    it('records the first tap on an era as that era alone, picked, with Era now on', () => {
+      expect(eventsFor(loaded, tuner({ type: 'era', era: 's80' }))).toEqual([
+        { name: 'era_change', props: { era: 's80', picked: true, on: true, eras: 's80', mode: 'library' } },
+      ]);
+    });
+
+    it('records the picks after a tap as one comma string, in the order they were picked', () => {
+      const one = run(tune({ type: 'era', era: 's80' }), loaded);
+      expect(eventsFor(one, tuner({ type: 'era', era: 's00' }))).toEqual([
+        { name: 'era_change', props: { era: 's00', picked: true, on: true, eras: 's80,s00', mode: 'library' } },
+      ]);
+    });
+
+    it('says picked is false when the tap took the era out', () => {
+      const picked = run(tune({ type: 'era', era: 's80' }, { type: 'era', era: 's90' }), loaded);
+      expect(eventsFor(picked, tuner({ type: 'era', era: 's90' }))).toEqual([
+        { name: 'era_change', props: { era: 's90', picked: false, on: true, eras: 's80', mode: 'library' } },
+      ]);
+    });
+
+    it('takes the last pick out to an empty string, with Era still on (an empty list, not an off gear)', () => {
+      const one = run(tune({ type: 'era', era: 's80' }), loaded);
+      expect(eventsFor(one, tuner({ type: 'era', era: 's80' }))).toEqual([
+        { name: 'era_change', props: { era: 's80', picked: false, on: true, eras: '', mode: 'library' } },
+      ]);
+    });
+
+    it('a reset has no era, no pick, Era off, and the default picks (there are none)', () => {
+      const picked = run(tune({ type: 'era', era: 's80' }), loaded);
+      expect(DEFAULTS.eras).toEqual([]);
+      expect(eventsFor(picked, tuner({ type: 'reset', gear: 'era' }))).toEqual([
+        { name: 'era_change', props: { era: null, picked: false, on: false, eras: '', mode: 'library' } },
+      ]);
+    });
+  });
+
+  describe('the tuner on song_opened, feedback_tapped and generate_more_pressed', () => {
+    const tuned = run(
+      tune(
+        { type: 'input', gear: 'difficulty', value: 33 },
+        { type: 'input', gear: 'history', value: 80 },
+        { type: 'input', gear: 'tempo', value: 35 },
+        { type: 'reset', gear: 'popularity' },
+        { type: 'era', era: 's80' },
+      ),
+      loaded,
+    );
+    // Each gear's target as 0 to 1, null when it is not factored in; the eras only while Era is on.
+    const props = { mode: 'library', difficulty: 0.33, familiarity: 0.8, popularity: null, tempo: 0.35, eras: 's80' };
+
+    it('viewProps reads the tuner as it stands', () => {
+      expect(viewProps(tuned)).toEqual(props);
+      expect(viewProps(loaded)).toEqual({ mode: 'library', difficulty: 0, familiarity: null, popularity: 1, tempo: null, eras: null });
+    });
+
+    it('all three carry it', () => {
+      expect(eventsFor(tuned, { type: 'select', trackId: 't2', position: 3 })).toEqual([{ name: 'song_opened', props: { ...props, position: 3 } }]);
+      expect(eventsFor(tuned, { type: 'feedback', trackId: 't2', thumbs: 'up' })).toEqual([{ name: 'feedback_tapped', props: { thumbs: 'up', ...props } }]);
+      expect(eventsFor(tuned, { type: 'loadMore' })).toEqual([{ name: 'generate_more_pressed', props: { shown: SHOW_STEP, ...props } }]);
+    });
+
+    it('a song with no position says so, and a catalogue song carries its catalogue key but never a Spotify id', () => {
+      expect(eventsFor(tuned, { type: 'select', trackId: 't2' })[0]!.props).toEqual({ ...props, position: null });
+      expect(eventsFor(tuned, { type: 'select', trackId: 'cat:queen|bohemian rhapsody', position: 1 })[0]!.props).toEqual({
+        ...props,
+        position: 1,
+        songKey: 'queen|bohemian rhapsody',
+      });
+    });
+
+    it('does not count History when there is no listening data, even if the gear is on', () => {
+      // A signed-in singer who switched History on, whose library then could not be read: the songs are the catalogue's.
+      const on = run([{ type: 'allLoaded', page: allMatches() }, ...tune({ type: 'input', gear: 'history', value: 80 })], atResults);
+      expect(viewProps(on).familiarity).toBe(0.8);
+      const unreadable = run([{ type: 'allLoaded', page: { ...allMatches(), libraryUnavailable: true } }], on);
+      expect(isOn(unreadable.tuner, 'history')).toBe(true);
+      expect(viewProps(unreadable)).toMatchObject({ mode: 'catalogue', familiarity: null, difficulty: 0 });
+      // Signed out: History is off, so it is null for that reason too.
+      const catalogue = run([{ type: 'booted', me: null, progress: null, wantsPick: false, savedRange: { low: 45, high: 72 } }]);
+      expect(viewProps(catalogue)).toEqual({ mode: 'catalogue', difficulty: 0, familiarity: null, popularity: 1, tempo: null, eras: null });
+    });
+
+    it('Era on with nothing picked is an empty string, not null: the filter is on', () => {
+      const none = run(tune({ type: 'era', era: 's90' }, { type: 'era', era: 's90' }), loaded);
+      expect(none.tuner.eras).toEqual([]);
+      expect(viewProps(none).eras).toBe('');
+    });
+  });
+
+  describe('feedbackView, the shape the feedback API still checks', () => {
+    it('is the tuner as the old results view: gears as 0 to 1 or null, and no chips', () => {
+      const tuned = run(
+        tune(
+          { type: 'input', gear: 'difficulty', value: 33 },
+          { type: 'input', gear: 'history', value: 80 },
+          { type: 'input', gear: 'tempo', value: 35 },
+          { type: 'reset', gear: 'popularity' },
+          { type: 'era', era: 's80' },
+        ),
+        loaded,
+      );
+      expect(feedbackView(tuned)).toEqual({
+        difficulty: 0.33,
+        familiarity: 0.8,
+        popularity: null,
+        tempo: 0.35,
+        decade: null,
+        mood: null,
+        duetsOnly: false,
+      });
+      // Era has no place in it: the feedback API has never had one.
+      expect(feedbackView(loaded)).not.toHaveProperty('eras');
+    });
+
+    it('has History null when there is no library, even if the gear is on', () => {
+      const on = run([{ type: 'allLoaded', page: allMatches() }, ...tune({ type: 'input', gear: 'history', value: 80 })], atResults);
+      expect(feedbackView(on).familiarity).toBe(0.8);
+      const unreadable = run([{ type: 'allLoaded', page: { ...allMatches(), libraryUnavailable: true } }], on);
+      expect(feedbackView(unreadable).familiarity).toBeNull();
+    });
   });
 });

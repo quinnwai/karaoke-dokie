@@ -80,7 +80,7 @@ test('a refused sign-in says so under the range and under the list, and Cancel o
   await page.screenshot({ path: path.join(SCREENS, 'qww55-sign-in-refused-range-375px.png') });
 
   await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page.locator('ol li').first()).toBeVisible();
+  await expect(page.locator('[data-row]').first()).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Couldn’t sign in to Spotify.');
   // Still the plain list, with both ways to try again.
   await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(2);
@@ -121,16 +121,23 @@ test('a signed-in singer whose Spotify library could not be read sees catalogue 
   await page.goto('/');
   const note = page.getByRole('status');
   await expect(note).toHaveText('Couldn’t reach Spotify, showing popular songs.');
-  await expect(page.locator('ol li')).toHaveCount(5);
+  await expect(page.locator('[data-row]')).toHaveCount(Math.min(catalogue.matches.length, 40));
   // Still signed in (the green logo), and nothing offers to connect Spotify or to retry a failed load.
   await expect(page.getByRole('button', { name: 'Spotify account' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(0);
   await expect(page.getByText('Couldn’t load songs.')).toHaveCount(0);
-  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
-  await expect(page.getByRole('slider', { name: 'Light work to Locked in' })).toBeVisible();
-  // The note fits one line on the narrowest phone, under the bar and clear of the logo.
+  // A catalogue list has no listening history: the gear is off and says why, whatever Spotify was before.
+  await expect(page.locator('#slider-history')).toBeDisabled();
+  await expect(page.getByText('Spotify could not be reached, so listening history is off')).toBeVisible();
+  await expect(page.locator('#slider-difficulty')).toBeVisible();
+  // The note is one line on the narrowest phone, above the list and inside the screen.
+  const lines = await note.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+  });
+  expect(lines).toBe(1);
   const box = (await note.boundingBox())!;
-  expect(box.height).toBeLessThan(24);
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(375);
   expect(asked).toBe(1);

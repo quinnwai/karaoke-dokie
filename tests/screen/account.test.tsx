@@ -1,27 +1,29 @@
 // @vitest-environment jsdom
-// The Spotify logo at the top right of the results: grey and "Connect to Spotify" without an
+// The Spotify logo at the top right of the Setlist screen: grey and "Connect to Spotify" without an
 // account, green with a "Logged in as ..." box and Log out with one. jsdom applies no CSS, so what
 // shows on hover is checked in tests/e2e/screen.spec.ts; here: which control is there, and the
 // open/close behaviour that taps and keys drive.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Results } from '../../src/components/Results';
-import { resultsProps } from '../helpers/results';
+import { SetlistScreen, type SetlistScreenProps } from '../../src/components/setlist/SetlistScreen';
+import { initialTuner } from '../../src/lib/setlist/tuner';
 import { match } from '../fixtures/screen';
+import { el, ranked, setlistProps } from '../helpers/setlist';
 
 afterEach(cleanup);
 
 const range = { low: 45, high: 72, source: 'test' as const };
-const songs = [match(0), match(1)];
+const songs = [match(0), match(1)].map((m) => ranked(m));
 
-const signedIn = (over: Partial<ReturnType<typeof resultsProps>> = {}) =>
-  render(<Results {...resultsProps(range, songs)} {...over} />);
+/** A signed-in singer: the library's songs, and the tuner every singer starts from. */
+const signedIn = (over: Partial<SetlistScreenProps> = {}) =>
+  render(<SetlistScreen {...setlistProps(range, songs, { mode: 'library', tuner: initialTuner(), ...over })} />);
 const logo = () => screen.getByRole('button', { name: 'Spotify account' });
 
 describe('Spotify logo without an account', () => {
   it('is the grey Connect to Spotify button and nothing about an account', () => {
     const onConnect = vi.fn();
-    render(<Results {...resultsProps(range, songs)} mode="catalogue" displayName={null} onConnect={onConnect} />);
+    render(<SetlistScreen {...setlistProps(range, songs, { mode: 'catalogue', displayName: null, onConnect })} />);
     // The logo up top and the text button under the list.
     const [top] = screen.getAllByRole('button', { name: 'Connect to Spotify' });
     expect(top!.className).not.toMatch(/connectOn/);
@@ -31,6 +33,20 @@ describe('Spotify logo without an account', () => {
     expect(screen.queryByRole('button', { name: 'Spotify account' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Log out' })).toBeNull();
     expect(screen.queryByText(/Logged in/)).toBeNull();
+  });
+
+  it('the text button under the list connects too, and only appears once songs are listed', () => {
+    const onConnect = vi.fn();
+    const { rerender } = render(<SetlistScreen {...setlistProps(range, [], { onConnect })} />);
+    expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1);
+    expect(screen.queryByText('Want personalized recommendations?')).toBeNull();
+
+    rerender(<SetlistScreen {...setlistProps(range, songs, { onConnect })} />);
+    const buttons = screen.getAllByRole('button', { name: 'Connect to Spotify' });
+    expect(buttons).toHaveLength(2);
+    expect(screen.getByText('Want personalized recommendations?')).toBeTruthy();
+    fireEvent.click(buttons[1]!);
+    expect(onConnect).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -47,6 +63,8 @@ describe('Spotify logo when signed in', () => {
   it('opens and closes the box on a tap, and tells assistive tech which it is', () => {
     const { container } = signedIn();
     const wrapper = logo().parentElement!;
+    // The sheet's own `data-open` (its open gear) is on #app; the account box's is the only other one.
+    const accountOpen = () => container.querySelectorAll('[data-open]:not(#app)');
     expect(logo().getAttribute('aria-expanded')).toBe('false');
     expect(wrapper.hasAttribute('data-open')).toBe(false);
     expect(logo().getAttribute('aria-controls')).toBe(screen.getByText('Logged in as Test Singer').closest('[id]')!.id);
@@ -54,11 +72,13 @@ describe('Spotify logo when signed in', () => {
     fireEvent.click(logo());
     expect(logo().getAttribute('aria-expanded')).toBe('true');
     expect(wrapper.hasAttribute('data-open')).toBe(true);
+    expect(Array.from(accountOpen())).toEqual([wrapper]);
     fireEvent.click(logo());
     expect(logo().getAttribute('aria-expanded')).toBe('false');
     expect(wrapper.hasAttribute('data-open')).toBe(false);
-    // The logo is the only thing that opens it: the rest of the screen is unchanged.
-    expect(container.querySelectorAll('[data-open]')).toHaveLength(0);
+    // The logo is the only thing that opens it: the rest of the screen is unchanged, the sheet's open gear included.
+    expect(accountOpen()).toHaveLength(0);
+    expect(el('#app').dataset.open).toBe(initialTuner().open);
   });
 
   it('a tap anywhere else closes it; a tap inside the box does not', () => {

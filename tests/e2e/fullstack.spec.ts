@@ -12,7 +12,7 @@ import path from 'node:path';
 
 const SCREENS = path.resolve('test-results/screens');
 
-test('no Spotify: catalogue songs with chips, then Connect Spotify for library songs, feedback, sources and the event log', async ({ browser, baseURL }) => {
+test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for library songs, feedback, sources and the event log', async ({ browser, baseURL }) => {
   test.setTimeout(90_000);
   const context = await browser.newContext({ ...devices['iPhone 13'], baseURL, reducedMotion: 'reduce' });
   await context.addInitScript(() => {
@@ -26,12 +26,16 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   await expect(page.getByTestId('range-low')).toHaveText('A2');
   await expect(page.getByTestId('range-high')).toHaveText('C5');
 
-  // ---- No Spotify: the arrow goes straight to real catalogue matches ----
+  // ---- No Spotify: the arrow goes straight to real catalogue matches, on the Setlist tuner ----
   await page.getByRole('button', { name: 'Continue' }).click();
-  const songs = page.locator('ol li');
-  await expect(songs).toHaveCount(5, { timeout: 20_000 });
-  await expect(page.getByRole('slider', { name: 'Light work to Locked in' })).toBeVisible();
-  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
+  const songs = page.locator('[data-row]');
+  await expect(songs.first()).toBeVisible({ timeout: 20_000 });
+  // Every match for the range, up to the 40 a screen shows at first.
+  const catAll = await (await page.request.get('/api/catalogue/recommendations?low=45&high=72&all=1')).json();
+  await expect(songs).toHaveCount(Math.min(catAll.matches.length, 40));
+  await expect(page.locator('#slider-difficulty')).toBeVisible();
+  // Catalogue songs are nobody's library: there is no listening history to tune by.
+  await expect(page.locator('#slider-history')).toBeDisabled();
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-01-catalogue.png') });
   // The end of the list: one short question with the button, and the book icon for sources.
   const credits = page.getByRole('link', { name: 'Sources and credits' });
@@ -53,21 +57,19 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
     expect(m.range.confidence).toBe('high');
   }
 
-  // Decade, mood and duet chips come from real data, with counts.
-  const filters = page.getByRole('group', { name: 'Filter songs' });
-  await expect(filters.getByRole('button', { name: /^80s, \d+ songs?$/ })).toBeVisible();
-  await expect(filters.getByRole('button', { name: /^Upbeat, \d+ songs?$/ })).toBeVisible();
-  const duets = filters.getByRole('button', { name: /^Duets, \d+ songs?$/ });
-  await expect(duets).toBeVisible();
-  await duets.click();
-  await expect(songs.first()).toContainText('Duet: take');
-  for (const li of await songs.all()) await expect(li).toContainText('Duet: take');
-  await page.screenshot({ path: path.join(SCREENS, 'fullstack-02-duets.png') });
-  await page.getByRole('button', { name: 'Clear' }).click();
+  // Every row says its era, from the real years (the song's USDB year, or its chart year).
+  await expect(songs.first()).toContainText(/· (Pre-’70s|’[0-9]0s)/);
 
-  await filters.getByRole('button', { name: /^80s, \d+ songs?$/ }).click();
-  for (const li of await songs.all()) await expect(li).toContainText(/· 198\d/);
+  // Era is a multi-select on real data: with it off every song counts, and the first tap picks just the 80s (Era has no
+  // default picks), which leaves only their songs.
+  const era = (id: string) => page.locator(`button[data-era="${id}"]`);
+  await era('s80').click();
+  await expect(era('s80')).toHaveAttribute('aria-pressed', 'true');
+  await expect(songs.first()).toBeVisible();
+  for (const li of await songs.all()) await expect(li).toContainText('’80s');
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-03-80s.png') });
+  await page.locator('button[data-reset="era"]').click();
+  await expect(songs).toHaveCount(Math.min(catAll.matches.length, 40));
 
   // Feedback without an account goes to the catalogue route with this device's id.
   await songs.first().getByRole('button').first().click();
@@ -77,10 +79,10 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   expect((await catFeedback).status()).toBe(200);
   await page.getByRole('button', { name: 'Back to songs' }).click();
 
-  // ---- Connect Spotify (mock): the range carries over and library songs load ----
+  // ---- Connect Spotify (mock): the range carries over and library songs load; History is on now ----
   await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
-  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toBeVisible({ timeout: 20_000 });
-  await expect(songs).toHaveCount(5);
+  await expect(page.locator('#slider-history')).toBeEnabled({ timeout: 20_000 });
+  await expect(songs.first()).toBeVisible();
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-04-library.png') });
 
   const me = await (await page.request.get('/api/me')).json();
@@ -119,12 +121,15 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
     expect(m.range.low + shift).toBeGreaterThanOrEqual(43);
     expect(m.range.high + shift).toBeLessThanOrEqual(74);
   }
+  // On the list they are the last rows, and the row says Maybe instead of a difficulty.
   await page.getByRole('button', { name: 'Back to songs' }).click();
-  const group = page.getByRole('region', { name: 'Maybe' });
-  for (let i = 0; i < 10 && (await group.count()) === 0; i++) await page.getByRole('button', { name: 'Load more songs' }).click();
-  await expect(group.locator('li')).toHaveCount(3);
-  await expect(group.locator('[data-difficulty]')).toHaveCount(0);
-  await group.scrollIntoViewIfNeeded();
+  const more = page.getByRole('button', { name: 'Load more songs' });
+  for (let i = 0; i < 10 && (await more.count()) > 0; i++) await more.click();
+  const maybeRows = page.locator('[data-row]:has(button[aria-label$=", Maybe"])');
+  await expect(maybeRows).toHaveCount(3);
+  const total = await songs.count();
+  expect(await maybeRows.evaluateAll((els) => els.map((el) => Number(el.getAttribute('data-rank'))))).toEqual([total - 2, total - 1, total]);
+  await maybeRows.last().scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-06-maybe.png') });
 
   // The hidden admin log lists where each song's data came from, and is locked without the token.
@@ -167,9 +172,9 @@ test('Spotify (mock) account: the green logo names the singer, and Log out reall
 
   // Sign in with the finished test A2 to C5 (the mock Spotify answers at once): library songs.
   await page.getByRole('button', { name: 'or use songs from your Spotify' }).click();
-  const songs = page.locator('ol li');
-  await expect(songs).toHaveCount(5, { timeout: 20_000 });
-  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toBeVisible();
+  const songs = page.locator('[data-row]');
+  await expect(songs.first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#slider-history')).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(0);
 
   // The logo is green, and pointing at it says who is signed in: the name comes from the real GET /api/me.
@@ -187,16 +192,16 @@ test('Spotify (mock) account: the green logo names the singer, and Log out reall
   expect((await loggedOut).status()).toBe(200);
   await expect(page.getByRole('button', { name: 'Connect to Spotify' }).first()).toBeVisible();
   await expect(logo).toHaveCount(0);
-  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
+  await expect(page.locator('#slider-history')).toBeDisabled();
   // Catalogue songs for the same range (only catalogue results end with the invitation to connect).
-  await expect(songs).toHaveCount(5, { timeout: 20_000 });
+  await expect(songs.first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Want personalized recommendations?')).toBeAttached();
   expect((await page.request.get('/api/me')).status()).toBe(401);
 
   // The same range stays on this device: a reload is still the catalogue, not the start screen.
   await page.reload();
   await expect(page.getByRole('button', { name: 'Connect to Spotify' }).first()).toBeVisible();
-  await expect(songs).toHaveCount(5, { timeout: 20_000 });
+  await expect(songs.first()).toBeVisible({ timeout: 20_000 });
 
   // The reset icon is credited on /credits, like the book.
   await page.goto('/credits');

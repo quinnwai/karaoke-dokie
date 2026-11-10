@@ -10,7 +10,8 @@ import path from 'node:path';
 import type { CatalogueFeedbackRequest, FeedbackRequest, Match, MeResponse, RecommendationsResponse, SongRange, VocalRange } from '../../src/lib/contracts';
 import { matchSong, toMatch } from '../../src/lib/songs/match';
 import { correctOctave, type OctaveEvidence } from '../../src/lib/songs/octave';
-import { allMatches, allMatchesWithFacts, knownSongs, longList, match, me } from '../fixtures/screen';
+import { DEFAULTS } from '../../src/lib/setlist/defaults';
+import { allMatches, knownSongs, longList, match, me } from '../fixtures/screen';
 
 const SCREENS = path.resolve('test-results/screens');
 const AUDIO = path.resolve('test-results/audio');
@@ -68,8 +69,6 @@ interface ApiState {
   recommendationCalls: string[];
   /** How many times the session was ended (POST /api/auth/logout). */
   logouts: number;
-  /** Serve songs with years, genres and known popularity. */
-  facts?: boolean;
   /** Serve a long list whose difficulty scores bunch low, as a wide range makes them (QWW-33). */
   long?: boolean;
   /** Serve exactly this list instead of the fixture songs. */
@@ -100,10 +99,10 @@ async function mockApi(context: BrowserContext, state: ApiState) {
       }
       case 'GET /api/recommendations':
         state.recommendationCalls.push(`library ${url.search}`);
-        return json(state.response ?? (state.long ? longList() : state.facts ? allMatchesWithFacts() : allMatches()));
+        return json(state.response ?? (state.long ? longList() : allMatches()));
       case 'GET /api/catalogue/recommendations':
         state.recommendationCalls.push(`catalogue ${url.search}`);
-        return json(state.long ? longList() : state.facts ? allMatchesWithFacts() : allMatches());
+        return json(state.long ? longList() : allMatches());
       case 'POST /api/catalogue/feedback':
         state.catalogueFeedback.push(req.postDataJSON() as CatalogueFeedbackRequest);
         return json({ ok: true });
@@ -150,7 +149,19 @@ async function holdButton(page: Page, name: RegExp, ms: number, midway?: () => P
 }
 
 const freshState = (): ApiState => ({ user: null, savedRanges: [], feedback: [], catalogueFeedback: [], recommendationCalls: [], logouts: 0 });
-const DEFAULT_VIEW = { difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false };
+/**
+ * The `view` a feedback request carries when nothing on the Setlist tuner was touched: its defaults, as feedbackView
+ * (src/lib/client/funnel.ts) lists them. Difficulty and Popularity are on; History, Tempo and Era start off.
+ */
+const DEFAULT_VIEW = {
+  difficulty: DEFAULTS.difficulty / 100,
+  familiarity: null,
+  popularity: DEFAULTS.popularity / 100,
+  tempo: null,
+  decade: null,
+  mood: null,
+  duetsOnly: false,
+};
 
 test('full flow: test, sign in, results, song detail, feedback', async ({ baseURL }) => {
   test.setTimeout(120_000);
@@ -232,45 +243,34 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   expect(api.recommendationCalls).toEqual(['catalogue ?low=45&high=72&all=1']);
   expect(api.savedRanges).toEqual([]);
   expect(await page.evaluate(() => localStorage.getItem('kd.range'))).toBe(JSON.stringify({ low: 45, high: 72 }));
-  // Catalogue songs are nobody's library: a difficulty slider, but no on-repeat one.
-  await expect(page.getByRole('slider', { name: 'Light work to Locked in' })).toBeVisible();
-  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
+  // The results are the Setlist tuner, full screen, with no TV around it. Catalogue songs are nobody's library, so
+  // there is no listening history to tune by.
+  await expect(page.getByRole('heading', { name: 'Tune your setlist' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Karaoke screen' })).toHaveCount(0);
+  await expect(page.locator('#slider-history')).toBeDisabled();
   await page.waitForTimeout(800);
   await shot(page, '07-catalogue-results');
 
   // ---- Connect Spotify (mocked redirect back to /?signedIn=1): the range carries over ----
   await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
-  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toBeVisible();
+  await expect(page.locator('#slider-history')).toBeEnabled();
   expect(api.savedRanges).toEqual([{ low: 45, high: 72, source: 'test' }]);
   expect(api.recommendationCalls.at(-1)).toBe('library ?all=1');
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.locator('ol li')).toHaveCount(5);
+  await expect(page.locator('[data-row]')).toHaveCount(10);
   await page.waitForTimeout(1000);
   await shot(page, '07-results');
 
-  // Ranking v2: octave and fast-lyrics icons beside the label, reasons under the artist.
-  const dancing = page.locator('ol li').filter({ hasText: 'Dancing Queen' });
-  await expect(dancing.getByRole('img', { name: 'Sing it an octave higher than the artist' })).toBeVisible();
-  await expect(dancing.getByText('In your sweet spot')).toBeVisible();
-  const yoru = page.locator('ol li').filter({ hasText: 'Yoru ni Kakeru' });
-  await expect(yoru.getByRole('img', { name: 'Fast lyrics' })).toBeVisible();
-  await expect(yoru.getByRole('img', { name: 'Sing it an octave lower than the artist' })).toBeVisible();
-  await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByText('In your sweet spot · Top songs this month')).toBeVisible();
-  await expect(page.locator('ol li').filter({ hasText: 'Plastic Love' }).getByRole('img')).toHaveCount(0);
-  await shot(page, '07b-results-icons');
-
-  await page.getByRole('button', { name: 'Load more songs' }).click();
-  await expect(page.locator('ol li')).toHaveCount(10);
-  // More songs come from memory: still one library request.
-  expect(api.recommendationCalls.filter((c) => c.startsWith('library'))).toHaveLength(1);
+  // Every song is on the list at once (no paging), from the one library request. Songs whose range is only an
+  // estimate come last, and their row says Maybe.
   await expect(page.getByRole('button', { name: 'Load more songs' })).toHaveCount(0);
-  // Low-confidence songs come last, under Maybe, without a difficulty label.
-  const maybe = page.getByRole('region', { name: 'Maybe' });
-  await expect(maybe.locator('li')).toHaveCount(2);
-  await expect(maybe.getByRole('button', { name: 'Sukiyaki by Kyu Sakamoto, Maybe' })).toBeVisible();
-  await expect(maybe.locator('[data-difficulty]')).toHaveCount(0);
-  await page.locator('ol li').nth(9).scrollIntoViewIfNeeded();
-  await shot(page, '08-load-more');
+  expect(api.recommendationCalls.filter((c) => c.startsWith('library'))).toHaveLength(1);
+  const maybeRows = page.locator('[data-row]:has(button[aria-label$=", Maybe"])');
+  await expect(maybeRows).toHaveCount(2);
+  expect(await maybeRows.evaluateAll((els) => els.map((el) => el.getAttribute('data-rank')))).toEqual(['9', '10']);
+  await expect(page.getByRole('button', { name: 'Sukiyaki by Kyu Sakamoto, Maybe' })).toBeVisible();
+  await page.locator('[data-row]').last().scrollIntoViewIfNeeded();
+  await shot(page, '08-all-songs');
 
   // ---- Song detail ----
   await page.getByRole('button', { name: /^Yoru ni Kakeru/ }).click();
@@ -314,7 +314,7 @@ test('returning user goes straight to results, and redo restarts the test', asyn
   await mockApi(context, api);
   const page = await context.newPage();
   await page.goto('/');
-  await expect(page.locator('ol li')).toHaveCount(5);
+  await expect(page.locator('[data-row]')).toHaveCount(10);
   expect(api.savedRanges).toEqual([]);
   await page.waitForTimeout(1000);
   await shot(page, '12-returning-user');
@@ -353,14 +353,14 @@ test('a Maybe song has no difficulty, and its info says the range is an estimate
   await mockApi(context, api);
   const page = await context.newPage();
   await page.goto('/');
-  await page.getByRole('button', { name: 'Load more songs' }).click();
-  const maybe = page.getByRole('region', { name: 'Maybe' });
-  await expect(maybe.getByText('We only have an estimate of these songs’ range.', { exact: false })).toBeVisible();
+  // The tuner's list has no Maybe section: a song whose range is only an estimate comes last, and its row says Maybe.
+  const maybe = page.getByRole('button', { name: 'Sukiyaki by Kyu Sakamoto, Maybe' });
+  await expect(maybe).toBeVisible();
   await maybe.scrollIntoViewIfNeeded();
   await page.waitForTimeout(500);
-  await shot(page, '17-maybe-group');
+  await shot(page, '17-maybe-row');
 
-  await maybe.getByRole('button', { name: /^Sukiyaki/ }).click();
+  await maybe.click();
   await expect(page.getByRole('heading', { name: 'Sukiyaki' })).toBeVisible();
   await expect(page.getByText('Maybe', { exact: true })).toBeVisible();
   await expect(page.getByText(/^(Easy|Medium|Hard)$/)).toHaveCount(0);
@@ -383,7 +383,7 @@ test('pick songs you sing well', async ({ browser, baseURL }) => {
   await page.waitForTimeout(1000);
   await shot(page, '13-pick-songs');
   await page.getByRole('button', { name: 'Use 2 songs' }).click();
-  await expect(page.locator('ol li')).toHaveCount(5);
+  await expect(page.locator('[data-row]')).toHaveCount(10);
   expect(api.savedRanges).toEqual([{ low: 40, high: 64, source: 'songs' }]);
   await context.close();
 });
@@ -412,7 +412,7 @@ test('desktop layout', async ({ browser, baseURL }) => {
   await mockApi(context, api);
   const page = await context.newPage();
   await page.goto('/');
-  await expect(page.locator('ol li')).toHaveCount(5);
+  await expect(page.locator('[data-row]')).toHaveCount(10);
   await page.waitForTimeout(1000);
   await shot(page, '15-desktop-results');
   await page.getByRole('button', { name: /^Lemon/ }).click();
@@ -423,94 +423,9 @@ test('desktop layout', async ({ browser, baseURL }) => {
   await context.close();
 });
 
-test('sliders and decade chips: sliders reorder, chips filter with counts, all on a small phone', async ({ browser, baseURL }) => {
-  const api = freshState();
-  api.user = me({ low: 45, high: 72, source: 'test' });
-  api.facts = true;
-  // iPhone SE size: the smallest screen the controls must fit on with songs visible.
-  const context = await browser.newContext({ ...iPhone, viewport: { width: 375, height: 667 }, baseURL, reducedMotion: 'reduce' });
-  await mockApi(context, api);
-  const page = await context.newPage();
-  await page.goto('/');
-  await expect(page.locator('ol li')).toHaveCount(5);
-
-  // The range bar, both control panels and at least three songs fit on screen together.
-  const view = page.viewportSize()!;
-  const inView = async (locator: ReturnType<Page['locator']>) => {
-    const b = (await locator.boundingBox())!;
-    return b.y >= 0 && b.y + b.height <= view.height;
-  };
-  expect(await inView(page.getByRole('region', { name: 'Tune' }))).toBe(true);
-  expect(await inView(page.getByRole('group', { name: 'Filter songs' }))).toBe(true);
-  for (let i = 0; i < 3; i++) expect(await inView(page.locator('ol li').nth(i))).toBe(true);
-  // Nothing scrolls sideways: not the page, and not the chips, which wrap onto new lines instead.
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  const chipRows = page.getByRole('group', { name: 'Filter songs' }).locator('> div');
-  expect(await chipRows.count()).toBeGreaterThan(0);
-  for (const row of await chipRows.all()) expect(await row.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  await page.waitForTimeout(300);
-  await shot(page, '19-controls');
-
-  const titles = () => page.locator('ol li [class*="songTitle"]').allTextContents();
-  const before = await titles();
-  // No title line over the list; each song's reasons are sung in instead, once its row is on screen.
-  await expect(page.locator('[data-lyric]')).toHaveCount(0);
-  await expect(page.locator('ol li').first().locator('[data-reasons]')).toHaveAttribute('data-sing', 'singing');
-
-  // A real drag: the thumb starts in the middle; pulling it to the right end switches the slider on.
-  const difficulty = page.getByRole('slider', { name: 'Light work to Locked in' });
-  await expect(difficulty).toHaveAttribute('aria-valuetext', 'not set');
-  const box = (await difficulty.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 6 });
-  await page.mouse.up();
-  await expect(difficulty).toHaveAttribute('aria-valuetext', 'towards Locked in');
-  await page.waitForTimeout(300);
-  await shot(page, '20-slider-locked-in');
-
-  // Each slider, from the keyboard, to each end; every move reorders the songs.
-  const orders = new Set([JSON.stringify(before)]);
-  for (const [left, right] of [
-    ['Light work', 'Locked in'],
-    ['Rediscover', 'On repeat'],
-    ['Deep cuts', 'Pop hits'],
-    ['Slow jams', 'Upbeat tracks'],
-  ] as const) {
-    const slider = page.getByRole('slider', { name: `${left} to ${right}` });
-    await slider.press('Home');
-    await expect(slider).toHaveAttribute('aria-valuetext', `towards ${left}`);
-    orders.add(JSON.stringify(await titles()));
-    if (left === 'Slow jams') await shot(page, '22-tempo-slow-jams');
-    await slider.press('End');
-    await expect(slider).toHaveAttribute('aria-valuetext', `towards ${right}`);
-    orders.add(JSON.stringify(await titles()));
-    if (left === 'Slow jams') await shot(page, '22-tempo-upbeat-tracks');
-  }
-  expect(orders.size).toBeGreaterThan(2);
-  await page.waitForTimeout(300);
-  await shot(page, '21-sliders-set');
-
-  // Reset unsets every slider and brings back the first order.
-  await page.getByRole('button', { name: 'Reset sliders' }).click();
-  for (const s of await page.getByRole('slider').all()) await expect(s).toHaveAttribute('aria-valuetext', 'not set');
-  expect(await titles()).toEqual(before);
-  expect(api.recommendationCalls).toHaveLength(1);
-
-  // Decade chips: counts, a disabled empty decade, filtering, and clearing.
-  await expect(page.getByRole('button', { name: '80s, 3 songs' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '90s, 0 songs' })).toBeDisabled();
-  await page.getByRole('button', { name: '80s, 3 songs' }).click();
-  await expect(page.locator('ol li')).toHaveCount(3);
-  await expect(page.locator('ol li').first()).toContainText('1984');
-  await page.waitForTimeout(300);
-  await shot(page, '24-decade-80s');
-  await page.getByRole('button', { name: 'Clear' }).click();
-  await expect(page.locator('ol li')).toHaveCount(5);
-  await context.close();
-});
-
 // ---- Reason wording (QWW-30) ----
+// The reasons used to be sung under each row. The tuner's rows do not show them (spec section 5), so the song page is
+// where they read.
 
 /** Songs in the order shown, with the reasons their label can get: every new wording, and the widest pairs. */
 const REASON_SHOWCASE: [song: number, reasons: string[]][] = [
@@ -522,7 +437,7 @@ const REASON_SHOWCASE: [song: number, reasons: string[]][] = [
 ];
 
 for (const width of [375, 1280]) {
-  test(`reasons read short, and a card wraps only between reasons, at ${width} px`, async ({ browser, baseURL }) => {
+  test(`the song page's reasons read short, at ${width} px`, async ({ browser, baseURL }) => {
     const api = freshState();
     api.user = me({ low: 45, high: 72, source: 'test' });
     const phone = width < 600;
@@ -540,38 +455,10 @@ for (const width of [375, 1280]) {
     await context.route('**/api/recommendations*', (route) => route.fulfill({ json: showcase }));
     const page = await context.newPage();
     await page.goto('/');
-    await expect(page.locator('ol li')).toHaveCount(REASON_SHOWCASE.length);
-
-    // Each card reads as its reasons joined by a dot (the words of one reason are joined by no-break spaces).
-    const lines = page.locator('ol li [data-reasons]');
-    expect((await lines.allTextContents()).map((t) => t.replace(/\s/g, ' '))).toEqual(REASON_SHOWCASE.map(([, r]) => r.join(' · ')));
-
-    // The height of every word on a card, grouped by reason: a reason broken over two lines has two heights.
-    const heights = await lines.evaluateAll((els) =>
-      els.map((el) => {
-        const reasons: number[][] = [[]];
-        for (const w of el.querySelectorAll<HTMLElement>('[class*="reasonWord"]')) {
-          if (w.textContent === '·') reasons.push([]);
-          else reasons[reasons.length - 1]!.push(Math.round(w.getBoundingClientRect().top));
-        }
-        return reasons;
-      }),
-    );
-    for (const card of heights) {
-      for (const reason of card) expect(new Set(reason).size, `a reason is split across lines: ${JSON.stringify(card)}`).toBe(1);
-    }
-    // On a phone the cards are narrow enough to wrap, so the check above has something to catch.
-    if (phone) expect(heights.some(([first, second]) => second![0]! > first![0]!)).toBe(true);
+    await expect(page.locator('[data-row]')).toHaveCount(REASON_SHOWCASE.length);
     await page.waitForTimeout(300);
     await shot(page, `reasons-${width}-results`);
-    if (phone) {
-      // The TV screen scrolls: the last card sits under the fold.
-      await page.locator('ol li').last().scrollIntoViewIfNeeded();
-      await page.waitForTimeout(300);
-      await shot(page, `reasons-${width}-results-end`);
-    }
 
-    // The song page says the same.
     await page.getByRole('button', { name: /^Mr\. Brightside/ }).click();
     await expect(page.getByRole('heading', { name: 'Mr. Brightside' })).toBeVisible();
     await expect(page.locator('[class*="detailReasons"]')).toHaveText('Lots of low notes · Top songs, past 6 months');
@@ -581,12 +468,14 @@ for (const width of [375, 1280]) {
   });
 }
 
-// QWW-33: the difficulty slider changes the list along its whole length, and its position means the
-// label the song shows: Easy songs towards Light work, Medium in the middle, Hard towards Locked in.
-// The long list has a few Hard, some Medium and mostly Easy songs. On a phone (375 px) and a desktop
-// (1280 px), the slider goes to 25, 50, 75 and 100%, and every step shows other songs first.
+// QWW-33: the Difficulty control changes the list, and its position means the label the song shows: Easy songs towards
+// Light work, Medium in the middle, Hard towards Locked in. The long list has a few Hard, some Medium and mostly Easy
+// songs. On a phone (375 px) and a desktop (1280 px) the Difficulty gear of the Setlist tuner goes to 0, 25, 50, 75 and 100.
+// (Under the spec's model a song sits on the gear by its difficulty score, not by its rank in the list, so two targets
+// that both lie beyond the last Medium song can list the Hard songs alike: what is held is the label that leads, and
+// that the Easy, Medium and Hard ends each lead with their own songs.)
 for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 }]) {
-  test(`the difficulty slider changes the list along its whole length, at ${viewport.width} px`, async ({ browser, baseURL }) => {
+  test(`the Difficulty gear leads with Easy, Medium and Hard songs along its length, at ${viewport.width} px`, async ({ browser, baseURL }) => {
     const api = freshState();
     api.user = me({ low: 45, high: 72, source: 'test' });
     api.long = true;
@@ -595,31 +484,45 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
     await mockApi(context, api);
     const page = await context.newPage();
     await page.goto('/');
-    await expect(page.locator('ol li')).toHaveCount(5);
+    await expect(page.locator('[data-row]')).toHaveCount(40);
 
-    const titles = () => page.locator('ol li [class*="songTitle"]').allTextContents();
-    const labels = () => page.locator('ol li [class*="pill"]').allTextContents();
-    const slider = page.getByRole('slider', { name: 'Light work to Locked in' });
-    const lists: string[][] = [];
-    const firstLabels: string[] = [];
-    for (const percent of [25, 50, 75, 100]) {
-      const before = await titles();
+    const titles = () => page.locator('[data-row-title]').allTextContents();
+    // A row's button ends its name with the song's label: "..., Easy".
+    const leadLabel = async () => ((await page.locator('[data-row] button').first().getAttribute('aria-label')) ?? '').split(', ').at(-1);
+    // The list is re-ranked a moment after the thumb moves: read it once it has stopped changing.
+    const settled = async () => {
+      let before = JSON.stringify(await titles());
+      for (let i = 0; i < 20; i++) {
+        await page.waitForTimeout(60);
+        const now = JSON.stringify(await titles());
+        if (now === before) return now;
+        before = now;
+      }
+      return before;
+    };
+    const slider = page.locator('#slider-difficulty');
+    const lists: string[] = [];
+    const labels: (string | undefined)[] = [];
+    for (const percent of [0, 25, 50, 75, 100]) {
       await slider.fill(String(percent));
-      await expect.poll(titles, { message: `the list at ${percent}% is the list before it` }).not.toEqual(before);
-      await page.waitForTimeout(300);
-      lists.push(await titles());
-      firstLabels.push((await labels())[0]!);
+      expect(await slider.inputValue()).toBe(String(percent));
+      lists.push(await settled());
+      labels.push(await leadLabel());
       await shot(page, `qww33-difficulty-${percent}-${viewport.width}px`);
     }
-    // The label leads where the thumb is: Easy at 25%, Medium at 50%, Hard at 100%.
-    expect([firstLabels[0], firstLabels[1], firstLabels[3]]).toEqual(['Easy', 'Medium', 'Hard']);
+    // The label leads where the target is: Easy at the low end, Medium in the middle, Hard at the top.
+    expect([labels[0], labels[2], labels[4]]).toEqual(['Easy', 'Medium', 'Hard']);
+    expect(['Medium', 'Hard']).toContain(labels[3]);
+    // Each of those three leads with different songs, and the control changes the list more than once along its length.
+    expect(new Set([lists[0], lists[2], lists[4]]).size).toBe(3);
+    expect(new Set(lists).size).toBeGreaterThanOrEqual(4);
 
-    // The ends keep their meaning: Light work lists Easy songs first, Locked in Hard ones; each end lists a different song first.
+    // The keys keep the ends' meaning: Home is Light work, End is Locked in.
     await slider.press('Home');
-    await expect.poll(async () => (await labels())[0]).toBe('Easy');
+    await expect.poll(leadLabel).toBe('Easy');
     const easiest = (await titles())[0];
     await slider.press('End');
-    await expect.poll(async () => (await labels())[0]).toBe('Hard');
+    await expect.poll(leadLabel).toBe('Hard');
     expect((await titles())[0]).not.toBe(easiest);
     await context.close();
   });
@@ -708,29 +611,26 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
   });
 }
 
-// ---- The Spotify logo (grey, or green with "Logged in as" and Log out) and the Reset icon ----
+// ---- The Spotify logo (grey, or green with "Logged in as" and Log out) ----
 
 const SPOTIFY_GREEN = 'rgb(29, 185, 84)';
 const LOGO_GREY = 'rgba(244, 241, 246, 0.4)';
-const ICON_GREY = 'rgba(244, 241, 246, 0.56)';
-const PINK = 'rgb(255, 46, 147)';
 
 interface Walk {
   size: { width: number; height: number };
   /** A finger taps the logo to open its box; otherwise a mouse points at it. */
   finger: boolean;
-  /** Real transitions and sung reasons, instead of reduced motion. */
+  /** Real transitions, instead of reduced motion. */
   motion?: boolean;
   /** Take the screenshots that look the same for a finger and a mouse. */
   rest?: boolean;
 }
 
 /**
- * One walk at one size, starting signed in: the green logo and its box, the Reset icon (no layout
- * jump, grey, pink under a mouse), then Log out and the catalogue for the same range. Screenshots go
- * to test-results/screens, named after the size.
+ * One walk at one size, starting signed in: the green logo and its box, then Log out and the catalogue for the same
+ * range. Screenshots go to test-results/screens, named after the size.
  */
-async function walkLogoAndReset(browser: Browser, baseURL: string | undefined, { size, finger, motion = false, rest = true }: Walk) {
+async function walkLogo(browser: Browser, baseURL: string | undefined, { size, finger, motion = false, rest = true }: Walk) {
   const api = freshState();
   api.user = me({ low: 45, high: 72, source: 'test' });
   // The config's default device is a phone, which cannot hover and would carry over to a context that
@@ -751,17 +651,15 @@ async function walkLogoAndReset(browser: Browser, baseURL: string | undefined, {
   const who = page.getByText('Logged in as Quinn');
   const logOut = page.getByRole('button', { name: 'Log out' });
   const connect = page.getByRole('button', { name: 'Connect to Spotify' }).first();
-  const tune = page.getByRole('region', { name: 'Tune' });
-  const reset = page.getByRole('button', { name: 'Reset sliders' });
   // A finger taps; a mouse points at the logo and clicks.
   const open = () => (finger ? logo.tap() : logo.hover());
   const press = (target: typeof logo) => (finger ? target.tap() : target.click());
-  // Somewhere neutral: a tap on the Tune title, or the pointer over a song near the bottom.
-  const away = () => (finger ? page.getByRole('heading', { name: 'Tune' }).tap() : page.mouse.move(w / 2, size.height - 40));
+  // Somewhere neutral: a tap on the heading, or the pointer over the sheet near the bottom.
+  const away = () => (finger ? page.getByRole('heading', { name: 'Tune your setlist' }).tap() : page.mouse.move(w / 2, size.height - 40));
 
   await page.goto('/');
-  await expect(page.locator('ol li')).toHaveCount(5);
-  await page.waitForTimeout(motion ? 2000 : 300);
+  await expect(page.locator('[data-row]')).toHaveCount(10);
+  await page.waitForTimeout(motion ? 1000 : 300);
 
   // ---- Signed in: a green logo that says nothing until asked ----
   await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(0);
@@ -788,33 +686,6 @@ async function walkLogoAndReset(browser: Browser, baseURL: string | undefined, {
   await expect(who).toBeHidden();
   if (finger) await expect(logo).toHaveAttribute('aria-expanded', 'false');
 
-  // ---- Reset: a circular-arrow icon in the header's own height, where the word used to be ----
-  await expect(reset).toHaveCount(0);
-  const heightBefore = (await tune.boundingBox())!.height;
-  await page.getByRole('slider', { name: 'Light work to Locked in' }).press('End');
-  // Let go of the slider, so its keyboard focus ring is not in the Reset screenshots.
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  await expect(reset).toBeVisible();
-  await expect(page.getByText('Reset', { exact: true })).toHaveCount(0);
-  await expect(reset.locator('svg')).toHaveAttribute('aria-hidden', 'true');
-  expect(Math.abs((await tune.boundingBox())!.height - heightBefore)).toBeLessThan(0.5);
-  await expect(reset).toHaveCSS('color', ICON_GREY);
-  await shotRest('27-reset-rest');
-  if (finger) {
-    // A phone cannot hover, so pink-on-hover can never get stuck after a tap.
-    expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(false);
-  } else {
-    await reset.hover();
-    await expect(reset).toHaveCSS('color', PINK);
-    await page.waitForTimeout(200);
-    await shot(page, `28-reset-hover-${w}`);
-    await away();
-  }
-  await press(reset);
-  for (const s of await page.getByRole('slider').all()) await expect(s).toHaveAttribute('aria-valuetext', 'not set');
-  await expect(reset).toHaveCount(0);
-  expect(Math.abs((await tune.boundingBox())!.height - heightBefore)).toBeLessThan(0.5);
-
   // ---- Log out: the session ends, the library goes, the catalogue answers for the same range ----
   await open();
   await expect(who).toBeVisible();
@@ -823,18 +694,16 @@ async function walkLogoAndReset(browser: Browser, baseURL: string | undefined, {
   await expect(connect).toBeVisible();
   await expect(logo).toHaveCount(0);
   await expect(who).toHaveCount(0);
-  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
-  await expect(page.locator('ol li')).toHaveCount(5);
+  // The catalogue has no listening history, so the History gear is off and cannot be used.
+  await expect(page.locator('#slider-history')).toBeDisabled();
+  await expect(page.locator('[data-row]')).toHaveCount(10);
   expect(api.recommendationCalls).toEqual(['library ?all=1', 'catalogue ?low=45&high=72&all=1']);
   expect(await page.evaluate(() => localStorage.getItem('kd.range'))).toBe(JSON.stringify({ low: 45, high: 72 }));
 
   // ---- Signed out again: the grey logo, green only under a mouse, as before ----
   if (!finger) await page.mouse.move(w / 2, size.height - 40);
   await expect(connect).toHaveCSS('color', LOGO_GREY);
-  // Playwright scrolls a button into view before it taps it; the screenshot should start at the top.
-  await page.evaluate(() => document.querySelector('[class*="screenInner"]')?.scrollTo(0, 0));
-  // The catalogue rows sing their reasons in again; wait it out so the screenshot is the settled screen.
-  await page.waitForTimeout(motion ? 2200 : 300);
+  await page.waitForTimeout(motion ? 500 : 300);
   await shotRest('29-logo-signed-out');
   if (!finger) {
     await connect.hover();
@@ -844,25 +713,25 @@ async function walkLogoAndReset(browser: Browser, baseURL: string | undefined, {
   // The session is gone for good: a reload is still the catalogue for the same range.
   await page.reload();
   await expect(connect).toBeVisible();
-  await expect(page.locator('ol li')).toHaveCount(5);
+  await expect(page.locator('[data-row]')).toHaveCount(10);
   expect(api.recommendationCalls.at(-1)).toBe('catalogue ?low=45&high=72&all=1');
   expect(api.logouts).toBe(1);
   await context.close();
 }
 
-test('Spotify logo and Reset icon on a 375 px phone: a tap opens the box', async ({ browser, baseURL }) => {
+test('Spotify logo on a 375 px phone: a tap opens the box', async ({ browser, baseURL }) => {
   test.setTimeout(60_000);
-  await walkLogoAndReset(browser, baseURL, { size: { width: 375, height: 667 }, finger: true });
+  await walkLogo(browser, baseURL, { size: { width: 375, height: 667 }, finger: true });
 });
 
-test('Spotify logo and Reset icon with a mouse at 375 px: pointing opens the box', async ({ browser, baseURL }) => {
+test('Spotify logo with a mouse at 375 px: pointing opens the box', async ({ browser, baseURL }) => {
   test.setTimeout(60_000);
-  await walkLogoAndReset(browser, baseURL, { size: { width: 375, height: 667 }, finger: false, rest: false });
+  await walkLogo(browser, baseURL, { size: { width: 375, height: 667 }, finger: false, rest: false });
 });
 
-test('Spotify logo and Reset icon on a 1280 px desktop, with real transitions', async ({ browser, baseURL }) => {
+test('Spotify logo on a 1280 px desktop, with real transitions', async ({ browser, baseURL }) => {
   test.setTimeout(60_000);
-  await walkLogoAndReset(browser, baseURL, { size: { width: 1280, height: 800 }, finger: false, motion: true });
+  await walkLogo(browser, baseURL, { size: { width: 1280, height: 800 }, finger: false, motion: true });
 });
 
 // QWW-31: Easy (Commodores) is stored from a note file written an octave above Lionel Richie's recording.
