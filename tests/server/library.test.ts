@@ -152,7 +152,8 @@ describe('a return visit', () => {
     expect((await store.getLibraryState(user.id))!.state.verify).toBeNull();
     // Afterwards a visit is a plain likes check again.
     expect((await visit(at + 60_000)).calls).toBe(2);
-  });
+    // About 2.6 s on its own, and 5.5 s when the whole suite runs at once, past vitest's 5 s default.
+  }, 30_000);
 
   it('one like and one un-like between visits (the count does not move) is still found', async () => {
     const { visit, fake, store } = setup(120);
