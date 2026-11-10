@@ -12,7 +12,8 @@ import { partRange } from '../songs/match';
 import { hasLittleSinging } from '../songs/resolve';
 import { withKaraokePopularity } from '../songs/score';
 import { prepareSetlist, rankPrepared, type PreparedSetlist, type RankedSetlist } from '../songs/setlist';
-import { tempoOf } from '../tempo/tempo';
+import { effectiveTempo, type EffectiveSource } from '../tempo/feel';
+import { readSongFeels } from './songFeel';
 import { MAX_ALL_MATCHES, type SongDeps } from './songService';
 import type { CatalogueSong, SongPopularityRecord, Store, UsdbIndexEntry } from './store';
 
@@ -26,8 +27,10 @@ const ID_PREFIX = 'cat:';
 /** A catalogue song as the cache keeps it: with its karaoke popularity row (QWW-6), when it has one. */
 export interface CatalogueEntry extends CatalogueSong {
   popularity?: SongPopularityRecord;
-  /** Tempo in beats per minute (QWW-40), when any source has one. */
+  /** The one tempo the ranking uses, in beats per minute, when the song has one (QWW-40; with its feel label, QWW-54). */
   tempo?: number;
+  /** Where `tempo` came from: a measurement, a checked tempo, or the song's feel label. */
+  tempoSource?: EffectiveSource;
 }
 
 /** A catalogue song and the track it is shown as. Its log line carries the track id. */
@@ -36,20 +39,22 @@ export interface CatalogueTrack extends CatalogueEntry {
 }
 
 /**
- * Reads the catalogue, most popular first, and its songs' karaoke popularity in one batched read.
- * The cache keeps both, so requests read neither.
+ * Reads the catalogue, most popular first, and its songs' karaoke popularity, measured tempo and feel
+ * labels in batched reads. The cache keeps all of it, so requests read none of it, and the one tempo of
+ * each song is worked out here, once per cache fill (effectiveTempo), never per request. A store with no
+ * feel labels, or one that cannot give them, leaves every song on its measured tempo.
  */
 export async function loadCatalogue(
-  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'>,
+  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'> & Partial<Pick<Store, 'getSongFeels'>>,
   size: number = CATALOGUE_SIZE,
 ): Promise<CatalogueEntry[]> {
   const songs = await store.listCatalogue(size);
   const keys = songs.map((s) => s.key);
-  const [popularity, tempos] = await Promise.all([store.getSongPopularity(keys), store.getSongTempos(keys)]);
+  const [popularity, tempos, feels] = await Promise.all([store.getSongPopularity(keys), store.getSongTempos(keys), readSongFeels(store, keys)]);
   return songs.map((s) => {
     const p = popularity.get(s.key);
-    const tempo = tempoOf(tempos.get(s.key), s.key);
-    return { ...s, ...(p ? { popularity: p } : {}), ...(tempo !== undefined ? { tempo } : {}) };
+    const t = effectiveTempo({ key: s.key, record: tempos.get(s.key), feel: feels.get(s.key)?.feel });
+    return { ...s, ...(p ? { popularity: p } : {}), ...(t ? { tempo: t.tempo, tempoSource: t.source } : {}) };
   });
 }
 

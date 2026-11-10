@@ -160,7 +160,11 @@ export interface Match {
    */
   year?: number;
   yearSource?: 'usdb' | 'spotify' | 'chart';
-  /** Tempo in beats per minute, 70 to 180, from Deezer, a beat tracker or the note file (QWW-40). Unset when unknown. */
+  /**
+   * The song's place on the Tempo gear, in beats per minute: the one tempo the ranking uses (src/lib/tempo/feel.ts effectiveTempo),
+   * which only its rank matters for. With a feel label it is a measured tempo moved into the label's band; without one, a measured
+   * tempo (Deezer, a beat tracker or the note file, QWW-40) squeezed into 90 to 125. Not a plain bpm. Unset when unknown.
+   */
   tempo?: number;
   /** Genre as USDB lists it (free text, e.g. "Rock"). */
   genre?: string;

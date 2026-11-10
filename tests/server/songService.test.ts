@@ -365,6 +365,28 @@ describe('song service whole list (all)', () => {
     expect(page.matches.find((m) => m.track.id === 't2')!.parts).toMatchObject({ popularityKnown: false, popularity: UNKNOWN_POPULARITY });
   });
 
+  describe('tempo and feel labels (QWW-40, QWW-54)', () => {
+    it('puts each song\'s one tempo on the whole list, a labelled song moved into its label\'s band, and reads none for a page', async () => {
+      const store = createMemoryStore();
+      await store.putSongTempo([{ key: key(2), deezerBpm: 148 }, { key: key(4), deezerBpm: 100 }]);
+      await store.putSongFeel([{ key: key(2), feel: 'slow', source: 'test/v1' }]);
+      const getSongFeels = vi.spyOn(store, 'getSongFeels');
+      const svc = createSongService(store, fakeDeps({ resolveSongRange: everyone(range(56, 64)) }).deps);
+      const lib = [track(2), track(4), track(8)];
+
+      const all = await svc.recommend(lib, user, 0, 0, { all: true });
+      const tempoOf = (n: number) => all.matches.find((m) => m.track.id === track(n).id)!.tempo;
+      expect(tempoOf(2)).toBe(74); // Deezer's 148 halved: the label says slow
+      expect(tempoOf(4)).toBeCloseTo(99.41, 2); // no label: 100 bpm as measured, squeezed into the mid band (90 to 125)
+      expect(tempoOf(8)).toBeUndefined(); // nothing known
+      expect(getSongFeels).toHaveBeenCalledTimes(1);
+
+      const page = await svc.recommend(lib, user, 0, 5);
+      expect(page.matches.every((m) => m.tempo === undefined)).toBe(true);
+      expect(getSongFeels).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('karaoke popularity (QWW-6)', () => {
     const popular = (n: number, extra: { karaokeViews?: number; chartRank?: number; chartYear?: number }) => ({ key: key(n), source: 'test', ...extra });
 
