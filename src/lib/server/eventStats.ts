@@ -46,7 +46,7 @@ function funnel(events: StoredEvent[]): AdminEventsResponse['funnel'] {
 
 /**
  * The controls in use when an event happened, from its view props: each slider that was set
- * (a number), each chip row that had a pick, or 'none' when nothing was set. Empty for an event
+ * (a number), the eras when Era is on, each older chip row that had a pick, or 'none' when nothing was set. Empty for an event
  * that carries no view.
  */
 export function controlsInUse(props: StoredEvent['props']): string[] {
@@ -54,6 +54,8 @@ export function controlsInUse(props: StoredEvent['props']): string[] {
   if (!props || !('difficulty' in props)) return [];
   const used: string[] = [];
   for (const slider of SLIDER_IDS) if (typeof props?.[slider] === 'number') used.push(slider);
+  // The Setlist tuner (QWW-46) sends the picked eras as one string, and only while Era is on.
+  if (typeof props?.eras === 'string') used.push('era');
   if (typeof props?.decade === 'string') used.push('decade');
   if (typeof props?.mood === 'string') used.push('mood');
   if (props?.duetsOnly === true) used.push('duets');

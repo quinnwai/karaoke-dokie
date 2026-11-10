@@ -3,26 +3,23 @@
 //
 // Results come in two modes. Library: a signed-in Spotify user's own songs. Catalogue: anyone
 // else, straight after the range test, from our public catalogue (QWW-2 Track B), with Spotify
-// as an optional upgrade. Either way the server sends every match at once and the phone orders,
-// filters and pages them (src/lib/songs/browse.ts).
+// as an optional upgrade. Either way the server sends every match at once; the Setlist tuner (QWW-46,
+// src/lib/setlist) holds what the singer has set, and the ranking engine orders the songs for it.
 
 import type {
-  Decade,
   DataSourceLogEntry,
   KnownSongsResponse,
   Match,
   MeResponse,
   Midi,
-  Mood,
   RecommendationsResponse,
   ResultsMode,
-  ResultsView,
-  SliderId,
   VocalRange,
 } from '../contracts';
-import { availableSliders, DEFAULT_VIEW, fitViewTo, pickDecade, pickMood, toggleDuets } from '../songs/browse';
 import type { BrowserInfo } from './browser';
 import type { MicPermission, MicProblem } from './mic';
+import { initialTuner, tunerReducer, type TunerAction } from '../setlist/tuner';
+import type { GearId, TunerState } from '../setlist/types';
 
 export type Step =
   | 'boot' // asking /api/me who this is
@@ -81,8 +78,8 @@ export interface TestProgress {
 export type KnownSong = KnownSongsResponse['songs'][number];
 
 export const MAX_PICKS = 3;
-/** Songs shown at first and added by each "Load more". */
-export const SHOW_STEP = 5;
+/** Songs shown at first and added by each "Load more". The list slides its rows when it re-ranks (FLIP), so it stays short. */
+export const SHOW_STEP = 40;
 /** How many times an incomplete library load is asked for again (the server continues its lookups). */
 export const MAX_LOAD_ATTEMPTS = 5;
 
@@ -106,11 +103,9 @@ export interface FlowState {
   /** Every match, in the server's Top picks order. */
   matches: Match[];
   sources: Record<string, DataSourceLogEntry>;
-  /** The sliders set and the chips picked on the results screen. */
-  view: ResultsView;
-  /** The slider moved last: it leads the lyric line and the reason line. */
-  leadSlider: SliderId | null;
-  /** How many songs of the current view are on screen. */
+  /** What the singer has set on the Setlist tuner: the gears, the eras, the sheet mode. */
+  tuner: TunerState;
+  /** How many songs of the ranked list are on screen. */
   shown: number;
   /** Load attempts so far; an incomplete library load asks again (see MAX_LOAD_ATTEMPTS). */
   attempt: number;
@@ -137,8 +132,7 @@ export const initialState: FlowState = {
   libraryUnavailable: false,
   matches: [],
   sources: {},
-  view: DEFAULT_VIEW,
-  leadSlider: null,
+  tuner: initialTuner(),
   shown: SHOW_STEP,
   attempt: 0,
   loading: false,
@@ -158,6 +152,8 @@ export type FlowEvent =
       wantsPick: boolean;
       /** A range kept on this device by someone without Spotify. */
       savedRange?: { low: Midi; high: Midi } | null;
+      /** Start the tuner's sheet in mini mode (`?mini=1`). */
+      mini?: boolean;
     }
   | { type: 'start' }
   | { type: 'quietDone' }
@@ -184,15 +180,10 @@ export type FlowEvent =
   | { type: 'allLoaded'; page: RecommendationsResponse }
   | { type: 'loadFailed' }
   | { type: 'retryLoad' }
-  /** A slider moved (null = unset it). Fires continuously while dragging, so the list follows the thumb. */
-  | { type: 'setSlider'; slider: SliderId; value: number | null }
-  /** The thumb was let go: only the event log cares (one record per adjustment, not per pixel). */
-  | { type: 'sliderDone'; slider: SliderId }
-  | { type: 'resetSliders' }
-  | { type: 'pickDecade'; decade: Decade }
-  | { type: 'pickMood'; mood: Mood }
-  | { type: 'toggleDuets' }
-  | { type: 'clearFilters' }
+  /** Something on the Setlist tuner changed. A slider fires continuously while dragging, so the list follows the thumb. */
+  | { type: 'tuner'; action: TunerAction }
+  /** A thumb was let go: only the event log cares (one record per adjustment, not per pixel). */
+  | { type: 'gearDone'; gear: GearId }
   | { type: 'select'; trackId: string; /** 1-based place in the list on screen, for the event log. */ position?: number }
   | { type: 'deselect' }
   | { type: 'feedback'; trackId: string; thumbs: 'up' | 'down' }
@@ -205,13 +196,12 @@ export type FlowEvent =
 
 const testRange = (low: Midi, high: Midi): VocalRange => ({ low, high, source: 'test' });
 
-/** Clears everything about results so a new range starts from the top, keeping only the sliders. */
-function freshResults(state: FlowState) {
+/** Clears everything about results so a new range starts from the top. The tuner keeps what the singer set. */
+function freshResults() {
   return {
     libraryUnavailable: false,
     matches: [] as Match[],
     sources: {} as Record<string, DataSourceLogEntry>,
-    view: { ...DEFAULT_VIEW, difficulty: state.view.difficulty, familiarity: state.view.familiarity, popularity: state.view.popularity, tempo: state.view.tempo },
     shown: SHOW_STEP,
     attempt: 0,
     selectedId: null,
@@ -219,8 +209,8 @@ function freshResults(state: FlowState) {
   };
 }
 
-/** A view change shows the new list from its first song. */
-const withView = (state: FlowState, view: ResultsView): FlowState => ({ ...state, view, shown: SHOW_STEP, selectedId: null });
+/** Listening history is Spotify's: it needs a library, not the catalogue (spec: logged out, the gear is off and disabled). */
+export const historyAvailable = (state: Pick<FlowState, 'mode'>): boolean => state.mode === 'library';
 
 /**
  * The way into a hold step when the microphone is not open (QWW-50): the mic step first, then `next`.
@@ -241,21 +231,23 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       const { me, progress, wantsPick, savedRange } = event;
       const low = progress?.low ?? null;
       const high = progress?.high ?? null;
+      // The tuner starts from its defaults (a reload, as after the Spotify round trip, starts it over).
+      const fresh = { ...state, tuner: initialTuner({ mini: event.mini }) };
       if (me) {
-        const base = { ...state, signedIn: true, displayName: me.displayName, low, high, mode: 'library' as const };
+        const base = { ...fresh, signedIn: true, displayName: me.displayName, low, high, mode: 'library' as const };
         if (low !== null && high !== null) return { ...base, step: 'saving', range: testRange(low, high) };
         if (wantsPick) return { ...base, step: 'pick', range: me.range };
         if (me.range) return { ...base, step: 'results', range: me.range, loading: true };
         if (low !== null) return enterMic(base, 'high');
         return { ...base, step: 'landing' };
       }
-      if (low !== null && high !== null) return { ...state, step: 'signin', low, high, range: testRange(low, high) };
-      if (low !== null) return enterMic({ ...state, low }, 'high');
+      if (low !== null && high !== null) return { ...fresh, step: 'signin', low, high, range: testRange(low, high) };
+      if (low !== null) return enterMic({ ...fresh, low }, 'high');
       if (savedRange) {
         const range = testRange(savedRange.low, savedRange.high);
-        return { ...state, ...freshResults(state), step: 'results', mode: 'catalogue', range, loading: true };
+        return { ...fresh, ...freshResults(), step: 'results', mode: 'catalogue', range, loading: true };
       }
-      return { ...state, step: 'landing' };
+      return { ...fresh, step: 'landing' };
     }
     case 'start':
       return { ...state, step: 'quiet', hold: 'ready', low: null, high: null, redoing: null };
@@ -308,13 +300,13 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
     case 'micLost':
       return state.step === 'low' || state.step === 'high' ? enterMic(state, state.step, true) : state;
     case 'rangeSaved':
-      return { ...state, ...freshResults(state), step: 'results', mode: 'library', loading: true };
+      return { ...state, ...freshResults(), step: 'results', mode: 'library', loading: true };
     case 'showCatalogue':
-      return state.range ? { ...state, ...freshResults(state), step: 'results', mode: 'catalogue', loading: true } : state;
+      return state.range ? { ...state, ...freshResults(), step: 'results', mode: 'catalogue', loading: true } : state;
     case 'loggedOut': {
       // Nothing of the library stays: not its matches, not the songs offered to pick from.
-      const out = { ...state, signedIn: false, displayName: null, known: null, picks: [] };
-      return state.range ? { ...out, ...freshResults(state), step: 'results', mode: 'catalogue', loading: true } : out;
+      const out = { ...state, signedIn: false, displayName: null, known: null, picks: [], tuner: initialTuner({ mini: state.tuner.mini }) };
+      return state.range ? { ...out, ...freshResults(), step: 'results', mode: 'catalogue', loading: true } : out;
     }
     case 'saveFailed':
       return { ...state, error: 'save' };
@@ -328,35 +320,23 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       // The server stops its lookups at a budget on a very large first visit, and says so with a
       // nextOffset; ask again to finish. A list trimmed to the best matches has no nextOffset.
       const again = page.complete === false && page.nextOffset !== null && attempt < MAX_LOAD_ATTEMPTS;
-      // A library the server could not read comes back as catalogue songs: shown as such (no listening sliders), with its note.
+      // A library the server could not read comes back as catalogue songs: shown as such (no listening history), with its note.
       const libraryUnavailable = page.libraryUnavailable === true;
       const mode = libraryUnavailable ? 'catalogue' : state.mode;
-      // Sliders this list cannot offer (no listening data, no popularity) are unset.
-      const view = fitViewTo(state.view, availableSliders(mode, page.matches));
-      const leadSlider = state.leadSlider && view[state.leadSlider] !== null ? state.leadSlider : null;
-      return { ...state, mode, libraryUnavailable, loading: again, attempt, error: null, matches: page.matches, sources: page.sources, view, leadSlider };
+      return { ...state, mode, libraryUnavailable, loading: again, attempt, error: null, matches: page.matches, sources: page.sources };
     }
     case 'loadFailed':
       return { ...state, loading: false, error: 'load' };
     case 'retryLoad':
       return state.step === 'results' ? { ...state, loading: true, error: null, attempt: 0 } : state;
-    case 'setSlider': {
-      const value = event.value === null ? null : Math.min(1, Math.max(0, event.value));
-      const view = { ...state.view, [event.slider]: value };
-      return { ...withView(state, view), leadSlider: value === null ? null : event.slider };
+    case 'tuner': {
+      const { action } = event;
+      // Listening history is Spotify's: without a library the gear is off and cannot be turned on.
+      if ((action.type === 'input' || action.type === 'touch') && action.gear === 'history' && !historyAvailable(state)) return state;
+      return { ...state, tuner: tunerReducer(state.tuner, action) };
     }
-    case 'sliderDone':
+    case 'gearDone':
       return state;
-    case 'resetSliders':
-      return { ...withView(state, { ...state.view, difficulty: null, familiarity: null, popularity: null, tempo: null }), leadSlider: null };
-    case 'pickDecade':
-      return withView(state, pickDecade(state.view, event.decade));
-    case 'pickMood':
-      return withView(state, pickMood(state.view, event.mood));
-    case 'toggleDuets':
-      return withView(state, toggleDuets(state.view));
-    case 'clearFilters':
-      return withView(state, { ...state.view, decade: null, mood: null, duetsOnly: false });
     case 'select':
       return { ...state, selectedId: event.trackId };
     case 'deselect':
@@ -364,7 +344,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
     case 'feedback':
       return { ...state, feedback: { ...state.feedback, [event.trackId]: event.thumbs } };
     case 'redo':
-      return { ...state, ...freshResults(state), step: 'quiet', hold: 'ready', low: null, high: null, loading: false, picks: [], redoing: null };
+      return { ...state, ...freshResults(), step: 'quiet', hold: 'ready', low: null, high: null, loading: false, picks: [], redoing: null };
     case 'redoEnd': {
       if (!state.range) return state;
       const keep = event.end === 'low' ? { low: null, high: state.range.high } : { low: state.range.low, high: null };

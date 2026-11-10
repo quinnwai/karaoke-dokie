@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
+import type { Match } from '../lib/contracts';
 import { detectPitch } from '../lib/audio/pitch';
 import { detectHeldNote } from '../lib/audio/heldNote';
 import { isDigitalSilence, MIN_MUTED_SAMPLES } from '../lib/audio/level';
@@ -8,8 +9,8 @@ import { frequencyToMidi, midiToNoteName } from '../lib/audio/notes';
 import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
 import { detectBrowser } from '../lib/client/browser';
 import { createTracker, flushWhenHidden, loadAnonId, sendEvents, type Tracker } from '../lib/client/events';
-import { flowReducer, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
-import { eventsFor } from '../lib/client/funnel';
+import { flowReducer, historyAvailable, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
+import { eventsFor, feedbackView, viewProps } from '../lib/client/funnel';
 import { browserMic, classifyMicError, MicError, type Mic, type MicRecorder } from '../lib/client/mic';
 import {
   clearProgress,
@@ -20,11 +21,14 @@ import {
   setWantsPick,
   takeWantsPick,
 } from '../lib/client/storage';
+import { useRankedSetlist } from '../lib/client/useRankedSetlist';
+import { createLocalEngine, type SetlistEngine } from '../lib/setlist/engine';
+import { toRequest } from '../lib/setlist/tuner';
 import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';
 import { MicStep } from './MicStep';
 import { PickSongs } from './PickSongs';
-import { Results } from './Results';
+import { SetlistScreen } from './setlist/SetlistScreen';
 import { SongDetail } from './SongDetail';
 import { Tv } from './Tv';
 import styles from './screen.module.css';
@@ -47,6 +51,13 @@ export interface KaraokeAppProps {
    * visit is ignored.
    */
   pickSongs?: boolean;
+  /**
+   * The ranking engine behind the Setlist tuner. By default the interim engine ranks the matches the server sent
+   * (src/lib/setlist/engine.ts); QWW-47's server engine replaces it here. Tests pass one that records its requests.
+   */
+  setlistEngine?: SetlistEngine;
+  /** The ▶ of a list row, mounted by QWW-48. Without it each row shows an inert ▶. */
+  renderPlay?(match: Match): ReactNode;
 }
 
 const LIVE_FRAME = 2048;
@@ -57,7 +68,17 @@ const LIVE_EVERY_MS = 50; // ~20 times a second
 const defaultNavigate = (url: string) => window.location.assign(url);
 const defaultReload = () => window.location.reload();
 
-export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, reload = defaultReload, quietMs = 2600, pickSongs: canPick = false }: KaraokeAppProps) {
+export function KaraokeApp({
+  api: apiProp,
+  track,
+  mic = browserMic,
+  navigate = defaultNavigate,
+  reload = defaultReload,
+  quietMs = 2600,
+  pickSongs: canPick = false,
+  setlistEngine,
+  renderPlay,
+}: KaraokeAppProps) {
   const [api] = useState(() => apiProp ?? createApi());
   const [state, rawDispatch] = useReducer(flowReducer, initialState);
 
@@ -109,6 +130,8 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
         progress: loadProgress(),
         wantsPick: wantedPick && canPick,
         savedRange: me ? null : loadSavedRange(),
+        // ?mini=1 starts the tuner's sheet in mini mode (the reference's way to open its "L2 mini" board).
+        mini: url.searchParams.get('mini') === '1',
       });
     })();
     return () => {
@@ -175,6 +198,15 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
       cancelled = true;
     };
   }, [api, step, known, signedIn]);
+
+  // The Setlist tuner sends what is set to the ranking engine and gets the ranked list back. Nothing is asked until the
+  // songs have loaded; a new request keeps the last list on screen until its own answer arrives.
+  const history = historyAvailable(state);
+  const engine = useMemo(
+    () => setlistEngine ?? createLocalEngine(state.matches, { loggedIn: history, sources: state.sources, libraryUnavailable: state.libraryUnavailable }),
+    [setlistEngine, state.matches, state.sources, history, state.libraryUnavailable],
+  );
+  const ranked = useRankedSetlist(engine, step === 'results' && range && !state.loading && state.error !== 'load' ? toRequest(state.tuner, range) : null);
 
   // ---- mic ----
   const stopTicker = () => {
@@ -326,7 +358,7 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
     const match = state.matches.find((m) => m.track.id === trackId);
     if (!match || !state.range) return;
     dispatch({ type: 'feedback', trackId, thumbs });
-    const body = { trackId, thumbs, difficulty: match.difficulty, octave: match.octave, view: state.view };
+    const body = { trackId, thumbs, difficulty: match.difficulty, octave: match.octave, view: feedbackView(state) };
     const sent =
       state.mode === 'catalogue'
         ? api.catalogueFeedback({ ...body, anonId: loadAnonId(), range: { low: state.range.low, high: state.range.high } })
@@ -359,6 +391,35 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
   };
 
   const selected = state.selectedId ? state.matches.find((m) => m.track.id === state.selectedId) : undefined;
+
+  // The Setlist tuner fills the screen: no TV around it. Every other step, and the song page, stay on the TV.
+  if (step === 'results' && state.range && !selected) {
+    return (
+      <SetlistScreen
+        range={state.range}
+        mode={state.mode}
+        tuner={state.tuner}
+        songs={ranked.result?.songs ?? null}
+        empty={ranked.result?.empty}
+        shown={state.shown}
+        loading={state.loading}
+        error={state.error === 'load' || ranked.failed}
+        libraryUnavailable={state.libraryUnavailable}
+        signInFailed={signInFailed}
+        displayName={state.displayName}
+        onTuner={(action) => dispatch({ type: 'tuner', action })}
+        onGearDone={(gear) => dispatch({ type: 'gearDone', gear })}
+        onSelect={(trackId, position) => dispatch({ type: 'select', trackId, position })}
+        onMore={() => dispatch({ type: 'loadMore' })}
+        onRetry={() => dispatch({ type: 'retryLoad' })}
+        onRedo={redo}
+        onRedoEnd={(end) => dispatch({ type: 'redoEnd', end })}
+        onConnect={connectSpotify}
+        onLogout={logOut}
+        renderPlay={renderPlay}
+      />
+    );
+  }
 
   return (
     <Tv>
@@ -447,36 +508,6 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
         </div>
       )}
 
-      {step === 'results' && state.range && !selected && (
-        <Results
-          range={state.range}
-          mode={state.mode}
-          matches={state.matches}
-          view={state.view}
-          shown={state.shown}
-          loading={state.loading}
-          error={state.error === 'load'}
-          libraryUnavailable={state.libraryUnavailable}
-          signInFailed={signInFailed}
-          onSelect={(trackId, position) => dispatch({ type: 'select', trackId, position })}
-          onMore={() => dispatch({ type: 'loadMore' })}
-          onRetry={() => dispatch({ type: 'retryLoad' })}
-          onRedo={redo}
-          onRedoEnd={(end) => dispatch({ type: 'redoEnd', end })}
-          leadSlider={state.leadSlider}
-          onSlider={(slider, value) => dispatch({ type: 'setSlider', slider, value })}
-          onSliderDone={(slider) => dispatch({ type: 'sliderDone', slider })}
-          onResetSliders={() => dispatch({ type: 'resetSliders' })}
-          onDecade={(decade) => dispatch({ type: 'pickDecade', decade })}
-          onMood={(mood) => dispatch({ type: 'pickMood', mood })}
-          onDuets={() => dispatch({ type: 'toggleDuets' })}
-          onClear={() => dispatch({ type: 'clearFilters' })}
-          onConnect={connectSpotify}
-          displayName={state.displayName}
-          onLogout={logOut}
-        />
-      )}
-
       {step === 'results' && state.range && selected && (
         <SongDetail
           key={selected.track.id}
@@ -484,18 +515,7 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
           userRange={state.range}
           feedback={state.feedback[selected.track.id]}
           onFeedback={(thumbs) => sendFeedback(selected.track.id, thumbs)}
-          onSpotify={() =>
-            tracker.track('spotify_link_pressed', {
-              mode: state.mode,
-              difficulty: state.view.difficulty,
-              familiarity: state.view.familiarity,
-              popularity: state.view.popularity,
-              tempo: state.view.tempo,
-              decade: state.view.decade,
-              mood: state.view.mood,
-              duetsOnly: state.view.duetsOnly,
-            })
-          }
+          onSpotify={() => tracker.track('spotify_link_pressed', viewProps(state))}
           onBack={() => dispatch({ type: 'deselect' })}
         />
       )}

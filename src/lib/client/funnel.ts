@@ -5,28 +5,51 @@
 // Privacy: events never carry a Spotify id or a song from someone's Spotify library. Catalogue
 // songs (no Spotify) may carry their catalogue key; library songs carry only their position.
 
-import type { EventValue } from '../contracts';
+import type { EventValue, ResultsView } from '../contracts';
 import { browserLabel } from './browser';
-import { flowReducer, type FlowEvent, type FlowState, type Step } from './flow';
+import { isOn } from '../setlist/tuner';
+import type { GearId } from '../setlist/types';
+import { flowReducer, historyAvailable, type FlowEvent, type FlowState, type Step } from './flow';
 
 export interface FunnelEvent {
   name: string;
   props?: Record<string, EventValue>;
 }
 
-/** The view a song was found in, as event props: each slider's target (null = not set) and the picks. */
-function viewProps(s: FlowState): Record<string, EventValue> {
-  const v = s.view;
-  const round = (n: number | null) => (n === null ? null : Math.round(n * 100) / 100);
+const round = (n: number | null) => (n === null ? null : Math.round(n * 100) / 100);
+
+/** A gear's target as 0 to 1, or null when it is not factored in (off, or History before Spotify is connected). */
+function gearTarget(s: FlowState, gear: GearId): number | null {
+  if (!isOn(s.tuner, gear) || (gear === 'history' && !historyAvailable(s))) return null;
+  return round(s.tuner[gear] / 100);
+}
+
+/**
+ * The tuner as a song was found in it, as event props: each gear's target (null = not factored in) and the picked
+ * eras. The gear props keep the names the admin page's per-control stats read (src/lib/server/eventStats.ts):
+ * `familiarity` is the History gear.
+ */
+export function viewProps(s: FlowState): Record<string, EventValue> {
   return {
     mode: s.mode,
-    difficulty: round(v.difficulty),
-    familiarity: round(v.familiarity),
-    popularity: round(v.popularity),
-    tempo: round(v.tempo),
-    decade: v.decade,
-    mood: v.mood,
-    duetsOnly: v.duetsOnly,
+    difficulty: gearTarget(s, 'difficulty'),
+    familiarity: gearTarget(s, 'history'),
+    popularity: gearTarget(s, 'popularity'),
+    tempo: gearTarget(s, 'tempo'),
+    eras: isOn(s.tuner, 'era') ? s.tuner.eras.join(',') : null,
+  };
+}
+
+/** The tuner in the shape the feedback request has always carried (server validate.ts), for the stored view. */
+export function feedbackView(s: FlowState): ResultsView {
+  return {
+    difficulty: gearTarget(s, 'difficulty'),
+    familiarity: gearTarget(s, 'history'),
+    popularity: gearTarget(s, 'popularity'),
+    tempo: gearTarget(s, 'tempo'),
+    decade: null,
+    mood: null,
+    duetsOnly: false,
   };
 }
 
@@ -72,25 +95,24 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
     case 'loadMore':
       out.push({ name: 'generate_more_pressed', props: { shown: prev.shown, ...viewProps(prev) } });
       break;
-    case 'sliderDone':
+    case 'gearDone': {
       // One record per adjustment, when the thumb is let go; dragging itself records nothing.
-      out.push({ name: 'slider_changed', props: { slider: action.slider, ...viewProps(prev) } });
+      const gear = action.gear;
+      out.push({ name: 'gear_change', props: { gear, value: next.tuner[gear], on: isOn(next.tuner, gear), mode: next.mode } });
       break;
-    case 'resetSliders':
-      out.push({ name: 'sliders_reset', props: viewProps(next) });
+    }
+    case 'tuner': {
+      const a = action.action;
+      // Reset is a gear going off, at its default value.
+      if (a.type === 'reset' && a.gear !== 'era') {
+        out.push({ name: 'gear_change', props: { gear: a.gear, value: next.tuner[a.gear], on: false, mode: next.mode } });
+      } else if (a.type === 'reset') {
+        out.push({ name: 'era_change', props: { era: null, picked: false, on: false, eras: next.tuner.eras.join(','), mode: next.mode } });
+      } else if (a.type === 'era') {
+        out.push({ name: 'era_change', props: { era: a.era, picked: next.tuner.eras.includes(a.era), on: isOn(next.tuner, 'era'), eras: next.tuner.eras.join(','), mode: next.mode } });
+      }
       break;
-    case 'pickDecade':
-      out.push({ name: 'chip_toggled', props: { kind: 'decade', value: action.decade, on: next.view.decade === action.decade, ...viewProps(next) } });
-      break;
-    case 'pickMood':
-      out.push({ name: 'chip_toggled', props: { kind: 'mood', value: action.mood, on: next.view.mood === action.mood, ...viewProps(next) } });
-      break;
-    case 'toggleDuets':
-      out.push({ name: 'chip_toggled', props: { kind: 'duets', value: 'duets', on: next.view.duetsOnly, ...viewProps(next) } });
-      break;
-    case 'clearFilters':
-      out.push({ name: 'filters_cleared', props: viewProps(next) });
-      break;
+    }
     case 'select': {
       const props: Record<string, EventValue> = { ...viewProps(prev), position: action.position ?? null };
       const key = catalogueKey(action.trackId);
