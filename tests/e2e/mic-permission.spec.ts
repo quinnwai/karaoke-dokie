@@ -5,6 +5,8 @@
 //   denied          getUserMedia refuses (or, closed without an answer, "Permission dismissed")
 //   already granted the permission is set before the page opens
 //   already blocked the Permissions API says "denied" before anyone asks
+//   waiting         getUserMedia never answers (the browser's question is up, and nobody has tapped it)
+// Once the microphone is on there is no screen of ours: the singer goes straight to the note.
 // What a real iPhone and a real Android phone do with the same screens is checked by hand (the PR's review guide).
 
 import { devices, expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
@@ -21,6 +23,8 @@ const pixel = devices['Pixel 7'];
  * stays at the bottom while the words scroll under it.
  */
 const SMALL = { width: 375, height: 553 };
+/** The phone the screenshots for review are taken on: 390 by 844, an iPhone 12 to 14 with no browser toolbars. */
+const PHONE = { width: 390, height: 844 };
 
 const INSTAGRAM_IPHONE = `${iPhone.userAgent} Instagram 336.0.0.35.121 (iPhone14,5; iOS 17_5; en_US; en-US; scale=3.00; 1170x2532; 599165981)`;
 const INSTAGRAM_ANDROID = `${pixel.userAgent} Instagram 336.0.0.40.109 Android (34/14; 420dpi; 1080x2400; Google/google; Pixel 7; panther; panther; en_US; 599165981)`;
@@ -56,7 +60,7 @@ async function mockApi(context: BrowserContext) {
   return { micEvents: () => sent.filter((e) => /^(mic_|inapp_)/.test(e.name)) };
 }
 
-type Answer = 'allow' | 'deny' | 'dismiss';
+type Answer = 'allow' | 'deny' | 'dismiss' | 'hang';
 
 /** getUserMedia says what `answer` says (the test can change it), and every microphone it hands out is kept. */
 function controlMic(context: BrowserContext, answer: Answer) {
@@ -66,6 +70,7 @@ function controlMic(context: BrowserContext, answer: Answer) {
     w.__answer = initial;
     w.__streams = [];
     navigator.mediaDevices.getUserMedia = async (constraints) => {
+      if (w.__answer === 'hang') return new Promise<MediaStream>(() => {});
       if (w.__answer === 'deny') throw new DOMException('Permission denied', 'NotAllowedError');
       if (w.__answer === 'dismiss') throw new DOMException('Permission dismissed', 'NotAllowedError');
       const stream = await real(constraints);
@@ -99,34 +104,75 @@ async function hold(page: Page, name: RegExp, ms: number) {
   await page.mouse.up();
 }
 
+/** A tap: down and up back to back, with no wait between, so no sound is recorded to speak of. */
+async function tap(page: Page, name: RegExp) {
+  const box = (await page.getByRole('button', { name }).boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.up();
+}
+
 const lowNote = (page: Page) => page.getByRole('button', { name: 'Hold to record your lowest note' });
 const view = (page: Page) => page.locator('[data-mic-view]');
 
-test('first run on an iPhone: our screen, then the browser\'s question, the level meter, and the note', async ({ baseURL }) => {
+/** How a button treats a finger that lands on it, as the browser applies it: the record button is held down, so it takes over the touch. */
+const pressStyle = (button: Locator) =>
+  button.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { touchAction: style.touchAction, userSelect: style.userSelect };
+  });
+
+/** What makes a round button look the way it does, as the browser draws it. */
+const roundStyle = (button: Locator) =>
+  button.evaluate((el) => {
+    const style = getComputedStyle(el);
+    const box = el.getBoundingClientRect();
+    return {
+      width: box.width,
+      height: box.height,
+      borderRadius: style.borderTopLeftRadius,
+      borderWidth: style.borderTopWidth,
+      borderColor: style.borderTopColor,
+      background: style.backgroundColor,
+      boxShadow: style.boxShadow,
+    };
+  });
+
+test('first run on an iPhone: our screen, then the browser\'s question, and straight to the note', async ({ baseURL }) => {
   const browser = await launchWithMic(tone);
-  const context = await browser.newContext({ ...iPhone, baseURL });
+  const context = await browser.newContext({ ...iPhone, viewport: PHONE, baseURL });
   const api = await mockApi(context);
   const page = await context.newPage();
   await startTest(page);
 
-  // Our own screen comes first, saying where the browser's question will be.
+  // Our own screen comes first: a title, one line, and a round button with a microphone on it. Nothing else.
   await expect(view(page)).toHaveAttribute('data-mic-view', 'prompt');
-  await expect(page.getByText('We need to hear you sing')).toBeVisible();
-  await expect(page.getByRole('img', { name: /box in the middle of its screen/ })).toBeVisible();
+  await expect(page.getByText('Set up your microphone')).toBeVisible();
+  await expect(page.getByText('Your phone will ask to use the microphone. Tap Allow.')).toBeVisible();
+  await expect(view(page).getByRole('img')).toHaveCount(0);
+  await expect(page.getByText(/voice stays/)).toHaveCount(0);
+  await expect(view(page).getByRole('button')).toHaveCount(1);
+  const turnOn = page.getByRole('button', { name: 'Turn on microphone' });
+  await expect(turnOn).toBeEnabled();
   await page.waitForTimeout(900);
   await shot(page, '19-mic-prompt-iphone');
+  const micStyle = await roundStyle(turnOn);
+  expect(micStyle).toMatchObject({ width: 112, height: 112 });
+  const micPress = await pressStyle(turnOn);
 
-  // One tap asks; the fake permission UI says yes; the bar moves with the tone, and the screen says so.
-  await page.getByRole('button', { name: 'Turn on microphone' }).click();
-  await expect(page.getByText('We can hear you ✓')).toBeVisible();
-  await expect(page.locator('[data-heard]')).toHaveAttribute('data-heard', 'true');
-  const fill = await page.locator('[class*="meterFill"]').evaluate((el) => el.style.transform);
-  expect(Number(/scaleX\(([\d.]+)\)/.exec(fill)![1])).toBeGreaterThan(0.5);
-  await page.waitForTimeout(500);
-  await shot(page, '20-mic-level-meter');
-
-  await page.getByRole('button', { name: 'Continue' }).click();
+  // One tap asks; the fake permission UI says yes; and the note is next. No meter, nothing more to tap.
+  await turnOn.click();
   await expect(lowNote(page)).toBeVisible();
+  await expect(page.getByText(/hear you|Listening|ahh/)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Continue' })).toHaveCount(0);
+  await page.waitForTimeout(1300);
+  await shot(page, '26-low-note-after-mic-iphone');
+
+  // The microphone button looks like the record button: the same size, ring, colour and glow.
+  expect(await roundStyle(lowNote(page))).toEqual(micStyle);
+  // What only the record button needs, because it is held down and not tapped, is still on it and not on the other.
+  expect(await pressStyle(lowNote(page))).toEqual({ touchAction: 'none', userSelect: 'none' });
+  expect(micPress.touchAction).not.toBe('none');
   await expect
     .poll(() => api.micEvents(), { timeout: 8000 })
     .toEqual([
@@ -136,21 +182,57 @@ test('first run on an iPhone: our screen, then the browser\'s question, the leve
   await browser.close();
 });
 
-test('on Android Chrome the picture shows a panel from the bottom, and the events say so', async ({ baseURL }) => {
+test('on Android Chrome it reads the same, and the events say which browser it was', async ({ baseURL }) => {
   const browser = await launchWithMic(tone);
-  const context = await browser.newContext({ ...pixel, baseURL });
+  const context = await browser.newContext({ ...pixel, viewport: PHONE, baseURL });
   const api = await mockApi(context);
   const page = await context.newPage();
   await startTest(page);
-  await expect(page.getByRole('img', { name: /panel sliding up from the bottom/ })).toBeVisible();
+  await expect(page.getByText('Set up your microphone')).toBeVisible();
+  await expect(page.getByText('Your phone will ask to use the microphone. Tap Allow.')).toBeVisible();
+  await expect(view(page).getByRole('img')).toHaveCount(0);
   await page.waitForTimeout(900);
   await shot(page, '21-mic-prompt-android');
   await page.getByRole('button', { name: 'Turn on microphone' }).click();
-  await expect(page.getByText('We can hear you ✓')).toBeVisible();
+  await expect(lowNote(page)).toBeVisible();
   await expect.poll(() => api.micEvents(), { timeout: 8000 }).toEqual([
     { name: 'mic_prompt_shown', props: { browser: 'android-chrome' } },
     { name: 'mic_granted', props: { via: 'prompt', browser: 'android-chrome' } },
   ]);
+  await browser.close();
+});
+
+test('while the browser\'s question is up the round button shows it waits, and after 12 seconds a reload is offered', async ({ baseURL }) => {
+  test.setTimeout(45_000);
+  const browser = await launchWithMic(tone);
+  const context = await browser.newContext({ ...iPhone, viewport: PHONE, baseURL });
+  await mockApi(context);
+  await controlMic(context, 'hang');
+  const page = await context.newPage();
+  await startTest(page);
+  const turnOn = page.getByRole('button', { name: 'Turn on microphone' });
+  await turnOn.click();
+
+  // The question is up and nothing has answered it: the same button, lit and pulsing, not tappable, with no words on it.
+  await expect(view(page)).toHaveAttribute('data-mic-view', 'asking');
+  await expect(turnOn).toBeDisabled();
+  await expect(turnOn).toHaveAttribute('aria-busy', 'true');
+  await expect(turnOn).toHaveText('');
+  // Screen readers are told what the lit button shows everyone else.
+  await expect(page.getByRole('status')).toHaveText('Waiting for your phone…');
+  await expect(page.getByText('Set up your microphone')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Reload/ })).toHaveCount(0);
+  await page.waitForTimeout(900);
+  await shot(page, '20-mic-waiting-iphone');
+
+  // The way out when the question never comes. It really reloads: the new page starts at the title screen.
+  const reload = page.getByRole('button', { name: 'Nothing happened? Reload this page' });
+  await expect(reload).toBeVisible({ timeout: 15_000 });
+  await shot(page, '27-mic-waiting-reload-iphone');
+  await page.evaluate(() => ((window as unknown as { __marker: string }).__marker = 'same document'));
+  await reload.click();
+  await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __marker?: string }).__marker)).toBeUndefined();
   await browser.close();
 });
 
@@ -178,8 +260,6 @@ test('a refusal shows the iPhone steps, "Try again" says it is still blocked, an
   // The singer follows the steps; the microphone is allowed now.
   await answerMic(page, 'allow');
   await page.getByRole('button', { name: 'Try again' }).click();
-  await expect(page.getByText('We can hear you ✓')).toBeVisible();
-  await page.getByRole('button', { name: 'Continue' }).click();
   await expect(lowNote(page)).toBeVisible();
 
   await expect.poll(() => api.micEvents().map((e) => e.name), { timeout: 8000 }).toEqual([
@@ -218,7 +298,7 @@ test('a question closed without an answer says so, and Android Chrome gets its o
   await browser.close();
 });
 
-test('a microphone the browser already allows skips our screen: straight to the level meter', async ({ baseURL }) => {
+test('a microphone the browser already allows skips our screen: straight to the low note', async ({ baseURL }) => {
   const browser = await launchWithMic(tone);
   const context = await browser.newContext({ ...pixel, baseURL });
   await context.grantPermissions(['microphone'], { origin: baseURL });
@@ -226,10 +306,10 @@ test('a microphone the browser already allows skips our screen: straight to the 
   const page = await context.newPage();
   await startTest(page);
 
-  await expect(page.getByText('We can hear you ✓')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Turn on microphone' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Continue' }).click();
+  // No tap, no meter, no screen of ours: the note.
   await expect(lowNote(page)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Turn on microphone' })).toHaveCount(0);
+  await expect(page.getByText(/hear you|Listening|ahh/)).toHaveCount(0);
   await expect.poll(() => api.micEvents(), { timeout: 8000 }).toEqual([{ name: 'mic_granted', props: { via: 'already', browser: 'android-chrome' } }]);
   await browser.close();
 });
@@ -335,29 +415,52 @@ test('"Reload this page" really reloads the page, which is how Safari comes to a
   await browser.close();
 });
 
-test('a microphone taken away during the note sends the singer back through the mic step, to the same note', async ({ baseURL }) => {
+test('a microphone that goes away during the note shows "Set up your microphone" again, though the browser still says yes', async ({ baseURL }) => {
   const browser = await launchWithMic(tone);
-  const context = await browser.newContext({ ...iPhone, baseURL });
+  const context = await browser.newContext({ ...iPhone, viewport: PHONE, baseURL });
   await context.grantPermissions(['microphone'], { origin: baseURL });
   const api = await mockApi(context);
   await controlMic(context, 'allow');
   const page = await context.newPage();
   await startTest(page);
-  await page.getByRole('button', { name: 'Continue' }).click();
   await expect(lowNote(page)).toBeVisible();
 
   // Another app takes the microphone, or the permission is withdrawn: the browser ends the stream.
   await page.evaluate(() => (window as unknown as { __streams: MediaStream[] }).__streams.forEach((s) => s.getTracks().forEach((t) => t.stop())));
   await hold(page, /lowest note/, 300);
 
-  // Not a note that records nothing and says "try again" for ever: the mic step, then the same note.
-  await expect(page.getByText('We can hear you ✓')).toBeVisible();
+  // Not a note that records nothing and says "try again" for ever, and not straight back on the note with no word, which
+  // is what an allowed microphone would get if it opened by itself: our screen, whose tap starts the audio.
+  await expect(view(page)).toHaveAttribute('data-mic-view', 'prompt');
+  await expect(page.getByText('Set up your microphone')).toBeVisible();
   await expect(lowNote(page)).toHaveCount(0);
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.waitForTimeout(900);
+  await shot(page, '28-mic-lost-iphone');
+  await page.getByRole('button', { name: 'Turn on microphone' }).click();
   await expect(lowNote(page)).toBeVisible();
   await hold(page, /lowest note/, 1500);
   await expect(page.getByTestId('low-note')).toHaveText('A3');
-  await expect.poll(() => api.micEvents().map((e) => e.name), { timeout: 8000 }).toEqual(['mic_granted', 'mic_granted']);
+  // One mic_granted for each grant: by itself the first time, by the tap the second, with our screen shown before it.
+  await expect.poll(() => api.micEvents().map((e) => e.name), { timeout: 8000 }).toEqual(['mic_granted', 'mic_prompt_shown', 'mic_granted']);
+  expect(api.micEvents().flatMap((e) => (e.props?.via ? [e.props.via] : []))).toEqual(['already', 'prompt']);
+  await browser.close();
+});
+
+test('a quick tap on the record button says to hold a little longer, and stays on the note instead of going to the mic step', async ({ baseURL }) => {
+  const browser = await launchWithMic(tone);
+  const context = await browser.newContext({ ...iPhone, baseURL });
+  await context.grantPermissions(['microphone'], { origin: baseURL });
+  await mockApi(context);
+  const page = await context.newPage();
+  await startTest(page);
+  await expect(lowNote(page)).toBeVisible();
+
+  for (let i = 0; i < 2; i++) {
+    await tap(page, /lowest note/);
+    await expect(page.getByText('Try again and hold the note a little longer')).toBeVisible();
+    await expect(view(page)).toHaveCount(0);
+    await expect(lowNote(page)).toBeVisible();
+  }
   await browser.close();
 });
 
@@ -366,16 +469,6 @@ test('a microphone taken away during the note sends the singer back through the 
 const SCREENS_TO_CHECK: [string, 'iphone' | 'pixel', (context: BrowserContext, page: Page) => Promise<void>, string, string][] = [
   ['the prompt on an iPhone', 'iphone', async () => {}, 'prompt', 'Turn on microphone'],
   ['the prompt on Android', 'pixel', async () => {}, 'prompt', 'Turn on microphone'],
-  [
-    'the level meter',
-    'iphone',
-    async (_context, page) => {
-      await page.getByRole('button', { name: 'Turn on microphone' }).click();
-      await expect(page.getByText('We can hear you ✓')).toBeVisible();
-    },
-    'level',
-    'Continue',
-  ],
   [
     'the steps on an iPhone',
     'iphone',
@@ -440,7 +533,11 @@ async function expectBigAndInView(page: Page, main: Locator) {
     const label = (el: Element) => (el.getAttribute('aria-label') ?? el.textContent ?? el.tagName).trim().slice(0, 40);
     return {
       targets: [...root.querySelectorAll('button, a, input')].filter((el) => el.getBoundingClientRect().height < 47.5).map(label),
-      text: [...root.querySelectorAll('p, li, button, a, input')].filter((el) => parseFloat(getComputedStyle(el).fontSize) < 18).map(label),
+      // Anything with words in it (a field holds its words in a value): the round button has none, so no type to size.
+      text: [...root.querySelectorAll('p, li, button, a, input')]
+        .filter((el) => el.tagName === 'INPUT' || (el.textContent ?? '').trim() !== '')
+        .filter((el) => parseFloat(getComputedStyle(el).fontSize) < 18)
+        .map(label),
     };
   });
   expect(small).toEqual({ targets: [], text: [] });

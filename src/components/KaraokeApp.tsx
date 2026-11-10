@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { detectPitch } from '../lib/audio/pitch';
 import { detectHeldNote } from '../lib/audio/heldNote';
-import { isDigitalSilence, levelOf, MIN_MUTED_SAMPLES } from '../lib/audio/level';
+import { isDigitalSilence, MIN_MUTED_SAMPLES } from '../lib/audio/level';
 import { frequencyToMidi, midiToNoteName } from '../lib/audio/notes';
 import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
 import { detectBrowser } from '../lib/client/browser';
@@ -252,13 +252,6 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
     void openMic();
   };
 
-  // null while the microphone is on but the browser has held the audio back until a tap: nothing to measure yet.
-  const readLevel = useCallback(() => {
-    const rec = recorder.current;
-    if (!rec) return 0;
-    return rec.running() ? levelOf(rec.latest(LIVE_FRAME)) : null;
-  }, []);
-
   const holdStart = () => {
     if (holding.current) return;
     const rec = recorder.current;
@@ -298,7 +291,8 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
     // Muted, or audio that never started: only exact zeros for long enough, or no sound at all from a recorder that is
     // not running (iOS after a call or the lock screen) or after a hold too long to be a tap. A quiet singer's
     // microphone still wobbles, and a quick tap on a running recorder is just a short hold. "Hold the note a little
-    // longer" would be said for ever. Back to the mic step, which asks again and shows what the microphone hears.
+    // longer" would be said for ever. Back to the mic step: it shows our own screen even when the browser says the
+    // microphone is allowed, and the tap on its button starts the audio again.
     const longHold = Date.now() - holdStarted.current > TAP_MS;
     if (isDigitalSilence(samples) || (samples.length < MIN_MUTED_SAMPLES && (!rec.running() || longHold))) {
       releaseMic();
@@ -396,18 +390,7 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
       )}
 
       {step === 'mic' && (
-        <MicStep
-          gate={gate}
-          readLevel={readLevel}
-          onAsk={askMic}
-          onTryHere={() => dispatch({ type: 'micTryHere' })}
-          onContinue={() => {
-            recorder.current?.resume();
-            dispatch({ type: 'micDone' });
-          }}
-          onWake={() => recorder.current?.resume()}
-          onReload={reload}
-        />
+        <MicStep gate={gate} onAsk={askMic} onTryHere={() => dispatch({ type: 'micTryHere' })} onReload={reload} />
       )}
 
       {(step === 'low' || step === 'high') && (

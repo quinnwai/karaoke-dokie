@@ -1,39 +1,27 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { HEARD_LEVEL } from '../lib/audio/level';
 import { chromeIntentUrl, type BrowserInfo, type InApp } from '../lib/client/browser';
 import type { MicGate } from '../lib/client/flow';
 import type { MicProblem } from '../lib/client/mic';
 import { Lyric } from './Lyric';
-import { MicArt } from './MicArt';
+import { RoundButton } from './RoundButton';
 import styles from './screen.module.css';
 
 // The microphone step (QWW-50). The browser's own question is a step we do not control, and older singers often
 // miss it, close it or tap Block, so every screen here is plain words, big type and big buttons, and no screen is
 // a dead end: each has a way on, and the way out of a refusal says how, for this browser. The one thing to tap on
 // each screen stays at the bottom of the screen while the words scroll under it, so a small phone, or one set to
-// larger text, never hides it.
+// larger text, never hides it. Once the microphone is on, the step is over: the singer goes straight to the note.
 
-/** How long the level meter listens to a running microphone before it says it hears nothing. */
-export const QUIET_HINT_MS = 5000;
 /** How long the browser's question can stay unanswered before the screen offers a reload. */
 export const ASKING_PATIENCE_MS = 12000;
 /** How long the blank screen (looking at the browser, or opening a microphone already allowed) may last before it offers a reload. */
 export const BUSY_PATIENCE_MS = 4000;
-const POLL_MS = 50;
-/** A voice must stay past the line this many polls in a row (150 ms), so a tap on the screen or a rub of the case is not one. */
-const HEARD_FRAMES = 3;
-const QUIET_FRAMES = QUIET_HINT_MS / POLL_MS;
 
 interface MicStepProps {
   gate: MicGate;
-  /** How loud the microphone is hearing right now, 0 to 1; null while the audio has not started (it waits for a tap). */
-  readLevel(): number | null;
   /** "Turn on microphone" and "Try again": the tap that brings up the browser's own question. */
   onAsk(): void;
   onTryHere(): void;
-  onContinue(): void;
-  /** Any tap on the level screen: starts the audio if the browser held it back. */
-  onWake(): void;
   onReload(): void;
 }
 
@@ -51,7 +39,7 @@ function useAfter(active: boolean, ms: number): boolean {
   return late;
 }
 
-export function MicStep({ gate, readLevel, onAsk, onTryHere, onContinue, onWake, onReload }: MicStepProps) {
+export function MicStep({ gate, onAsk, onTryHere, onReload }: MicStepProps) {
   const { view, env } = gate;
   // Looking at the browser, or opening a microphone that was already allowed: nothing to read yet.
   if (!env || view === 'checking' || view === 'opening') return <BusyScreen view={view} onReload={onReload} />;
@@ -61,8 +49,6 @@ export function MicStep({ gate, readLevel, onAsk, onTryHere, onContinue, onWake,
     case 'prompt':
     case 'asking':
       return <PromptScreen env={env} asking={view === 'asking'} onAsk={onAsk} onReload={onReload} />;
-    case 'level':
-      return <LevelScreen readLevel={readLevel} onContinue={onContinue} onWake={onWake} />;
     case 'recovery':
       return <RecoveryScreen gate={gate} env={env} onAsk={onAsk} onReload={onReload} />;
   }
@@ -91,6 +77,17 @@ function BusyScreen({ view, onReload }: { view: MicGate['view']; onReload(): voi
 
 // ---- before the browser's question ----
 
+/** A microphone in outline: the capsule, the cradle round it, the stem and the foot. Drawn in the button's pink. */
+function MicIcon() {
+  return (
+    <svg className={styles.micIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden>
+      <rect x="9" y="2.5" width="6" height="12" rx="3" />
+      <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" />
+      <path d="M12 18v3.5M8.5 21.5h7" />
+    </svg>
+  );
+}
+
 function PromptScreen({ env, asking, onAsk, onReload }: { env: BrowserInfo; asking: boolean; onAsk(): void; onReload(): void }) {
   const device = deviceOf(env);
   // A question that never comes (some in-app browsers say nothing at all) must not leave the singer waiting for ever.
@@ -98,22 +95,24 @@ function PromptScreen({ env, asking, onAsk, onReload }: { env: BrowserInfo; aski
 
   return (
     <div className={styles.mic} data-mic-view={asking ? 'asking' : 'prompt'}>
-      <Lyric text="We need to hear you sing" />
-      <MicArt where={env.os === 'android' ? 'sheet' : 'center'} />
+      <Lyric text="Set up your microphone" />
       <p className={styles.micBody}>
         Your {device} will ask to use the microphone. Tap <strong>Allow</strong>.
       </p>
       <Main>
-        <button type="button" className={styles.micButton} onClick={onAsk} disabled={asking}>
-          {asking ? `Waiting for your ${device}…` : 'Turn on microphone'}
-        </button>
+        {/* No words on the button, so its name is for screen readers. While the question is up it glows and pulses, and a second tap does nothing. */}
+        <RoundButton aria-label="Turn on microphone" active={asking} aria-busy={asking} disabled={asking} onClick={onAsk}>
+          <MicIcon />
+        </RoundButton>
+        {/* For screen readers only: what the lit button shows everyone else. The region is always there, so the change is announced. */}
+        <span className={styles.srOnly} role="status">
+          {asking ? `Waiting for your ${device}…` : ''}
+        </span>
       </Main>
-      {late ? (
+      {late && (
         <button type="button" className={styles.micLink} onClick={onReload}>
           Nothing happened? Reload this page
         </button>
-      ) : (
-        <p className={styles.micNote}>Your voice stays on your {device}.</p>
       )}
     </div>
   );
@@ -210,63 +209,6 @@ function InAppScreen({ env, recovery = false, onNext }: { env: BrowserInfo; reco
       <button type="button" className={styles.micLink} onClick={onNext}>
         {recovery ? 'Try again' : 'Try here anyway'}
       </button>
-    </div>
-  );
-}
-
-// ---- the microphone is on ----
-
-function LevelScreen({ readLevel, onContinue, onWake }: { readLevel(): number | null; onContinue(): void; onWake(): void }) {
-  const fill = useRef<HTMLDivElement>(null);
-  const [heard, setHeard] = useState(false);
-  const [silent, setSilent] = useState(false);
-  const [stalled, setStalled] = useState(false);
-
-  useEffect(() => {
-    let shown = 0;
-    let streak = 0;
-    let quietFrames = 0;
-    let loud = false;
-    let wasStalled = false;
-    const poll = setInterval(() => {
-      const level = readLevel();
-      // The microphone is on but the browser has not let the audio start (no tap yet): that is not a quiet room.
-      if ((level === null) !== wasStalled) {
-        wasStalled = level === null;
-        setStalled(wasStalled);
-      }
-      if (level === null) return;
-      // Up at once, down gently, so a word reads as one swing of the bar.
-      shown = Math.max(level, shown * 0.8);
-      if (fill.current) fill.current.style.transform = `scaleX(${shown.toFixed(3)})`;
-      streak = level >= HEARD_LEVEL ? streak + 1 : 0;
-      if (!loud && streak >= HEARD_FRAMES) {
-        loud = true;
-        setHeard(true);
-      }
-      if (!loud && ++quietFrames === QUIET_FRAMES) setSilent(true);
-    }, POLL_MS);
-    return () => clearInterval(poll);
-  }, [readLevel]);
-
-  return (
-    <div className={styles.mic} data-mic-view="level" onPointerDown={onWake}>
-      <Lyric text="Say “ahh”" />
-      <p className={styles.micBody}>The bar should move when you talk.</p>
-      <div className={styles.meter} aria-hidden data-heard={heard}>
-        <div ref={fill} className={styles.meterFill} />
-      </div>
-      <p className={styles.micStatus} role="status">
-        {heard ? 'We can hear you ✓' : stalled ? 'Tap anywhere to start listening' : silent ? 'We can’t hear anything yet' : 'Listening…'}
-      </p>
-      {silent && !heard && !stalled && (
-        <p className={styles.micNote}>Make sure nothing covers the microphone, and that Bluetooth headphones are off.</p>
-      )}
-      <Main>
-        <button type="button" className={styles.micButton} onClick={onContinue}>
-          Continue
-        </button>
-      </Main>
     </div>
   );
 }

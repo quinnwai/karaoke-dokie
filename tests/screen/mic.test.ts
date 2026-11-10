@@ -29,7 +29,7 @@ describe('SampleBuffer', () => {
     expect(Array.from(b.all())).toEqual([1]);
   });
 
-  describe('while nobody is recording (the level meter is on, or the singer is between notes)', () => {
+  describe('while nobody is recording (the singer is between notes)', () => {
     const chunk = (n: number, v = 0.1) => new Float32Array(n).fill(v);
 
     it('keeps only the latest sound, so a microphone left open does not fill the phone', () => {
@@ -37,7 +37,7 @@ describe('SampleBuffer', () => {
       for (let i = 0; i < 1000; i++) b.push(chunk(1024)); // about 23 s at 44.1 kHz
       expect(b.all().length).toBeGreaterThanOrEqual(IDLE_KEEP);
       expect(b.all().length).toBeLessThan(IDLE_KEEP + 1024);
-      // What the meter and the live pitch read is still there.
+      // What the live pitch reads once a hold begins is still there.
       expect(b.latest(2048)).toHaveLength(2048);
     });
 

@@ -19,18 +19,18 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
      (there is no way to open Safari from a page), a copy-link button, the address in a field to copy by hand, and
      "Try here anyway", because a user agent is only a guess. "Try here anyway" is remembered for the visit, and a
      refusal after it shows this screen again with "Try again", since that browser has no site settings to open.
-   - **Our own screen first**, "We need to hear you sing": a picture of where the browser's question appears on this
-     phone (a box in the middle on iPhone, a sheet from the bottom on Android) and one big "Turn on microphone".
-     That tap itself calls `getUserMedia` (iOS Safari wants a tap for audio). The screen is skipped when
-     `navigator.permissions.query({ name: 'microphone' })` already says *granted* (the microphone opens by itself) or
-     *denied* (straight to the steps below). Where the browser cannot say, or does not answer within 0.4 s, the screen
-     shows. If the question never comes, "Nothing happened? Reload this page" appears after 12 s.
-   - **Level meter** once the microphone is on: "Say “ahh”", a bar that follows `levelOf` (`src/lib/audio/level.ts`),
-     "We can hear you ✓" once a voice stays past the line for 150 ms (a thump on the screen is not one), and after 5 s of
-     running silence what to check (a covered microphone, Bluetooth headphones). A microphone that opened by itself may
-     have its audio held back by the browser until a tap (`MicRecorder.running()` says so): the screen then says "Tap
-     anywhere to start listening", and a tap (or Continue) starts it. "Continue" is always there. The same microphone
-     carries on into the two notes, so the browser is not asked again.
+   - **Our own screen first**, "Set up your microphone": one line, "Your phone will ask to use the microphone. Tap
+     **Allow**." ("browser" on a computer), and one round button with a microphone on it. Nothing else: no picture, no
+     other words. The button has no text, so its name is "Turn on microphone" (`aria-label`); it is the record
+     button's own component (`RoundButton.tsx`: the same size, ring and glow). That tap itself calls `getUserMedia`
+     (iOS Safari wants a tap for audio). While the browser's question is up the button is lit and pulsing (`aria-busy`)
+     and does not take a second tap; screen readers get a hidden status line, "Waiting for your phone…". If the
+     question never comes, "Nothing happened? Reload this page" appears after 12 s: it is the only way out then. The screen is skipped when `navigator.permissions.query({ name: 'microphone' })`
+     already says *granted* (the microphone opens by itself) or *denied* (straight to the steps below). Where the
+     browser cannot say, or does not answer within 0.4 s, the screen shows.
+   - **Once the microphone is on, the step is over**: straight to the low (or high) note, whether the tap just allowed
+     it or the browser had already. There is no level meter and no "Continue". The same microphone carries on into the
+     two notes, so the browser is not asked again.
    - **When the answer is no**, told apart by reason (blocked, question closed, Android's own switch for the browser,
      no microphone, busy, unsupported): the steps for this browser (iPhone Safari: aA, Website Settings, Microphone;
      Android Chrome: lock icon, Permissions; other iPhone browsers: the Settings app; Android's own switch: Settings,
@@ -38,17 +38,26 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
      it is `reload` on the component, not `navigate`, which does nothing on an address with a `#fragment`), and that
      Safari may ask again each visit. A second no says "Still not working". "Unsupported" tells a browser we do not
      point to to open Safari or Chrome, and tells Safari or Chrome to try again.
-   - Type is 18 px or more and every button 48 px or more (the main one 56 px). The one thing to tap on each screen is
-     sticky at the bottom of the scrolling screen, so a small phone, or one set to larger text, never hides it.
-     `mic-permission.spec.ts` checks the sizes, and that the main button is in view, on 375x553: an iPhone SE with
-     Safari's toolbars showing.
+   - Type is 18 px or more and every button 48 px or more (the main one 56 px or more: the round button is 112 px). The
+     one thing to tap on each screen is sticky at the bottom of the scrolling screen, so a small phone, or one set to
+     larger text, never hides it. `mic-permission.spec.ts` checks the sizes, and that the main button is in view, on
+     375x553: an iPhone SE with Safari's toolbars showing.
    - Events: `inapp_browser_detected`, `mic_prompt_shown`, `mic_granted`, `mic_denied` (any way the answer was no, with
      a `reason`) and `mic_recovery_shown`, with only `browser`, `app`, `reason` and `via` (asked by a tap, or already
      answered) as props. They come from the flow's own transitions (`funnel.ts`), through the usual tracker.
+     `mic_granted` is logged on the grant itself, once per grant: the grant leaves the mic step for the note, so there
+     is no screen it could be tied to, and an answer the flow ignores (a late one) logs nothing. A lost microphone
+     shows our screen again, so that pass logs `mic_prompt_shown` and a second `mic_granted` (`via: 'prompt'`) even when
+     the browser, already allowing it, shows no question: a funnel per visitor takes the first of each.
 
    Every way into a note with no microphone open goes through this step: the first run, redoing the test or one end of
    it, resuming a half-done test after a reload, and a microphone taken away during a note (`MicRecorder.live()`
-   false, or a hold that recorded only zeros: a microphone the system muted is not a quiet singer).
+   false, or a hold that recorded only zeros, or audio that never started: a microphone the system muted is not a
+   quiet singer). After a microphone is lost, **our own screen shows even when the browser says allowed**
+   (`MicGate.lost`): an allowed but silent microphone would otherwise open by itself and drop the singer straight
+   back on the note with no word, and it is the tap on the round button that starts the audio again. A *quick tap* on
+   the record button is not a lost microphone: it says "hold a little longer" (a take shorter than
+   `MIN_MUTED_SAMPLES` from a running recorder).
 4. **Lowest note**: press and hold the round button (Space/Enter also work). While held,
    the mic records and a dot moves on a C2–C6 scale with the current note. On release,
    `detectHeldNote` runs on the recording. Too short a hold → "Try again…" lyric.
@@ -151,14 +160,15 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/lib/client/api.ts` | The only HTTP client (paths and shapes from `contracts.ts`). |
 | `src/lib/client/mic.ts` | `Mic`/`MicRecorder` interface (`permission()`, `open()`, `live()`, `resume()`); `MicError` and what each `getUserMedia` failure means (`classifyMicError`); AudioWorklet with ScriptProcessor fallback. `open()` never waits for the audio to start (a browser may hold it back until a tap, and a promise that never settles would leave a blank screen) and lets go of the microphone if anything after the question fails; the sample buffer keeps only the latest sound while nobody is recording. |
 | `src/lib/client/browser.ts` | The browser and OS from the user agent, and which app's built-in browser it is (`detectBrowser`); the Android Chrome intent link. |
-| `src/lib/audio/level.ts` | `levelOf`: how loud the microphone is hearing, 0 to 1, for the level meter. |
+| `src/lib/audio/level.ts` | `isDigitalSilence`: a take of only zeros, which is a microphone the system muted, not a quiet singer; `MIN_MUTED_SAMPLES`, below which a take is a tap. |
 | `src/lib/client/storage.ts` | Guarded `sessionStorage` for test progress and the pick-songs intent; `localStorage` for a range kept on the device. |
 | `src/lib/songs/browse.ts` | Sliders, chips, counts and the "Saved, not played lately" divider, as pure functions over every match. |
 | `src/lib/client/funnel.ts`, `events.ts` | What each action records in the beta event log, and the batching tracker that sends it. |
 | `src/lib/client/spotifyEmbed.ts` | A song's `open.spotify.com/track/ID` link to the address of Spotify's player, or null. |
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `reload`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,Results,SongDetail,PickSongs}.tsx` | The screen pieces. |
-| `src/components/MicStep.tsx`, `MicArt.tsx` | The mic step's screens, and the picture of where the browser's question appears. |
+| `src/components/RoundButton.tsx` | The round pink-ringed button, shared by the record button (`HoldStep.tsx`, a dot in it) and "Turn on microphone" (`MicStep.tsx`, a microphone in it), so the two keep one look. |
+| `src/components/MicStep.tsx` | The mic step's screens. |
 | `src/components/SpotifyPlayer.tsx` | Spotify's player iframe, or the plain "Open in Spotify" link when there is no track to embed. |
 | `src/components/screen.module.css`, `app/globals.css` | Styles; `prefers-reduced-motion` stops all animation. |
 
@@ -174,8 +184,10 @@ The e2e spec generates a 110 Hz (A2) and a 523.25 Hz (C5) WAV and feeds them to
 Chromium's fake microphone. Chromium takes one file per launch, so the low note is sung
 in one browser and the high note in a second one that picks up the saved progress.
 `mic-permission.spec.ts` covers the mic step with Chromium's fake microphone and the user agents of iPhone Safari, Android
-Chrome and the in-app browsers: granted, refused (and closed without an answer), already allowed, already blocked, a
-microphone taken away mid-note, and the sizes. What a real iPhone and Android phone do with those screens is checked by hand.
+Chrome and the in-app browsers: granted, refused (and closed without an answer), already allowed, already blocked, the
+browser's question left unanswered (and the reload after 12 s), a microphone taken away mid-note (our screen again
+though the browser says yes), a quick tap on the record button, and the sizes. What a real iPhone and Android phone do
+with those screens is checked by hand.
 Named screenshots land in `test-results/screens/`. The specs never load Spotify's player from
 Spotify: the screen spec answers `https://open.spotify.com/embed/**` with a stand-in page, and the
 full-stack spec (offline mock, search links only) shows the plain link.

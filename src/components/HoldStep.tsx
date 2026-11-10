@@ -3,6 +3,7 @@ import { midiToNoteName } from '../lib/audio/notes';
 import { SCALE_HIGH, SCALE_LOW, scalePosition } from '../lib/client/display';
 import type { HoldStatus } from '../lib/client/flow';
 import { Lyric } from './Lyric';
+import { RoundButton } from './RoundButton';
 import styles from './screen.module.css';
 
 interface HoldStepProps {
@@ -71,9 +72,9 @@ export function HoldStep({ kind, status, live, lowNote, onPress, onRelease }: Ho
       </div>
 
       <div className={styles.holdCenter}>
-        <button
-          type="button"
-          className={`${styles.holdButton} ${holding ? styles.holding : ''}`}
+        <RoundButton
+          className={styles.holdPress}
+          active={holding}
           aria-label={label}
           aria-pressed={holding}
           onPointerDown={onPointerDown}
@@ -86,7 +87,7 @@ export function HoldStep({ kind, status, live, lowNote, onPress, onRelease }: Ho
           onContextMenu={(e) => e.preventDefault()}
         >
           <span className={styles.holdDot} aria-hidden />
-        </button>
+        </RoundButton>
         <p className={styles.holdCaption} aria-hidden>
           {holding ? 'listening' : 'hold'}
         </p>

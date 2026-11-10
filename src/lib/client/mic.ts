@@ -93,7 +93,7 @@ export async function queryMicPermission(): Promise<MicPermission> {
   }
 }
 
-/** How much of the latest sound is kept while nobody is recording: enough for the level meter and the live pitch. */
+/** How much of the latest sound is kept while nobody is recording, so a microphone left open between notes does not fill the phone. */
 export const IDLE_KEEP = 8192;
 
 /** Collects Float32 chunks and hands back slices of them. */

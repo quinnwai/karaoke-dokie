@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ASKING_PATIENCE_MS, BUSY_PATIENCE_MS, MicStep, QUIET_HINT_MS } from '../../src/components/MicStep';
-import { HEARD_LEVEL } from '../../src/lib/audio/level';
+import { HoldStep } from '../../src/components/HoldStep';
+import { ASKING_PATIENCE_MS, BUSY_PATIENCE_MS, MicStep } from '../../src/components/MicStep';
 import type { BrowserInfo } from '../../src/lib/client/browser';
 import { initialState, type MicGate, type MicView } from '../../src/lib/client/flow';
 import type { MicProblem } from '../../src/lib/client/mic';
@@ -15,15 +15,16 @@ const IOS_CHROME: BrowserInfo = { os: 'ios', browser: 'chrome', inApp: null };
 const DESKTOP: BrowserInfo = { os: 'other', browser: 'other', inApp: null };
 const ANDROID_INSTAGRAM: BrowserInfo = { os: 'android', browser: 'other', inApp: 'instagram' };
 
-function show(view: MicView, env: BrowserInfo | null, extra: Partial<MicGate> = {}, props: Partial<Parameters<typeof MicStep>[0]> = {}) {
-  const handlers = { onAsk: vi.fn(), onTryHere: vi.fn(), onContinue: vi.fn(), onWake: vi.fn(), onReload: vi.fn() };
+function show(view: MicView, env: BrowserInfo | null, extra: Partial<MicGate> = {}) {
+  const handlers = { onAsk: vi.fn(), onTryHere: vi.fn(), onReload: vi.fn() };
   const gate: MicGate = { ...initialState.mic, view, env, ...extra };
-  const utils = render(<MicStep gate={gate} readLevel={() => 0} {...handlers} {...props} />);
+  const utils = render(<MicStep gate={gate} {...handlers} />);
   return { ...utils, ...handlers };
 }
 const view = () => document.querySelector('[data-mic-view]')!.getAttribute('data-mic-view');
 const lyric = () => document.querySelector('[data-lyric]')?.textContent;
-const buttons = () => screen.queryAllByRole('button').map((b) => b.textContent);
+/** Each button by the name it is read out as: the round one has no words on it, only an aria-label. */
+const buttons = () => screen.queryAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -59,34 +60,57 @@ describe('MicStep: before the browser is asked', () => {
     expect(onReload).toHaveBeenCalledTimes(1);
   });
 
-  it('says it plainly, with one big button, and draws where the question appears on an iPhone', () => {
+  it('says it plainly: a title, one line, and one round button with a microphone on it', () => {
     const { onAsk } = show('prompt', IOS_SAFARI);
     expect(view()).toBe('prompt');
-    expect(lyric()).toBe('We need to hear you sing');
-    expect(screen.getByText(/Your phone will ask to use the microphone/)).toBeTruthy();
-    expect(screen.getByRole('img', { name: /box in the middle of its screen/ })).toBeTruthy();
-    expect(screen.getByText('Your voice stays on your phone.')).toBeTruthy();
+    expect(lyric()).toBe('Set up your microphone');
+    expect(screen.getByText(/Your phone will ask to use the microphone/).textContent).toBe('Your phone will ask to use the microphone. Tap Allow.');
+    // Nothing else: no picture of a phone, no word about where the voice goes.
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.queryByText(/voice stays/)).toBeNull();
     expect(buttons()).toEqual(['Turn on microphone']);
-    fireEvent.click(screen.getByRole('button', { name: 'Turn on microphone' }));
+    const turnOn = screen.getByRole('button', { name: 'Turn on microphone' }) as HTMLButtonElement;
+    // No words on it: the microphone says it, and the name is for screen readers, so the picture is hidden from them.
+    expect(turnOn.textContent).toBe('');
+    expect(turnOn.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true');
+    expect(turnOn.disabled).toBe(false);
+    expect(turnOn.getAttribute('aria-busy')).toBe('false');
+    // The screen-reader line is there, empty, so that its change is announced.
+    expect(screen.getByRole('status').textContent).toBe('');
+    fireEvent.click(turnOn);
     expect(onAsk).toHaveBeenCalledTimes(1);
   });
 
-  it('draws a panel from the bottom on Android', () => {
+  it('reads the same on Android, and says "browser" rather than "phone" on a computer', () => {
     show('prompt', ANDROID_CHROME);
-    expect(screen.getByRole('img', { name: /panel sliding up from the bottom/ })).toBeTruthy();
-  });
-
-  it('says "browser" rather than "phone" on a computer', () => {
+    expect(lyric()).toBe('Set up your microphone');
+    expect(screen.getByText(/Your phone will ask to use the microphone/)).toBeTruthy();
+    expect(screen.queryByRole('img')).toBeNull();
+    cleanup();
     show('prompt', DESKTOP);
     expect(screen.getByText(/Your browser will ask to use the microphone/)).toBeTruthy();
-    expect(screen.getByText('Your voice stays on your browser.')).toBeTruthy();
   });
 
-  it('while the question is up the button waits, and after a long silence it offers a reload', () => {
-    const { onReload } = show('asking', IOS_SAFARI);
+  it('while the question is up the button shows it is waiting: lit, busy, not tappable, and still the same name', () => {
+    const { onAsk } = show('asking', IOS_SAFARI);
     expect(view()).toBe('asking');
-    const wait = screen.getByRole('button', { name: 'Waiting for your phone…' }) as HTMLButtonElement;
+    expect(lyric()).toBe('Set up your microphone');
+    const wait = screen.getByRole('button', { name: 'Turn on microphone' }) as HTMLButtonElement;
     expect(wait.disabled).toBe(true);
+    expect(wait.getAttribute('aria-busy')).toBe('true');
+    expect(wait.className).toMatch(/roundActive/);
+    // No words come and go on it either; screen readers are told what the lit button shows everyone else.
+    expect(wait.textContent).toBe('');
+    expect(screen.getByRole('status').textContent).toBe('Waiting for your phone…');
+    fireEvent.click(wait);
+    expect(onAsk).not.toHaveBeenCalled();
+    cleanup();
+    show('asking', DESKTOP);
+    expect(screen.getByRole('status').textContent).toBe('Waiting for your browser…');
+  });
+
+  it('and after a long silence it offers a reload: the way out when the browser\'s question never comes', () => {
+    const { onReload } = show('asking', IOS_SAFARI);
     expect(screen.queryByRole('button', { name: /Reload/ })).toBeNull();
 
     act(() => void vi.advanceTimersByTime(ASKING_PATIENCE_MS - 1));
@@ -94,12 +118,35 @@ describe('MicStep: before the browser is asked', () => {
     act(() => void vi.advanceTimersByTime(1));
     fireEvent.click(screen.getByRole('button', { name: 'Nothing happened? Reload this page' }));
     expect(onReload).toHaveBeenCalledTimes(1);
+    // The round button is still there, still waiting.
+    expect(buttons()).toEqual(['Turn on microphone', 'Nothing happened? Reload this page']);
   });
 
   it('offers no reload to a singer who has not tapped yet', () => {
     show('prompt', IOS_SAFARI);
     act(() => void vi.advanceTimersByTime(ASKING_PATIENCE_MS * 2));
     expect(buttons()).toEqual(['Turn on microphone']);
+  });
+
+  it('the round button is the record button\'s: one shared button, so the two look alike', () => {
+    show('prompt', IOS_SAFARI);
+    render(<HoldStep kind="low" status="ready" live={null} lowNote={null} onPress={() => {}} onRelease={() => {}} />);
+    const turnOn = screen.getByRole('button', { name: 'Turn on microphone' });
+    const record = screen.getByRole('button', { name: 'Hold to record your lowest note' });
+    const round = Array.from(turnOn.classList).find((c) => c.includes('roundButton'));
+    expect(round).toBeTruthy();
+    expect(Array.from(record.classList)).toContain(round);
+    // Lit the same way: held down on the record button, waiting on the microphone button.
+    expect(record.className).not.toMatch(/roundActive/);
+    cleanup();
+    show('asking', IOS_SAFARI);
+    render(<HoldStep kind="low" status="holding" live={null} lowNote={null} onPress={() => {}} onRelease={() => {}} />);
+    const lit = (el: HTMLElement) => /roundActive/.test(el.className);
+    expect(lit(screen.getByRole('button', { name: 'Turn on microphone' }))).toBe(true);
+    expect(lit(screen.getByRole('button', { name: 'Hold to record your lowest note' }))).toBe(true);
+    // Only the record button is held down, so only it blocks scrolling and selecting under the finger.
+    expect(screen.getByRole('button', { name: 'Hold to record your lowest note' }).className).toMatch(/holdPress/);
+    expect(screen.getByRole('button', { name: 'Turn on microphone' }).className).not.toMatch(/holdPress/);
   });
 });
 
@@ -173,115 +220,6 @@ describe('MicStep: inside another app', () => {
   });
 });
 
-describe('MicStep: the level meter', () => {
-  const frames = (levels: number[]) => {
-    let i = 0;
-    return vi.fn((): number | null => levels[Math.min(i++, levels.length - 1)]!);
-  };
-  const fill = () => document.querySelector<HTMLElement>('[class*="meterFill"]')!;
-  const tick = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
-
-  it('moves the bar with the sound, up at once and down gently', () => {
-    show('level', IOS_SAFARI, {}, { readLevel: frames([0, 0.6, 0, 0]) });
-    expect(view()).toBe('level');
-    expect(lyric()).toBe('Say “ahh”');
-    tick(50);
-    expect(fill().style.transform).toBe('scaleX(0.000)');
-    tick(50);
-    expect(fill().style.transform).toBe('scaleX(0.600)');
-    tick(50);
-    expect(fill().style.transform).toBe('scaleX(0.480)'); // 0.6 * 0.8
-    tick(50);
-    expect(fill().style.transform).toBe('scaleX(0.384)');
-  });
-
-  it('says "We can hear you" once a voice stays past the line for three polls, and keeps saying it', () => {
-    const T = HEARD_LEVEL;
-    show('level', IOS_SAFARI, {}, { readLevel: frames([0.1, T - 0.01, T, T, T, 0]) });
-    expect(screen.getByRole('status').textContent).toBe('Listening…');
-    tick(200); // 0.1, just under, T, T: not three in a row yet
-    expect(screen.getByRole('status').textContent).toBe('Listening…');
-    tick(50);
-    expect(screen.getByRole('status').textContent).toBe('We can hear you ✓');
-    expect(document.querySelector('[data-heard]')!.getAttribute('data-heard')).toBe('true');
-    tick(500);
-    expect(screen.getByRole('status').textContent).toBe('We can hear you ✓');
-  });
-
-  it('a thump on the screen, one loud poll, is not a voice', () => {
-    show('level', IOS_SAFARI, {}, { readLevel: frames([0, 0.9, 0, 0.9, 0, 0.9, 0, 0]) });
-    tick(400);
-    expect(screen.getByRole('status').textContent).toBe('Listening…');
-    expect(document.querySelector('[data-heard]')!.getAttribute('data-heard')).toBe('false');
-  });
-
-  it('after a few silent seconds says it hears nothing and what to check; a voice then takes that back', () => {
-    const readLevel = vi.fn((): number | null => 0);
-    show('level', IOS_SAFARI, {}, { readLevel });
-    tick(QUIET_HINT_MS - 100);
-    expect(screen.getByRole('status').textContent).toBe('Listening…');
-    expect(screen.queryByText(/covers the microphone/)).toBeNull();
-    tick(150);
-    expect(screen.getByRole('status').textContent).toBe('We can’t hear anything yet');
-    expect(screen.getByText(/nothing covers the microphone/i)).toBeTruthy();
-    expect(screen.getByText(/Bluetooth headphones are off/)).toBeTruthy();
-    readLevel.mockReturnValue(0.9);
-    tick(150);
-    expect(screen.getByRole('status').textContent).toBe('We can hear you ✓');
-    expect(screen.queryByText(/covers the microphone/)).toBeNull();
-  });
-
-  describe('when the browser holds the audio back until a tap (the microphone is on, nothing runs)', () => {
-    it('says to tap, not that it hears nothing, however long that lasts; a tap anywhere asks for the audio', () => {
-      const { onWake } = show('level', IOS_SAFARI, {}, { readLevel: () => null });
-      tick(50);
-      expect(screen.getByRole('status').textContent).toBe('Tap anywhere to start listening');
-      tick(QUIET_HINT_MS * 3);
-      expect(screen.getByRole('status').textContent).toBe('Tap anywhere to start listening');
-      expect(screen.queryByText(/covers the microphone/)).toBeNull();
-      expect(onWake).not.toHaveBeenCalled();
-      fireEvent.pointerDown(document.querySelector('[data-mic-view="level"]')!);
-      expect(onWake).toHaveBeenCalledTimes(1);
-    });
-
-    it('goes back to listening when the audio starts, and only running time counts toward "hears nothing"', () => {
-      const readLevel = vi.fn((): number | null => null);
-      show('level', IOS_SAFARI, {}, { readLevel });
-      tick(QUIET_HINT_MS * 2); // stalled for ten seconds
-      readLevel.mockReturnValue(0);
-      tick(50);
-      expect(screen.getByRole('status').textContent).toBe('Listening…');
-      tick(QUIET_HINT_MS - 200);
-      expect(screen.getByRole('status').textContent).toBe('Listening…');
-      tick(300);
-      expect(screen.getByRole('status').textContent).toBe('We can’t hear anything yet');
-    });
-
-    it('draws nothing on the bar while it waits', () => {
-      show('level', IOS_SAFARI, {}, { readLevel: () => null });
-      tick(500);
-      expect(fill().style.transform).toBe('');
-    });
-  });
-
-  it('never makes the singer wait for a sound: Continue is always there', () => {
-    const { onContinue } = show('level', IOS_SAFARI);
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(onContinue).toHaveBeenCalledTimes(1);
-  });
-
-  it('stops listening when it goes away', () => {
-    const readLevel = vi.fn(() => 0);
-    const { unmount } = show('level', IOS_SAFARI, {}, { readLevel });
-    tick(100);
-    const calls = readLevel.mock.calls.length;
-    unmount();
-    tick(1000);
-    expect(readLevel.mock.calls.length).toBe(calls);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-});
-
 describe('MicStep: the main button stays on screen', () => {
   // How it stays (sticky, at the bottom of the scrolling screen) is CSS, checked in the browser by mic-permission.spec.ts;
   // here, that every screen's one thing to tap is inside the wrapper that does it.
@@ -289,7 +227,6 @@ describe('MicStep: the main button stays on screen', () => {
 
   it.each([
     ['the prompt', () => show('prompt', IOS_SAFARI), 'Turn on microphone', 'button'],
-    ['the level meter', () => show('level', IOS_SAFARI), 'Continue', 'button'],
     ['the steps', () => show('recovery', IOS_SAFARI, { problem: 'denied' }), 'Try again', 'button'],
     ['the in-app screen on an iPhone', () => show('inapp', INSTAGRAM), 'Copy link', 'button'],
     ['the in-app screen on Android', () => show('inapp', ANDROID_INSTAGRAM), 'Open in Chrome', 'link'],

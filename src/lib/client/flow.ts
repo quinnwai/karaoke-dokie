@@ -44,17 +44,17 @@ export type HoldStatus = 'ready' | 'holding' | 'short' | 'order';
  * question, so the step walks them through it:
  * - checking: looking at the browser and what it already says about the microphone (no screen yet)
  * - inapp: this page is inside another app's built-in browser, which often cannot use the microphone
- * - prompt: "We need to hear you sing", before the browser's own question; its button asks
+ * - prompt: "Set up your microphone", before the browser's own question; its round button asks
  * - asking: the browser's question is up (or the microphone is opening after a tap)
  * - opening: the browser had already said yes, so the microphone opens by itself (no screen)
- * - level: the microphone is on; "Say ahh, see the bar move"
  * - recovery: it did not work; what to do, for this browser
+ * A yes, from asking or opening, goes straight on to the note: there is no screen for it.
  */
-export type MicView = 'checking' | 'inapp' | 'prompt' | 'asking' | 'opening' | 'level' | 'recovery';
+export type MicView = 'checking' | 'inapp' | 'prompt' | 'asking' | 'opening' | 'recovery';
 
 export interface MicGate {
   view: MicView;
-  /** The hold step the "Continue" on the level screen leads to. */
+  /** The hold step a yes leads to. */
   next: 'low' | 'high';
   /** What the browser is, once the step has looked. */
   env: BrowserInfo | null;
@@ -64,6 +64,12 @@ export interface MicGate {
   fails: number;
   /** "Try here anyway" was tapped: the in-app screen does not come back this visit, since the guess may be wrong. */
   triedHere: boolean;
+  /**
+   * The microphone was lost during a note (another app took it, or its audio went silent). The browser may still say
+   * "allowed", so this time our own screen shows instead of the microphone opening by itself: the tap on its button is
+   * what starts the audio again.
+   */
+  lost: boolean;
 }
 
 /** Test progress kept in sessionStorage so it survives the Spotify round trip. */
@@ -121,7 +127,7 @@ export interface FlowState {
 export const initialState: FlowState = {
   step: 'boot',
   hold: 'ready',
-  mic: { view: 'checking', next: 'low', env: null, problem: null, fails: 0, triedHere: false },
+  mic: { view: 'checking', next: 'low', env: null, problem: null, fails: 0, triedHere: false, lost: false },
   low: null,
   high: null,
   signedIn: false,
@@ -161,13 +167,12 @@ export type FlowEvent =
   | { type: 'micChecked'; env: BrowserInfo; permission: MicPermission }
   /** "Turn on microphone" or "Try again" was tapped: the browser's own question comes up. */
   | { type: 'micAsk' }
+  /** The microphone is on: straight on to the note. */
   | { type: 'micGranted' }
   | { type: 'micFailed'; reason: MicProblem }
   /** "Try here anyway" on the in-app screen. */
   | { type: 'micTryHere' }
-  /** "Continue" on the level screen. */
-  | { type: 'micDone' }
-  /** The microphone went away during a hold step (the permission was taken back, another app took it): the mic step again. */
+  /** The microphone went away or went silent during a hold step (the permission was taken back, another app took it): the mic step again. */
   | { type: 'micLost' }
   | { type: 'rangeSaved' }
   | { type: 'saveFailed' }
@@ -220,10 +225,11 @@ const withView = (state: FlowState, view: ResultsView): FlowState => ({ ...state
 /**
  * The way into a hold step when the microphone is not open (QWW-50): the mic step first, then `next`.
  * Starts it from the top every time, since the browser may have been asked since and the answer may
- * have changed; what the browser is, and that "Try here anyway" was tapped, stay.
+ * have changed; what the browser is, and that "Try here anyway" was tapped, stay. `lost` is for a microphone that
+ * went away or silent during a note (see MicGate).
  */
-function enterMic(state: FlowState, next: 'low' | 'high'): FlowState {
-  return { ...state, step: 'mic', hold: 'ready', mic: { ...initialState.mic, next, env: state.mic.env, triedHere: state.mic.triedHere } };
+function enterMic(state: FlowState, next: 'low' | 'high', lost = false): FlowState {
+  return { ...state, step: 'mic', hold: 'ready', mic: { ...initialState.mic, next, env: state.mic.env, triedHere: state.mic.triedHere, lost } };
 }
 
 /** The mic step moves only on an event meant for the screen it is on, so a late answer cannot undo a later one. */
@@ -285,23 +291,22 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       // point asking, go straight to what to do.
       if (env.inApp && !mic.triedHere) return { ...state, mic: { ...mic, view: 'inapp' } };
       if (permission === 'denied') return { ...state, mic: { ...mic, view: 'recovery', problem: 'denied', fails: mic.fails + 1 } };
-      // Already allowed: the microphone opens by itself and the singer goes straight to the level meter.
-      return { ...state, mic: { ...mic, view: permission === 'granted' ? 'opening' : 'prompt' } };
+      // Already allowed: the microphone opens by itself and the singer goes straight on to the note. Not after a lost
+      // microphone: the browser still says yes, but the audio went quiet, and only a tap on our screen starts it again.
+      return { ...state, mic: { ...mic, view: permission === 'granted' && !mic.lost ? 'opening' : 'prompt' } };
     }
     case 'micAsk':
       return inMic(state, 'prompt', 'recovery') ? { ...state, mic: { ...state.mic, view: 'asking' } } : state;
     case 'micGranted':
-      return inMic(state, 'asking', 'opening') ? { ...state, mic: { ...state.mic, view: 'level', problem: null } } : state;
+      return inMic(state, 'asking', 'opening') ? { ...state, step: state.mic.next, hold: 'ready', mic: { ...state.mic, problem: null } } : state;
     case 'micFailed':
       return inMic(state, 'asking', 'opening')
         ? { ...state, mic: { ...state.mic, view: 'recovery', problem: event.reason, fails: state.mic.fails + 1 } }
         : state;
     case 'micTryHere':
       return inMic(state, 'inapp') ? { ...state, mic: { ...state.mic, view: 'prompt', triedHere: true } } : state;
-    case 'micDone':
-      return inMic(state, 'level') ? { ...state, step: state.mic.next, hold: 'ready' } : state;
     case 'micLost':
-      return state.step === 'low' || state.step === 'high' ? enterMic(state, state.step) : state;
+      return state.step === 'low' || state.step === 'high' ? enterMic(state, state.step, true) : state;
     case 'rangeSaved':
       return { ...state, ...freshResults(state), step: 'results', mode: 'library', loading: true };
     case 'showCatalogue':

@@ -11,8 +11,9 @@ import { DEFAULT_VIEW } from '../../src/lib/songs/browse';
 
 /**
  * A mic that "hears" whatever tone the test queues for the next hold. `permission` is what the browser says
- * before anyone asks (QWW-50); `hear` is what is in the air on the level screen; `lose` takes the microphone away;
- * `stall` is a browser holding the audio back until a tap (nothing runs until `resume`).
+ * before anyone asks (QWW-50); `lose` takes the microphone away; `stall` is a browser holding the audio back until a
+ * tap (nothing runs until `resume`). Opening it again, as a tap on "Turn on microphone" does, gives a fresh microphone
+ * whose audio runs.
  */
 function fakeMic(permission: MicPermission = 'prompt') {
   const queue: Float32Array[] = [];
@@ -40,7 +41,8 @@ function fakeMic(permission: MicPermission = 'prompt') {
     permission: async () => permission,
     open: async () => {
       opened.count++;
-      alive = true; // a fresh microphone
+      alive = true; // a fresh microphone, whose audio runs
+      stalled = stuck = false;
       return recorder;
     },
   };
@@ -49,7 +51,6 @@ function fakeMic(permission: MicPermission = 'prompt') {
     sing: (hz: number, seconds = 1.5) => queue.push(voice(hz, seconds)),
     /** Whatever the microphone gives for the next hold. */
     play: (samples: Float32Array) => queue.push(samples),
-    hear: (samples: Float32Array) => void (current = samples),
     lose: () => void (alive = false),
     stall: () => void (stalled = true),
     /** Audio that stays stopped however many times it is resumed (iOS after a call or the lock screen). */
@@ -58,16 +59,15 @@ function fakeMic(permission: MicPermission = 'prompt') {
   };
 }
 
-/** Taps through the mic step the usual way: "Turn on microphone", then "Continue" on the level screen. */
+/** The mic step for a browser that has not said yes yet: one tap on "Turn on microphone", and the note follows. */
 async function throughMic() {
   fireEvent.click(await screen.findByRole('button', { name: 'Turn on microphone' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Continue' }));
 }
 
-/** Start, then the mic step, then the low note's button. */
-async function startTest() {
+/** Start, then the mic step (which an already-allowed microphone skips), then the low note's button. */
+async function startTest(permission: MicPermission = 'prompt') {
   fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
-  await throughMic();
+  if (permission !== 'granted') await throughMic();
   return screen.findByRole('button', { name: /lowest note/ });
 }
 
@@ -321,30 +321,27 @@ describe('KaraokeApp', () => {
       delete (navigator as unknown as Record<string, unknown>).clipboard;
     });
 
-    it('first run on an iPhone: our screen, then the browser asked once, the level meter, and the low note', async () => {
+    it('first run on an iPhone: our screen, then the browser asked once, and straight to the low note', async () => {
       asBrowser(IPHONE);
-      const { mic, hear, opened } = fakeMic('prompt');
+      const { mic, opened } = fakeMic('prompt');
       const log = eventLog();
       render(<KaraokeApp api={fakeApi(null)} track={log.track} mic={mic} quietMs={0} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
 
-      // Our own screen comes first, and the browser has not been asked.
+      // Our own screen comes first: a title, one line, and a round button. The browser has not been asked.
       const turnOn = await screen.findByRole('button', { name: 'Turn on microphone' });
-      expect(lyrics()).toContain('We need to hear you sing');
-      expect(screen.getByRole('img', { name: /box in the middle/ })).toBeTruthy();
-      // "Allow" is named in the words and lit up in the picture.
-      expect(screen.getAllByText('Allow')).toHaveLength(2);
+      expect(lyrics()).toEqual(['Set up your microphone']);
+      expect(screen.getByText(/Your phone will ask to use the microphone/)).toBeTruthy();
+      expect(screen.getAllByText('Allow')).toHaveLength(1);
+      expect(screen.queryByRole('img')).toBeNull();
+      expect(screen.queryByText(/voice stays/)).toBeNull();
       expect(opened.count).toBe(0);
 
-      // The tap asks. Then the singer sees the bar move and is told it works.
+      // The tap asks, and a yes goes straight to the note: no meter, nothing more to tap.
       fireEvent.click(turnOn);
-      expect(await screen.findByText('Listening…')).toBeTruthy();
-      hear(voice(220, 0.2));
-      expect(await screen.findByText('We can hear you ✓')).toBeTruthy();
-      expect(lyrics()).toContain('Say “ahh”');
-
-      fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
       await screen.findByRole('button', { name: /lowest note/ });
+      expect(screen.queryByText(/hear you|Listening|ahh/)).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
       // The same microphone carries on into the note: no second question, nothing let go in between.
       expect(opened.count).toBe(1);
       expect(opened.closed).toBe(0);
@@ -377,7 +374,6 @@ describe('KaraokeApp', () => {
 
       answer = 'yes';
       fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-      fireEvent.click(await screen.findByRole('button', { name: 'Continue' }));
       await screen.findByRole('button', { name: /lowest note/ });
       expect(opened.count).toBe(1);
       expect(log.mic().map((e) => e.name)).toEqual([
@@ -409,18 +405,16 @@ describe('KaraokeApp', () => {
       }
     });
 
-    it('a microphone the browser already allows opens by itself: straight to the level meter, no screen of ours', async () => {
+    it('a microphone the browser already allows opens by itself: straight to the low note, no screen of ours', async () => {
       asBrowser(PIXEL);
       const { mic, opened } = fakeMic('granted');
       const log = eventLog();
       render(<KaraokeApp api={fakeApi(null)} track={log.track} mic={mic} quietMs={0} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
 
-      expect(await screen.findByText('Listening…')).toBeTruthy();
+      await screen.findByRole('button', { name: /lowest note/ });
       expect(screen.queryByRole('button', { name: 'Turn on microphone' })).toBeNull();
       expect(opened.count).toBe(1);
-      fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-      await screen.findByRole('button', { name: /lowest note/ });
       expect(log.mic()).toEqual([{ name: 'mic_granted', props: { via: 'already', browser: 'android-chrome' } }]);
     });
 
@@ -473,29 +467,49 @@ describe('KaraokeApp', () => {
       ]);
     });
 
-    it('a microphone lost during the note sends the singer back through the mic step, to the same note', async () => {
-      asBrowser(IPHONE);
-      const { mic, lose, opened } = fakeMic('prompt');
-      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
-      await startTest();
+    // "granted" is the microphone that is allowed but silent: the browser still says yes, so without our screen the mic
+    // step would open it by itself and drop the singer back on the note with no word.
+    it.each(['prompt', 'granted'] as const)(
+      'a microphone lost during the note (the browser says %s) shows "Set up your microphone" again, and its tap goes back to the same note',
+      async (permission) => {
+        asBrowser(IPHONE);
+        const { mic, lose, sing, opened } = fakeMic(permission);
+        const log = eventLog();
+        render(<KaraokeApp api={fakeApi(null)} track={log.track} mic={mic} quietMs={0} />);
+        await startTest(permission);
 
-      lose();
-      await hold(/lowest note/);
-      // Not a hold that records nothing and asks to "try again" for ever: the mic step again, the old one let go.
-      await screen.findByRole('button', { name: 'Turn on microphone' });
-      expect(opened.closed).toBe(1);
-      expect(screen.queryByRole('button', { name: /lowest note/ })).toBeNull();
+        lose();
+        await hold(/lowest note/);
+        // Not a hold that records nothing and asks to "try again" for ever, and not straight back on the note: our
+        // screen, with the old microphone let go.
+        await screen.findByRole('button', { name: 'Turn on microphone' });
+        expect(lyrics()).toEqual(['Set up your microphone']);
+        expect(opened.closed).toBe(1);
+        expect(screen.queryByRole('button', { name: /lowest note/ })).toBeNull();
 
-      await throughMic();
-      await screen.findByRole('button', { name: /lowest note/ });
-      expect(opened.count).toBe(2);
-    });
+        // Its tap opens the microphone again, and the note is the one the singer was on.
+        await throughMic();
+        await screen.findByRole('button', { name: /lowest note/ });
+        expect(opened.count).toBe(2);
+        sing(110);
+        await hold(/lowest note/);
+        expect((await screen.findByTestId('low-note')).textContent).toBe('A2');
+
+        // One mic_granted for each grant, and our screen shown again before the second.
+        const grant = { name: 'mic_granted', props: { via: 'prompt', browser: 'ios-safari' } };
+        const shown = { name: 'mic_prompt_shown', props: { browser: 'ios-safari' } };
+        expect(log.mic()).toEqual(
+          permission === 'prompt' ? [shown, grant, shown, grant] : [{ name: 'mic_granted', props: { via: 'already', browser: 'ios-safari' } }, shown, grant],
+        );
+      },
+    );
 
     it('a double tap on "Turn on microphone" asks the browser once, not twice', async () => {
       const spare = fakeMic('prompt');
       let finish!: () => void;
       const open = vi.fn(() => new Promise<MicRecorder>((resolve) => (finish = async () => resolve(await spare.mic.open()))));
-      render(<KaraokeApp api={fakeApi(null)} mic={{ permission: async () => 'prompt', open }} quietMs={0} />);
+      const log = eventLog();
+      render(<KaraokeApp api={fakeApi(null)} track={log.track} mic={{ permission: async () => 'prompt', open }} quietMs={0} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
       const turnOn = await screen.findByRole('button', { name: 'Turn on microphone' });
       // Both taps land before the screen has had a chance to disable the button.
@@ -504,9 +518,13 @@ describe('KaraokeApp', () => {
         turnOn.click();
       });
       expect(open).toHaveBeenCalledTimes(1);
+      // While the question is up the button says so, and its name does not change.
+      expect(screen.getByRole('button', { name: 'Turn on microphone' }).getAttribute('aria-busy')).toBe('true');
       await act(async () => finish());
-      await screen.findByRole('button', { name: 'Continue' });
+      await screen.findByRole('button', { name: /lowest note/ });
       expect(open).toHaveBeenCalledTimes(1);
+      // One question, one grant.
+      expect(log.mic().filter((e) => e.name === 'mic_granted')).toHaveLength(1);
     });
 
     it('"Reload this page" reloads the page, which is how Safari comes to ask again', async () => {
@@ -521,25 +539,28 @@ describe('KaraokeApp', () => {
       expect(navigate).not.toHaveBeenCalled();
     });
 
-    it('a hold that records nothing but zeros is a microphone the system muted, not a note held too short', async () => {
-      asBrowser(IPHONE);
-      const { mic, play, sing, opened } = fakeMic('prompt');
-      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
-      await startTest();
+    it.each(['prompt', 'granted'] as const)(
+      'a hold that records nothing but zeros (the browser says %s) is a mic the system muted: "Set up your microphone", not a note held too short',
+      async (permission) => {
+        asBrowser(IPHONE);
+        const { mic, play, sing, opened } = fakeMic(permission);
+        render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
+        await startTest(permission);
 
-      // A call, another app or the system has muted it: all zeros. "Hold a little longer" would be said for ever.
-      play(new Float32Array(48000));
-      await hold(/lowest note/);
-      await screen.findByRole('button', { name: 'Turn on microphone' });
-      expect(opened.closed).toBe(1);
-      expect(lyrics()).not.toContain('Try again and hold the note a little longer');
+        // A call, another app or the system has muted it: all zeros. "Hold a little longer" would be said for ever.
+        play(new Float32Array(48000));
+        await hold(/lowest note/);
+        await screen.findByRole('button', { name: 'Turn on microphone' });
+        expect(opened.closed).toBe(1);
+        expect(lyrics()).toEqual(['Set up your microphone']);
 
-      await throughMic();
-      await screen.findByRole('button', { name: /lowest note/ });
-      sing(110);
-      await hold(/lowest note/);
-      expect((await screen.findByTestId('low-note')).textContent).toBe('A2');
-    });
+        await throughMic();
+        await screen.findByRole('button', { name: /lowest note/ });
+        sing(110);
+        await hold(/lowest note/);
+        expect((await screen.findByTestId('low-note')).textContent).toBe('A2');
+      },
+    );
 
     it('but a quiet singer is not a muted microphone: hiss, however faint, still says to hold the note longer', async () => {
       asBrowser(IPHONE);
@@ -553,32 +574,46 @@ describe('KaraokeApp', () => {
       expect(opened.closed).toBe(0);
     });
 
-    it('a tap that records nothing at all is a short hold, not a muted microphone, every time', async () => {
-      asBrowser(IPHONE);
-      const { mic, play, opened } = fakeMic('prompt');
-      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
-      await startTest();
-      for (let i = 0; i < 2; i++) {
-        play(new Float32Array(0)); // pointerdown and pointerup back to back: no chunk was recorded
-        await hold(/lowest note/);
-        await waitFor(() => expect(lyrics()).toContain('Try again and hold the note a little longer'));
-        expect(screen.queryByRole('button', { name: 'Turn on microphone' })).toBeNull();
-      }
-      expect(opened.closed).toBe(0);
-    });
+    it.each(['prompt', 'granted'] as const)(
+      'a quick tap on the record button (the browser says %s) says "hold a little longer", every time, and never goes to the mic step',
+      async (permission) => {
+        asBrowser(IPHONE);
+        const { mic, play, opened } = fakeMic(permission);
+        render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
+        await startTest(permission);
+        for (let i = 0; i < 2; i++) {
+          play(new Float32Array(0)); // pointerdown and pointerup back to back: no chunk was recorded
+          await hold(/lowest note/);
+          await waitFor(() => expect(lyrics()).toContain('Try again and hold the note a little longer'));
+          expect(screen.queryByRole('button', { name: 'Turn on microphone' })).toBeNull();
+          expect(screen.getByRole('button', { name: /lowest note/ })).toBeTruthy();
+        }
+        expect(opened.closed).toBe(0);
+      },
+    );
 
-    it('audio that never starts is the mic step again, not "hold a little longer" for ever', async () => {
-      asBrowser(IPHONE);
-      const { mic, play, stick, opened } = fakeMic('prompt');
-      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
-      await startTest();
-      stick();
-      play(new Float32Array(0)); // no chunk ever arrives
-      await hold(/lowest note/);
-      await screen.findByRole('button', { name: 'Turn on microphone' });
-      expect(opened.closed).toBe(1);
-      expect(lyrics()).not.toContain('Try again and hold the note a little longer');
-    });
+    it.each(['prompt', 'granted'] as const)(
+      'audio that never starts (the browser says %s) is "Set up your microphone" again, whose tap starts it; not "hold a little longer" for ever',
+      async (permission) => {
+        asBrowser(IPHONE);
+        const { mic, play, sing, stick, opened } = fakeMic(permission);
+        render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
+        await startTest(permission);
+        stick();
+        play(new Float32Array(0)); // no chunk ever arrives
+        await hold(/lowest note/);
+        await screen.findByRole('button', { name: 'Turn on microphone' });
+        expect(opened.closed).toBe(1);
+        expect(lyrics()).toEqual(['Set up your microphone']);
+
+        // The tap opens a fresh microphone, whose audio starts inside it.
+        await throughMic();
+        await screen.findByRole('button', { name: /lowest note/ });
+        sing(110);
+        await hold(/lowest note/);
+        expect((await screen.findByTestId('low-note')).textContent).toBe('A2');
+      },
+    );
 
     it('a long press that records nothing on a running recorder is the mic step too', async () => {
       asBrowser(IPHONE);
@@ -595,22 +630,23 @@ describe('KaraokeApp', () => {
       await screen.findByRole('button', { name: 'Turn on microphone' });
     });
 
-    it('a microphone that is on while the browser holds the audio back says to tap, and a tap starts it', async () => {
+    it('an allowed microphone whose audio the browser held back is asked to start by the first press, and the note goes on from there', async () => {
       asBrowser(PIXEL);
-      const { mic, stall, hear, opened } = fakeMic('granted');
-      stall();
+      const { mic, stall, sing, opened } = fakeMic('granted');
       render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+      await screen.findByRole('button', { name: /lowest note/ });
 
-      // Opened by itself with no tap, so the audio waits for one: the screen says so, not "we hear nothing".
-      expect(await screen.findByText('Tap anywhere to start listening')).toBeTruthy();
+      // Opened by itself with no tap, so the browser keeps the audio back until one, and nothing asks for it before the
+      // note. Whether a real phone starts it from a press is checked by hand: if it does not, the hold bounces to
+      // "Set up your microphone" (the test above), whose tap does.
+      stall();
       expect(opened.resumed).toBe(0);
-      hear(voice(220, 0.2));
-      await act(async () => {
-        fireEvent.pointerDown(document.querySelector('[data-mic-view="level"]')!);
-      });
+      sing(110);
+      await hold(/lowest note/);
       expect(opened.resumed).toBe(1);
-      expect(await screen.findByText('We can hear you ✓')).toBeTruthy();
+      expect((await screen.findByTestId('low-note')).textContent).toBe('A2');
+      expect(screen.queryByRole('button', { name: 'Turn on microphone' })).toBeNull();
     });
 
     it('"Try here anyway" is not asked again this visit: a lost microphone goes by permission, not back to the in-app screen', async () => {
@@ -625,7 +661,7 @@ describe('KaraokeApp', () => {
       lose();
       await hold(/lowest note/);
       await screen.findByRole('button', { name: 'Turn on microphone' });
-      expect(lyrics()).toContain('We need to hear you sing');
+      expect(lyrics()).toEqual(['Set up your microphone']);
       expect(screen.queryByRole('button', { name: 'Try here anyway' })).toBeNull();
     });
 

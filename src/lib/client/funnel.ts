@@ -113,29 +113,32 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
     default:
       break;
   }
-  out.push(...micEvents(prev, next));
+  out.push(...micEvents(prev, next, action));
   if (next.step !== prev.step) out.push(...stepEvents(next.step, next));
   return out;
 }
 
 /**
- * Events for the mic step (QWW-50), one per screen it arrives at. `mic_prompt_shown` is our own screen ahead of the
- * browser's question, the closest we can get: the browser does not say when its own box appears. `mic_denied` is any
- * way the answer was no (blocked, closed, no microphone, in use), told apart by `reason`. `via` says whether a tap
- * asked ('prompt') or the browser had already said ('already'). `browser` is 'ios-safari', 'android-chrome', ...
+ * Events for the mic step (QWW-50). `mic_prompt_shown` is our own screen ahead of the browser's question, the closest
+ * we can get: the browser does not say when its own box appears. `mic_denied` is any way the answer was no (blocked,
+ * closed, no microphone, in use), told apart by `reason`. `mic_granted` is the yes itself: it goes straight on to the
+ * note, so there is no screen to arrive at, and it is logged on the grant, once per grant (a late answer the flow
+ * ignores logs nothing). `via` says whether a tap asked ('prompt') or the browser had already said ('already').
+ * `browser` is 'ios-safari', 'android-chrome', ...
  */
-function micEvents(prev: FlowState, next: FlowState): FunnelEvent[] {
-  if (prev.step !== 'mic' || next.mic.view === prev.mic.view) return [];
+function micEvents(prev: FlowState, next: FlowState, action: FlowEvent): FunnelEvent[] {
+  if (prev.step !== 'mic') return [];
   const { env, problem } = next.mic;
   const browser = env ? browserLabel(env) : 'other';
   const via = prev.mic.view === 'asking' ? 'prompt' : 'already';
+  // The flow takes a grant only on a screen that waits for one, and then leaves the mic step.
+  if (action.type === 'micGranted') return next.step === 'mic' ? [] : [{ name: 'mic_granted', props: { via, browser } }];
+  if (next.mic.view === prev.mic.view) return [];
   switch (next.mic.view) {
     case 'inapp':
       return [{ name: 'inapp_browser_detected', props: { app: env?.inApp ?? 'webview', browser } }];
     case 'prompt':
       return [{ name: 'mic_prompt_shown', props: { browser } }];
-    case 'level':
-      return [{ name: 'mic_granted', props: { via, browser } }];
     case 'recovery':
       return [
         { name: 'mic_denied', props: { reason: problem ?? 'denied', via, browser } },

@@ -112,7 +112,7 @@ describe('the mic step (QWW-50)', () => {
   const gate = (events: FlowEvent[], from: FlowState = atMic) => run(events, from).mic;
 
   it('starts by looking at the browser, and leads on to the low note', () => {
-    expect(atMic).toMatchObject({ step: 'mic', mic: { view: 'checking', next: 'low', env: null, problem: null, fails: 0 } });
+    expect(atMic).toMatchObject({ step: 'mic', mic: { view: 'checking', next: 'low', env: null, problem: null, fails: 0, lost: false } });
   });
 
   it('shows our own screen first when the browser has not been asked, or cannot say', () => {
@@ -120,10 +120,10 @@ describe('the mic step (QWW-50)', () => {
     expect(gate([{ type: 'micChecked', env: IOS_SAFARI, permission: 'unknown' }]).view).toBe('prompt');
   });
 
-  it('skips that screen when the microphone is already allowed: it opens by itself, then the level meter', () => {
+  it('skips that screen when the microphone is already allowed: it opens by itself, then goes straight to the note', () => {
     const opening = run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'granted' }], atMic);
-    expect(opening.mic.view).toBe('opening');
-    expect(run([{ type: 'micGranted' }], opening).mic.view).toBe('level');
+    expect(opening.mic).toMatchObject({ view: 'opening', lost: false });
+    expect(run([{ type: 'micGranted' }], opening)).toMatchObject({ step: 'low', hold: 'ready' });
     expect(run([{ type: 'micFailed', reason: 'busy' }], opening).mic).toMatchObject({ view: 'recovery', problem: 'busy', fails: 1 });
   });
 
@@ -143,25 +143,27 @@ describe('the mic step (QWW-50)', () => {
     const tried = run([{ type: 'micChecked', env: INSTAGRAM, permission: 'prompt' }, { type: 'micTryHere' }], atMic);
     expect(tried.mic.triedHere).toBe(true);
     // The next time through the mic step (a microphone lost mid-note, a redo) it goes by permission like anywhere else.
-    const again = run([{ type: 'micAsk' }, { type: 'micGranted' }, { type: 'micDone' }, { type: 'micLost' }], tried);
+    const again = run([{ type: 'micAsk' }, { type: 'micGranted' }, { type: 'micLost' }], tried);
     expect(again).toMatchObject({ step: 'mic', mic: { view: 'checking', triedHere: true, env: INSTAGRAM } });
     expect(run([{ type: 'micChecked', env: INSTAGRAM, permission: 'prompt' }], again).mic.view).toBe('prompt');
-    expect(run([{ type: 'micChecked', env: INSTAGRAM, permission: 'granted' }], again).mic.view).toBe('opening');
     expect(run([{ type: 'micChecked', env: INSTAGRAM, permission: 'denied' }], again).mic.view).toBe('recovery');
+    // A redo, which comes in with no lost microphone, opens an allowed one by itself.
+    const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
+    const redo = run([{ type: 'redoEnd', end: 'low' }], { ...atResults, mic: { ...atResults.mic, env: INSTAGRAM, triedHere: true } });
+    expect(redo.mic).toMatchObject({ view: 'checking', triedHere: true, lost: false });
+    expect(run([{ type: 'micChecked', env: INSTAGRAM, permission: 'granted' }], redo).mic.view).toBe('opening');
     // Not before it was tapped.
     expect(atMic.mic.triedHere).toBe(false);
   });
 
-  it('a tap asks, a yes shows the level meter, Continue goes to the note', () => {
+  it('a tap asks, and a yes goes straight on to the note', () => {
     let s = run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' }, { type: 'micAsk' }], atMic);
     expect(s.mic.view).toBe('asking');
     s = run([{ type: 'micGranted' }], s);
-    expect(s.mic.view).toBe('level');
-    expect(s.step).toBe('mic');
-    expect(run([{ type: 'micDone' }], s)).toMatchObject({ step: 'low', hold: 'ready' });
+    expect(s).toMatchObject({ step: 'low', hold: 'ready', mic: { problem: null } });
   });
 
-  it('a no goes to recovery, "Try again" asks again, and a second no counts', () => {
+  it('a no goes to recovery, "Try again" asks again, a second no counts, and a yes at last goes on to the note', () => {
     let s = run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' }, { type: 'micAsk' }, { type: 'micFailed', reason: 'denied' }], atMic);
     expect(s.mic).toMatchObject({ view: 'recovery', problem: 'denied', fails: 1 });
     s = run([{ type: 'micAsk' }], s);
@@ -169,7 +171,7 @@ describe('the mic step (QWW-50)', () => {
     s = run([{ type: 'micFailed', reason: 'denied' }], s);
     expect(s.mic).toMatchObject({ view: 'recovery', fails: 2 });
     s = run([{ type: 'micAsk' }, { type: 'micGranted' }], s);
-    expect(s.mic).toMatchObject({ view: 'level', problem: null });
+    expect(s).toMatchObject({ step: 'low', mic: { problem: null } });
   });
 
   it('keeps going to the end it was heading for', () => {
@@ -181,25 +183,43 @@ describe('the mic step (QWW-50)', () => {
     const prompt = run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' }], atMic);
     expect(run([{ type: 'micGranted' }], prompt)).toBe(prompt);
     expect(run([{ type: 'micFailed', reason: 'denied' }], prompt)).toBe(prompt);
-    expect(run([{ type: 'micDone' }], prompt)).toBe(prompt);
     expect(run([{ type: 'micTryHere' }], prompt)).toBe(prompt);
     expect(run([{ type: 'micChecked', env: INSTAGRAM, permission: 'denied' }], prompt)).toBe(prompt);
     expect(run([{ type: 'micAsk' }], atMic)).toBe(atMic);
     expect(run([{ type: 'holdEnd', midi: 45 }, { type: 'holdStart' }], prompt)).toMatchObject({ step: 'mic', low: null });
+    // A second yes, after the first has taken the singer on to the note, is ignored.
+    const atNote = run(micOn, atMic);
+    expect(atNote.step).toBe('low');
+    expect(run([{ type: 'micGranted' }], atNote)).toBe(atNote);
     // Outside the mic step none of it does anything.
     const landing = run([signedOut]);
-    expect(run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' }, { type: 'micAsk' }, { type: 'micGranted' }, { type: 'micDone' }], landing)).toBe(landing);
+    expect(run(micOn, landing)).toBe(landing);
   });
 
   it('a microphone lost during a hold goes back to the mic step, and on to the same note', () => {
     const atHigh = run([...toLowEvents(), { type: 'holdEnd', midi: 45 }]);
     expect(atHigh.step).toBe('high');
     const lost = run([{ type: 'micLost' }], atHigh);
-    expect(lost).toMatchObject({ step: 'mic', low: 45, mic: { view: 'checking', next: 'high', fails: 0 } });
+    expect(lost).toMatchObject({ step: 'mic', low: 45, mic: { view: 'checking', next: 'high', fails: 0, lost: true } });
     expect(run(micOn, lost)).toMatchObject({ step: 'high', low: 45 });
     // Only a hold step can lose it.
     const landing = run([signedOut]);
     expect(run([{ type: 'micLost' }], landing)).toBe(landing);
+  });
+
+  it('a lost microphone shows our own screen even when the browser says it is allowed, so a tap starts the audio again', () => {
+    const lost = run([...toLowEvents(), { type: 'micLost' }]);
+    // Allowed but silent: opening it by itself would drop the singer straight back on the note with no word.
+    for (const permission of ['granted', 'prompt', 'unknown'] as const) {
+      expect(run([{ type: 'micChecked', env: IOS_SAFARI, permission }], lost).mic).toMatchObject({ view: 'prompt', lost: true });
+    }
+    // Taken back for good: the steps, not a button that cannot work.
+    expect(run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'denied' }], lost).mic).toMatchObject({ view: 'recovery', problem: 'denied' });
+    // The tap on its button asks, and a yes goes straight back to the note the singer was on.
+    const prompt = run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'granted' }], lost);
+    expect(run([{ type: 'micAsk' }, { type: 'micGranted' }], prompt)).toMatchObject({ step: 'low', hold: 'ready' });
+    // Only a lost microphone is not opened by itself: a first visit with an allowed one still is.
+    expect(run([{ type: 'micChecked', env: IOS_SAFARI, permission: 'granted' }], atMic).mic.view).toBe('opening');
   });
 
   /** Landing to the low note through the usual mic step. */

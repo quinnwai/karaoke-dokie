@@ -172,11 +172,9 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await page1.waitForTimeout(1100);
   await shot(page1, '02-quiet-spot');
 
-  // The mic step (QWW-50): our own screen, then the browser's question (the fake UI says yes), then the level
-  // meter. Its screens are checked in mic-permission.spec.ts; here the flow just has to pass through them.
+  // The mic step (QWW-50): our own screen, then the browser's question (the fake UI says yes), then the note. Its
+  // screens are checked in mic-permission.spec.ts; here the flow just has to pass through it.
   await page1.getByRole('button', { name: 'Turn on microphone', exact: true }).click({ timeout: 5000 });
-  await expect(page1.getByText('We can hear you ✓')).toBeVisible();
-  await page1.getByRole('button', { name: 'Continue' }).click();
 
   const lowButton = page1.getByRole('button', { name: 'Hold to record your lowest note' });
   await expect(lowButton).toBeVisible({ timeout: 5000 });
@@ -209,7 +207,6 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await page.goto('/');
   // A reload let go of the microphone, so the half-done test goes by way of the mic step to the high note.
   await page.getByRole('button', { name: 'Turn on microphone', exact: true }).click();
-  await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByTestId('low-note')).toHaveText('A2');
 
   await holdButton(page, /highest note/, 1600);

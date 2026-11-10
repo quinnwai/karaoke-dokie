@@ -7,10 +7,9 @@ export const IOS_SAFARI: BrowserInfo = { os: 'ios', browser: 'safari', inApp: nu
 export const ANDROID_CHROME: BrowserInfo = { os: 'android', browser: 'chrome', inApp: null };
 export const INSTAGRAM: BrowserInfo = { os: 'ios', browser: 'other', inApp: 'instagram' };
 
-/** The mic step the usual way: the browser is not asked yet, the singer taps, it says yes, the meter, Continue. */
+/** The mic step the usual way: the browser is not asked yet, the singer taps, it says yes, and the note follows. */
 export const micOn: FlowEvent[] = [
   { type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' },
   { type: 'micAsk' },
   { type: 'micGranted' },
-  { type: 'micDone' },
 ];

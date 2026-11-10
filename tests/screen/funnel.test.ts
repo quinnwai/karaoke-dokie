@@ -38,14 +38,37 @@ describe('funnel events', () => {
     }
 
     it('a first-time singer on an iPhone: our screen shown, then the answer', () => {
+      expect(record(atMic, [...micOn])).toEqual([
+        { name: 'mic_prompt_shown', props: { browser: 'ios-safari' } },
+        { name: 'mic_granted', props: { via: 'prompt', browser: 'ios-safari' } },
+      ]);
+    });
+
+    it('mic_granted is logged on the grant itself, once: the grant leaves the mic step, so no screen change carries it', () => {
+      const asking = run(micOn.slice(0, 2), atMic);
+      expect(asking.mic.view).toBe('asking');
+      // The grant is what takes the singer on to the note...
+      const atNote = run([{ type: 'micGranted' }], asking);
+      expect(atNote.step).toBe('low');
+      expect(eventsFor(asking, { type: 'micGranted' })).toEqual([{ name: 'mic_granted', props: { via: 'prompt', browser: 'ios-safari' } }]);
+      // ...and a second answer, with nothing waiting for one any more, is not a second grant.
+      expect(eventsFor(atNote, { type: 'micGranted' })).toEqual([]);
+      expect(record(atMic, [...micOn, { type: 'micGranted' }]).filter((e) => e.name === 'mic_granted')).toHaveLength(1);
+    });
+
+    it('a microphone lost during a note and set up again is a second grant, with our screen shown again before it', () => {
+      // Allowed from the start, so no screen of ours the first time; the second time the screen shows even though the browser still says yes.
       expect(
         record(atMic, [
-          { type: 'micChecked', env: IOS_SAFARI, permission: 'prompt' },
+          { type: 'micChecked', env: IOS_SAFARI, permission: 'granted' },
+          { type: 'micGranted' },
+          { type: 'micLost' },
+          { type: 'micChecked', env: IOS_SAFARI, permission: 'granted' },
           { type: 'micAsk' },
           { type: 'micGranted' },
-          { type: 'micDone' },
         ]),
       ).toEqual([
+        { name: 'mic_granted', props: { via: 'already', browser: 'ios-safari' } },
         { name: 'mic_prompt_shown', props: { browser: 'ios-safari' } },
         { name: 'mic_granted', props: { via: 'prompt', browser: 'ios-safari' } },
       ]);
