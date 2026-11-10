@@ -9,17 +9,24 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    server has `PICK_SONGS=on` (off by default, QWW-55: the first release has one onboarding flow). `app/page.tsx`
    reads it on every request and passes it to `KaraokeApp` as `pickSongs`; off, the link is not drawn and a
    pick left over in `sessionStorage` (`kd.wantsPick`) from an earlier visit is dropped. The pick screen's code stays.
+   The same switch also decides the link under the range (step 5).
 2. **Find a quiet spot**: lyric line, moves on by itself after ~2.6 s (or tap).
 3. **Lowest note**: press and hold the round button (Space/Enter also work). While held,
    the mic records and a dot moves on a C2–C6 scale with the current note. On release,
    `detectHeldNote` runs on the recording. Too short a hold → "Try again…" lyric.
 4. **Highest note**: same button; the low note shows small in the corner. A high note at
    or below the low one asks to go higher.
-5. **Range + arrow**: "That's your range A2 – C5", a wordless arrow bouncing bottom-right
-   (`aria-label="Continue"`) and "or use songs from your Spotify". The arrow goes straight to
-   catalogue results with no sign-in (QWW-2 Track B); the range is kept on the device
-   (`localStorage` `kd.range`). The text button keeps the range in `sessionStorage` (`kd.test`) and
-   goes to `/api/auth/login`.
+5. **Range + arrow**: "That's your range A2 – C5" and a wordless arrow bouncing bottom-right
+   (`aria-label="Continue"`). The arrow goes straight to catalogue results with no sign-in
+   (QWW-2 Track B); the range is kept on the device (`localStorage` `kd.range`). "or use songs from your
+   Spotify" under it shows only while `PICK_SONGS=on`, the switch of step 1 (QWW-55); it keeps the range in
+   `sessionStorage` (`kd.test`) and goes to `/api/auth/login`. With the switch off, the Spotify logo on the
+   results (step 6) is the one way to sign in.
+   A sign-in that Spotify refuses (Spotify says wait, the account is not allowed, the redirect URI does not
+   match, ...) is sent back by the callback as `/?authError=<reason>`. The range was kept for the round trip, so
+   it lands here: `?authError` is taken out of the address and one quiet line, "Couldn’t sign in to Spotify.",
+   shows under the arrow, and again under the bar of the results the arrow leads to. `access_denied` is the
+   singer pressing Cancel on Spotify's page, which is their answer, so nothing is said.
 6. **Results**: one request for every match (`/api/catalogue/recommendations?...&all=1` without
    Spotify, `/api/recommendations?all=1` with it), then the phone orders, filters and pages them
    (`src/lib/songs/browse.ts`), 5 at a time. Two panels sit above the list: **Tune** (pink), sliders

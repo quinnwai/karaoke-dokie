@@ -59,6 +59,11 @@ interface ResultsProps {
    * says so, and the connect prompts, which are for someone without Spotify, stay away.
    */
   libraryUnavailable?: boolean;
+  /**
+   * The singer tried to sign in and Spotify refused (the server's ?authError, QWW-55): one quiet line says so. The
+   * connect prompts stay, so they can try again.
+   */
+  signInFailed?: boolean;
   /** Library mode: the singer's Spotify display name (from GET /api/me). */
   displayName: string | null;
   /** Library mode: ends the session. Rejects when it could not, which the logo's box then says. */
@@ -150,6 +155,11 @@ export function Results(props: ResultsProps) {
       {props.libraryUnavailable && (
         <p className={styles.libraryNote} role="status">
           Couldn’t reach Spotify, showing popular songs.
+        </p>
+      )}
+      {props.signInFailed && (
+        <p className={styles.libraryNote} role="status">
+          Couldn’t sign in to Spotify.
         </p>
       )}
 
