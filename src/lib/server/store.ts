@@ -1,6 +1,30 @@
 // Persistence interface for the backend. Two implementations:
 // memoryStore.ts (dev, tests, e2e) and postgresStore.ts (Neon in production, pg-mem in tests).
-import type { AppEvent, DataSourceLogEntry, FeedbackEntry, Mood, SongRange, VocalRange } from '../contracts';
+import type { AppEvent, DataSourceLogEntry, FeedbackEntry, Mood, SongRange, TimeRange, Track, VocalRange } from '../contracts';
+
+/**
+ * What the sync knows about one user's stored library (QWW-55 PR 2). The liked songs are rows of their own;
+ * the rest is small and kept here. Times are epoch ms.
+ */
+export interface LibrarySyncState {
+  /** Spotify's count of liked items (unreadable ones included) at the last sync. */
+  savedTotal: number;
+  /** False while the first read is unfinished (cut off by an error, a 429 or the deadline); the next visit resumes it. */
+  savedComplete: boolean;
+  /** Where the first read resumes: the offset of the next page of liked songs. */
+  savedNextOffset: number;
+  top: Partial<Record<TimeRange, { at: number; tracks: Track[] }>>;
+  recent: { at: number; tracks: Track[] } | null;
+  /** Own playlists by id, each with the snapshot_id its songs were read at. */
+  playlists: Record<string, { snapshotId: string; tracks: Track[] }>;
+  /** Playlists are not asked for again before this (a user who never granted the scope), or 0. */
+  playlistsRetryAt: number;
+}
+
+export interface StoredLibraryState {
+  state: LibrarySyncState;
+  lastSeenAt: number;
+}
 
 export interface UserRecord {
   id: string;
@@ -184,6 +208,28 @@ export interface Store {
   getSpotifyBlock(): Promise<number | null>;
   /** Blocks Spotify until `until`. A later block wins; an earlier one never shortens it. */
   setSpotifyBlock(until: number): Promise<void>;
+
+  // ---- stored Spotify library per user (QWW-55 PR 2) ----
+  /** The sync state of a user's stored library, or null when none is stored. */
+  getLibraryState(userId: string): Promise<StoredLibraryState | null>;
+  /** Replaces the sync state and sets when the user was last seen (a visit). */
+  putLibraryState(userId: string, state: LibrarySyncState, lastSeenAt: number): Promise<void>;
+  /** The user's liked songs, newest first. */
+  listSavedTracks(userId: string): Promise<Track[]>;
+  /** Adds or replaces liked songs; `pos` orders them (higher = liked later). */
+  putSavedTracks(userId: string, rows: { track: Track; pos: number }[]): Promise<void>;
+  /** Removes liked songs by track id (the ones un-liked on Spotify). */
+  removeSavedTracks(userId: string, trackIds: string[]): Promise<void>;
+  /** Deletes everything stored about the user's library (disconnect). */
+  deleteUserLibrary(userId: string): Promise<void>;
+  /** Deletes the library of every user not seen since `before` (epoch ms); returns how many users. */
+  deleteIdleLibraries(before: number): Promise<number>;
+
+  // ---- Spotify request counts (QWW-55 PR 2) ----
+  /** Adds `n` Web API requests to the count for this UTC day ("2026-11-10") and caller. */
+  addSpotifyCalls(day: string, caller: string, n: number): Promise<void>;
+  /** The counts, newest day first; for one day when given. */
+  listSpotifyCalls(day?: string): Promise<{ day: string; caller: string; calls: number }[]>;
 
   // ---- tempo (QWW-40) ----
   /** Adds rows, or sets the fields given on a key's row: a field left unset keeps its stored value. */

@@ -13,6 +13,7 @@ import { scoreMatch } from '../songs/score';
 import { resolveSongRange, songKey } from '../songs/resolve';
 import { createSongService, type ResolveResult, type SongDeps, type SongService } from './songService';
 import { createSpotifyClient, type SpotifyClient } from './spotify';
+import { countingFetch } from './spotifyCalls';
 import type { SongMoodsRecord, Store, UsdbIndexEntry } from './store';
 import { createTrackCache, type TrackCache } from './trackCache';
 
@@ -164,7 +165,7 @@ export function getAppContext(): AppContext {
     g.__karaokeApp = {
       config,
       store,
-      spotify: config.spotifyMock ? createMockSpotifyClient() : createSpotifyClient(config.spotify),
+      spotify: config.spotifyMock ? createMockSpotifyClient() : createSpotifyClient(config.spotify, countingFetch((i, init) => fetch(i, init), store)),
       songs: createSongService(store, deps),
       tracks: createTrackCache(),
       catalogue: createCatalogue(async () => {

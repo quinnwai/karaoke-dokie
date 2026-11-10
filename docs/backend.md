@@ -45,7 +45,8 @@ ran out of budget (a first visit to a very large library), `all=1` returns `comp
 | --- | --- |
 | `SESSION_SECRET` | Required, 16+ chars. HMAC-SHA256 key for the session cookie |
 | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI` | Required unless `SPOTIFY_MOCK=1`. Redirect URI is the full `/api/auth/callback` URL |
-| `SPOTIFY_MOCK` | `1` uses the offline mock client (user "Test Singer", 25 well-known songs) and, with the memory store, seeds the placeholder songs in `data/seed-song-ranges.json` |
+| `SPOTIFY_MOCK` | `1` uses the offline mock client (user "Test Singer", 25 well-known songs) and, with the memory store, seeds the placeholder songs in `data/seed-song-ranges.json`. Also on whenever real Spotify is not allowed (see Stored library per user) |
+| `SPOTIFY_LIVE` | `1` allows real Spotify outside a Vercel preview or production (a script's `--live` sets it). Unset elsewhere, so local runs, CI and agents never spend the shared quota |
 | `DATABASE_URL` | Postgres (Neon) connection string |
 | `KARAOKE_STORE` | `memory` forces the in-memory store |
 | `ADMIN_TOKEN` | Token for `/api/admin/log` and `/api/admin/events`; unset disables both |
@@ -73,14 +74,57 @@ sign-ins, each reading the user's whole library again, used it up, and Spotify a
   store, so every serverless instance and every script sees it. A shorter 429 is waited out inside the request
   (3 retries of at most 10 s; 6 of at most 30 s for saved songs) and blocks nothing. A later block never shortens
   an earlier one. To lift it by hand: `DELETE FROM spotify_block`.
-- **No request while it holds.** `readUserTracks` (`src/lib/server/spotify.ts`), the one place that reads a user's
-  library, checks it first; the library routes use it, and so do `usdb:sync`, `report:coverage`, `report:facets`
-  and `popularity:calibrate`. The sign-in callback checks it before the token exchange. A block that cannot be
+- **No request while it holds.** `loadLibrary` (`src/lib/server/library.ts`), which the library routes and the scripts
+  (`--live`) use, checks it first; `readUserTracks` (`src/lib/server/spotify.ts`) is the older whole-library read
+  that does the same check. The sign-in callback checks it before the token exchange. A block that cannot be
   read counts as none (logged), and one more than a day away counts as a day, so a problem with that one row
-  never hides a healthy Spotify or locks the app for good.
+  never hides a healthy Spotify or locks the app for good. A user with a stored library is still served it
+  during a wait; one with nothing stored gets the catalogue's songs.
 - **Never an error response.** See the paragraph under the routes: catalogue songs and `libraryUnavailable`.
-- **How much of a library is read is unchanged**: every saved song, the three top-50 lists, the last 50 plays
-  and the user's own playlists.
+
+## Stored library per user (QWW-55 PR 2)
+
+A signed-in user's library is read in full once and kept in Postgres (`user_library` for the sync state, `user_saved`
+for the liked songs), then synced by reading only what changed (`src/lib/server/library.ts`). There is no cap on likes.
+
+| Part | When it is read |
+|---|---|
+| Liked songs | Every visit: the first page, then pages until the first song already stored. Spotify's count of liked songs must equal the stored count plus the new songs; if it does not (something was un-liked), the likes are read again in full and the missing songs are dropped. A first read that is cut off (an error, a 429, the 50 s deadline) keeps what it got and resumes from there on the next visit |
+| Top tracks (3 spans), recent plays | At most once a day each |
+| Playlists | The list of own playlists is checked on a visit (1 request); a playlist's songs are read only when its `snapshot_id` changed |
+
+A visit to a complete library makes at most `INCREMENTAL_BUDGET` (5) requests: the likes check comes first, then
+what is due in the order top tracks, recent plays, playlist list, changed playlists; the rest waits for the next
+visit. With nothing changed a visit is 2 requests. The first read and a resumed one are not limited. When a sync
+fails, the stored library is served as it is. Known gap: one song liked and another un-liked between two visits
+leaves the count unchanged, so the un-like is only noticed at the next visit where it does change.
+Other limits: the budget counts calls to the Spotify client, not HTTP requests (a retry after a short 429, or a
+user with over 50 playlists, costs more); new likes beyond the first page are read before anything else whatever the
+budget; one un-like costs a re-read of all likes (1 request per 50 songs, not resumable), and nothing is dropped
+if that read does not account for every item Spotify counts; a first read resumed after the library changed can
+miss a few songs until a later count mismatch; two simultaneous visits of one user (two instances) are not
+coordinated and can both read.
+
+**Spotify's terms**: songs un-liked on Spotify are dropped on each sync; `POST /api/auth/disconnect` (signed in)
+deletes the user's stored library, clears the session and keeps the vocal range (the app has no button for it yet);
+a library not visited for 30 days is deleted (`purgeIdleLibraries`, run at most hourly by the first library load of
+a process); the stored library is only ever returned to its own user (every read is by the session's user id). Sign-in
+tokens stay in `users` until the user removes the app in Spotify's account settings. The app has no privacy note
+page, so the retention line (stored library deleted on disconnect and after 30 days without a visit) still needs
+one when it gets one.
+
+**Where real Spotify is used.** Only a deployed preview or production (`VERCEL_ENV`), or `SPOTIFY_LIVE=1`;
+everywhere else (local dev, CI, agent runs) `readConfig` turns `SPOTIFY_MOCK` on, so no request is made. Scripts that
+read a library (`usdb:sync`, `report:coverage`, `report:facets`, `popularity:calibrate`) use the offline mock, or a
+snapshot given with `--snapshot <file>` (or `SPOTIFY_SNAPSHOT`), unless they are run with `--live`; `--live
+--save-snapshot <file>` also writes the library out for later runs.
+
+**Request counts.** Every Web API request is counted in `spotify_calls` (day UTC, caller, calls) before it is sent
+(the token endpoint is not counted): callers are `site:/api/recommendations`, `site:/api/songs/known`,
+`site:/api/auth/callback`, `script:<name>`, else `unknown`. Read it with `SELECT * FROM spotify_calls ORDER BY day DESC, calls DESC`.
+
+**Measurement.** `npm run report:library -- [spotifyUserId] [--range 39:74] [--file library.json]` prints how many
+in-range catalogue songs top and recent plays, plus the newest 200 likes, plus all likes, plus playlists find.
 
 Postgres tables are in `db/schema.sql` (an identical copy is inlined in
 `src/lib/server/schema.ts`). The Postgres store runs `migrate()` (idempotent `CREATE ... IF NOT

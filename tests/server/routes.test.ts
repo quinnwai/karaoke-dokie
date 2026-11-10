@@ -2,6 +2,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as login from '../../app/api/auth/login/route';
 import * as callback from '../../app/api/auth/callback/route';
+import * as disconnect from '../../app/api/auth/disconnect/route';
 import * as logout from '../../app/api/auth/logout/route';
 import * as me from '../../app/api/me/route';
 import * as meRange from '../../app/api/me/range/route';
@@ -160,7 +161,7 @@ describe('sign-in flow', () => {
     try {
       const jar = await signIn();
       await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
-      getAppContext().spotify.getSavedTracks = async () => {
+      getAppContext().spotify.getSavedPage = async () => {
         throw new SpotifyError('Spotify API /me/tracks?limit=50&offset=0 failed (429)', 429, '', '48000');
       };
       const res = await recs.GET(req('/api/recommendations?all=1', jar));
@@ -183,6 +184,23 @@ describe('sign-in flow', () => {
     jar.take(await logout.POST(req('/api/auth/logout', jar, { method: 'POST' })));
     expect(jar.cookies.has(SESSION_COOKIE)).toBe(false);
     expect((await me.GET(req('/api/me', jar))).status).toBe(401);
+  });
+
+  it('disconnect deletes the stored library and signs the user out (Spotify terms, QWW-55 PR 2)', async () => {
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    expect((await recs.GET(req('/api/recommendations?all=1', jar))).status).toBe(200);
+    const store = getStore();
+    const userId = (await store.listUserIds())[0]!;
+    expect((await store.listSavedTracks(userId)).length).toBeGreaterThan(0);
+    expect(await store.getLibraryState(userId)).not.toBeNull();
+
+    expect((await disconnect.POST(req('/api/auth/disconnect', undefined, { method: 'POST' }))).status).toBe(401); // not signed in: nothing to do
+    jar.take(await disconnect.POST(req('/api/auth/disconnect', jar, { method: 'POST' })));
+    expect(jar.cookies.has(SESSION_COOKIE)).toBe(false);
+    expect(await store.listSavedTracks(userId)).toEqual([]);
+    expect(await store.getLibraryState(userId)).toBeNull();
+    expect(await store.getRange(userId)).not.toBeNull(); // the vocal range is not Spotify data
   });
 
   it('login returns 500 JSON when the session secret is missing', async () => {
@@ -511,6 +529,7 @@ describe('catalogue (no Spotify)', () => {
 
   it('is not seeded outside mock mode', async () => {
     delete process.env.SPOTIFY_MOCK;
+    process.env.SPOTIFY_LIVE = '1'; // real Spotify allowed (outside a deployment it is the mock, QWW-55 PR 2)
     resetAppContextForTests();
     expect(await getAppContext().catalogue.get()).toEqual([]);
     expect(await getStore().listLog()).toEqual([]);
@@ -1145,7 +1164,7 @@ describe('Spotify trouble is never a server error', () => {
     await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
 
     // Rate limited for 2 s, again after every wait: the retries run out, the screen gets catalogue songs, and Spotify is not blocked.
-    spotify.shortLimit = { match: '/me/top/tracks', times: 99, retryAfter: 2 };
+    spotify.shortLimit = { match: '/me/tracks', times: 99, retryAfter: 2 };
     const limited = await list(jar);
     expect(limited.status).toBe(200);
     expect(limited.body.libraryUnavailable).toBe(true);
@@ -1156,6 +1175,7 @@ describe('Spotify trouble is never a server error', () => {
 
     // A quota 429 with no Retry-After at all.
     getAppContext().tracks.invalidate('real-singer');
+    await getStore().deleteUserLibrary('real-singer'); // a user with a stored library is served it during a wait; this one has none
     spotify.quota.on = true;
     spotify.quota.retryAfter = null;
     const before = Date.now();
@@ -1213,7 +1233,7 @@ describe('Spotify trouble is never a server error', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const jar = await signIn();
     await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
-    getAppContext().spotify.getTopTracks = async () => {
+    getAppContext().spotify.getSavedPage = async () => {
       throw new TypeError('fetch failed');
     };
     const res = await list(jar);
