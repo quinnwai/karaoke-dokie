@@ -1,0 +1,700 @@
+/* The Setlist tuner (round 5 design, QWW-46). Sizes, colours and radii are the spec's (docs/setlist-round5, §3, §5, §7).
+   Its tokens carry an --sl- prefix: the rest of the app already uses --bg and --ink with other values. */
+
+.app {
+  --sl-bg: #191714;
+  --sl-sheet: #211e1a;
+  --sl-panel: #2b2723;
+  --sl-line: #3a3631;
+  --sl-row-line: #2c2925;
+  --sl-text: #f7f3ea;
+  --sl-text-2: #d9d3c4;
+  --sl-text-3: #b8b2a6;
+  --sl-cream: #f4e7c5;
+  --sl-ink: #191714;
+  --sl-lane-bg: #252047;
+  --sl-font: 'Barlow Semi Condensed', system-ui, sans-serif;
+
+  /* The screen fills the viewport; wider than a phone it stays a phone-wide column. */
+  width: 100%;
+  max-width: 480px;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: max(20px, env(safe-area-inset-top)) 12px 0;
+  overflow: hidden;
+  background: var(--sl-bg);
+  color: var(--sl-text);
+  font-family: var(--sl-font);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Panning and pinching stay; a fast second tap (an era button, a reset) is not a double-tap zoom. */
+  touch-action: manipulation;
+}
+
+/* [hidden] must win over the display each of these sets, or a hidden gear would still draw. */
+.app [hidden] {
+  display: none !important;
+}
+
+.app :focus-visible {
+  outline: 2px solid var(--sl-text);
+  outline-offset: 2px;
+}
+
+/* ===== Heading ===== */
+
+.head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.title {
+  min-width: 0;
+  margin: 0;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.headTools {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rangeGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rangeChip {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--sl-text-3);
+  white-space: nowrap;
+}
+
+.rangeNote {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.redo {
+  border: 1px solid var(--sl-line);
+  border-radius: 6px;
+  background: none;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--sl-text-3);
+  cursor: pointer;
+}
+
+/* ===== Song list ===== */
+
+.listScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  /* Room under the last thing in the list, clear of the handle's touch area, which reaches 22 px above the sheet. */
+  padding-bottom: 24px;
+}
+
+.list {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  height: 58px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--sl-row-line);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* A row that changes place slides there (flip.ts takes the offset off and this runs). */
+  transition: transform 280ms ease;
+}
+
+.rowOpen {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rank {
+  width: 20px;
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--sl-text-3);
+  text-align: right;
+}
+
+.rowText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rowTitle,
+.rowSub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowTitle {
+  font-size: 18px;
+  line-height: 22px;
+  font-weight: 700;
+}
+
+.rowSub {
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--sl-text-3);
+}
+
+.lane {
+  position: relative;
+  width: 44px;
+  height: 30px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--sl-lane-bg);
+}
+
+.laneNone {
+  width: 44px;
+  height: 30px;
+  flex-shrink: 0;
+}
+
+.laneBand {
+  position: absolute;
+  left: 0;
+  right: 0;
+  opacity: 0.25;
+}
+
+.laneDash {
+  position: absolute;
+  height: 3px;
+  border-radius: 2px;
+}
+
+/* The ▶ slot: a 44 px target at the end of the row, beside the row's own button. */
+.playSlot {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+}
+
+.playButton {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--sl-text-2);
+  cursor: pointer;
+}
+
+.playButton:disabled {
+  color: var(--sl-text-3);
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ===== What else the list says ===== */
+
+.empty {
+  margin: 0;
+  padding: 24px 0;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--sl-text-2);
+}
+
+.note {
+  margin: 0;
+  padding: 10px 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sl-text-3);
+}
+
+.more {
+  display: block;
+  margin: 12px auto 4px;
+  padding: 9px 20px;
+  border: 1px solid var(--sl-line);
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--sl-text-2);
+  cursor: pointer;
+}
+
+.connectNote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 14px 0 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--sl-text-3);
+}
+
+.connectNote p {
+  margin: 0;
+}
+
+.credits {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 0 0;
+  color: var(--sl-text-3);
+  opacity: 0.6;
+}
+
+/* ===== Bottom sheet ===== */
+
+.sheet {
+  flex-shrink: 0;
+  margin: 0 -12px;
+  box-sizing: border-box;
+  padding: 0 12px max(16px, env(safe-area-inset-bottom));
+  background: var(--sl-sheet);
+  border-top: 1px solid var(--sl-line);
+  border-radius: 16px 16px 0 0;
+  /* Dragging the handle or a slider must not select the labels or open iOS's long-press callout. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.handleRow {
+  position: relative;
+  height: 22px;
+}
+
+/* 140×44 touch area centred on the sheet's top edge, with a 48×6 bar. touch-action: none keeps a drag on the handle
+   from scrolling or pulling the page. */
+.handle {
+  position: absolute;
+  left: 50%;
+  top: -11px;
+  width: 140px;
+  height: 44px;
+  margin-left: -70px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.handle:active {
+  cursor: grabbing;
+}
+
+.handle span {
+  width: 48px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--sl-text-3);
+}
+
+.rack {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: height 260ms ease;
+}
+
+.rack[data-dragging] {
+  transition: none;
+}
+
+/* ===== Gear strips ===== */
+
+.strips {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.strip {
+  display: flex;
+  flex-shrink: 0;
+  height: 76px;
+  box-sizing: border-box;
+  padding: 0 12px 0 6px;
+  background: var(--sl-panel);
+  border-radius: 8px;
+  align-items: center;
+  gap: 10px;
+}
+
+.gearArt {
+  flex-shrink: 0;
+  width: 120px;
+  height: 64px;
+  border-radius: 4px;
+}
+
+.sheet[data-compact] .strip {
+  height: 94px;
+  padding-left: 7px;
+}
+
+.sheet[data-compact] .gearArt {
+  width: 150px;
+  height: 80px;
+}
+
+.stripBody {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gearHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.eyebrow {
+  font-size: 12px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--sl-text-2);
+}
+
+.offTag {
+  color: var(--sl-text-3);
+}
+
+/* 44×26 touch area. The negative margins keep the head row 14 px tall, so the rack's height does not change, and put
+   the icon's right edge on the track's right edge. It sits above the invisible slider, which a tap on the track's
+   right end must still move. */
+.resetButton {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 44px;
+  height: 26px;
+  margin: -8px -8px -4px 0;
+  box-sizing: border-box;
+  padding: 4px 8px 0 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sl-text-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.resetButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.resetButton:hover {
+  color: var(--sl-text);
+}
+
+.resetButton:focus-visible {
+  outline: 2px solid var(--sl-text);
+  outline-offset: -2px;
+}
+
+.track {
+  position: relative;
+  height: 14px;
+}
+
+.track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--sl-line);
+}
+
+.trackFill {
+  position: absolute;
+  left: 0;
+  top: 5px;
+  height: 4px;
+  border-radius: 2px;
+  width: var(--pct, 0%);
+  background: var(--sl-cream);
+}
+
+.trackThumb {
+  position: absolute;
+  top: 0;
+  left: var(--pct, 0%);
+  width: 18px;
+  height: 14px;
+  margin-left: -9px;
+  border-radius: 4px;
+  background: var(--sl-cream);
+}
+
+.stripBody:has(.sliderInput:focus-visible) .trackThumb {
+  outline: 2px solid var(--sl-text);
+  outline-offset: 2px;
+}
+
+.ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  line-height: 14px;
+  font-weight: 700;
+  color: var(--sl-text-2);
+}
+
+/* What the strip says when the gear cannot be used, where the track would be. */
+.unavailable {
+  margin: 0;
+  min-height: 34px;
+  font-size: 13px;
+  line-height: 14px;
+  font-weight: 700;
+  color: var(--sl-text-3);
+}
+
+/* The real <input type="range">, laid invisibly over the whole strip body. It starts 9 px before the track and ends
+   9 px after it, and its thumb is 18 px wide, so the thumb's centre travels exactly the track's length: a tap lands
+   on the value the drawn thumb shows. */
+.sliderInput {
+  position: absolute;
+  left: -9px;
+  top: -6px;
+  width: calc(100% + 18px);
+  height: calc(100% + 12px);
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: ew-resize;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  /* A drag that drifts up or down must stay with the thumb, not scroll or pull the page. */
+  touch-action: none;
+}
+
+.sliderInput::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+
+.sliderInput::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+}
+
+.sliderInput::-moz-range-track {
+  height: 100%;
+  background: transparent;
+}
+
+.sliderInput::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: none;
+}
+
+/* ===== Off: the gear is not factored in (spec §4a) ===== */
+
+.strip[data-off] .gearArt,
+.tab[data-off] svg {
+  opacity: 0.3;
+  filter: grayscale(1);
+}
+
+.strip[data-off] .gearArt *,
+.tab[data-off] svg * {
+  animation-play-state: paused !important;
+}
+
+.strip[data-off] .trackFill {
+  display: none;
+}
+
+.strip[data-off] .trackThumb {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--sl-text-3);
+}
+
+.strip[data-off] .ends {
+  color: var(--sl-text-3);
+}
+
+/* ===== Era ===== */
+
+.eraPanel {
+  display: flex;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 8px;
+  background: var(--sl-panel);
+  border-radius: 8px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eraGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.eraButton {
+  height: 52px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: var(--sl-bg);
+  color: var(--sl-text-2);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.eraButton[aria-pressed='true'] {
+  background: var(--sl-cream);
+  color: var(--sl-ink);
+}
+
+/* A default pick while Era is off: outlined, not filled. */
+.eraButton[data-parked] {
+  box-shadow: inset 0 0 0 2px var(--sl-text-3);
+}
+
+.sheet[data-compact] .eraButton {
+  height: 60px;
+}
+
+/* ===== Tab bar (mini only) ===== */
+
+.tabs {
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.tab {
+  height: 62px;
+  padding: 4px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 6px;
+  background: var(--sl-panel);
+  color: var(--sl-text-2);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.tab[aria-pressed='true'] {
+  background: var(--sl-cream);
+  color: var(--sl-ink);
+}
+
+.tab svg {
+  flex-shrink: 0;
+  width: 62px;
+  height: 33px;
+  border-radius: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .rack {
+    transition: none !important;
+  }
+}

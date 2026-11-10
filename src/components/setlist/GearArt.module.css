@@ -1,0 +1,53 @@
+/* The gear art's own styles (spec §6), copied from the reference's <style> block. Size, corner radius and the off-state
+   dimming (opacity 0.3, grayscale, animations paused) belong to the parent, which passes a className. */
+
+/* Backgrounds. Literal colours, not var(): these are the reference's --lane-bg, --cream, --bg and #0E0D0B. The app's
+   own --bg is #07060a, so the art cannot lean on tokens the screen may or may not redefine. */
+.artLane {
+  background: #252047;
+}
+.artCream {
+  background: #f4e7c5;
+}
+.artDark {
+  background: #191714;
+}
+.artBlack {
+  background: #0e0d0b;
+}
+
+/* A note or a bolt fades in and out as the value crosses its threshold. */
+.histNote,
+.popBolt {
+  transition: opacity 180ms;
+}
+
+/* The pendulum swings around its pivot at (75, 62) in the 150x80 viewBox. Its keyframes are global, in
+   setlist-global.css: the animation is an inline style, and an inline style cannot name a keyframes rule that CSS
+   Modules would rename. */
+.metroPend {
+  transform-origin: 75px 62px;
+}
+
+@keyframes bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-2px);
+  }
+}
+/* The strip's notes and bolts bob. Each keeps its own inline animation-delay, so they do not move in step. */
+.bob,
+.zap {
+  animation: bob 1.1s ease-in-out infinite alternate;
+}
+
+/* !important so it also beats the pendulum's inline animation. */
+@media (prefers-reduced-motion: reduce) {
+  .metroPend,
+  .bob,
+  .zap {
+    animation: none !important;
+  }
+}
