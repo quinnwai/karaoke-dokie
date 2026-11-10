@@ -148,9 +148,13 @@ export class SampleBuffer {
   }
 }
 
+/** Samples per recorder chunk: a take shorter than this has no sound in it yet. tests tie these to MIN_MUTED_SAMPLES. */
+export const WORKLET_CHUNK = 1024;
+export const SCRIPT_CHUNK = 2048;
+
 const WORKLET = `
 class KdTap extends AudioWorkletProcessor {
-  constructor() { super(); this.buf = new Float32Array(1024); this.n = 0; }
+  constructor() { super(); this.buf = new Float32Array(${WORKLET_CHUNK}); this.n = 0; }
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
     if (ch) {
@@ -205,7 +209,7 @@ export const browserMic: Mic = {
         worklet.port.onmessage = (e: MessageEvent<Float32Array>) => buffer.push(e.data);
         node = worklet;
       } catch {
-        const processor = ctx.createScriptProcessor(2048, 1, 1);
+        const processor = ctx.createScriptProcessor(SCRIPT_CHUNK, 1, 1);
         processor.onaudioprocess = (e) => buffer.push(new Float32Array(e.inputBuffer.getChannelData(0)));
         node = processor;
       }

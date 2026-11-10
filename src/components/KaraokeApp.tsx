@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { detectPitch } from '../lib/audio/pitch';
 import { detectHeldNote } from '../lib/audio/heldNote';
-import { isDigitalSilence, levelOf } from '../lib/audio/level';
+import { isDigitalSilence, levelOf, MIN_MUTED_SAMPLES } from '../lib/audio/level';
 import { frequencyToMidi, midiToNoteName } from '../lib/audio/notes';
 import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
 import { detectBrowser } from '../lib/client/browser';
@@ -50,6 +50,8 @@ export interface KaraokeAppProps {
 }
 
 const LIVE_FRAME = 2048;
+/** A press shorter than this is a tap. */
+const TAP_MS = 400;
 const LIVE_EVERY_MS = 50; // ~20 times a second
 
 const defaultNavigate = (url: string) => window.location.assign(url);
@@ -81,6 +83,7 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
   const [signInFailed, setSignInFailed] = useState(false);
   const recorder = useRef<MicRecorder | null>(null);
   const holding = useRef(false);
+  const holdStarted = useRef(0);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Who is this? Signed in, mid-test, or brand new.
@@ -267,6 +270,7 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
       return;
     }
     holding.current = true;
+    holdStarted.current = Date.now();
     setLive(null);
     dispatch({ type: 'holdStart' });
     rec.resume();
@@ -291,10 +295,12 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
       return;
     }
     const samples = rec.take();
-    // Only exact zeros for long enough (a tap gives a short or empty take, which is just a short hold). A quiet singer's microphone still wobbles; this is one the system has
-    // muted (a call, another app) and "hold the note a little longer" would be said for
-    // ever. Back to the mic step, which asks again and shows what the microphone hears.
-    if (isDigitalSilence(samples)) {
+    // Muted, or audio that never started: only exact zeros for long enough, or no sound at all from a recorder that is
+    // not running (iOS after a call or the lock screen) or after a hold too long to be a tap. A quiet singer's
+    // microphone still wobbles, and a quick tap on a running recorder is just a short hold. "Hold the note a little
+    // longer" would be said for ever. Back to the mic step, which asks again and shows what the microphone hears.
+    const longHold = Date.now() - holdStarted.current > TAP_MS;
+    if (isDigitalSilence(samples) || (samples.length < MIN_MUTED_SAMPLES && (!rec.running() || longHold))) {
       releaseMic();
       dispatch({ type: 'micLost' });
       return;

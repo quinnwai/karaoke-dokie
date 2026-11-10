@@ -19,6 +19,7 @@ function fakeMic(permission: MicPermission = 'prompt') {
   let current: Float32Array = new Float32Array(0);
   let alive = true;
   let stalled = false;
+  let stuck = false; // audio that a press does not start
   const opened = { count: 0, closed: 0, resumed: 0 };
   const recorder: MicRecorder = {
     sampleRate: SAMPLE_RATE,
@@ -31,7 +32,7 @@ function fakeMic(permission: MicPermission = 'prompt') {
     running: () => !stalled,
     resume: () => {
       opened.resumed++;
-      stalled = false;
+      if (!stuck) stalled = false;
     },
     close: () => void opened.closed++,
   };
@@ -51,6 +52,8 @@ function fakeMic(permission: MicPermission = 'prompt') {
     hear: (samples: Float32Array) => void (current = samples),
     lose: () => void (alive = false),
     stall: () => void (stalled = true),
+    /** Audio that stays stopped however many times it is resumed (iOS after a call or the lock screen). */
+    stick: () => void (stalled = stuck = true),
     opened,
   };
 }
@@ -562,6 +565,34 @@ describe('KaraokeApp', () => {
         expect(screen.queryByRole('button', { name: 'Turn on microphone' })).toBeNull();
       }
       expect(opened.closed).toBe(0);
+    });
+
+    it('audio that never starts is the mic step again, not "hold a little longer" for ever', async () => {
+      asBrowser(IPHONE);
+      const { mic, play, stick, opened } = fakeMic('prompt');
+      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
+      await startTest();
+      stick();
+      play(new Float32Array(0)); // no chunk ever arrives
+      await hold(/lowest note/);
+      await screen.findByRole('button', { name: 'Turn on microphone' });
+      expect(opened.closed).toBe(1);
+      expect(lyrics()).not.toContain('Try again and hold the note a little longer');
+    });
+
+    it('a long press that records nothing on a running recorder is the mic step too', async () => {
+      asBrowser(IPHONE);
+      const { mic, play } = fakeMic('prompt');
+      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
+      await startTest();
+      const now = vi.spyOn(Date, 'now');
+      now.mockReturnValue(1_000);
+      play(new Float32Array(0));
+      const button = screen.getByRole('button', { name: /lowest note/ });
+      await act(async () => void fireEvent.pointerDown(button));
+      now.mockReturnValue(2_000); // a second later
+      await act(async () => void fireEvent.pointerUp(button));
+      await screen.findByRole('button', { name: 'Turn on microphone' });
     });
 
     it('a microphone that is on while the browser holds the audio back says to tap, and a tap starts it', async () => {

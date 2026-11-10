@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SCRIPT_CHUNK, WORKLET_CHUNK } from '../../src/lib/client/mic';
 import { HEARD_LEVEL, isDigitalSilence, MIN_MUTED_SAMPLES, LEVEL_CEIL_DB, LEVEL_FLOOR_DB, levelOf } from '../../src/lib/audio/level';
 import { noise, sine, voice } from '../helpers/synth';
 
@@ -48,6 +49,12 @@ describe('levelOf', () => {
 
   it('takes any array of numbers', () => {
     expect(levelOf([0.1, -0.1, 0.1, -0.1])).toBeCloseTo(levelOf(atDb(-20)), 5);
+  });
+});
+
+describe('MIN_MUTED_SAMPLES', () => {
+  it('stays above the biggest recorder chunk, twice over, so a tap can never look muted', () => {
+    expect(MIN_MUTED_SAMPLES).toBeGreaterThan(2 * Math.max(WORKLET_CHUNK, SCRIPT_CHUNK));
   });
 });
 
