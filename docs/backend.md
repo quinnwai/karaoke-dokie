@@ -219,8 +219,10 @@ be switched off (no key) and nothing else changes. What the sink keeps to:
   signed-in visitor, whose screen shows their Spotify name and songs from their library; a Log out
   starts it. It also needs "Record user sessions" on in PostHog (Settings > Project > Session
   replay).
-- **Loading**: `posthog-js` is imported on the first event, after the screen is up. Events that
-  arrive while it loads wait (at most 100) and keep the time they happened.
+- **Loading**: `posthog-js` is a separate chunk, imported once the screen is up (the screen's first
+  `setReplay`) or at the first event, whichever is first, so the title screen never waits for it.
+  Events that arrive while it loads wait (at most 100) and keep the time they happened; a page that
+  closes before it is ready loses them from PostHog, not from our log.
 
 The `/credits` page tells testers this in plain words (`ANALYTICS_NOTE` in `src/lib/credits.ts`); change both together.
 

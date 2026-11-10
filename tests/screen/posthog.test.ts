@@ -135,6 +135,19 @@ describe('createPostHogSink', () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
+  it('starts loading posthog-js when the screen first reports in, so the first event need not wait for it', async () => {
+    const { sink, calls, load, finish } = sinkWithSlowLoad();
+    sink.setReplay(false);
+    await settle();
+    expect(load).toHaveBeenCalledTimes(1);
+    finish();
+    await settle();
+    expect(calls.init).toHaveLength(1);
+    sink.capture(event('title_view'));
+    expect(calls.capture.map((c) => c[0])).toEqual(['title_view']); // sent at once, nothing waited
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
   it('is initialised with the device id as the distinct id', async () => {
     const { sink, calls, finish } = sinkWithSlowLoad();
     sink.capture(event('title_view'));

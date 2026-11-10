@@ -92,8 +92,9 @@ async function loadPostHog(): Promise<PostHogClient> {
 }
 
 /**
- * The sink. `load` brings in posthog-js on the first event (a fake in tests). Events that arrive meanwhile wait, and keep
- * the time they happened. It never throws.
+ * The sink. `load` brings in posthog-js (a fake in tests) as soon as the screen first reports in with setReplay, or the
+ * first event arrives, whichever is first. Events that arrive meanwhile wait, and keep the time they happened; a page that
+ * goes away before posthog-js is ready loses them from PostHog, not from our log. It never throws.
  */
 export function createPostHogSink(settings: PostHogSettings, anonId: string, load: () => Promise<PostHogClient> = loadPostHog): PostHogSink {
   let client: PostHogClient | null = null;
@@ -102,6 +103,18 @@ export function createPostHogSink(settings: PostHogSettings, anonId: string, loa
   let replay = false;
   let recording = false;
   let waiting: AppEvent[] = [];
+
+  function start(): void {
+    if (loading || gone) return;
+    loading = true;
+    Promise.resolve()
+      .then(load)
+      .then(ready, () => {
+        // Blocked or offline: our log carries on alone.
+        gone = true;
+        waiting = [];
+      });
+  }
 
   function send(c: PostHogClient, event: AppEvent): void {
     try {
@@ -145,19 +158,12 @@ export function createPostHogSink(settings: PostHogSettings, anonId: string, loa
         return;
       }
       if (waiting.length < WAITING_MAX) waiting.push(event);
-      if (loading) return;
-      loading = true;
-      Promise.resolve()
-        .then(load)
-        .then(ready, () => {
-          // Blocked or offline: our log carries on alone.
-          gone = true;
-          waiting = [];
-        });
+      start();
     },
     setReplay(on) {
       replay = on;
       if (client) applyReplay(client);
+      else start();
     },
   };
 }
