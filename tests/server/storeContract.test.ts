@@ -8,6 +8,7 @@ import { createPostgresStore, migrate, schemaStatements, type QueryFn } from '..
 import { SCHEMA_SQL } from '../../src/lib/server/schema';
 import { pickStoreKind } from '../../src/lib/server/getStore';
 import type { Store } from '../../src/lib/server/store';
+import type { SongMoodsRecord, SongPopularityRecord } from '../../src/lib/server/store';
 
 function pgMemQuery(opts: Parameters<typeof newDb>[0] = {}): QueryFn {
   const db = newDb(opts);
@@ -105,6 +106,18 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(listed.map((r) => r.low).sort()).toEqual([50, 52, 53, 54]);
     expect(listed.find((r) => r.low === 53)).toMatchObject({ source: 'audio-full', method: 'pyin-v1/app-range-v1' });
     expect(await s.listMeasuredRangesByArtist('nobody')).toEqual([]);
+    // Every stored range for the artist, estimates included, keyed by song; skips and other artists left out.
+    const all = await s.listSongRangesByArtist('queen');
+    expect([...all.keys()].sort()).toEqual([
+      'queen|bohemian rhapsody',
+      'queen|guess',
+      'queen|published',
+      'queen|radio ga ga',
+      'queen|rough',
+      'queen|somebody to love',
+    ]);
+    expect(all.get('queen|radio ga ga')?.range).toMatchObject({ source: 'audio-full' });
+    expect((await s.listSongRangesByArtist('nobody')).size).toBe(0);
   });
 
   it('keeps a USDB song index: upserts by id, finds the most-viewed per key, reports size and newest change', async () => {
@@ -125,6 +138,119 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect((await s.findUsdbSongs(['queen|bohemian rhapsody'])).get('queen|bohemian rhapsody')).not.toHaveProperty('rating');
   });
 
+  describe('catalogue', () => {
+    const recording = { ...songRange, source: 'audio-full' as const, method: 'pyin-v1/app-range-v1' };
+    const estimate = (source: 'artist-typical' | 'artist-external') => ({ ...songRange, source, confidence: 'low' as const });
+    /** A stored row whose log line has the display names, as a library lookup or import writes it. */
+    const row = (artist: string, title: string, range: SongRange | null) => ({
+      range,
+      log: { trackId: 'spotify-track-id', title, artist, outcome: range?.source ?? ('skipped' as const), reason: 'r', at: '2026-01-01T00:00:00.000Z' },
+    });
+    const rows = {
+      'queen|bohemian rhapsody': row('Queen', 'Bohemian Rhapsody - Remastered 2011', songRange),
+      'abba|sos': row('ABBA', 'SOS', recording),
+      'abba|waterloo': row('ABBA', 'Waterloo', songRange),
+      'toto|africa': row('Toto', 'Africa', recording),
+      'a-ha|take on me': row('a-ha', 'Take On Me', songRange),
+      'queen|rough': row('Queen', 'Rough', { ...recording, confidence: 'low' as const }),
+      'queen|guess': row('Queen', 'Guess', estimate('artist-typical')),
+      'queen|published': row('Queen', 'Published', estimate('artist-external')),
+      'nobody|skipped': row('Nobody', 'Skipped', null),
+    };
+    const usdb = {
+      bohemianStudio: { id: 1, key: 'queen|bohemian rhapsody', artist: 'Queen', title: 'Bohemian Rhapsody', views: 100, rating: 4.5 },
+      bohemianLive: { id: 2, key: 'queen|bohemian rhapsody', artist: 'Queen', title: 'Bohemian Rhapsody (Live)', views: 900 },
+      sos: { id: 3, key: 'abba|sos', artist: 'ABBA', title: 'SOS', views: 900, rating: 3 },
+      waterlooLater: { id: 7, key: 'abba|waterloo', artist: 'ABBA', title: 'Waterloo (Duet)', views: 50, rating: 5 },
+      waterloo: { id: 6, key: 'abba|waterloo', artist: 'ABBA', title: 'Waterloo', views: 50, rating: 2 },
+      guess: { id: 4, key: 'queen|guess', artist: 'Queen', title: 'Guess', views: 99_999 },
+      skipped: { id: 5, key: 'nobody|skipped', artist: 'Nobody', title: 'Skipped', views: 99_999 },
+    };
+    async function filled(): Promise<Store> {
+      const s = make();
+      for (const [key, rec] of Object.entries(rows)) await s.putSongRange(key, rec);
+      await s.putUsdbSongs(Object.values(usdb));
+      return s;
+    }
+
+    it('is empty with no song ranges', async () => {
+      expect(await make().listCatalogue(10)).toEqual([]);
+    });
+
+    it('has one row per song with its most-viewed USDB row (a tie goes to the lower id)', async () => {
+      const all = await (await filled()).listCatalogue(100);
+      expect(new Set(all.map((c) => c.key)).size).toBe(all.length);
+      const byKey = new Map(all.map((c) => [c.key, c]));
+      expect(byKey.get('queen|bohemian rhapsody')!.usdb).toEqual(usdb.bohemianLive);
+      expect(byKey.get('abba|sos')!.usdb).toEqual(usdb.sos);
+      expect(byKey.get('abba|waterloo')!.usdb).toEqual(usdb.waterloo);
+      expect(byKey.get('toto|africa')).not.toHaveProperty('usdb');
+    });
+
+    it('leaves out skipped songs and artist estimates, even with a USDB row, and keeps rough recordings', async () => {
+      const keys = (await (await filled()).listCatalogue(100)).map((c) => c.key);
+      for (const left of ['queen|guess', 'queen|published', 'nobody|skipped']) expect(keys).not.toContain(left);
+      expect(keys).toContain('queen|rough');
+    });
+
+    it('orders by popularity from USDB views and stars, then songs with none by key, and cuts to the limit', async () => {
+      const s = await filled();
+      const order = ['abba|sos', 'queen|bohemian rhapsody', 'abba|waterloo', 'a-ha|take on me', 'queen|rough', 'toto|africa'];
+      expect((await s.listCatalogue(100)).map((c) => c.key)).toEqual(order);
+      expect((await s.listCatalogue(2)).map((c) => c.key)).toEqual(order.slice(0, 2));
+      expect(await s.listCatalogue(0)).toEqual([]);
+    });
+
+    it('also orders by karaoke popularity and the range’s own USDB views, so a recording with no USDB row makes the cut (QWW-32)', async () => {
+      const s = await filled();
+      await s.putSongRange('a-ha|take on me', row('a-ha', 'Take On Me', { ...songRange, usdbViews: 5_000 }));
+      const pop = (key: string, p: Partial<SongPopularityRecord>): SongPopularityRecord => ({ key, source: 'karafun+billboard', ...p });
+      await s.putSongPopularity([
+        // Scores below are on the committed popularity scale (src/lib/songs/popularityScale.ts);
+        // recalibrating can move them.
+        pop('toto|africa', { karaokeViews: 40_000_000 }), // a recording with no USDB row: 1, the top of the scale
+        pop('queen|rough', { chartRank: 15, chartYear: 1999 }), // top-20 Year-End floor: 0.73
+        pop('abba|waterloo', { chartRank: 90, chartYear: 1990 }), // lifted from 0.01 to the 0.62 floor
+        pop('queen|guess', { karaokeViews: 40_000_000 }), // an estimate: still left out
+        pop('nobody|skipped', { karaokeViews: 40_000_000 }), // skipped: still left out
+      ]);
+      // a-ha's own range views (0.97) count as the catalogue scores them; sos and Bohemian tie at 0.88, then by key.
+      const order = ['toto|africa', 'a-ha|take on me', 'abba|sos', 'queen|bohemian rhapsody', 'queen|rough', 'abba|waterloo'];
+      expect((await s.listCatalogue(100)).map((c) => c.key)).toEqual(order);
+      // Past the limit, Year-End songs are still read: Rough and Waterloo, not SOS or Bohemian.
+      expect((await s.listCatalogue(2)).map((c) => c.key)).toEqual(['toto|africa', 'a-ha|take on me', 'queen|rough', 'abba|waterloo']);
+      const waterloo = (await s.listCatalogue(100)).find((c) => c.key === 'abba|waterloo')!;
+      expect(waterloo.usdb).toEqual(usdb.waterloo); // the row is still the most-viewed one (a tie goes to the lower id)
+    });
+
+    it('takes display names from the log line and returns the stored range and log as they are', async () => {
+      const all = await (await filled()).listCatalogue(100);
+      const queen = all.find((c) => c.key === 'queen|bohemian rhapsody')!;
+      expect(queen).toEqual({
+        key: 'queen|bohemian rhapsody',
+        artist: 'Queen',
+        title: 'Bohemian Rhapsody - Remastered 2011',
+        range: songRange,
+        log: rows['queen|bohemian rhapsody'].log,
+        usdb: usdb.bohemianLive,
+      });
+      expect(all.find((c) => c.key === 'a-ha|take on me')).toMatchObject({ artist: 'a-ha', title: 'Take On Me', range: songRange });
+      expect(all.find((c) => c.key === 'abba|sos')!.range).toEqual(recording);
+    });
+  });
+
+  it('reads back genre, year and language in the USDB index, and replaces them on update', async () => {
+    const s = make();
+    const full = { id: 1, key: 'queen|bohemian rhapsody', artist: 'Queen', title: 'Bohemian Rhapsody', views: 100, genre: 'Rock', year: 1975, language: 'English' };
+    const bare = { id: 2, key: 'abba|sos', artist: 'ABBA', title: 'SOS' };
+    await s.putUsdbSongs([full, bare]);
+    expect((await s.findUsdbSongs(['queen|bohemian rhapsody'])).get('queen|bohemian rhapsody')).toStrictEqual(full);
+    expect(await s.listUsdbSongs()).toStrictEqual([full, bare]);
+    // A newer list row is the whole truth: a cleared year or language goes, a changed genre replaces the old one.
+    await s.putUsdbSongs([{ id: 1, key: full.key, artist: 'Queen', title: 'Bohemian Rhapsody', views: 120, genre: 'Classic Rock' }]);
+    expect((await s.findUsdbSongs([full.key])).get(full.key)).toStrictEqual({ id: 1, key: full.key, artist: 'Queen', title: 'Bohemian Rhapsody', views: 120, genre: 'Classic Rock' });
+  });
+
   it('lists log entries newest first with a limit', async () => {
     const s = make();
     for (const n of [1, 3, 2]) await s.appendLog(logEntry(n, n === 2 ? 'skipped' : 'artist-typical'));
@@ -133,6 +259,48 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(all[1]).toEqual(logEntry(2, 'skipped'));
     expect(await s.listLog(1)).toEqual([logEntry(3, 'artist-typical')]);
   });
+
+  it('reads back beta events: the newest `limit`, oldest first, optionally for one device', async () => {
+    const s = make();
+    const at = (n: number) => new Date(Date.UTC(2026, 10, 3, 0, 0, n)).toISOString();
+    const opened = { name: 'song_opened', at: at(1), props: { sort: 'top', position: 2, fits: true, mood: null } };
+    // An anonId inside the event must not override the device the call is for.
+    const spoofed = { name: 'results_viewed', at: at(4), anonId: 'device-zzzz' };
+    await s.appendEvents('device-aaaa', [opened, spoofed]);
+    await s.appendEvents('device-bbbb', [{ name: 'range_shown', at: at(3) }, { name: 'landing_viewed', at: at(2) }]);
+    const all = await s.listEvents();
+    expect(all).toEqual([
+      { anonId: 'device-aaaa', ...opened },
+      { anonId: 'device-bbbb', name: 'landing_viewed', at: at(2) },
+      { anonId: 'device-bbbb', name: 'range_shown', at: at(3) },
+      { anonId: 'device-aaaa', name: 'results_viewed', at: at(4) },
+    ]);
+    expect(all[1]).not.toHaveProperty('props');
+    expect((await s.listEvents({ limit: 2 })).map((e) => e.name)).toEqual(['range_shown', 'results_viewed']);
+    expect((await s.listEvents({ anonId: 'device-aaaa' })).map((e) => e.name)).toEqual(['song_opened', 'results_viewed']);
+    expect(await s.listEvents({ anonId: 'device-aaaa', limit: 1 })).toEqual([{ anonId: 'device-aaaa', name: 'results_viewed', at: at(4) }]);
+    expect(await s.listEvents({ anonId: 'device-zzzz' })).toEqual([]);
+  });
+
+  it('keeps beta events with the same time in the order they arrived', async () => {
+    const s = make();
+    const at = '2026-11-03T00:00:00.000Z';
+    await s.appendEvents('device-aaaa', [{ name: 'first', at }, { name: 'second', at }]);
+    await s.appendEvents('device-bbbb', [{ name: 'third', at }]);
+    expect((await s.listEvents()).map((e) => e.name)).toEqual(['first', 'second', 'third']);
+    expect((await s.listEvents({ limit: 2 })).map((e) => e.name)).toEqual(['second', 'third']);
+  });
+
+  it('lists 5,000 beta events unless asked, and never more than 20,000', async () => {
+    const s = make();
+    const start = Date.UTC(2026, 10, 1);
+    const many = Array.from({ length: 20_005 }, (_, i) => ({ name: 'tap', at: new Date(start + i * 1000).toISOString() }));
+    await s.appendEvents('device-aaaa', many);
+    const latest = await s.listEvents();
+    expect(latest).toHaveLength(5_000);
+    expect([latest[0]!.at, latest.at(-1)!.at]).toEqual([many[15_005]!.at, many[20_004]!.at]);
+    expect(await s.listEvents({ limit: 50_000 })).toHaveLength(20_000);
+  }, 30_000); // pg-mem takes a few seconds to insert 20,005 rows
 
   it('reads back feedback, newest first, filtered by user', async () => {
     const s = make();
@@ -152,6 +320,161 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     for (const f of [measured, estimate, skipped]) await s.saveFeedback(f);
     expect(await s.listFeedback()).toEqual([skipped, estimate, measured]);
   });
+
+  it('reads back mood labels by song key, and a relabel replaces the whole row', async () => {
+    const s = make();
+    const method = 'claude-haiku-5-5/moods-v1';
+    const both: SongMoodsRecord = { key: 'whitney houston|i wanna dance with somebody', moods: ['upbeat', 'heartfelt'], method, source: 'claude' };
+    const none: SongMoodsRecord = { key: 'nirvana|smells like teen spirit', moods: [], method, source: 'claude' };
+    expect((await s.getSongMoods([both.key])).size).toBe(0);
+    await s.putSongMoods([both, none]);
+    const read = await s.getSongMoods([both.key, none.key, 'nobody|missing']);
+    expect([...read.keys()].sort()).toEqual([none.key, both.key]);
+    expect(read.get(both.key)).toEqual(both);
+    expect(read.get(none.key)).toEqual(none);
+
+    // Upsert by key; within one call the last entry for a key wins.
+    const relabel: SongMoodsRecord = { ...both, moods: ['heartfelt'], method: 'claude-sonnet-5-5/moods-v2' };
+    await s.putSongMoods([{ ...none, moods: ['upbeat'], source: 'hand' }, relabel, { ...none, moods: ['heartfelt'], source: 'hand' }]);
+    const again = await s.getSongMoods([both.key, none.key]);
+    expect(again.get(both.key)).toEqual(relabel);
+    expect(again.get(none.key)).toEqual({ ...none, moods: ['heartfelt'], source: 'hand' });
+    expect((await s.getSongMoods([])).size).toBe(0);
+    await s.putSongMoods([]);
+  });
+
+  it('writes and reads mood labels in bulk', async () => {
+    const s = make();
+    const many: SongMoodsRecord[] = Array.from({ length: 250 }, (_, i) => ({
+      key: `artist ${i}|song ${i}`,
+      moods: i % 3 === 0 ? ['upbeat'] : [],
+      method: 'claude-haiku-5-5/moods-v1',
+      source: 'claude',
+    }));
+    await s.putSongMoods(many);
+    const read = await s.getSongMoods(many.map((m) => m.key));
+    expect(read.size).toBe(250);
+    expect(read.get('artist 249|song 249')).toEqual(many[249]);
+  });
+
+  it('reads back song popularity by key, and a new row replaces the whole old one', async () => {
+    const s = make();
+    // Views past 2^31 (karaoke_views is a BIGINT) and rows with only one file's numbers.
+    const both: SongPopularityRecord = { key: 'the examples|first song', karaokeViews: 3_200_000_000, chartRank: 12, chartYear: 2004, source: 'karafun+billboard' };
+    const views: SongPopularityRecord = { key: 'the examples|second song', karaokeViews: 4_100, source: 'karafun' };
+    const chart: SongPopularityRecord = { key: 'lead singer|duet song', chartRank: 97, chartYear: 1999, source: 'billboard' };
+    expect((await s.getSongPopularity([both.key])).size).toBe(0);
+    await s.putSongPopularity([both, views, chart]);
+    const read = await s.getSongPopularity([both.key, views.key, chart.key, 'nobody|missing', both.key]);
+    expect([...read.keys()].sort()).toEqual([chart.key, both.key, views.key]);
+    expect(read.get(both.key)).toStrictEqual(both);
+    expect(read.get(views.key)).toStrictEqual(views);
+    expect(read.get(chart.key)).toStrictEqual(chart);
+
+    // Upsert by key, replacing the whole row; within one call the last entry for a key wins.
+    const rechart: SongPopularityRecord = { key: both.key, chartRank: 3, chartYear: 2005, source: 'billboard' };
+    await s.putSongPopularity([{ ...views, karaokeViews: 1 }, rechart, { ...views, karaokeViews: 9_000 }]);
+    const again = await s.getSongPopularity([both.key, views.key, chart.key]);
+    expect(again.get(both.key)).toStrictEqual(rechart);
+    expect(again.get(views.key)).toStrictEqual({ ...views, karaokeViews: 9_000 });
+    expect(again.get(chart.key)).toStrictEqual(chart);
+    expect((await s.getSongPopularity([])).size).toBe(0);
+    await s.putSongPopularity([]);
+  });
+
+  it('writes and reads song popularity in bulk', async () => {
+    const s = make();
+    const many: SongPopularityRecord[] = Array.from({ length: 2_500 }, (_, i) => ({ key: `artist ${i}|song ${i}`, karaokeViews: 1_000 + i, source: 'karafun' }));
+    await s.putSongPopularity(many);
+    const read = await s.getSongPopularity(many.map((p) => p.key));
+    expect(read.size).toBe(2_500);
+    expect(read.get('artist 2499|song 2499')).toStrictEqual(many[2_499]);
+  });
+
+  it('keeps Deezer ranks apart: popularity reads carry them, and a new popularity row leaves them alone (QWW-37)', async () => {
+    const s = make();
+    const karaoke: SongPopularityRecord = { key: 'toto|africa', karaokeViews: 40_000, source: 'karafun' };
+    await s.putSongPopularity([karaoke]);
+    await s.putSongDeezer([
+      { key: 'toto|africa', rank: 964_180, deezerId: 3_135_556_000, checkedAt: '2026-11-06T12:00:00.000Z' },
+      { key: 'kehlani|folded', rank: 794_554, checkedAt: '2026-11-06T12:00:01.000Z' },
+      { key: 'nobody|missing', checkedAt: '2026-11-06T12:00:02.000Z' }, // a miss
+    ]);
+    const read = await s.getSongPopularity(['toto|africa', 'kehlani|folded', 'nobody|missing']);
+    expect([...read.keys()].sort()).toEqual(['kehlani|folded', 'toto|africa']);
+    expect(read.get('toto|africa')).toStrictEqual({ ...karaoke, deezerRank: 964_180 });
+    expect(read.get('kehlani|folded')).toStrictEqual({ key: 'kehlani|folded', source: 'deezer', deezerRank: 794_554 });
+
+    // popularity:import replaces the whole popularity row; the Deezer rank stays.
+    await s.putSongPopularity([{ key: 'toto|africa', chartRank: 40, chartYear: 1983, source: 'billboard' }]);
+    expect((await s.getSongPopularity(['toto|africa'])).get('toto|africa')).toStrictEqual({
+      key: 'toto|africa',
+      chartRank: 40,
+      chartYear: 1983,
+      source: 'billboard',
+      deezerRank: 964_180,
+    });
+
+    // Every lookup, misses included, for the rerun to skip; a new lookup replaces the old one.
+    await s.putSongDeezer([{ key: 'nobody|missing', rank: 5, checkedAt: '2026-11-07T00:00:00.000Z' }]);
+    const all = await s.listSongDeezer();
+    expect(all.size).toBe(3);
+    expect(all.get('nobody|missing')).toStrictEqual({ key: 'nobody|missing', rank: 5, checkedAt: '2026-11-07T00:00:00.000Z' });
+    expect(all.get('toto|africa')!.deezerId).toBe(3_135_556_000);
+  });
+
+  it('keeps tempo per source: a write sets only the fields it names (QWW-40)', async () => {
+    const s = make();
+    await s.putSongTempo([{ key: 'a-ha|take on me', ultrastarBpm: 456 }, { key: 'toto|africa', ultrastarBpm: 372 }]);
+    await s.putSongTempo([{ key: 'toto|africa', deezerBpm: 93.5, deezerVersions: 2, previewUrl: 'https://cdn/x.mp3', checkedAt: '2026-11-06T12:00:00.000Z' }]);
+    await s.putSongTempo([{ key: 'nobody|missing', checkedAt: '2026-11-06T12:00:01.000Z' }]); // a miss
+    // the fill script writing a tracker tempo leaves Deezer's and UltraStar's alone
+    await s.putSongTempo([{ key: 'toto|africa', trackerBpm: 92, checkedAt: '2026-11-06T13:00:00.000Z' }]);
+    const read = await s.getSongTempos(['toto|africa', 'a-ha|take on me', 'unknown|song']);
+    expect([...read.keys()].sort()).toEqual(['a-ha|take on me', 'toto|africa']);
+    expect(read.get('toto|africa')).toStrictEqual({
+      key: 'toto|africa',
+      deezerBpm: 93.5,
+      deezerVersions: 2,
+      trackerBpm: 92,
+      ultrastarBpm: 372,
+      previewUrl: 'https://cdn/x.mp3',
+      checkedAt: '2026-11-06T13:00:00.000Z',
+    });
+    expect(read.get('a-ha|take on me')).toStrictEqual({ key: 'a-ha|take on me', ultrastarBpm: 456 });
+    expect((await s.listSongTempos()).size).toBe(3);
+    // more keys than one query carries
+    const many = Array.from({ length: 2_500 }, (_, i) => ({ key: `artist ${i}|song ${i}`, deezerBpm: 100 + (i % 50) }));
+    await s.putSongTempo(many);
+    expect((await s.getSongTempos(many.map((m) => m.key))).size).toBe(2_500);
+  });
+
+  it('keeps one Spotify block for the whole app: a later time wins and an earlier one never shortens it (QWW-55)', async () => {
+    const s = make();
+    expect(await s.getSpotifyBlock()).toBeNull();
+    await s.setSpotifyBlock(1_800_000_000_000);
+    expect(await s.getSpotifyBlock()).toBe(1_800_000_000_000);
+    await s.setSpotifyBlock(1_700_000_000_000); // a short 429 arriving after a long one
+    expect(await s.getSpotifyBlock()).toBe(1_800_000_000_000);
+    await s.setSpotifyBlock(1_800_000_012_000);
+    expect(await s.getSpotifyBlock()).toBe(1_800_000_012_000);
+  });
+
+  it('reads back the results view stored with feedback, and no view for a tap without one', async () => {
+    const s = make();
+    const filtered = {
+      ...feedback('u1', 1),
+      view: { difficulty: 0.1, familiarity: null, popularity: 0.75, tempo: null, decade: '80s' as const, mood: 'upbeat' as const, duetsOnly: true },
+    };
+    const plain = { ...feedback('u1', 2), view: { difficulty: null, familiarity: null, popularity: null, tempo: null, decade: null, mood: null, duetsOnly: false } };
+    const older = feedback('u1', 3);
+    for (const f of [filtered, plain, older]) await s.saveFeedback(f);
+    const [o, p, f] = await s.listFeedback();
+    expect(f).toStrictEqual(filtered);
+    expect(p).toStrictEqual(plain);
+    expect(o).toStrictEqual(older);
+    expect(o).not.toHaveProperty('view');
+  });
 });
 
 describe('schema and store selection', () => {
@@ -164,7 +487,7 @@ describe('schema and store selection', () => {
     const q = pgMemQuery();
     await migrate(q);
     expect(schemaStatements().length).toBeGreaterThanOrEqual(5);
-    for (const t of ['users', 'vocal_ranges', 'song_ranges', 'source_log', 'feedback']) {
+    for (const t of ['users', 'vocal_ranges', 'song_ranges', 'source_log', 'feedback', 'song_popularity', 'spotify_block']) {
       await expect(q(`SELECT * FROM ${t}`)).resolves.toEqual([]);
     }
   });
@@ -184,9 +507,15 @@ describe('schema and store selection', () => {
     await migrate(q);
     await migrate(q);
     const s = createPostgresStore(q, { autoMigrate: false });
-    const fresh = { ...feedback('u1', 2), songRange: { source: 'audio-full' as const, method: 'm', low: 52, high: 65 } };
+    const fresh = {
+      ...feedback('u1', 2),
+      songRange: { source: 'audio-full' as const, method: 'm', low: 52, high: 65 },
+      view: { difficulty: 1, familiarity: 0.5, popularity: null, tempo: null, decade: '20s' as const, mood: null, duetsOnly: false },
+    };
     await s.saveFeedback(fresh);
     expect(await s.listFeedback()).toEqual([fresh, old]);
+    // A tap saved before the view column existed comes back with no view.
+    expect((await s.listFeedback())[1]).not.toHaveProperty('view');
   });
 
   it('picks memory unless a DATABASE_URL is set and KARAOKE_STORE is not memory', () => {

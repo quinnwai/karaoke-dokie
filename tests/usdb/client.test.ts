@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createUsdbClient, parseDownloadWait, parseSongList, parseNoteText } from '../../src/lib/usdb/client';
+import { createUsdbClient, isDuetListing, parseDownloadWait, parseSongList, parseNoteText } from '../../src/lib/usdb/client';
 
 const fixture = (name: string) => readFileSync(join(__dirname, '../fixtures/usdb', name), 'utf8');
 
@@ -24,10 +24,58 @@ const html = (body: string, cookie?: string) =>
   new Response(body, { status: 200, headers: cookie ? { 'set-cookie': cookie } : {} });
 
 describe('USDB page parsing', () => {
-  it('reads song rows from a search result page', () => {
+  it('reads song rows from a search result page, with genre, year and language', () => {
     expect(parseSongList(fixture('list.html'))).toEqual([
-      { id: 1234, artist: 'Queen', title: 'Bohemian Rhapsody', rating: 5, views: 1000, lastChange: 1700000000 },
-      { id: 5678, artist: 'Queen & David Bowie', title: 'Under Pressure', rating: 4, views: 500, lastChange: 1700000001 },
+      { id: 1234, artist: 'Queen', title: 'Bohemian Rhapsody', rating: 5, views: 1000, lastChange: 1700000000, genre: 'Rock', year: 1975, language: 'English' },
+      { id: 5678, artist: 'Queen & David Bowie', title: 'Under Pressure', rating: 4, views: 500, lastChange: 1700000001, genre: 'Rock', year: 1981, language: 'English' },
+    ]);
+  });
+
+  /** A full 12-cell row: sample, cover, artist, title, genre, year, edition, golden notes, language, creator, rating, views. */
+  const fullRow = ({ genre = 'Pop', year = '1999', language = 'English' } = {}) =>
+    `<tr data-songid="9"><td></td><td></td><td>A</td><td>B</td><td>${genre}</td><td>${year}</td><td></td><td>No</td><td>${language}</td><td>me</td><td>4</td><td>10</td></tr>`;
+  const NOW = new Date('2026-11-03T12:00:00Z');
+  const parsedYear = (year: string) => parseSongList(fullRow({ year }), NOW)[0]!.year;
+
+  it('keeps a 4-digit year from 1900 to next year and drops anything else', () => {
+    expect(parsedYear('1900')).toBe(1900);
+    expect(parsedYear(' <b>1975</b> ')).toBe(1975);
+    expect(parsedYear('2027')).toBe(2027); // next year: a song announced ahead of release
+    for (const junk of ['1899', '2028', '0000', '75', '19755', '1975-10', 'ca. 1975', 'unknown', '']) {
+      expect(parsedYear(junk), junk).toBeUndefined();
+    }
+  });
+
+  it('strips tags and entities from genre and language, and leaves empty cells out', () => {
+    expect(parseSongList(fullRow({ genre: '<a href="?genre=rnb">R&amp;B</a>', language: '<span>Fran&#231;ais</span> ' }), NOW)[0]).toMatchObject({
+      genre: 'R&B',
+      language: 'Français',
+    });
+    const empty = parseSongList(fullRow({ genre: ' ', year: '', language: '' }), NOW)[0]!;
+    expect(empty).toEqual({ id: 9, artist: 'A', title: 'B', rating: 4, views: 10 });
+  });
+
+  it('reads no genre, year or language from a row without the full layout', () => {
+    // 7 cells: cell 5 is the rating here, not the year.
+    const short = parseSongList('<tr data-songid="9"><td></td><td></td><td>A</td><td>B</td><td>Rock</td><td>1975</td><td>12</td></tr>', NOW)[0]!;
+    expect(short).toEqual({ id: 9, artist: 'A', title: 'B', views: 12 });
+  });
+
+  it('reads a row that ends with a download button after Views, as USDB lists them since late 2026', () => {
+    const row = `<tr class="list_tr2" data-songid="3" data-lastchange="1762883679"><td style="text-align: center"><audio id="sample3"></audio><button class="samplePlay"><svg></svg></button></td><td onclick="show_detail(3)"><img src="data/cover/3.jpg"></td><td onclick="show_detail(3)">2raumwohnung</td>
+<td onclick="show_detail(3)"><a href="?link=detail&id=3">Wir trafen uns in einem Garten</td>
+<td onclick="show_detail(3)">Pop</td>
+<td onclick="show_detail(3)">2000</td>
+<td onclick="show_detail(3)">SingStar Deutsch Rock-Pop</td>
+<td onclick="show_detail(3)">Yes</td>
+<td onclick="show_detail(3)">German</td>
+<td onclick="show_detail(3)">SsX</td>
+<td onclick="show_detail(3)"><img src="images/star.png"> <img src="images/star.png"> <img src="images/star.png"> <img src="images/star.png"> <img src="images/star.png"> </td>
+<td onclick="show_detail(3)">1387</td>
+<td><a  href="#" onClick="addToList(3, 1)"><img src="images/mini-zip.png" border="0"></a></td>
+</tr>`;
+    expect(parseSongList(row, NOW)).toEqual([
+      { id: 3, artist: '2raumwohnung', title: 'Wir trafen uns in einem Garten', lastChange: 1762883679, rating: 5, views: 1387, genre: 'Pop', year: 2000, edition: 'SingStar Deutsch Rock-Pop', language: 'German' },
     ]);
   });
 
@@ -53,6 +101,18 @@ describe('USDB page parsing', () => {
 
   it('returns null when the page has no notes', () => {
     expect(parseNoteText('<html>please log in</html>')).toBeNull();
+  });
+
+  it("reads a detailed row's edition, when it has one", () => {
+    const withEdition = fixture('list.html').replace('<td>1975</td>\n<td></td>', '<td>1975</td>\n<td>[SC]-Duets &amp; More</td>');
+    expect(parseSongList(withEdition).map((r) => r.edition)).toEqual(['[SC]-Duets & More', undefined]);
+  });
+
+  it('knows a duet listing by "duet" in its title or edition, any case, bracketed or not', () => {
+    for (const title of ['Song [DUET]', 'Song (Duet)', 'Song - duet version', 'Song [Duett]']) expect(isDuetListing({ title })).toBe(true);
+    expect(isDuetListing({ title: 'Song', edition: 'SingStar Duets' })).toBe(true);
+    expect(isDuetListing({ title: 'Song', edition: '[SC]-Songs' })).toBe(false);
+    expect(isDuetListing({ title: 'Song' })).toBe(false);
   });
 });
 
@@ -202,6 +262,36 @@ describe('USDB client', () => {
     const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async () => {} });
     expect(await client.findSong('Queen', 'Bohemian Rhapsody', { download: false })).toEqual({ id: 1234, noteText: null, rating: 5, views: 1000 });
     expect(calls.some((c) => c.url.includes('link=gettxt'))).toBe(false);
+  });
+
+  it('with duet, takes the upload listed as a duet and downloads it after the countdown', async () => {
+    // A detailed list row: sample, cover, artist, title, genre, year, edition, golden notes, language, creator, rating, views.
+    const row = (id: number, title: string, edition = '') =>
+      `<tr data-songid="${id}"><td></td><td></td><td>Duo</td><td><a href="?link=detail&id=${id}">${title}</a></td>` +
+      `<td>Pop</td><td>1983</td><td>${edition}</td><td>No</td><td>English</td><td>x</td><td>4</td><td>${id * 100}</td></tr>`;
+    const usdb = (rows: string[]) => {
+      const { fetch, calls } = fakeFetch({
+        'link=list': () => html(`<table>${rows.join('')}</table>`),
+        'link=gettxt': (method) => html(method === 'GET' ? fixture('gettxt-countdown.html') : fixture('gettxt.html')),
+        'index.php': () => html('<a href="?link=logout">Logout</a>', 'PHPSESSID=abc123; path=/'),
+      });
+      const slept: number[] = [];
+      const client = createUsdbClient({ username: 'u', password: 'p', fetch, minIntervalMs: 0, sleep: async (ms) => { slept.push(ms); } });
+      return { client, calls, slept };
+    };
+
+    const both = usdb([row(1, 'Islands in the Stream'), row(2, 'Islands in the Stream [DUET]')]);
+    expect(await both.client.findSong('Duo', 'Islands in the Stream', { duet: true })).toMatchObject({ id: 2, views: 200 });
+    expect(both.calls.filter((c) => c.url.includes('link=gettxt')).map((c) => `${c.method} ${new URL(c.url).searchParams.get('id')}`)).toEqual(['GET 2', 'POST 2']);
+    expect(both.slept).toContain(25_000);
+    // Without duet, the first match as before.
+    expect(await both.client.findSong('Duo', 'Islands in the Stream', { download: false })).toMatchObject({ id: 1 });
+
+    const byEdition = usdb([row(3, 'Islands in the Stream'), row(4, 'Islands in the Stream', 'SingStar Duets')]);
+    expect(await byEdition.client.findSong('Duo', 'Islands in the Stream', { download: false, duet: true })).toMatchObject({ id: 4 });
+    const soloOnly = usdb([row(5, 'Islands in the Stream')]);
+    expect(await soloOnly.client.findSong('Duo', 'Islands in the Stream', { duet: true })).toBeNull();
+    expect(soloOnly.calls.some((c) => c.url.includes('link=gettxt'))).toBe(false);
   });
 
   it('reads the countdown from the gettxt page', () => {

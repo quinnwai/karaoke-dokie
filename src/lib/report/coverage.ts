@@ -5,7 +5,7 @@
 import { midiToNoteName } from '../audio/notes';
 import type { Match, SongRange, Track, VocalRange } from '../contracts';
 import type { UsdbIndexEntry } from '../server/store';
-import { matchSong } from '../songs/match';
+import { matchSong, toMatch } from '../songs/match';
 import { rankMatches } from '../songs/rank';
 import { songKey } from '../songs/resolve';
 import { scoreMatch } from '../songs/score';
@@ -95,7 +95,7 @@ export function coverageReport({
   for (const track of ordered) {
     const range = ranges.get(songKey(track.artist, track.title));
     const fit = range ? matchSong(userRange, range) : null;
-    if (range && fit) matches.push(scoreMatch(userRange, { track, range, ...fit }));
+    if (range && fit) matches.push(scoreMatch(userRange, toMatch(track, range, fit)));
   }
   const ranked = rankMatches(matches);
   const appRank = new Map(ranked.map((m, i) => [m.track.id, i + 1]));

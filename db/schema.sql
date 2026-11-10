@@ -58,3 +58,62 @@ CREATE TABLE IF NOT EXISTS usdb_songs (
   last_change BIGINT
 );
 CREATE INDEX IF NOT EXISTS usdb_songs_key ON usdb_songs (song_key);
+-- QWW-3 (Nov 2026). Year, genre and language from USDB's song list (QWW-6).
+ALTER TABLE usdb_songs ADD COLUMN IF NOT EXISTS year INTEGER;
+ALTER TABLE usdb_songs ADD COLUMN IF NOT EXISTS genre TEXT;
+ALTER TABLE usdb_songs ADD COLUMN IF NOT EXISTS language TEXT;
+-- The results view a thumbs tap came from (QWW-16).
+ALTER TABLE feedback ADD COLUMN IF NOT EXISTS view_json TEXT;
+-- Beta event log, keyed by a random device id, never a Spotify id (QWW-16, QWW-20).
+CREATE TABLE IF NOT EXISTS events (
+  id BIGSERIAL PRIMARY KEY,
+  anon_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  at TEXT NOT NULL,
+  props_json TEXT
+);
+CREATE INDEX IF NOT EXISTS events_anon ON events (anon_id);
+CREATE INDEX IF NOT EXISTS events_at ON events (at);
+-- Mood labels per song, one labelling method per row (QWW-11).
+CREATE TABLE IF NOT EXISTS song_moods (
+  song_key TEXT PRIMARY KEY,
+  moods TEXT NOT NULL,
+  method TEXT NOT NULL,
+  source TEXT NOT NULL
+);
+-- Song popularity from our own karaoke data (QWW-6): KaraFun karaoke-video views and the best
+-- Billboard Year-End Hot 100 rank and its year, written by npm run popularity:import.
+CREATE TABLE IF NOT EXISTS song_popularity (
+  song_key TEXT PRIMARY KEY,
+  karaoke_views BIGINT,
+  chart_year INTEGER,
+  chart_rank INTEGER,
+  source TEXT NOT NULL
+);
+-- Deezer track rank per song (QWW-37), written by npm run popularity:deezer. Its own table, so
+-- popularity:import, which replaces whole song_popularity rows, leaves it alone. A null rank is a
+-- miss: Deezer had no matching track when checked_at, so a rerun skips it for a while.
+CREATE TABLE IF NOT EXISTS song_deezer (
+  song_key TEXT PRIMARY KEY,
+  rank INTEGER,
+  deezer_id BIGINT,
+  checked_at TEXT NOT NULL
+);
+-- Tempo per song (QWW-40), one column per source, written by npm run tempo:fill (Deezer, beat
+-- tracker) and npm run tempo:ultrastar (note files). Raw values: the one tempo shown is worked out
+-- when read (src/lib/tempo/tempo.ts). A row with no bpm at all is a miss, kept so a rerun skips it.
+CREATE TABLE IF NOT EXISTS song_tempo (
+  song_key TEXT PRIMARY KEY,
+  deezer_bpm DOUBLE PRECISION,
+  deezer_versions INTEGER,
+  tracker_bpm DOUBLE PRECISION,
+  ultrastar_bpm DOUBLE PRECISION,
+  preview_url TEXT,
+  checked_at TEXT
+);
+-- When Spotify said the app may call it again after a 429 (QWW-55): one row (id 1), shared by every server
+-- instance and script. Spotify's quota is the app's, so a 429 for one user stops calls for all of them until it passes.
+CREATE TABLE IF NOT EXISTS spotify_block (
+  id INTEGER PRIMARY KEY,
+  blocked_until BIGINT NOT NULL
+);

@@ -1,36 +1,55 @@
-import { useId, useState } from 'react';
-import type { DataSourceLogEntry, Match, VocalRange } from '../lib/contracts';
-import { difficultyLabel, octaveWording, rangeBar, sourceTooltip } from '../lib/client/display';
-import { usdbSongUrl } from '../lib/usdb/client';
+import { useLayoutEffect, useRef, useState } from 'react';
+import type { Match, VocalRange } from '../lib/contracts';
+import { difficultyLabel, duetPartLine, isCatalogueTrack, octaveWording, rangeBar } from '../lib/client/display';
+import { MOOD_LABELS } from '../lib/songs/browse';
 import { FastLyricsIcon, OctaveIcon } from './Icon';
 import styles from './screen.module.css';
+import { SpotifyPlayer } from './SpotifyPlayer';
 
 interface SongDetailProps {
   match: Match;
   userRange: VocalRange;
-  source: DataSourceLogEntry | undefined;
   feedback: 'up' | 'down' | undefined;
   onFeedback(thumbs: 'up' | 'down'): void;
+  /** "Open in Spotify" was tapped (for the beta event log). */
+  onSpotify?(): void;
   onBack(): void;
 }
 
 export function RangeBarView({ userRange, match }: { userRange: VocalRange; match: Match }) {
-  const bar = rangeBar(userRange, match.range, match.octave);
+  const bar = rangeBar(userRange, match.range, match.octave, match.shape);
+  // Note names stay out of the way until wanted: hover or focus shows them, and so does a tap on a phone.
+  const [open, setOpen] = useState(false);
   return (
-    <div className={styles.rangeBar} role="img" aria-label={`Song goes from ${bar.song.low} to ${bar.song.high}. You sing from ${bar.user.low} to ${bar.user.high}.`}>
+    <div
+      className={styles.rangeBar}
+      role="img"
+      aria-label={`Song goes from ${bar.song.low} to ${bar.song.high}${bar.original ? ' as you would sing it' : ''}. You sing from ${bar.user.low} to ${bar.user.high}.${bar.shape ? ' Most of the song sits where the taller bars are.' : ''}`}
+      data-open={open || undefined}
+      onClick={() => setOpen((o) => !o)}
+    >
+      {bar.shape && (
+        <div className={styles.barShape} aria-hidden>
+          {bar.shape.map((b, i) => (
+            <i key={i} style={{ left: `${b.left}%`, width: `${b.width}%`, height: `${Math.max(b.height, 3)}%` }} />
+          ))}
+        </div>
+      )}
       <div className={styles.barTrack}>
-        <div className={styles.barUser} style={{ left: `${bar.user.left}%`, width: `${bar.user.width}%` }}>
-          <span className={styles.barEndLow}>{bar.user.low}</span>
-          <span className={styles.barEndHigh}>{bar.user.high}</span>
-        </div>
-        <div className={styles.barSong} style={{ left: `${bar.song.left}%`, width: `${bar.song.width}%` }}>
-          <span className={styles.barEndLow}>{bar.song.low}</span>
-          <span className={styles.barEndHigh}>{bar.song.high}</span>
-        </div>
+        <div className={styles.barUser} style={{ left: `${bar.user.left}%`, width: `${bar.user.width}%` }} />
+        {bar.original && <div className={styles.barOriginal} style={{ left: `${bar.original.left}%`, width: `${bar.original.width}%` }} />}
+        <div className={styles.barSong} style={{ left: `${bar.song.left}%`, width: `${bar.song.width}%` }} />
+      </div>
+      <div className={styles.barNames} aria-hidden>
+        <span className={styles.barNameSong} style={{ left: `${bar.song.left}%` }}>{bar.song.low}</span>
+        <span className={styles.barNameSong} style={{ left: `${bar.song.left + bar.song.width}%` }}>{bar.song.high}</span>
+        <span className={styles.barNameUser} style={{ left: `${bar.user.left}%` }}>{bar.user.low}</span>
+        <span className={styles.barNameUser} style={{ left: `${bar.user.left + bar.user.width}%` }}>{bar.user.high}</span>
       </div>
       <div className={styles.barLegend} aria-hidden>
-        <span><i className={styles.legendSong} /> song</span>
-        <span><i className={styles.legendUser} /> you</span>
+        <span><i className={styles.legendSong} /> song range</span>
+        <span><i className={styles.legendUser} /> your range</span>
+        {bar.original && <span><i className={styles.legendOriginal} /> as recorded</span>}
       </div>
     </div>
   );
@@ -50,14 +69,22 @@ function Thumb({ down }: { down?: boolean }) {
   );
 }
 
-export function SongDetail({ match, userRange, source, feedback, onFeedback, onBack }: SongDetailProps) {
-  const [infoOpen, setInfoOpen] = useState(false);
-  const tipId = useId();
+export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, onBack }: SongDetailProps) {
   const octave = octaveWording(match.octave);
   const maybe = match.difficulty === 'maybe';
+  const duet = duetPartLine(match);
+  const facts = [match.year, match.genre].filter((f) => f !== undefined && f !== '').join(' · ');
+  const catalogue = isCatalogueTrack(match.track.id);
+
+  // The screen is one scroller shared with the song list. With the player, a long title can make this page
+  // taller than the screen, and it would open scrolled to wherever the list was, past the back button.
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (root.current?.parentElement) root.current.parentElement.scrollTop = 0;
+  }, []);
 
   return (
-    <div className={styles.detail}>
+    <div className={styles.detail} ref={root}>
       <button type="button" className={styles.back} onClick={onBack} aria-label="Back to songs">
         ‹
       </button>
@@ -65,6 +92,7 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
       <div className={styles.detailHead}>
         <h2 className={styles.detailTitle}>{match.track.title}</h2>
         <p className={styles.detailArtist}>{match.track.artist}</p>
+        {facts && <p className={styles.detailFacts}>{facts}</p>}
       </div>
 
       <RangeBarView userRange={userRange} match={match} />
@@ -77,34 +105,12 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
             <span aria-hidden>Fast lyrics</span>
           </span>
         )}
-        <span className={styles.infoWrap}>
-          <button
-            type="button"
-            className={styles.info}
-            aria-label="Where this came from"
-            aria-expanded={infoOpen}
-            aria-describedby={infoOpen ? tipId : undefined}
-            onClick={() => setInfoOpen((o) => !o)}
-            onKeyDown={(e) => e.key === 'Escape' && setInfoOpen(false)}
-          >
-            i
-          </button>
-        </span>
+        {match.moods?.map((mood) => (
+          <span key={mood} className={styles.pillQuiet}>
+            {MOOD_LABELS[mood]}
+          </span>
+        ))}
       </div>
-
-      {infoOpen && (
-        <p role="tooltip" id={tipId} className={styles.tooltip}>
-          {sourceTooltip(source, maybe)}
-          {match.range.usdbId !== undefined && (
-            <>
-              {' '}
-              <a href={usdbSongUrl(match.range.usdbId)} target="_blank" rel="noreferrer">
-                View on USDB
-              </a>
-            </>
-          )}
-        </p>
-      )}
 
       {octave && (
         <p className={styles.octave}>
@@ -113,11 +119,15 @@ export function SongDetail({ match, userRange, source, feedback, onFeedback, onB
         </p>
       )}
 
+      {duet && <p className={styles.octave}>{duet}</p>}
+
       {match.reasons && match.reasons.length > 0 && <p className={styles.detailReasons}>{match.reasons.join(' · ')}</p>}
 
-      <a className={styles.spotify} href={match.track.spotifyUrl} target="_blank" rel="noreferrer">
-        Open in Spotify
-      </a>
+      <SpotifyPlayer
+        track={match.track}
+        label={catalogue ? 'Find on Spotify' : 'Open in Spotify'}
+        onOpen={onSpotify}
+      />
 
       <div className={styles.feedback}>
         {feedback ? (
