@@ -7,7 +7,7 @@
 | Types | `npm run typecheck` | none | wrong shapes between server, store and screen |
 | Unit and integration | `npx -y node@22 node_modules/vitest/vitest.mjs run` (see the count it prints) | fixtures and an in-memory store | ranking, slider order, store contract, routes, scripts' pure logic |
 | Browser | `E2E_PORT=<port> npx playwright test` (mocked API and mock Spotify). It starts two servers from one build: the main one with duets and moods on, and a second with them off, as they ship (QWW-43), on `E2E_OFF_PORT` (default `E2E_PORT` + 1). Parallel checkouts set both | fixtures | layout at 375 px, flows, slider reordering on a fixture list, and that switching duets and moods off changes nothing but their words |
-| Live-data smoke | `npm run smoke:live` (database) or `npm run smoke:live -- --url <deployment>` | the real preview or production data | a deployment reading a database without the data: no Pick row, sliders that change nothing, unknown songs first |
+| Live-data smoke | `npm run smoke:live` (database) or `npm run smoke:live -- --url <deployment>` | the real preview or production data | a deployment reading a database without the data: no Pick row, sliders that change nothing, unknown songs first, play buttons with no Deezer id; with `--url`, also that 90% of the first 20 songs play a preview through the deployment and Deezer |
 | Reports | `npm run tempo:report`, `report:coverage`, `report:facets` | saved data | coverage and accuracy numbers |
 
 Fixture tests cannot see a wrong database. The live-data smoke test exists because a preview once read

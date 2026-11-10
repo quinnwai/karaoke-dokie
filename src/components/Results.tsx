@@ -23,6 +23,7 @@ import {
   type SliderDef,
 } from '../lib/songs/browse';
 import { BookIcon, FastLyricsIcon, OctaveIcon, ResetIcon, SpotifyIcon } from './Icon';
+import { DeezerCredit, PreviewButton } from './PreviewButton';
 import styles from './screen.module.css';
 
 interface ResultsProps {
@@ -99,27 +100,30 @@ export function Results(props: ResultsProps) {
     const reasons = [...(duet ? [duet] : []), ...reasonsForSlider(m.reasons, leadSlider)].slice(0, 2);
     const yearText = typeof m.year === 'number' ? `, ${m.year}` : '';
     return (
-      <button
-        type="button"
-        className={styles.song}
-        onClick={() => props.onSelect(m.track.id, position)}
-        aria-label={`${m.track.title} by ${m.track.artist}${yearText}, ${difficultyLabel(m.difficulty)}${octave ? `. ${octave}` : ''}${m.range.fastLyrics ? '. Fast lyrics' : ''}${duet ? `. ${duet}` : ''}`}
-      >
-        <span className={styles.songText}>
-          <span className={styles.songTitle}>{m.track.title}</span>
-          <span className={styles.songArtist}>{artistLine(m)}</span>
-          {reasons.length > 0 && <SungReasons key={reasons.join(' · ')} reasons={reasons} />}
-        </span>
-        <span className={styles.songMeta}>
-          <OctaveIcon octave={m.octave} className={styles.icon} />
-          {m.range.fastLyrics && <FastLyricsIcon className={styles.icon} />}
-          {m.difficulty !== 'maybe' && (
-            <span className={styles.pill} data-difficulty={m.difficulty}>
-              {difficultyLabel(m.difficulty)}
-            </span>
-          )}
-        </span>
-      </button>
+      <div className={styles.songRow}>
+        <PreviewButton deezerId={m.deezerId} title={m.track.title} artist={m.track.artist} />
+        <button
+          type="button"
+          className={styles.song}
+          onClick={() => props.onSelect(m.track.id, position)}
+          aria-label={`${m.track.title} by ${m.track.artist}${yearText}, ${difficultyLabel(m.difficulty)}${octave ? `. ${octave}` : ''}${m.range.fastLyrics ? '. Fast lyrics' : ''}${duet ? `. ${duet}` : ''}`}
+        >
+          <span className={styles.songText}>
+            <span className={styles.songTitle}>{m.track.title}</span>
+            <span className={styles.songArtist}>{artistLine(m)}</span>
+            {reasons.length > 0 && <SungReasons key={reasons.join(' · ')} reasons={reasons} />}
+          </span>
+          <span className={styles.songMeta}>
+            <OctaveIcon octave={m.octave} className={styles.icon} />
+            {m.range.fastLyrics && <FastLyricsIcon className={styles.icon} />}
+            {m.difficulty !== 'maybe' && (
+              <span className={styles.pill} data-difficulty={m.difficulty}>
+                {difficultyLabel(m.difficulty)}
+              </span>
+            )}
+          </span>
+        </button>
+      </div>
     );
   };
 
@@ -256,6 +260,8 @@ export function Results(props: ResultsProps) {
           )}
         </div>
       )}
+
+      {visible.some((m) => m.deezerId !== undefined) && <DeezerCredit />}
 
       {sure.length > 0 && (
         <ol className={styles.songList}>

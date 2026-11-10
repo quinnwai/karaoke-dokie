@@ -37,12 +37,14 @@ export function createMemoryStore(): Store {
   const libraryStates = new Map<string, StoredLibraryState>();
   const savedTracks = new Map<string, Map<string, { track: Track; pos: number; gen: number }>>();
   const spotifyCalls = new Map<string, { day: string; caller: string; calls: number }>();
-  /** A song's popularity row with its Deezer rank, as getSongPopularity reads it. */
+  /** A song's popularity row with its Deezer rank and track id, as getSongPopularity reads it. */
   const popularityOf = (key: string): SongPopularityRecord | undefined => {
     const p = songPopularity.get(key);
-    const rank = songDeezer.get(key)?.rank;
-    if (rank === undefined) return p && clone(p);
-    return { ...(p ? clone(p) : { key, source: 'deezer' }), deezerRank: rank };
+    const deezer = songDeezer.get(key);
+    if (deezer?.rank === undefined) return p && clone(p);
+    const out: SongPopularityRecord = { ...(p ? clone(p) : { key, source: 'deezer' }), deezerRank: deezer.rank };
+    if (deezer.deezerId !== undefined) out.deezerId = deezer.deezerId;
+    return out;
   };
 
   const newestFirst = <T extends { at: string }>(items: T[]): T[] =>

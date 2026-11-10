@@ -115,6 +115,8 @@ export interface SongPopularityRecord {
   chartYear?: number;
   /** Deezer's track rank (QWW-37), from song_deezer; higher is more popular. */
   deezerRank?: number;
+  /** The Deezer track that rank belongs to (song_deezer), for the row's play button (QWW-48); never scored with. */
+  deezerId?: number;
   /**
    * Which files the numbers came from: "karafun", "billboard" or "karafun+billboard"; "deezer"
    * when a song has only a Deezer rank.
@@ -196,7 +198,7 @@ export interface Store {
   putSongPopularity(entries: SongPopularityRecord[]): Promise<void>;
   /**
    * Batch read; the map only has keys that have a row or a Deezer rank. Carries the song's Deezer
-   * rank (song_deezer) as well.
+   * rank and track id (song_deezer) as well.
    */
   getSongPopularity(songKeys: string[]): Promise<Map<string, SongPopularityRecord>>;
 

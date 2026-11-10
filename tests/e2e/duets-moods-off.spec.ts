@@ -77,7 +77,7 @@ test('switch off: the results screen has decade chips but no Duets or mood chip,
   const duet = songs.filter({ hasText: 'Islands in the Stream' });
   await expect(duet).toHaveCount(1);
   await expect(page.getByText(/Duet/)).toHaveCount(0);
-  await duet.getByRole('button').first().click();
+  await duet.getByRole('button', { name: /^Islands in the Stream by/ }).click();
   await expect(page.getByRole('heading', { name: 'Islands in the Stream' })).toBeVisible();
   await expect(page.getByText(/Duet|Upbeat|Heartfelt/)).toHaveCount(0);
   await page.screenshot({ path: path.join(SCREENS, 'duets-moods-off-02-song.png') });

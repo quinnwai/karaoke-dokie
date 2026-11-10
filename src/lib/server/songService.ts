@@ -231,7 +231,8 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         const m = deps.matchSong(track, index ? withKaraokePopularity(withIndexPopularity(range, row), pop) : range, userRange);
         if (!m) continue;
         const tempo = tempoOf(tempos?.get(key), key);
-        matches.push(index ? { ...m, ...songFacts(track, row, pop), ...(tempo !== undefined ? { tempo } : {}) } : m);
+        const deezer = pop?.deezerId !== undefined ? { deezerId: pop.deezerId } : {};
+        matches.push(index ? { ...m, ...songFacts(track, row, pop), ...(tempo !== undefined ? { tempo } : {}), ...deezer } : m);
         logs.set(track.id, log);
         keyOf.set(track.id, key);
       }

@@ -63,6 +63,31 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
 9. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
    low and highest high become the range (`source: 'songs'`). Signed-out users sign in first.
 
+## Play from the list (QWW-48)
+
+Each result row starts with a play button that plays the song's 30 s Deezer preview, so a singer can hear a song
+without leaving the list. Spotify's player stays on the song page (below); it was too slow to start from our own
+button and must stay on screen (spike QWW-44).
+
+- **One player.** Every button shares one `<audio>` element (`src/lib/client/preview.ts`), so one song plays at a
+  time and a tap on another row switches at once. The latest tap always wins: five taps in five seconds end with the
+  fifth song playing.
+- **iOS.** The tap handler sets the element's address to `/api/preview/<deezerId>` and calls `play()` in the same
+  tick; iOS plays audio only when it starts inside the tap. That route redirects to Deezer's preview link (see
+  backend.md), which expires after 15 minutes, so links are never stored.
+- **What it shows.** ▶ until tapped; then ⏸, a thin pink ring that fills as the preview plays, and the row's title in
+  pink, as Spotify marks the track it is on. Tapped again it pauses, and the ring stays where it stopped. At the end it
+  goes back to ▶. A song with no Deezer match (`Match.deezerId` unset), or whose preview fails to load, gets a disabled
+  button for the rest of the visit. The button is 44 px square.
+- **The row.** The play button and the song button sit side by side, never one inside the other: the play button
+  never opens the song page, and the rest of the row still does. Opening the song page (or a filter taking the song off
+  the list) stops the preview.
+- **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly, so a line over the list reads
+  "Previews from [logo] Deezer" whenever a song on it has a preview. The credits page says the previews stream from
+  Deezer for private, non-commercial listening and that no audio is kept.
+- **For the round 5 rows (QWW-46).** `PreviewButton` takes the song's `deezerId`, title and artist, and needs nothing
+  else; `DeezerCredit` is the logo line. Both draw in `currentColor` and the pink accent, so a new row can restyle them.
+
 ## Spotify player
 
 The song detail embeds Spotify's own player: the plain iframe from Spotify's
@@ -119,6 +144,7 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,Results,SongDetail,PickSongs}.tsx` | The screen pieces. |
 | `src/components/SpotifyPlayer.tsx` | Spotify's player iframe, or the plain "Open in Spotify" link when there is no track to embed. |
+| `src/components/PreviewButton.tsx`, `src/lib/client/preview.ts` | The play button in each row, its hook and the one shared `<audio>` they drive (QWW-48); the Deezer logo line. |
 | `src/components/screen.module.css`, `app/globals.css` | Styles; `prefers-reduced-motion` stops all animation. |
 
 ## Tests

@@ -402,7 +402,8 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     ]);
     const read = await s.getSongPopularity(['toto|africa', 'kehlani|folded', 'nobody|missing']);
     expect([...read.keys()].sort()).toEqual(['kehlani|folded', 'toto|africa']);
-    expect(read.get('toto|africa')).toStrictEqual({ ...karaoke, deezerRank: 964_180 });
+    // The track id comes along for the row's play button (QWW-48); a hit stored without one has none.
+    expect(read.get('toto|africa')).toStrictEqual({ ...karaoke, deezerRank: 964_180, deezerId: 3_135_556_000 });
     expect(read.get('kehlani|folded')).toStrictEqual({ key: 'kehlani|folded', source: 'deezer', deezerRank: 794_554 });
 
     // popularity:import replaces the whole popularity row; the Deezer rank stays.
@@ -413,6 +414,7 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
       chartYear: 1983,
       source: 'billboard',
       deezerRank: 964_180,
+      deezerId: 3_135_556_000,
     });
 
     // Every lookup, misses included, for the rerun to skip; a new lookup replaces the old one.
