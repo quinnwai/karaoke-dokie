@@ -77,18 +77,37 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    it lands here: `?authError` is taken out of the address and one quiet line, "Couldn’t sign in to Spotify.",
    shows under the arrow, and again under the bar of the results the arrow leads to. `access_denied` is the
    singer pressing Cancel on Spotify's page, which is their answer, so nothing is said.
-7. **Results**: one request for every match (`/api/catalogue/recommendations?...&all=1` without
-   Spotify, `/api/recommendations?all=1` with it), then the phone orders, filters and pages them
-   (`src/lib/songs/browse.ts`), 5 at a time. Two panels sit above the list: **Tune** (pink), sliders
-   that reorder and never remove a song, untouched until moved, with a circular-arrow Reset icon
-   (`aria-label` "Reset sliders") once one is set (a song sits on a slider by its rank in the list, so
-   every tenth of the track holds about a tenth of the songs); and **Pick** (cyan),
-   chips for decades, and for moods and duets only while the server has `DUETS_AND_MOODS=on` (off by
-   default, QWW-43: it then sends no mood labels or duet markers, so those chips and the "Duet: take ..."
-   lines never appear, and the order of the songs does not change) (one pick per row, a count on each, disabled at zero). The
-   lyric line says what the slider moved last does. Songs whose range is only an estimate
-   (`difficulty: 'maybe'`) show last in their own "Maybe" list, without a difficulty pill. In
-   catalogue mode "Connect Spotify" saves the range for the sign-in round trip; back from Spotify,
+7. **Results: the Setlist tuner** (QWW-46, the round 5 design; spec and reference in `docs/setlist-round5/`).
+   It fills the screen: no TV around it (the other steps and the song page stay on the TV). One request for every
+   match (`/api/catalogue/recommendations?...&all=1` without Spotify, `/api/recommendations?all=1` with it); then
+   the screen sends what is set on the sheet to the ranking engine (`src/lib/setlist/engine.ts`, asked through
+   `useRankedSetlist`) and draws the ranked list it gets back (`SetlistResponse`, the shape of QWW-47's
+   `POST /api/setlist`). The screen holds no ranking. Until QWW-47's server engine replaces it, the interim engine
+   ranks the loaded matches: each song has a place on each gear, 0 to 100, by its rank among the songs that fit (browse.ts
+   `sliderPlaces`); nearest to the targets of the gears that count first (Popularity counts double), in the picked
+   eras, ties in the server's order, Maybe songs last. A song whose range spans under 5 semitones has no Difficulty
+   place (QWW-43's one-note "Jump"), so it cannot win on "easy".
+   - **The list**: a row is its rank, the title over "Artist · Era" (`’90s`), a 44×30 difficulty lane, and a ▶ slot
+     that QWW-48 fills (until then a disabled ▶). Rows are in rank order in the DOM, and slide to their new place when
+     the order changes (`flip.ts`; reduced motion turns it off). Tapping a row opens the song page; the ▶ does not.
+     40 songs show at first, then "Load more". Songs with no year are in the list while Era is off and out of it
+     while Era is on. When there are no songs the engine says why (`empty`): "Pick an era to see songs." (Era on,
+     nothing picked), or a line saying none of the picked eras fit the range.
+   - **The sheet**: four gears (Difficulty, Listening history, Popularity, Tempo) and a multi-select Era. **Reset** on
+     a gear puts it back to its default (`src/lib/setlist/defaults.ts`, the one place) and turns it **off**: it
+     counts for nothing, its art dims, and touching it again turns it on from the default. Era off means every era.
+     **Defaults** (QWW-47's decision): Popularity 100 and Difficulty 0 on; History 100, Tempo 50 and Era off, and Era
+     has no default picks (the first tap on an era picks just that era). Signed out, History is also disabled and says
+     "Connect Spotify to use your listening history"; signed in, it can be switched on. **Expanded** shows every gear (rack 416 px);
+     **mini** shows one gear and a tab bar (164 px). The grab handle switches by tap, Enter or Space, or by a
+     vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live. `?mini=1`
+     starts in mini mode.
+   - **Type**: Barlow Semi Condensed 500 and 700, self-hosted (`@fontsource/barlow-semi-condensed`, SIL OFL 1.1).
+   - **Events**: `gear_change` (gear, value, on) when a thumb is let go or a gear is reset, `era_change` (era, picked,
+     on, eras) on an era tap or reset. `song_opened` and the like carry each gear's target (null when off).
+   - **Tests**: `window.setlist` (`getState`, `setState`, `ranking`, `songs`) exists only in a build made with
+     `NEXT_PUBLIC_SETLIST_TEST_HOOK=1`, which is the e2e build (`playwright.config.ts`); production has none.
+   In catalogue mode "Connect Spotify" saves the range for the sign-in round trip; back from Spotify,
    it is PUT to `/api/me/range` and library results load. The Spotify logo at the top right shows
    which mode this is: grey ("Connect to Spotify") without an account, Spotify green when signed in.
    Signed in, pointing at it (or a tap) opens a small box, "Logged in as <display name> · Log out";
@@ -96,8 +115,8 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    range, which stays on the device (`kd.range`). If the request fails the box says so and nothing changes.
    When the server cannot read the singer's Spotify library (Spotify says wait, fails or is down) it answers
    `/api/recommendations?all=1` with the catalogue's songs for their range and `libraryUnavailable: true` (QWW-55).
-   The list is then a catalogue list (no "Rediscover to On repeat" slider, no connect prompts) for a singer who stays
-   signed in, with the green logo, Log out and one quiet line under the bar: "Couldn’t reach Spotify, showing
+   The list is then a catalogue list (History disabled, no connect prompts) for a singer who stays
+   signed in, with the green logo, Log out and one quiet line above the list: "Couldn’t reach Spotify, showing
    popular songs." The next range save or redo asks the server again.
 8. **Song detail**: range bar (song in neon pink over the user's range, note names at the
    ends; a song sung an octave away is drawn as sung, with the recording as a dashed outline;
@@ -165,11 +184,15 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/lib/client/browser.ts` | The browser and OS from the user agent, and which app's built-in browser it is (`detectBrowser`); the Android Chrome intent link. |
 | `src/lib/audio/level.ts` | `isDigitalSilence`: a take of only zeros, which is a microphone the system muted, not a quiet singer; `MIN_MUTED_SAMPLES`, below which a take is a tap. |
 | `src/lib/client/storage.ts` | Guarded `sessionStorage` for test progress and the pick-songs intent; `localStorage` for a range kept on the device. |
-| `src/lib/songs/browse.ts` | Sliders, chips, counts and the "Saved, not played lately" divider, as pure functions over every match. |
+| `src/lib/setlist/` | The Setlist tuner without React: `types.ts`, `defaults.ts` (every default), `tuner.ts` (reducer, request), `sheet.ts` (geometry, drag rules), `art.ts` (gear art and lane maths), `engine.ts` (the ranking port and the interim engine), `rows.ts`, `eras.ts`, `gears.ts` (labels). |
+| `src/lib/client/useRankedSetlist.ts` | Asks the engine for the list that goes with the tuner, drops answers that arrive after a newer request. |
+| `src/lib/songs/browse.ts` | The old sliders, chips and counts (no longer used by the screen; QWW-47 owns what becomes of them), and `difficultyBand` and `decadeOf`, which the tuner reads. |
 | `src/lib/client/funnel.ts`, `events.ts` | What each action records in the beta event log, and the batching tracker that sends it. |
 | `src/lib/client/spotifyEmbed.ts` | A song's `open.spotify.com/track/ID` link to the address of Spotify's player, or null. |
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `reload`, `quietMs` props for tests. |
-| `src/components/{Tv,Lyric,HoldStep,Results,SongDetail,PickSongs}.tsx` | The screen pieces. |
+| `src/components/{Tv,Lyric,HoldStep,SongDetail,PickSongs}.tsx` | The screen pieces. |
+| `src/components/setlist/` | The Setlist tuner: `SetlistScreen`, `Sheet`, `GearStrip`, `EraPanel`, `SongRows` (+ `flip.ts`), `GearArt`, and `setlist.module.css` (its tokens are `--sl-*`). |
+| `src/components/SpotifyAccount.tsx` | The signed-in Spotify logo and its "Logged in as ... · Log out" box. |
 | `src/components/RoundButton.tsx` | The round pink-ringed button, shared by the record button (`HoldStep.tsx`, a dot in it) and "Turn on microphone" (`MicStep.tsx`, a microphone in it), so the two keep one look. |
 | `src/components/MicStep.tsx` | The mic step's screens. |
 | `src/components/SpotifyPlayer.tsx` | Spotify's player iframe, or the plain "Open in Spotify" link when there is no track to embed. |
@@ -183,6 +206,11 @@ npx playwright test              # builds + starts the app, mocks /api/*, fake m
 E2E_PORT=3107 npx playwright test  # same, on another port (avoids reusing another checkout's server)
 ```
 
+`tests/e2e/setlist.spec.ts` is the Setlist tuner's acceptance suite (spec section 9, tests 1 to 21, at 390×844, plus
+touch drag, short phones and long titles). CI runs it in Chromium. It also passes in WebKit, the engine behind iPhone
+Safari (a config with `browserName: 'webkit'`; the three DevTools touch tests are Chromium-only and skip there), which
+is how the drag and slider behavior was checked without a real iPhone. Its fixture is the spec's 25 mock songs
+(`tests/fixtures/setlist.ts`).
 The e2e spec generates a 110 Hz (A2) and a 523.25 Hz (C5) WAV and feeds them to
 Chromium's fake microphone. Chromium takes one file per launch, so the low note is sung
 in one browser and the high note in a second one that picks up the saved progress.

@@ -14,6 +14,7 @@ were. The screen is `src/components/setlist/`; this lists where it differs from 
 | Reference: the invisible `<input type="range">` spans the strip body | It also starts 9 px before the track and ends 9 px after, with an 18 px thumb | So the native thumb's centre travels exactly the drawn track: a tap lands on the value the thumb shows |
 | §7: Barlow Semi Condensed from Google Fonts | Self-hosted from `@fontsource/barlow-semi-condensed` | §10 said to self-host for production |
 | §6 writes the metronome weight as `translate(0, N)` | `translate(0 N)`, as the reference does | The same thing in SVG |
+| §3: the heading is 28 px | 28 px from 375 px wide up; 24 px below that | At 360 px (a common Android width) the range and the Connect button cut the heading to "Tune your setl…" when the range has sharps (D#2 to D#5). It still clips at 320 px |
 
 Acceptance tests: `tests/e2e/setlist.spec.ts` runs spec §9, tests 1 to 21, at 390×844. Where a test names a mock default,
 it is rewritten for the real one; the header of that file says how.

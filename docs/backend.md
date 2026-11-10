@@ -234,7 +234,7 @@ writes `src/lib/songs/popularityScale.ts`.
 
 ## Song tempo
 
-The Tempo slider (QWW-40) sorts by beats per minute, 70 to 180, placed by rank like popularity. No
+The Tempo gear (QWW-40) ranks by beats per minute, 70 to 180, scored 0 to 100 over that range (`src/lib/setlist/engine.ts`). No
 tempo is read from Spotify (its audio features are closed to new apps). `song_tempo` keeps each
 source as measured, and `combineTempo` (`src/lib/tempo/tempo.ts`) picks the song's one tempo when
 it is read, so changing the rule needs no refetch: Deezer's `bpm` (median over the studio versions
@@ -275,8 +275,9 @@ these names and props:
   `spotify_link_pressed`, `spotify_connect_pressed`. Each step counts on its own, so a returning
   tester who lands on results still counts there.
 - **By control**, keyed by each control in use when the event happened: `difficulty`,
-  `familiarity` or `popularity` when that slider prop is a number, `decade` or `mood` when one is
-  picked, `duets` when `duetsOnly` is true, else `none`. An event with several controls in use
+  `familiarity` (the History gear) or `popularity` when that gear's prop is a number, `era` when the
+  `eras` prop is a string (Era is on), `decade` or `mood` when an older event carries one, `duets` when
+  `duetsOnly` is true, else `none`. An event with several controls in use
   counts toward each. Per control: `song_opened` (count, and the median of its `position` prop),
   `spotify_link_pressed` (count), `feedback_tapped` (its `thumbs` prop, `up` or `down`).
 - **Sessions**: each device's events in time order, the 50 most recently active devices first.
