@@ -66,6 +66,23 @@ export interface SongService {
     opts?: { all?: boolean },
   ): Promise<RecommendationsResponse>;
   knownSongs(tracks: Track[]): Promise<KnownSongsResponse>;
+  /**
+   * Every library song that fits `userRange`, scored and with its year, genre, tempo and popularity, but not ranked, cut
+   * or stripped of its pitch histograms: the Setlist tuner ranks them itself (QWW-47). A song the library has twice under
+   * different Spotify ids is listed once, as its most played one.
+   */
+  libraryMatches(tracks: Track[], userRange: VocalRange): Promise<LibraryMatches>;
+}
+
+/** What libraryMatches returns. */
+export interface LibraryMatches {
+  matches: Match[];
+  /** Each match's song key, by track id (to tell a song the catalogue also has). */
+  keys: Map<string, string>;
+  /** The data-source line of each match, by track id. */
+  logs: Map<string, DataSourceLogEntry>;
+  /** False while lookups have run out of budget (a first visit to a very large library): asking again carries on. */
+  complete: boolean;
 }
 
 interface Walked {
@@ -126,7 +143,7 @@ function withoutPitchShare<T extends { pitchShare?: [number, number][] }>(x: T):
  * The match as the whole-list response sends it: no pitch histograms, for the song or its duet
  * parts, and none of the karaoke popularity it was scored with.
  */
-function compact(m: Match): Match {
+export function compact(m: Match): Match {
   const scored: SongRange & KaraokePopularity = m.range;
   const { karaokeViews: _views, chartRank: _rank, deezerRank: _deezer, ...range } = withoutPitchShare(scored);
   if (range.parts) range.parts = range.parts.map(withoutPitchShare);
@@ -207,34 +224,41 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
     return true;
   }
 
+  /**
+   * The library's songs that fit `userRange`, in play order (the order `walk` visits them). With `all`, each carries
+   * song facts from our USDB index and is scored with our karaoke popularity (QWW-6) and tempo (QWW-40), each read once
+   * for every candidate. Pages leave both out, so they stay exactly as they were.
+   */
+  async function collect(tracks: Track[], userRange: VocalRange, all: boolean) {
+    const candidates: { track: Track; key: string; range: SongRange; log: DataSourceLogEntry }[] = [];
+    const exhausted = await walk(tracks, ({ track, key, record }) => {
+      if (!record.range) return false; // skipped songs never match
+      if (hasLittleSinging(track.title)) return false; // a dub or instrumental shares the original's key
+      candidates.push({ track, key, range: record.range, log: record.log });
+      return false;
+    });
+
+    const keys = candidates.map((c) => c.key);
+    const [index, popularity, tempos] = all ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys), store.getSongTempos(keys)]) : [null, null, null];
+    const matches: Match[] = [];
+    const logs = new Map<string, DataSourceLogEntry>();
+    const keyOf = new Map<string, string>();
+    for (const { track, key, range, log } of candidates) {
+      const row = index?.get(key);
+      const pop = popularity?.get(key);
+      const m = deps.matchSong(track, index ? withKaraokePopularity(withIndexPopularity(range, row), pop) : range, userRange);
+      if (!m) continue;
+      const tempo = tempoOf(tempos?.get(key), key);
+      matches.push(index ? { ...m, ...songFacts(track, row, pop), ...(tempo !== undefined ? { tempo } : {}) } : m);
+      logs.set(track.id, log);
+      keyOf.set(track.id, key);
+    }
+    return { matches, logs, keyOf, exhausted };
+  }
+
   return {
     async recommend(tracks, userRange, offset, limit, { all = false } = {}) {
-      const candidates: { track: Track; key: string; range: SongRange; log: DataSourceLogEntry }[] = [];
-      const exhausted = await walk(tracks, ({ track, key, record }) => {
-        if (!record.range) return false; // skipped songs never match
-        if (hasLittleSinging(track.title)) return false; // a dub or instrumental shares the original's key
-        candidates.push({ track, key, range: record.range, log: record.log });
-        return false;
-      });
-
-      // The whole list also carries song facts from our USDB index and is scored with our karaoke
-      // popularity (QWW-6) and tempo (QWW-40), each read once for every candidate. Pages leave both out, so they stay
-      // exactly as they were.
-      const keys = candidates.map((c) => c.key);
-      const [index, popularity, tempos] = all ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys), store.getSongTempos(keys)]) : [null, null, null];
-      const matches: Match[] = [];
-      const logs = new Map<string, DataSourceLogEntry>();
-      const keyOf = new Map<string, string>();
-      for (const { track, key, range, log } of candidates) {
-        const row = index?.get(key);
-        const pop = popularity?.get(key);
-        const m = deps.matchSong(track, index ? withKaraokePopularity(withIndexPopularity(range, row), pop) : range, userRange);
-        if (!m) continue;
-        const tempo = tempoOf(tempos?.get(key), key);
-        matches.push(index ? { ...m, ...songFacts(track, row, pop), ...(tempo !== undefined ? { tempo } : {}) } : m);
-        logs.set(track.id, log);
-        keyOf.set(track.id, key);
-      }
+      const { matches, logs, keyOf, exhausted } = await collect(tracks, userRange, all);
       const sourcesOf = (items: Match[]) => {
         const sources: Record<string, DataSourceLogEntry> = {};
         for (const m of items) {
@@ -271,6 +295,19 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       // library): let the client ask again, which continues the lookups.
       const nextOffset = page.nextOffset ?? (exhausted ? null : offset + items.length);
       return { matches: items, nextOffset, sources: sourcesOf(items) };
+    },
+
+    async libraryMatches(tracks, userRange) {
+      const { matches, logs, keyOf, exhausted } = await collect(tracks, userRange, true);
+      // Matches come in play order, so the first of a song under two Spotify ids is the one played more.
+      const seen = new Set<string>();
+      const unique = matches.filter((m) => {
+        const key = keyOf.get(m.track.id) ?? m.track.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return { matches: unique, keys: keyOf, logs, complete: exhausted };
     },
 
     async knownSongs(tracks) {

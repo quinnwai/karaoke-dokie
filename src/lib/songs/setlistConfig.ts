@@ -29,6 +29,9 @@ export const DEFAULTS = Object.freeze({
 /** The parts that start out reset (off), as the sheet loads. */
 export const DEFAULT_OFF: readonly TunerPart[] = Object.freeze(['history', 'tempo', 'era']);
 
+/** Songs per page of POST /api/setlist: the number sent when `limit` is left out, and the most one request may ask for. */
+export const SETLIST_PAGE = Object.freeze({ default: 100, max: 200 });
+
 /** The button labels (spec §2). The apostrophe is U+2019. */
 export const ERA_LABEL: Record<EraId, string> = {
   pre: 'Pre-’70s',

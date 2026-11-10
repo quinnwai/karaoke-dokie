@@ -7,6 +7,7 @@ import type {
   KnownSongsResponse,
   MeResponse,
   RecommendationsResponse,
+  SetlistResponse,
   Track,
   VocalRange,
 } from '../contracts';
@@ -26,10 +27,12 @@ import {
   signSession,
 } from './session';
 import { disconnectUser, loadLibrary } from './library';
+import { setlistFor } from './setlistService';
+import type { LibraryMatches } from './songService';
 import { assertSpotifyOpen, describeError, noteSpotifyLimit } from './spotify';
 import { withCaller } from './spotifyCalls';
 import { DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT, type UserRecord } from './store';
-import { intParam, validateEvents, validateFeedback, validateVocalRange } from './validate';
+import { intParam, validateEvents, validateFeedback, validateSetlistRequest, validateVocalRange } from './validate';
 import type { AppContext } from './wiring';
 
 const STATE_MAX_AGE_S = 600;
@@ -267,6 +270,67 @@ export async function catalogueRecommendations(req: Request, ctx: AppContext): P
   if (offset === null || limit === null) return errorJson(400, 'bad-request', 'offset must be >= 0 and limit 1..50');
   const body: RecommendationsResponse = await ctx.catalogue.recommend(range.value, { offset, limit });
   return json(await withDuetsAndMoods(body, ctx));
+}
+
+// ---------- the Setlist tuner (QWW-47) ----------
+
+/** The signed-in user, or null: no session, a stale one, or one for a user we no longer have. Never a 401, since using the tuner signed out is the main way. */
+async function optionalUser(req: Request, ctx: AppContext): Promise<UserRecord | null> {
+  const userId = readSessionUserId(req, ctx.config.sessionSecret);
+  return userId ? ctx.store.getUser(userId) : null;
+}
+
+/** Ranges whose library songs are kept per library: the sheet moves one slider at a time on one range. */
+const LIBRARY_RANGES_KEPT = 4;
+const libraryLists = new WeakMap<Track[], Map<string, Promise<LibraryMatches>>>();
+
+/**
+ * The library's songs that fit a range. The track cache hands out one array for as long as it keeps a library,
+ * so the matches are kept against that array: a slider moving asks again and again for the same ones, and a
+ * library read again is a new array. A list that is not complete (lookups ran out of budget) is not kept, so
+ * the next request carries on with them.
+ */
+function libraryFor(tracks: Track[], range: { low: number; high: number }, ctx: AppContext): Promise<LibraryMatches> {
+  let byRange = libraryLists.get(tracks);
+  if (!byRange) libraryLists.set(tracks, (byRange = new Map()));
+  const key = `${range.low}:${range.high}`;
+  const hit = byRange.get(key);
+  if (hit) return hit;
+  const list = ctx.songs.libraryMatches(tracks, { ...range, source: 'test' });
+  const kept = byRange;
+  kept.set(key, list);
+  if (kept.size > LIBRARY_RANGES_KEPT) kept.delete(kept.keys().next().value!);
+  list.then(
+    (l) => l.complete || kept.delete(key),
+    () => kept.delete(key),
+  );
+  return list;
+}
+
+/**
+ * The tuner's ranked list (QWW-47). No session needed. A valid one adds the singer's library songs and lets the History
+ * gear count; when the library cannot be read the catalogue's list comes back with `libraryUnavailable`, as everywhere
+ * else (QWW-55). The range comes with the request, like the catalogue's.
+ */
+export async function setlist(req: Request, ctx: AppContext): Promise<Response> {
+  const parsed = await readJson(req);
+  if (!parsed.ok) return errorJson(400, 'bad-request', 'Body must be JSON');
+  const v = validateSetlistRequest(parsed.body);
+  if (!v.ok) return errorJson(400, 'bad-request', v.error);
+  const base = await ctx.catalogue.setlist(v.value.range);
+  const user = await optionalUser(req, ctx);
+  let library: LibraryMatches | null = null;
+  let libraryUnavailable = false;
+  if (user) {
+    const tracks = await loadTracks(user, ctx, 'site:/api/setlist');
+    if (tracks) library = await libraryFor(tracks, v.value.range, ctx);
+    else libraryUnavailable = true;
+  }
+  const body = setlistFor(base, library, v.value);
+  if (libraryUnavailable) body.libraryUnavailable = true;
+  // After ranking, like every response (features.ts): duets and moods can never change the order.
+  const matches = await applyDuetsAndMoods(body.songs.map((s) => s.match), ctx.store, ctx.config);
+  return json({ ...body, songs: body.songs.map((s, i) => ({ ...s, match: matches[i]! })) } satisfies SetlistResponse);
 }
 
 export async function catalogueFeedback(req: Request, ctx: AppContext): Promise<Response> {

@@ -9,10 +9,14 @@
 //   3. Era filter, then the songs are sorted by distance to the gear values (rankPrepared):
 //        distance = sum over the active gears of weight × |song's place − gear value|
 //      An active gear is one that is not in `off` (and History only when the singer's library was read).
-//      Off gears add nothing. A song we know nothing about on an active gear is UNKNOWN_DISTANCE from any
-//      value, which sorts it after every song we do know there. The Maybe songs (estimated ranges) come after
-//      all the others, as everywhere else. Ties go to the more popular song, then the easier, then to a song
-//      sung as written over one an octave away, then to the track id, so the order never depends on input order.
+//      Off gears add nothing. A song we do not know on an active gear (no tempo, an implausible range, not in
+//      the singer's library) is a tier of its own: it sorts after every song that has all the active gears,
+//      among the songs that miss as many as it does. That is what "songs without a tempo sort last" and "the
+//      singer's own songs come first" mean. The Maybe songs (estimated ranges) come after all the others, as
+//      everywhere else. Ties go to the more popular song, then the easier, then to a song sung as written
+//      over one an octave away, then to the song's artist and title, then to the track id, so the order never
+//      depends on input order, and a song keeps its place among equals whether it arrives as the catalogue's
+//      track or the singer's own.
 //
 // The default state (setlistConfig.ts) is Popularity on at 100, Difficulty on at 0, the rest off. With
 // Popularity counting double, that is "most popular first, then easiest" (QWW-42 rule 3).
@@ -35,9 +39,6 @@ import { eraOf } from './setlistConfig';
  * twenty place easier song to make up for it.
  */
 export const GEAR_WEIGHTS: Readonly<Record<GearId, number>> = Object.freeze({ difficulty: 1, history: 1, popularity: 2, tempo: 1 });
-
-/** How far a song we know nothing about on a gear is from any value: past the 100 of the farthest song we know. */
-export const UNKNOWN_DISTANCE = 150;
 
 /**
  * A song range narrower than this many semitones is not a melody. The 5th to 95th percentile of what is sung
@@ -255,19 +256,24 @@ export function rankPrepared(prepared: PreparedSetlist, state: SetlistState & { 
   const passing = prepared.songs.filter((s) => !eraOn || (s.era !== null && picked.has(s.era)));
   const scored = passing.map((s) => {
     let distance = 0;
+    let missing = 0;
     for (const g of active) {
       const place = s.gears[g];
-      distance += GEAR_WEIGHTS[g] * (place === null ? UNKNOWN_DISTANCE : Math.abs(place - value(g)));
+      if (place === null) missing++;
+      else distance += GEAR_WEIGHTS[g] * Math.abs(place - value(g));
     }
-    return { s, distance: quantize(distance) };
+    const m = s.candidate.match;
+    return { s, missing, distance: quantize(distance), who: `${m.track.artist}\u0000${m.track.title}`.toLowerCase() };
   });
   scored.sort(
     (a, b) =>
       Number(a.s.maybe) - Number(b.s.maybe) ||
+      a.missing - b.missing ||
       a.distance - b.distance ||
       quantize(b.s.popularity) - quantize(a.s.popularity) ||
       (a.s.gears.difficulty ?? 1000) - (b.s.gears.difficulty ?? 1000) ||
       Math.abs(octaveSemitones(a.s.candidate.match)) - Math.abs(octaveSemitones(b.s.candidate.match)) ||
+      compareIds(a.who, b.who) ||
       compareIds(a.s.candidate.match.track.id, b.s.candidate.match.track.id),
   );
 
