@@ -54,6 +54,11 @@ interface ResultsProps {
   onClear(): void;
   /** Catalogue mode: sign in to Spotify for songs from the singer's own library. */
   onConnect(): void;
+  /**
+   * Signed in, but the server could not read the Spotify library and sent catalogue songs (QWW-55): one quiet line
+   * says so, and the connect prompts, which are for someone without Spotify, stay away.
+   */
+  libraryUnavailable?: boolean;
   /** Library mode: the singer's Spotify display name (from GET /api/me). */
   displayName: string | null;
   /** Library mode: ends the session. Rejects when it could not, which the logo's box then says. */
@@ -131,7 +136,7 @@ export function Results(props: ResultsProps) {
             redo
           </button>
         </span>
-        {mode === 'catalogue' && (
+        {mode === 'catalogue' && !props.libraryUnavailable && (
           <button type="button" className={styles.connect} onClick={props.onConnect} aria-label="Connect to Spotify">
             <SpotifyIcon />
             <span className={styles.connectTip} aria-hidden>
@@ -139,8 +144,14 @@ export function Results(props: ResultsProps) {
             </span>
           </button>
         )}
-        {mode === 'library' && <SpotifyAccount name={props.displayName} onLogout={props.onLogout} />}
+        {(mode === 'library' || props.libraryUnavailable) && <SpotifyAccount name={props.displayName} onLogout={props.onLogout} />}
       </div>
+
+      {props.libraryUnavailable && (
+        <p className={styles.libraryNote} role="status">
+          Couldn’t reach Spotify, showing popular songs.
+        </p>
+      )}
 
       {matches.length > 0 && (
         <div className={styles.controls}>
@@ -288,7 +299,7 @@ export function Results(props: ResultsProps) {
       {mode === 'library' && !loading && !error && list.length > 0 && visible.length >= list.length && (
         <p className={styles.hint}>That’s every song that fits, for now.</p>
       )}
-      {mode === 'catalogue' && matches.length > 0 && (
+      {mode === 'catalogue' && !props.libraryUnavailable && matches.length > 0 && (
         <div className={styles.catalogueNote}>
           <p>Want personalized recommendations?</p>
           <button type="button" className={styles.textButton} onClick={props.onConnect}>

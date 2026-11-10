@@ -113,4 +113,10 @@ CREATE TABLE IF NOT EXISTS song_tempo (
   preview_url TEXT,
   checked_at TEXT
 );
+-- When Spotify said the app may call it again after a 429 (QWW-55): one row (id 1), shared by every server
+-- instance and script. Spotify's quota is the app's, so a 429 for one user stops calls for all of them until it passes.
+CREATE TABLE IF NOT EXISTS spotify_block (
+  id INTEGER PRIMARY KEY,
+  blocked_until BIGINT NOT NULL
+);
 `;

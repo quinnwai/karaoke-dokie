@@ -54,6 +54,18 @@ describe('funnel events', () => {
     expect(eventsFor(loaded, { type: 'feedback', trackId: 't3', thumbs: 'down' })[0]).toMatchObject({ name: 'feedback_tapped', props: { thumbs: 'down' } });
   });
 
+  it('records a library the server could not read as catalogue results, and says so (QWW-55)', () => {
+    const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
+    const page = { ...allMatches(), libraryUnavailable: true };
+    expect(eventsFor(atResults, { type: 'allLoaded', page })).toEqual([
+      { name: 'results_viewed', props: { mode: 'catalogue', matchCount: 8, maybeCount: 2, libraryUnavailable: true } },
+    ]);
+    expect(eventsFor(atResults, { type: 'allLoaded', page: { ...allMatches(0), libraryUnavailable: true } })).toEqual([
+      { name: 'results_viewed', props: { mode: 'catalogue', matchCount: 0, maybeCount: 0, libraryUnavailable: true } },
+      { name: 'results_empty', props: { mode: 'catalogue' } },
+    ]);
+  });
+
   it('never puts a Spotify track id in an event; catalogue songs carry their catalogue key', () => {
     const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
     const library = eventsFor(atResults, { type: 'select', trackId: '4uLU6hMCjMI75M1A2tKUQC', position: 1 });

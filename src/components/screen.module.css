@@ -1436,6 +1436,15 @@
   margin: 0;
 }
 
+/* A signed-in singer whose Spotify library could not be read gets catalogue songs and this one quiet line. */
+.libraryNote {
+  margin: -6px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--dim);
+  text-align: center;
+}
+
 .detailFacts {
   margin: 4px 0 0;
   font-size: 13px;

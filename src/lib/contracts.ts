@@ -240,7 +240,10 @@ export interface FeedbackEntry {
 // PUT  /api/me/range   body VocalRange -> { ok: true }
 // GET  /api/recommendations?offset=0&limit=5 -> RecommendationsResponse
 // GET  /api/recommendations?all=1      -> RecommendationsResponse with every match, `complete: true`
-// GET  /api/songs/known                -> KnownSongsResponse (saved songs with a known range, for "pick songs you sing well")
+//   When the signed-in user's Spotify library cannot be read (Spotify says wait, fails or is down) these answer 200
+//   with the catalogue's songs for the user's range and `libraryUnavailable: true`, never a 5xx (QWW-55).
+// GET  /api/songs/known                -> KnownSongsResponse (saved songs with a known range, for "pick songs you sing well");
+//   no songs and `libraryUnavailable: true` when the library cannot be read
 // POST /api/feedback   body FeedbackRequest -> { ok: true }
 // GET  /api/admin/log  (header x-admin-token) -> { entries: DataSourceLogEntry[] }
 // No Spotify (QWW-2 Track B), no session needed:
@@ -264,10 +267,17 @@ export interface RecommendationsResponse {
   sources: Record<string, DataSourceLogEntry>;
   /** True when `matches` is every match there is (an `all=1` request whose lookups all finished). */
   complete?: boolean;
+  /**
+   * True when a signed-in user's Spotify library could not be read, so `matches` are the catalogue's songs for
+   * their range, as someone without Spotify gets them (QWW-55). The screen says so in one quiet line.
+   */
+  libraryUnavailable?: boolean;
 }
 
 export interface KnownSongsResponse {
   songs: { track: Track; range: SongRange }[];
+  /** True when the library could not be read: `songs` is then empty (QWW-55). */
+  libraryUnavailable?: boolean;
 }
 
 export interface FeedbackRequest {

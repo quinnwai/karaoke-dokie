@@ -481,6 +481,29 @@ describe('KaraokeApp', () => {
     expect(api.saveRange).toHaveBeenCalledWith({ low: 40, high: 64, source: 'songs' });
   });
 
+  it('a library Spotify would not give shows catalogue songs with one quiet note, and feedback goes the catalogue way (QWW-55)', async () => {
+    // The control: a library that loaded offers the listening slider and has no note.
+    const ok = render(<KaraokeApp api={fakeApi(me({ low: 45, high: 72, source: 'test' }))} mic={fakeMic().mic} />);
+    await screen.findByRole('slider', { name: 'Rediscover to On repeat' });
+    expect(screen.queryByRole('status')).toBeNull();
+    ok.unmount();
+
+    const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
+    api.allRecommendations.mockImplementation(async () => ({ ...allMatches(), libraryUnavailable: true }));
+    render(<KaraokeApp api={api} mic={fakeMic().mic} />);
+    expect((await screen.findByRole('status')).textContent).toBe('Couldn’t reach Spotify, showing popular songs.');
+    // Still signed in; nothing asks to connect; and the listening slider is not offered for songs with no listening data.
+    expect(screen.getByRole('slider', { name: 'Light work to Locked in' })).toBeTruthy();
+    expect(screen.queryByRole('slider', { name: 'Rediscover to On repeat' })).toBeNull();
+    expect(screen.getByText('Logged in as Quinn')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Connect to Spotify' })).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: /^Yoru ni Kakeru/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
+    expect(api.catalogueFeedback).toHaveBeenCalledTimes(1);
+    expect(api.feedback).not.toHaveBeenCalled();
+    expect(api.allRecommendations).toHaveBeenCalledTimes(1);
+  });
+
   it('records the beta funnel without any Spotify id or library song', async () => {
     const tracked: { name: string; props?: Record<string, unknown> }[] = [];
     const track = { track: (name: string, props?: Record<string, unknown>) => void tracked.push({ name, props }), flush: async () => {} };

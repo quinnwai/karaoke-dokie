@@ -37,6 +37,11 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    Signed in, pointing at it (or a tap) opens a small box, "Logged in as <display name> · Log out";
    Log out POSTs `/api/auth/logout`, forgets the library and shows catalogue results for the same
    range, which stays on the device (`kd.range`). If the request fails the box says so and nothing changes.
+   When the server cannot read the singer's Spotify library (Spotify says wait, fails or is down) it answers
+   `/api/recommendations?all=1` with the catalogue's songs for their range and `libraryUnavailable: true` (QWW-55).
+   The list is then a catalogue list (no "Rediscover to On repeat" slider, no connect prompts) for a singer who stays
+   signed in, with the green logo, Log out and one quiet line under the bar: "Couldn’t reach Spotify, showing
+   popular songs." The next range save or redo asks the server again.
 7. **Song detail**: range bar (song in neon pink over the user's range, note names at the
    ends; a song sung an octave away is drawn as sung, with the recording as a dashed outline;
    faint bars above it show where the song's singing time sits across your range, `Match.shape`,

@@ -449,6 +449,17 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect((await s.getSongTempos(many.map((m) => m.key))).size).toBe(2_500);
   });
 
+  it('keeps one Spotify block for the whole app: a later time wins and an earlier one never shortens it (QWW-55)', async () => {
+    const s = make();
+    expect(await s.getSpotifyBlock()).toBeNull();
+    await s.setSpotifyBlock(1_800_000_000_000);
+    expect(await s.getSpotifyBlock()).toBe(1_800_000_000_000);
+    await s.setSpotifyBlock(1_700_000_000_000); // a short 429 arriving after a long one
+    expect(await s.getSpotifyBlock()).toBe(1_800_000_000_000);
+    await s.setSpotifyBlock(1_800_000_012_000);
+    expect(await s.getSpotifyBlock()).toBe(1_800_000_012_000);
+  });
+
   it('reads back the results view stored with feedback, and no view for a tap without one', async () => {
     const s = make();
     const filtered = {
@@ -476,7 +487,7 @@ describe('schema and store selection', () => {
     const q = pgMemQuery();
     await migrate(q);
     expect(schemaStatements().length).toBeGreaterThanOrEqual(5);
-    for (const t of ['users', 'vocal_ranges', 'song_ranges', 'source_log', 'feedback', 'song_popularity']) {
+    for (const t of ['users', 'vocal_ranges', 'song_ranges', 'source_log', 'feedback', 'song_popularity', 'spotify_block']) {
       await expect(q(`SELECT * FROM ${t}`)).resolves.toEqual([]);
     }
   });

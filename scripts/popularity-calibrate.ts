@@ -10,7 +10,7 @@ import { parseArgs } from 'node:util';
 import { calibrate, type CalibrationSong } from '../src/lib/popularity/calibrate';
 import { readConfig } from '../src/lib/server/config';
 import { getStore, neonQuery } from '../src/lib/server/getStore';
-import { createSpotifyClient, ensureFreshTokens, getUserTracks } from '../src/lib/server/spotify';
+import { createSpotifyClient, readUserTracks } from '../src/lib/server/spotify';
 import { songKey } from '../src/lib/songs/resolve';
 import { MEASURED_RANK, SOURCE_RANK } from '../src/lib/songs/sourceRank';
 
@@ -25,7 +25,7 @@ async function spotifyPopularity(): Promise<Map<string, number>> {
   for (const id of await store.listUserIds()) {
     const user = await store.getUser(id);
     if (!user) continue;
-    const tracks = await getUserTracks(spotify, (await ensureFreshTokens(user, spotify, store)).spotify.accessToken);
+    const tracks = await readUserTracks(store, spotify, user);
     const withPopularity = tracks.filter((t) => typeof t.popularity === 'number');
     console.log(`${user.displayName}: ${tracks.length} songs, ${withPopularity.length} with Spotify popularity`);
     for (const t of withPopularity) out.set(songKey(t.artist, t.title), t.popularity!);

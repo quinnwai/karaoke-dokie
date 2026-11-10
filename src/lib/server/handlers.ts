@@ -8,11 +8,12 @@ import type {
   MeResponse,
   RecommendationsResponse,
   Track,
+  VocalRange,
 } from '../contracts';
 import { withoutForbiddenProps } from '../eventRules';
 import { songKey } from '../songs/resolve';
 import { summarizeEvents } from './eventStats';
-import { catalogueKey } from './catalogue';
+import { catalogueKey, type CataloguePage } from './catalogue';
 import { applyDuetsAndMoods, applyDuetsToKnownSongs } from './features';
 import {
   SESSION_COOKIE,
@@ -24,7 +25,7 @@ import {
   serializeCookie,
   signSession,
 } from './session';
-import { describeError, ensureFreshTokens, getUserTracks, SpotifyError } from './spotify';
+import { assertSpotifyOpen, describeError, noteSpotifyLimit, readUserTracks } from './spotify';
 import { DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT, type UserRecord } from './store';
 import { intParam, validateEvents, validateFeedback, validateVocalRange } from './validate';
 import type { AppContext } from './wiring';
@@ -82,20 +83,41 @@ async function requireUser(req: Request, ctx: AppContext): Promise<UserRecord | 
   return json({ error: 'signed-out' }, 401, h);
 }
 
-/** The user's library (cached per process), or an error response. */
-async function loadTracks(user: UserRecord, ctx: AppContext): Promise<Track[] | Response> {
+/**
+ * How long a library read may take before the screen gets catalogue songs instead. The library routes have a 60 s
+ * maxDuration, and a host that gives up on a slow function answers with its own 5xx, which is the error this
+ * avoids: Spotify can stall, or answer 429s whose waits add up inside one request's retries.
+ */
+export const LIBRARY_DEADLINE_MS = 50_000;
+
+/** `p`, or a rejection once `ms` have passed. `p` is left running, and a late failure of it has nobody to tell. */
+function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the library read took more than ${ms / 1000} s`)), ms);
+  });
+  p.catch(() => {});
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * The user's library (cached per process), or null when it cannot be had: Spotify said wait (nothing is requested
+ * while it does), failed, stalled or refused the user's token. Spotify trouble is never the user's error
+ * (QWW-55, which was a 502 and an empty screen): the caller answers with the catalogue's songs and says so.
+ * A read that outlives the deadline carries on and, if it finishes, is cached for the next request.
+ */
+async function loadTracks(user: UserRecord, ctx: AppContext): Promise<Track[] | null> {
   try {
-    return await ctx.tracks.get(user.id, async () => {
-      const fresh = await ensureFreshTokens(user, ctx.spotify, ctx.store);
-      return getUserTracks(ctx.spotify, fresh.spotify.accessToken);
-    });
+    return await withDeadline(ctx.tracks.get(user.id, () => readUserTracks(ctx.store, ctx.spotify, user)), LIBRARY_DEADLINE_MS);
   } catch (err) {
     console.error(`[spotify] could not load the library: ${describeError(err)}`);
-    if (err instanceof SpotifyError && (err.status === 400 || err.status === 401)) {
-      return errorJson(401, 'signed-out', 'Spotify access expired; sign in again');
-    }
-    return errorJson(502, 'spotify-unavailable', err instanceof Error ? err.message : undefined);
+    return null;
   }
+}
+
+/** The catalogue's songs in place of a library that could not be read, with the flag the screen words its note from. */
+async function withoutLibrary(range: VocalRange, page: CataloguePage, ctx: AppContext): Promise<Response> {
+  return json(await withDuetsAndMoods({ ...(await ctx.catalogue.recommend(range, page)), libraryUnavailable: true }, ctx));
 }
 
 // ---------- auth ----------
@@ -125,8 +147,11 @@ export async function callback(req: Request, ctx: AppContext): Promise<Response>
   if (!expected || !state || !safeEqual(state, expected)) return fail('state');
   if (!code) return fail('missing-code');
 
-  let step = 'token exchange';
+  let step = 'rate limit check';
   try {
+    // While Spotify has said to wait (QWW-55) a sign-in would only be refused, and every request counts.
+    await assertSpotifyOpen(ctx.store);
+    step = 'token exchange';
     const tokens = await ctx.spotify.exchangeCode(code);
     step = 'profile (/me)';
     const me = await ctx.spotify.getMe(tokens.accessToken);
@@ -140,6 +165,7 @@ export async function callback(req: Request, ctx: AppContext): Promise<Response>
   } catch (err) {
     // The browser only gets ?authError=spotify, so this line is the only record of why.
     console.error(`[auth] Spotify sign-in failed at the ${step} step: ${describeError(err)}`);
+    await noteSpotifyLimit(ctx.store, err);
     return fail('spotify');
   }
 }
@@ -190,7 +216,7 @@ export async function recommendations(req: Request, ctx: AppContext): Promise<Re
   const range = await ctx.store.getRange(user.id);
   if (!range) return errorJson(409, 'no-range', 'Save a vocal range first (PUT /api/me/range)');
   const tracks = await loadTracks(user, ctx);
-  if (tracks instanceof Response) return tracks;
+  if (!tracks) return withoutLibrary(range, all ? { all: true } : { offset, limit }, ctx);
   const body: RecommendationsResponse = all
     ? await ctx.songs.recommend(tracks, range, offset, limit, { all: true })
     : await ctx.songs.recommend(tracks, range, offset, limit);
@@ -201,7 +227,7 @@ export async function knownSongs(req: Request, ctx: AppContext): Promise<Respons
   const user = await requireUser(req, ctx);
   if (user instanceof Response) return user;
   const tracks = await loadTracks(user, ctx);
-  if (tracks instanceof Response) return tracks;
+  if (!tracks) return json({ songs: [], libraryUnavailable: true } satisfies KnownSongsResponse);
   const body: KnownSongsResponse = await ctx.songs.knownSongs(tracks);
   return json(applyDuetsToKnownSongs(body, ctx.config));
 }

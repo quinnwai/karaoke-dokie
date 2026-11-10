@@ -175,6 +175,16 @@ export interface Store {
   /** Every lookup, hits and misses, by song key. */
   listSongDeezer(): Promise<Map<string, SongDeezerRecord>>;
 
+  // ---- Spotify rate-limit block (QWW-55) ----
+  /**
+   * Epoch ms until which Spotify has told the app to stop calling it (a 429's Retry-After), or null when it
+   * has not. One value for the whole app, shared by every server instance and script: Spotify's quota is the
+   * app's, not a user's.
+   */
+  getSpotifyBlock(): Promise<number | null>;
+  /** Blocks Spotify until `until`. A later block wins; an earlier one never shortens it. */
+  setSpotifyBlock(until: number): Promise<void>;
+
   // ---- tempo (QWW-40) ----
   /** Adds rows, or sets the fields given on a key's row: a field left unset keeps its stored value. */
   putSongTempo(entries: SongTempoRecord[]): Promise<void>;

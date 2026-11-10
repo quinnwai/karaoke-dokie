@@ -84,6 +84,17 @@ export class SpotifyError extends Error {
   }
 }
 
+/**
+ * Thrown in place of a request while Spotify has told the app to wait (QWW-55): a 429's Retry-After, kept in the
+ * store so every server instance and every script honours it. No request was made.
+ */
+export class SpotifyBlockedError extends Error {
+  constructor(readonly until: number) {
+    super(`Spotify asked the app to wait until ${new Date(until).toISOString()}; no request was made`);
+    this.name = 'SpotifyBlockedError';
+  }
+}
+
 /** One line of a failed Spotify response's body, e.g. {"error":"invalid_grant"}; empty when it cannot be read. */
 async function errorDetail(res: Response): Promise<string> {
   try {
@@ -272,7 +283,10 @@ export function createSpotifyClient(
       headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(body).toString(),
     });
-    if (!res.ok) throw new SpotifyError(`Spotify token request failed (${res.status})`, res.status, await errorDetail(res));
+    if (!res.ok) {
+      const retryAfter = res.status === 429 ? (res.headers.get('retry-after') ?? undefined) : undefined;
+      throw new SpotifyError(`Spotify token request failed (${res.status})`, res.status, await errorDetail(res), retryAfter);
+    }
     const j = (await res.json()) as { access_token: string; refresh_token?: string; expires_in: number };
     const refreshToken = j.refresh_token ?? previousRefresh;
     if (!j.access_token || !refreshToken) throw new SpotifyError('Spotify token response was incomplete', 502);
@@ -456,4 +470,66 @@ export async function getUserTracks(client: SpotifyClient, accessToken: string):
     optional(client.getPlaylistTracks(accessToken)),
   ]);
   return buildLibrary({ top: { short_term: short, medium_term: medium, long_term: long }, recent: plays, saved, playlists });
+}
+
+// ---- Spotify's "wait" (QWW-55) ----
+
+/** However long a 429 asks, the app waits no more than a day, so a bogus value cannot lock it for good. */
+const MAX_BLOCK_MS = 24 * 60 * 60_000;
+/** A 429 with reason QUOTA_EXCEEDED that does not say how long: the quota resets daily, so an hour is a cautious guess. */
+const QUOTA_UNSAID_BLOCK_MS = 60 * 60_000;
+/** A Retry-After of no more than this is a rate limit, waited out inside the request (RATE_LIMIT_MAX_WAIT_MS), not a block. */
+const BLOCK_OVER_SECONDS = 30;
+
+/**
+ * When the app may call Spotify again after this error (epoch ms), or null when there is nothing to wait for: it is
+ * not a 429, or it is a short rate limit. A block follows a 429 with reason QUOTA_EXCEEDED, as on 10 Nov 2026
+ * (retry-after 12098 s, the whole app locked for 3.4 hours), or any Retry-After over 30 s.
+ */
+export function blockedUntilOf(err: unknown, now: number = Date.now()): number | null {
+  if (!(err instanceof SpotifyError) || err.status !== 429) return null;
+  const said = err.retryAfter?.trim() ? Number(err.retryAfter) : NaN;
+  const seconds = Number.isFinite(said) && said >= 0 ? said : null;
+  const quota = err.detail?.includes('QUOTA_EXCEEDED') === true;
+  if (!quota && (seconds === null || seconds <= BLOCK_OVER_SECONDS)) return null;
+  return now + Math.min(MAX_BLOCK_MS, seconds === null ? QUOTA_UNSAID_BLOCK_MS : seconds * 1000);
+}
+
+/**
+ * Throws SpotifyBlockedError, before any request, while Spotify has told the app to wait. A block that cannot be
+ * read counts as none, and one that is more than a day away (a clock gone wrong, a hand-edited row) as a day:
+ * a problem with that one row must not hide a healthy Spotify, or lock the app for good.
+ */
+export async function assertSpotifyOpen(store: Pick<Store, 'getSpotifyBlock'>, now: number = Date.now()): Promise<void> {
+  const until = await store.getSpotifyBlock().catch((err) => {
+    console.error(`[spotify] could not read the rate limit: ${describeError(err)}`);
+    return null;
+  });
+  if (until !== null && until > now) throw new SpotifyBlockedError(Math.min(until, now + MAX_BLOCK_MS));
+}
+
+/**
+ * Keeps a 429's wait in the store, so the next request, every other server instance and every script stay away
+ * until it passes. Anything else is ignored. A store that cannot be written is logged, not thrown: the error
+ * being handled matters more.
+ */
+export async function noteSpotifyLimit(store: Pick<Store, 'setSpotifyBlock'>, err: unknown, now: number = Date.now()): Promise<void> {
+  const until = blockedUntilOf(err, now);
+  if (until === null) return;
+  await store.setSpotifyBlock(until).catch((e) => console.error(`[spotify] could not keep the rate limit: ${describeError(e)}`));
+}
+
+/**
+ * The user's library for the site and for scripts: none of it when Spotify has told the app to wait, and a 429's
+ * wait kept for everyone else. It reads what getUserTracks reads, which this does not change.
+ */
+export async function readUserTracks(store: Store, client: SpotifyClient, user: UserRecord): Promise<Track[]> {
+  await assertSpotifyOpen(store);
+  try {
+    const fresh = await ensureFreshTokens(user, client, store);
+    return await getUserTracks(client, fresh.spotify.accessToken);
+  } catch (err) {
+    await noteSpotifyLimit(store, err);
+    throw err;
+  }
 }
