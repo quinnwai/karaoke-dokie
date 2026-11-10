@@ -13,7 +13,7 @@ import { withoutForbiddenProps } from '../eventRules';
 import { songKey } from '../songs/resolve';
 import { summarizeEvents } from './eventStats';
 import { catalogueKey } from './catalogue';
-import { applyDuetsAndMoods } from './features';
+import { applyDuetsAndMoods, applyDuetsToKnownSongs } from './features';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_S,
@@ -203,7 +203,7 @@ export async function knownSongs(req: Request, ctx: AppContext): Promise<Respons
   const tracks = await loadTracks(user, ctx);
   if (tracks instanceof Response) return tracks;
   const body: KnownSongsResponse = await ctx.songs.knownSongs(tracks);
-  return json(body);
+  return json(applyDuetsToKnownSongs(body, ctx.config));
 }
 
 // ---------- catalogue: results without Spotify (QWW-2 Track B) ----------

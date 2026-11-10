@@ -23,7 +23,7 @@ import type {
   RecommendationsResponse,
   ResultsView,
 } from '../../src/lib/contracts';
-import { withoutDuetsAndMoods } from '../../src/lib/server/features';
+import { withoutDuetRange, withoutDuetsAndMoods } from '../../src/lib/server/features';
 import { getStore } from '../../src/lib/server/getStore';
 import { MOCK_USER } from '../../src/lib/server/mockSpotify';
 import { SpotifyError } from '../../src/lib/server/spotify';
@@ -1010,13 +1010,20 @@ describe('duets and moods switch (QWW-43)', () => {
     expect(availableFacets(off.catalogueAll.matches)).toEqual({ decades: true, duets: false, moods: [] });
   });
 
-  it('never changes what the catalogue keeps in memory: the cached songs still know they are duets', async () => {
-    const off = await everyRoute(false, 40, 84);
-    expect(off.catalogueAll.matches.some((m) => m.range.duet)).toBe(false);
-    // Same process, same cache, switch flipped on without a restart of the catalogue: the duets are back.
-    getAppContext().config.duetsAndMoods = true;
-    const body = (await (await catalogueRecs.GET(req('/api/catalogue/recommendations?low=40&high=84&all=1'))).json()) as RecommendationsResponse;
-    expect(body.matches.some((m) => m.range.duet === true && m.part !== undefined)).toBe(true);
+  it('the pick-songs list says nothing about duets either, and lists the same songs in the same order', async () => {
+    const pickList = async (on: boolean) => {
+      process.env.DUETS_AND_MOODS = on ? 'on' : '';
+      resetAppContextForTests();
+      const jar = await signIn();
+      return ((await (await known.GET(req('/api/songs/known', jar))).json()) as KnownSongsResponse).songs;
+    };
+    const on = await pickList(true);
+    const off = await pickList(false);
+    // The control: the mock library has a duet (Shallow), and with the switch on its parts are sent.
+    expect(on.some((s) => s.range.duet === true && s.range.parts?.length)).toBe(true);
+    expect(off.map((s) => s.track.id)).toEqual(on.map((s) => s.track.id));
+    for (const s of off) expect([s.range.duet, s.range.parts].filter((v) => v !== undefined), s.track.title).toEqual([]);
+    expect(off).toEqual(on.map((s) => ({ ...s, range: withoutDuetRange(s.range) })));
   });
 });
 

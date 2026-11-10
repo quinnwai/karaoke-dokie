@@ -3,9 +3,10 @@ import { defineConfig, devices } from '@playwright/test';
 // Chromium is preinstalled at /opt/pw-browsers in the cloud sandbox; elsewhere Playwright finds its own.
 const executablePath = process.env.PW_CHROMIUM_PATH;
 // E2E_PORT lets parallel checkouts run their own server without reusing another's. A second server,
-// with duets and moods off as they ship (QWW-43), takes the next port; tests/e2e/duets-moods-off.spec.ts reads it.
+// with duets and moods off as they ship (QWW-43), takes E2E_OFF_PORT (default: the next port);
+// tests/e2e/duets-moods-off.spec.ts reads both. Parallel checkouts set both.
 const port = Number(process.env.E2E_PORT ?? 3000);
-const offPort = port + 1;
+const offPort = Number(process.env.E2E_OFF_PORT ?? port + 1);
 
 const appEnv = {
   KARAOKE_STORE: 'memory',

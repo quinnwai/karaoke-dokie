@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Match } from '../../src/lib/contracts';
+import type { KnownSongsResponse, Match } from '../../src/lib/contracts';
 import { duetsAndMoodsOn, readConfig } from '../../src/lib/server/config';
-import { applyDuetsAndMoods, withoutDuetsAndMoods } from '../../src/lib/server/features';
+import { applyDuetsAndMoods, applyDuetsToKnownSongs, withoutDuetRange, withoutDuetsAndMoods } from '../../src/lib/server/features';
 import type { SongMoodsRecord } from '../../src/lib/server/store';
 
 describe('the duets and moods switch (QWW-43)', () => {
@@ -86,6 +86,35 @@ describe('withoutDuetsAndMoods', () => {
     const { part: _p, partSinger: _s, moods: _m, ...solo } = duet();
     const m: Match = { ...solo, range: { low: 50, high: 62, tessitura: 56, source: 'note-file', confidence: 'high', fastLyrics: false } };
     expect(withoutDuetsAndMoods(m)).toEqual(m);
+  });
+});
+
+describe('withoutDuetRange and the pick-songs list', () => {
+  it('takes the duet flag and the singers’ parts off a range, keeps the rest, and leaves its input alone', () => {
+    const { range } = duet();
+    const before = structuredClone(range);
+    const out = withoutDuetRange(range);
+    expect(out).not.toHaveProperty('duet');
+    expect(out).not.toHaveProperty('parts');
+    expect(out).toEqual({ low: 50, high: 62, tessitura: 56, source: 'note-file', confidence: 'high', fastLyrics: false });
+    expect(range).toEqual(before);
+  });
+
+  const list = (): KnownSongsResponse => {
+    const d = duet();
+    return { songs: [{ track: d.track, range: d.range }, { track: { ...d.track, id: 't2' }, range: withoutDuetRange(d.range) }] };
+  };
+
+  it('off: every song of the list without duet markers, in the same order', () => {
+    const out = applyDuetsToKnownSongs(list(), { duetsAndMoods: false });
+    expect(out.songs.map((s) => s.track.id)).toEqual(['cat:abba|dancing queen', 't2']);
+    for (const s of out.songs) expect(s.range).toEqual(withoutDuetRange(s.range));
+    expect(out.songs[0]!.range).not.toHaveProperty('duet');
+  });
+
+  it('on: the list as it is', () => {
+    const body = list();
+    expect(applyDuetsToKnownSongs(body, { duetsAndMoods: true })).toBe(body);
   });
 });
 

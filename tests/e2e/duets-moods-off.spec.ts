@@ -8,10 +8,11 @@ import { devices, expect, test } from '@playwright/test';
 import path from 'node:path';
 
 const SCREENS = path.resolve('test-results/screens');
-// The same expression as in playwright.config.ts.
+// The same expressions as in playwright.config.ts.
 const port = Number(process.env.E2E_PORT ?? 3000);
+const offPort = Number(process.env.E2E_OFF_PORT ?? port + 1);
 const ON = `http://127.0.0.1:${port}`;
-const OFF = `http://127.0.0.1:${port + 1}`;
+const OFF = `http://127.0.0.1:${offPort}`;
 
 interface ApiMatch {
   track: { id: string; title: string };
