@@ -67,8 +67,8 @@ test('range screen: no "or use songs from your Spotify" as the app ships, and th
   }
 });
 
-// What a refused sign-in looks like: the callback sends the browser to /?authError=<reason> (Spotify says wait, the
-// account is not allowed, the redirect URI does not match, ...), and the range, kept for the round trip, is on screen.
+// What a failed sign-in looks like: the callback sends the browser to /?authError=<reason> (Spotify says wait, one of
+// its calls fails, the sign-in cookie is gone, ...), and the range, kept for the round trip, is on screen.
 test('a refused sign-in says so under the range and under the list, and Cancel on Spotify says nothing', async ({ browser }) => {
   const context = await browser.newContext({ ...PHONE_375, baseURL: OFF, reducedMotion: 'reduce' });
   await withRange(context, 39, 72);

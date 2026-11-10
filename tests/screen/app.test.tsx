@@ -137,7 +137,7 @@ describe('KaraokeApp', () => {
     expect(screen.getByRole('button', { name: 'or use songs from your Spotify' })).toBeTruthy();
   });
 
-  // The server sends a refused sign-in (Spotify said wait, the account is not allowed, the redirect did not match, ...)
+  // The server sends a failed sign-in (Spotify said wait, one of its calls failed, the sign-in cookie was gone, ...)
   // back with ?authError=<reason>. It landed on the range screen with no word about it.
   describe('a refused sign-in (?authError=...)', () => {
     it('says so under the range and under the list, takes ?authError out of the address, and keeps the ways to retry', async () => {

@@ -22,8 +22,8 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    Spotify" under it shows only while `PICK_SONGS=on`, the switch of step 1 (QWW-55); it keeps the range in
    `sessionStorage` (`kd.test`) and goes to `/api/auth/login`. With the switch off, the Spotify logo on the
    results (step 6) is the one way to sign in.
-   A sign-in that Spotify refuses (Spotify says wait, the account is not allowed, the redirect URI does not
-   match, ...) is sent back by the callback as `/?authError=<reason>`. The range was kept for the round trip, so
+   A sign-in that fails (Spotify says wait, one of the sign-in's Spotify calls fails, the sign-in cookie is gone,
+   ...) is sent back by the callback as `/?authError=<reason>`. The range was kept for the round trip, so
    it lands here: `?authError` is taken out of the address and one quiet line, "Couldn’t sign in to Spotify.",
    shows under the arrow, and again under the bar of the results the arrow leads to. `access_denied` is the
    singer pressing Cancel on Spotify's page, which is their answer, so nothing is said.
