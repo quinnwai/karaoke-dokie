@@ -55,10 +55,11 @@ export function duetsAndMoodsOn(env: Record<string, string | undefined>): boolea
 }
 
 /**
- * The title screen's "or pick songs you sing well" link (QWW-55), off by default: the first tester release
- * has one onboarding flow (title, mic, low note, high note, list). Only PICK_SONGS=on shows it; unset,
- * empty or any other value (a typo, "1", "true") hides it, like DUETS_AND_MOODS. The screen code stays.
- * It is read by app/page.tsx, not by an API route, because the link is the only thing it changes.
+ * The two extra ways in (QWW-55), off by default: the title screen's "or pick songs you sing well" and the range
+ * screen's "or use songs from your Spotify". The first tester release has one onboarding flow (title, mic, low
+ * note, high note, list), and the Spotify logo on the list is its sign-in. Only PICK_SONGS=on shows them; unset,
+ * empty or any other value (a typo, "1", "true") hides them, like DUETS_AND_MOODS. The screen code stays.
+ * It is read by app/page.tsx, not by an API route, because the links are the only thing it changes.
  */
 export function pickSongsOn(env: Record<string, string | undefined>): boolean {
   return env.PICK_SONGS?.trim().toLowerCase() === 'on';

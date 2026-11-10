@@ -49,6 +49,55 @@ test('title screen: no "or pick songs you sing well" as the app ships, and the s
   }
 });
 
+// The range screen ("That's your range") has its own link into Spotify; the same PICK_SONGS switch hides it, so the app
+// has one onboarding flow and the Spotify logo on the list is the one way to sign in.
+test('range screen: no "or use songs from your Spotify" as the app ships, and the switch brings it back', async ({ browser }) => {
+  for (const [name, baseURL, links] of [['off', OFF, 0], ['on', ON, 1]] as const) {
+    const context = await browser.newContext({ ...PHONE_375, baseURL, reducedMotion: 'reduce' });
+    await withRange(context, 39, 72); // D#2 to C5
+    const page = await context.newPage();
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
+    await expect(page.getByTestId('range-low')).toHaveText('D#2');
+    await expect(page.getByRole('button', { name: 'or use songs from your Spotify' })).toHaveCount(links);
+    await expect(page.getByText(/songs from your Spotify/i)).toHaveCount(links);
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(SCREENS, `qww55-range-switch-${name}-375px.png`) });
+    await context.close();
+  }
+});
+
+// What a refused sign-in looks like: the callback sends the browser to /?authError=<reason> (Spotify says wait, the
+// account is not allowed, the redirect URI does not match, ...), and the range, kept for the round trip, is on screen.
+test('a refused sign-in says so under the range and under the list, and Cancel on Spotify says nothing', async ({ browser }) => {
+  const context = await browser.newContext({ ...PHONE_375, baseURL: OFF, reducedMotion: 'reduce' });
+  await withRange(context, 39, 72);
+  const page = await context.newPage();
+  await page.goto('/?authError=spotify');
+  await expect(page.getByRole('status')).toHaveText('Couldn’t sign in to Spotify.');
+  expect(new URL(page.url()).search).toBe('');
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: path.join(SCREENS, 'qww55-sign-in-refused-range-375px.png') });
+
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.locator('ol li').first()).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Couldn’t sign in to Spotify.');
+  // Still the plain list, with both ways to try again.
+  await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(2);
+  await expect(page.getByText('Couldn’t load songs.')).toHaveCount(0);
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: path.join(SCREENS, 'qww55-sign-in-refused-list-375px.png') });
+  await context.close();
+
+  const cancelled = await browser.newContext({ ...PHONE_375, baseURL: OFF, reducedMotion: 'reduce' });
+  await withRange(cancelled, 39, 72);
+  const cancelPage = await cancelled.newPage();
+  await cancelPage.goto('/?authError=access_denied');
+  await expect(cancelPage.getByRole('button', { name: 'Continue' })).toBeVisible();
+  await expect(cancelPage.getByRole('status')).toHaveCount(0);
+  await cancelled.close();
+});
+
 test('a signed-in singer whose Spotify library could not be read sees catalogue songs and one quiet note', async ({ browser }) => {
   test.setTimeout(60_000);
   const context = await browser.newContext({ ...PHONE_375, baseURL: OFF, reducedMotion: 'reduce' });

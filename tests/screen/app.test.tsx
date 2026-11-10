@@ -112,13 +112,78 @@ describe('KaraokeApp', () => {
     expect(screen.queryByRole('slider', { name: 'Rediscover to On repeat' })).toBeNull();
   });
 
-  it('after the test, "or use songs from your Spotify" keeps the range and goes to sign-in', async () => {
+  it('after the test, with the switch on, "or use songs from your Spotify" keeps the range and goes to sign-in', async () => {
     sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
     const navigate = vi.fn();
-    render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} navigate={navigate} />);
+    render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} navigate={navigate} pickSongs />);
     fireEvent.click(await screen.findByRole('button', { name: 'or use songs from your Spotify' }));
     expect(navigate).toHaveBeenCalledWith('/api/auth/login');
     expect(JSON.parse(sessionStorage.getItem('kd.test')!)).toEqual({ low: 45, high: 72 });
+  });
+
+  // The range screen has one way on (QWW-55): the arrow. The Spotify link is behind the same PICK_SONGS switch as the
+  // title screen's link, which app/page.tsx passes as `pickSongs`; the Spotify logo on the list is the one way to sign in.
+  it('the range screen has the arrow and no "or use songs from your Spotify" unless the switch is on', async () => {
+    sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
+    const off = render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} />);
+    await screen.findByRole('button', { name: 'Continue' });
+    expect(screen.getByTestId('range-low').textContent).toBe('A2');
+    expect(screen.queryByRole('button', { name: 'or use songs from your Spotify' })).toBeNull();
+    expect(screen.queryByText(/songs from your Spotify/)).toBeNull();
+    off.unmount();
+
+    render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} pickSongs />);
+    await screen.findByRole('button', { name: 'Continue' });
+    expect(screen.getByRole('button', { name: 'or use songs from your Spotify' })).toBeTruthy();
+  });
+
+  // The server sends a refused sign-in (Spotify said wait, the account is not allowed, the redirect did not match, ...)
+  // back with ?authError=<reason>. It landed on the range screen with no word about it.
+  describe('a refused sign-in (?authError=...)', () => {
+    it('says so under the range and under the list, takes ?authError out of the address, and keeps the ways to retry', async () => {
+      window.history.replaceState(null, '', '/?authError=spotify');
+      sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
+      render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} />);
+      expect((await screen.findByRole('status')).textContent).toBe('Couldn’t sign in to Spotify.');
+      expect(window.location.search).toBe('');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+      await screen.findByText('Plastic Love');
+      expect(screen.getByRole('status').textContent).toBe('Couldn’t sign in to Spotify.');
+      // The logo and the prompt under the list stay, to try again; the failed-load screen is not what this is.
+      expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2);
+      expect(screen.queryByText('Couldn’t load songs.')).toBeNull();
+    });
+
+    it('says it on the list a singer comes back to when the range was kept on the device', async () => {
+      window.history.replaceState(null, '', '/?authError=state');
+      localStorage.setItem('kd.range', JSON.stringify({ low: 45, high: 72 }));
+      render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} />);
+      await screen.findByText('Plastic Love');
+      expect(screen.getByRole('status').textContent).toBe('Couldn’t sign in to Spotify.');
+      expect(window.location.search).toBe('');
+    });
+
+    it('says nothing when the singer pressed Cancel on Spotify, and nothing without an error', async () => {
+      window.history.replaceState(null, '', '/?authError=access_denied');
+      sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
+      const cancelled = render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} />);
+      await screen.findByRole('button', { name: 'Continue' });
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(window.location.search).toBe('');
+      cancelled.unmount();
+
+      render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} />);
+      await screen.findByRole('button', { name: 'Continue' });
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+
+    it('is not shown to someone who is signed in', async () => {
+      window.history.replaceState(null, '', '/?authError=spotify');
+      render(<KaraokeApp api={fakeApi(me({ low: 45, high: 72, source: 'test' }))} mic={fakeMic().mic} />);
+      await screen.findByText('Plastic Love');
+      expect(screen.queryByText('Couldn’t sign in to Spotify.')).toBeNull();
+    });
   });
 
   it('someone without Spotify comes back to their catalogue songs, and can connect Spotify later', async () => {
