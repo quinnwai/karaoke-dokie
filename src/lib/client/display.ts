@@ -1,6 +1,6 @@
 // Plain-words text and geometry for the screen. No music jargon reaches the user.
 
-import type { DataSourceLogEntry, Label, LogOutcome, Midi, OctaveShift, SongRange, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, Label, LogOutcome, Match, Midi, OctaveShift, SliderId, SongRange, VocalRange } from '../contracts';
 import { midiToNoteName } from '../audio/notes';
 
 export function difficultyLabel(d: Label): string {
@@ -47,9 +47,27 @@ export interface Span {
   high: string;
 }
 
+/** One bar of the time-in-range histogram above the range bar. */
+export interface ShapeBar {
+  /** Percent from the left edge of the bar, on the same scale as Span. */
+  left: number;
+  /** Percent of the bar's width. */
+  width: number;
+  /** Share of sung time as a height, 0 to 100: the tallest bin is 100. */
+  height: number;
+}
+
 export interface RangeBar {
   user: Span;
+  /** The song as the user will sing it (octave shift applied). */
   song: Span;
+  /** The song as recorded, drawn faintly, when it is sung an octave away; clipped to the bar. */
+  original?: { left: number; width: number };
+  /**
+   * The time-in-range histogram: one bar for each bin of the user's range that has sung time, none for an
+   * empty bin, and each cut to the song's span so no bar sticks out of the pink stretch. Unset when there are none.
+   */
+  shape?: ShapeBar[];
 }
 
 const PAD = 2; // semitones of breathing room at each end
@@ -59,7 +77,7 @@ const PAD = 2; // semitones of breathing room at each end
  * When the song fits an octave up or down, the song span shows the notes the
  * user will actually sing.
  */
-export function rangeBar(user: VocalRange, song: SongRange, octave: OctaveShift): RangeBar {
+export function rangeBar(user: VocalRange, song: SongRange, octave: OctaveShift, shape?: number[]): RangeBar {
   const shift = octave === 'up' ? 12 : octave === 'down' ? -12 : 0;
   const songLow = song.low + shift;
   const songHigh = song.high + shift;
@@ -71,7 +89,30 @@ export function rangeBar(user: VocalRange, song: SongRange, octave: OctaveShift)
     low: midiToNoteName(lo),
     high: midiToNoteName(hi),
   });
-  return { user: span(user.low, user.high), song: span(songLow, songHigh) };
+  const bar: RangeBar = { user: span(user.low, user.high), song: span(songLow, songHigh) };
+  if (shift !== 0) {
+    const lo = Math.max(min, song.low);
+    const hi = Math.min(max, song.high);
+    if (hi > lo) bar.original = { left: span(lo, hi).left, width: span(lo, hi).width };
+  }
+  const tallest = Math.max(0, ...(shape ?? []));
+  if (shape && tallest > 0) {
+    // The bins are equal slices of the user's range, 2.9 semitones wide for D#2 to D5, so a bin holding the song's
+    // top note ran on past it. Each bar is cut to the pink stretch as drawn instead; a bin outside it has no bar.
+    const pinkLeft = bar.song.left;
+    const pinkRight = bar.song.left + bar.song.width;
+    const binWidth = (user.high - user.low) / shape.length;
+    const edge = (i: number) => round(((user.low + i * binWidth - min) / (max - min)) * 100);
+    const bars: ShapeBar[] = [];
+    shape.forEach((share, i) => {
+      if (!(share > 0)) return;
+      const left = Math.max(edge(i), pinkLeft);
+      const width = round(Math.min(edge(i + 1), pinkRight) - left);
+      if (width > 0) bars.push({ left, width, height: Math.round((100 * share) / tallest) });
+    });
+    if (bars.length) bar.shape = bars;
+  }
+  return bar;
 }
 
 const round = (n: number) => Math.round(n * 100) / 100;
@@ -85,3 +126,36 @@ export function scalePosition(midi: number): number {
   const p = ((midi - SCALE_LOW) / (SCALE_HIGH - SCALE_LOW)) * 100;
   return Math.max(0, Math.min(100, round(p)));
 }
+
+// ---- results view (QWW-3) ----
+
+/** Which reasons speak to each slider, so the reason line leads with why the song is where it is. */
+const SLIDER_REASONS: Record<SliderId, RegExp> = {
+  difficulty: /^(In your sweet spot|Mostly comfortable|(?:Some|Lots of) (?:high|low) notes)$/,
+  familiarity: /^(Top songs(?: this month|, past 6 months| this past year)|Played recently|In your playlists|You (play this a lot|know this one))$/,
+  popularity: /^Crowd favourite/,
+  tempo: /^(?!)/, // no reason line speaks to tempo
+};
+
+/** The song's reasons with the one that matches the leading slider first (unchanged when no slider leads). */
+export function reasonsForSlider(reasons: string[] | undefined, lead: SliderId | null): string[] {
+  const list = reasons ?? [];
+  if (!lead) return list;
+  const re = SLIDER_REASONS[lead];
+  return [...list.filter((r) => re.test(r)), ...list.filter((r) => !re.test(r))];
+}
+
+/** "Take Lady Gaga's part" for a duet matched on one part; null for everything else. */
+export function duetPartLine(m: Pick<Match, 'part' | 'partSinger' | 'range'>): string | null {
+  if (!m.range.duet || !m.part) return null;
+  const singer = m.partSinger?.trim();
+  return singer ? `Duet: take ${singer}'s part` : `Duet: take part ${m.part}`;
+}
+
+/** "Queen · 1975", or just the artist when the year is unknown. */
+export function artistLine(m: Pick<Match, 'track' | 'year'>): string {
+  return typeof m.year === 'number' ? `${m.track.artist} · ${m.year}` : m.track.artist;
+}
+
+/** Catalogue songs have no Spotify track of their own, only a search. */
+export const isCatalogueTrack = (trackId: string) => trackId.startsWith('cat:');

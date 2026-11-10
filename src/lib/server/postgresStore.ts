@@ -1,9 +1,24 @@
 // Postgres store using raw SQL through an injected query function, so the same code
 // runs on Neon (production) and pg-mem (tests).
-import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
-import { isMeasured } from '../songs/sourceRank';
+import type { DataSourceLogEntry, FeedbackEntry, Mood, SongRange, VocalRange } from '../contracts';
+import { catalogueRank, pickCatalogue } from '../songs/score';
+import { isMeasured, MEASURED_RANK, SOURCE_RANK } from '../songs/sourceRank';
 import { SCHEMA_SQL } from './schema';
-import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
+import {
+  DEFAULT_EVENTS_LIMIT,
+  DEFAULT_LIST_LIMIT,
+  MAX_EVENTS_LIMIT,
+  type CatalogueSong,
+  type SongMoodsRecord,
+  type SongDeezerRecord,
+  type SongTempoRecord,
+  type SongPopularityRecord,
+  type SongRangeRecord,
+  type Store,
+  type StoredEvent,
+  type UsdbIndexEntry,
+  type UserRecord,
+} from './store';
 
 export type Row = Record<string, unknown>;
 export type QueryFn = (text: string, params?: unknown[]) => Promise<Row[]>;
@@ -51,6 +66,9 @@ function toUsdbEntry(r: Row): UsdbIndexEntry {
   if (r.views !== null && r.views !== undefined) e.views = num(r.views);
   if (r.rating !== null && r.rating !== undefined) e.rating = num(r.rating);
   if (r.last_change !== null && r.last_change !== undefined) e.lastChange = num(r.last_change);
+  if (r.year !== null && r.year !== undefined) e.year = num(r.year);
+  if (r.genre !== null && r.genre !== undefined) e.genre = str(r.genre);
+  if (r.language !== null && r.language !== undefined) e.language = str(r.language);
   return e;
 }
 
@@ -88,7 +106,47 @@ function toFeedback(r: Row): FeedbackEntry {
     if (isSet(r.range_high)) s.high = num(r.range_high);
     f.songRange = s;
   }
+  if (isSet(r.view_json)) f.view = JSON.parse(str(r.view_json));
   return f;
+}
+
+function toEvent(r: Row): StoredEvent {
+  const e: StoredEvent = { anonId: str(r.anon_id), name: str(r.name), at: str(r.at) };
+  if (isSet(r.props_json)) e.props = JSON.parse(str(r.props_json));
+  return e;
+}
+
+/** Range sources measured from the song itself (note files, recordings): the catalogue's rows. */
+const MEASURED_SOURCES = Object.entries(SOURCE_RANK)
+  .filter(([, rank]) => rank >= MEASURED_RANK)
+  .map(([source]) => source);
+
+function toSongMoods(r: Row): SongMoodsRecord {
+  return {
+    key: str(r.song_key),
+    moods: str(r.moods).split(',').filter(Boolean) as Mood[],
+    method: str(r.method),
+    source: str(r.source),
+  };
+}
+
+function toSongTempo(r: Row): SongTempoRecord {
+  const t: SongTempoRecord = { key: str(r.song_key) };
+  if (isSet(r.deezer_bpm)) t.deezerBpm = num(r.deezer_bpm);
+  if (isSet(r.deezer_versions)) t.deezerVersions = num(r.deezer_versions);
+  if (isSet(r.tracker_bpm)) t.trackerBpm = num(r.tracker_bpm);
+  if (isSet(r.ultrastar_bpm)) t.ultrastarBpm = num(r.ultrastar_bpm);
+  if (isSet(r.preview_url)) t.previewUrl = str(r.preview_url);
+  if (isSet(r.checked_at)) t.checkedAt = str(r.checked_at);
+  return t;
+}
+
+function toSongPopularity(r: Row): SongPopularityRecord {
+  const p: SongPopularityRecord = { key: str(r.song_key), source: str(r.source) };
+  if (isSet(r.karaoke_views)) p.karaokeViews = num(r.karaoke_views);
+  if (isSet(r.chart_rank)) p.chartRank = num(r.chart_rank);
+  if (isSet(r.chart_year)) p.chartYear = num(r.chart_year);
+  return p;
 }
 
 export interface PostgresStoreOptions {
@@ -171,20 +229,32 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         .map((r) => toSongRecord(r).range)
         .filter((r): r is SongRange => r !== null && isMeasured(r));
     },
+    async listSongRangesByArtist(artistKey) {
+      const rows = await query(`SELECT * FROM song_ranges WHERE song_key LIKE $1 AND skipped = false`, [`${artistKey}|%`]);
+      const out = new Map<string, SongRangeRecord>();
+      for (const r of rows) {
+        const key = str(r.song_key);
+        const rec = toSongRecord(r);
+        if (key.startsWith(`${artistKey}|`) && rec.range) out.set(key, rec);
+      }
+      return out;
+    },
     async putUsdbSongs(entries) {
       // Multi-row inserts, 100 at a time, so a full index (about 32k songs) is a few hundred queries.
       for (let i = 0; i < entries.length; i += 100) {
         const chunk = entries.slice(i, i + 100);
         const params: unknown[] = [];
         const rows = chunk.map((e) => {
-          params.push(e.id, e.key, e.artist, e.title, e.views ?? null, e.rating ?? null, e.lastChange ?? null);
-          const n = params.length;
-          return `($${n - 6}, $${n - 5}, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+          const values = [e.id, e.key, e.artist, e.title, e.views ?? null, e.rating ?? null, e.lastChange ?? null, e.year ?? null, e.genre ?? null, e.language ?? null];
+          const first = params.length + 1;
+          params.push(...values);
+          return `(${values.map((_, j) => `$${first + j}`).join(', ')})`;
         });
         await query(
-          `INSERT INTO usdb_songs (id, song_key, artist, title, views, rating, last_change) VALUES ${rows.join(', ')}
+          `INSERT INTO usdb_songs (id, song_key, artist, title, views, rating, last_change, year, genre, language) VALUES ${rows.join(', ')}
            ON CONFLICT (id) DO UPDATE SET song_key = EXCLUDED.song_key, artist = EXCLUDED.artist, title = EXCLUDED.title,
-             views = EXCLUDED.views, rating = EXCLUDED.rating, last_change = EXCLUDED.last_change`,
+             views = EXCLUDED.views, rating = EXCLUDED.rating, last_change = EXCLUDED.last_change,
+             year = EXCLUDED.year, genre = EXCLUDED.genre, language = EXCLUDED.language`,
           params,
         );
       }
@@ -225,11 +295,11 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       const s = f.songRange;
       await query(
         `INSERT INTO feedback (user_id, track_id, thumbs, user_low, user_high, user_range_source, difficulty, octave, at,
-           range_source, range_method, range_low, range_high)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+           range_source, range_method, range_low, range_high, view_json)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [
           f.userId, f.trackId, f.thumbs, f.userRange.low, f.userRange.high, f.userRange.source, f.difficulty, f.octave, f.at,
-          s?.source ?? null, s?.method ?? null, s?.low ?? null, s?.high ?? null,
+          s?.source ?? null, s?.method ?? null, s?.low ?? null, s?.high ?? null, f.view ? JSON.stringify(f.view) : null,
         ],
       );
     },
@@ -239,6 +309,332 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         ? await query('SELECT * FROM feedback WHERE user_id = $1 ORDER BY at DESC, id DESC LIMIT $2', [o.userId, limit])
         : await query('SELECT * FROM feedback ORDER BY at DESC, id DESC LIMIT $1', [limit]);
       return rows.map(toFeedback);
+    },
+    // ---- catalogue (QWW-2 Track B) ----
+    async listCatalogue(limit) {
+      // Three steps, so no response carries thousands of ranges (the table can hold tens of
+      // thousands; one query for 6,000 songs would be about 6 MB). First a few numbers for every
+      // measured song: the range's own USDB views, its most-viewed USDB row's (DISTINCT
+      // ON; a tie goes to the lower id) and its karaoke popularity. Those are ranked here with
+      // catalogueRank, the formula the catalogue scores with (SQL would need a copy of it), and cut
+      // to the limit, keeping every Year-End song (pickCatalogue). Then the chosen songs' ranges and log lines, and their USDB rows, 1,000 a
+      // query, all at once. Artist estimates stay out: they exist only because a tester's library had the song.
+      // The join is on `b.song_key || ''` because pg-mem otherwise reads usdb_songs through its
+      // song_key index and skips the DISTINCT ON.
+      const sources = MEASURED_SOURCES.map((_, i) => `$${i + 1}`).join(', ');
+      const candidates = await query(
+        `SELECT s.song_key, s.range_json::json ->> 'usdbViews' AS range_views,
+           b.id AS usdb_id, b.views, p.karaoke_views, p.chart_rank, d.rank AS deezer_rank
+         FROM song_ranges s
+         LEFT JOIN (SELECT DISTINCT ON (song_key) song_key, id, views FROM usdb_songs ORDER BY song_key, COALESCE(views, 0) DESC, id) b
+           ON (b.song_key || '') = s.song_key
+         LEFT JOIN song_popularity p ON p.song_key = s.song_key
+         LEFT JOIN song_deezer d ON d.song_key = s.song_key
+         WHERE s.skipped = false AND (s.range_json::json ->> 'source') IN (${sources})`,
+        MEASURED_SOURCES,
+      );
+      const opt = (v: unknown): number | undefined => (isSet(v) ? num(v) : undefined);
+      const chosen = pickCatalogue(
+        candidates.map((r) => ({
+          key: str(r.song_key),
+          usdbId: opt(r.usdb_id),
+          rank: catalogueRank(
+            { usdbViews: opt(r.range_views) },
+            { views: opt(r.views) },
+            { karaokeViews: opt(r.karaoke_views), chartRank: opt(r.chart_rank), deezerRank: opt(r.deezer_rank) },
+          ),
+          charted: isSet(r.chart_rank),
+        })),
+        Math.max(0, limit),
+      );
+      const inList = (n: number) => Array.from({ length: n }, (_, j) => `$${j + 1}`).join(', ');
+      const records = new Map<string, SongRangeRecord>();
+      const usdbRows = new Map<number, UsdbIndexEntry>();
+      const chunks: (typeof chosen)[] = [];
+      for (let i = 0; i < chosen.length; i += 1000) chunks.push(chosen.slice(i, i + 1000));
+      // Every chunk's reads at once: each is its own request to Neon, so this takes about as long as one.
+      await Promise.all(
+        chunks.map(async (chunk) => {
+          const keys = chunk.map((c) => c.key);
+          const ids = chunk.flatMap((c) => (c.usdbId === undefined ? [] : [c.usdbId]));
+          const [ranges, usdb] = await Promise.all([
+            query(`SELECT * FROM song_ranges WHERE song_key IN (${inList(keys.length)})`, keys),
+            ids.length ? query(`SELECT * FROM usdb_songs WHERE id IN (${inList(ids.length)})`, ids) : [],
+          ]);
+          for (const r of ranges) records.set(str(r.song_key), toSongRecord(r));
+          for (const r of usdb) usdbRows.set(num(r.id), toUsdbEntry(r));
+        }),
+      );
+      const out: CatalogueSong[] = [];
+      for (const { key, usdbId } of chosen) {
+        const { range, log } = records.get(key) ?? {};
+        if (!range || !log || !isMeasured(range)) continue; // replaced between the reads
+        const song: CatalogueSong = { key, artist: log.artist, title: log.title, range, log };
+        const usdb = usdbId === undefined ? undefined : usdbRows.get(usdbId);
+        if (usdb) song.usdb = usdb;
+        out.push(song);
+      }
+      return out;
+    },
+
+    // ---- beta event log (QWW-16) ----
+    async appendEvents(anonId, events) {
+      // One multi-row insert per 100 events (a request carries at most 50). Rows get ids in
+      // VALUES order, which keeps events with the same time in the order they arrived.
+      for (let i = 0; i < events.length; i += 100) {
+        const params: unknown[] = [];
+        const rows = events.slice(i, i + 100).map((e) => {
+          params.push(anonId, e.name, e.at, e.props ? JSON.stringify(e.props) : null);
+          const n = params.length;
+          return `($${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(`INSERT INTO events (anon_id, name, at, props_json) VALUES ${rows.join(', ')}`, params);
+      }
+    },
+    async listEvents(o = {}) {
+      const limit = Math.min(o.limit ?? DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
+      // The newest `limit` rows, turned back to oldest first.
+      const rows = o.anonId
+        ? await query('SELECT * FROM events WHERE anon_id = $1 ORDER BY at DESC, id DESC LIMIT $2', [o.anonId, limit])
+        : await query('SELECT * FROM events ORDER BY at DESC, id DESC LIMIT $1', [limit]);
+      return rows.reverse().map(toEvent);
+    },
+
+    // ---- mood labels (QWW-11) ----
+    async putSongMoods(entries) {
+      // One row per key, the last entry winning as in the memory store: Postgres refuses an
+      // upsert that touches the same row twice in one statement.
+      const unique = [...new Map(entries.map((e) => [e.key, e])).values()];
+      for (let i = 0; i < unique.length; i += 100) {
+        const chunk = unique.slice(i, i + 100);
+        const params: unknown[] = [];
+        const rows = chunk.map((e) => {
+          params.push(e.key, e.moods.join(','), e.method, e.source);
+          const n = params.length;
+          return `($${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(
+          `INSERT INTO song_moods (song_key, moods, method, source) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET moods = EXCLUDED.moods, method = EXCLUDED.method, source = EXCLUDED.source`,
+          params,
+        );
+      }
+    },
+    async getSongMoods(songKeys) {
+      const out = new Map<string, SongMoodsRecord>();
+      const unique = [...new Set(songKeys)];
+      for (let i = 0; i < unique.length; i += 200) {
+        const chunk = unique.slice(i, i + 200);
+        const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
+        const rows = await query(`SELECT * FROM song_moods WHERE song_key IN (${placeholders})`, chunk);
+        for (const r of rows) out.set(str(r.song_key), toSongMoods(r));
+      }
+      return out;
+    },
+
+    // ---- song popularity (QWW-6) ----
+    async putSongPopularity(entries) {
+      // One row per key, the last entry winning, as for mood labels.
+      const unique = [...new Map(entries.map((e) => [e.key, e])).values()];
+      for (let i = 0; i < unique.length; i += 100) {
+        const params: unknown[] = [];
+        const rows = unique.slice(i, i + 100).map((e) => {
+          params.push(e.key, e.karaokeViews ?? null, e.chartYear ?? null, e.chartRank ?? null, e.source);
+          const n = params.length;
+          return `($${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(
+          `INSERT INTO song_popularity (song_key, karaoke_views, chart_year, chart_rank, source) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET karaoke_views = EXCLUDED.karaoke_views, chart_year = EXCLUDED.chart_year,
+             chart_rank = EXCLUDED.chart_rank, source = EXCLUDED.source`,
+          params,
+        );
+      }
+    },
+    async getSongPopularity(songKeys) {
+      // 1,000 keys a query: the catalogue asks for all of its songs at once.
+      const out = new Map<string, SongPopularityRecord>();
+      const unique = [...new Set(songKeys)];
+      for (let i = 0; i < unique.length; i += 1000) {
+        const chunk = unique.slice(i, i + 1000);
+        const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
+        const [rows, deezer] = await Promise.all([
+          query(`SELECT * FROM song_popularity WHERE song_key IN (${placeholders})`, chunk),
+          query(`SELECT song_key, rank FROM song_deezer WHERE rank IS NOT NULL AND song_key IN (${placeholders})`, chunk),
+        ]);
+        for (const r of rows) out.set(str(r.song_key), toSongPopularity(r));
+        for (const r of deezer) {
+          const key = str(r.song_key);
+          out.set(key, { ...(out.get(key) ?? { key, source: 'deezer' }), deezerRank: num(r.rank) });
+        }
+      }
+      return out;
+    },
+
+    // ---- Deezer track rank (QWW-37) ----
+    async putSongDeezer(entries) {
+      // One row per key, the last entry winning, as for mood labels.
+      const unique = [...new Map(entries.map((e) => [e.key, e])).values()];
+      for (let i = 0; i < unique.length; i += 100) {
+        const params: unknown[] = [];
+        const rows = unique.slice(i, i + 100).map((e) => {
+          params.push(e.key, e.rank ?? null, e.deezerId ?? null, e.checkedAt);
+          const n = params.length;
+          return `($${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(
+          `INSERT INTO song_deezer (song_key, rank, deezer_id, checked_at) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET rank = EXCLUDED.rank, deezer_id = EXCLUDED.deezer_id, checked_at = EXCLUDED.checked_at`,
+          params,
+        );
+      }
+    },
+    async listSongDeezer() {
+      const out = new Map<string, SongDeezerRecord>();
+      for (const r of await query('SELECT * FROM song_deezer')) {
+        const d: SongDeezerRecord = { key: str(r.song_key), checkedAt: str(r.checked_at) };
+        if (isSet(r.rank)) d.rank = num(r.rank);
+        if (isSet(r.deezer_id)) d.deezerId = num(r.deezer_id);
+        out.set(d.key, d);
+      }
+      return out;
+    },
+
+    // ---- Spotify rate-limit block (QWW-55) ----
+    async getSpotifyBlock() {
+      const [r] = await query('SELECT blocked_until FROM spotify_block WHERE id = 1', []);
+      return r ? num(r.blocked_until) : null;
+    },
+    async setSpotifyBlock(until) {
+      // The later of the stored and the new time, so a short 429 never shortens a long block.
+      await query(
+        `INSERT INTO spotify_block (id, blocked_until) VALUES (1, $1)
+         ON CONFLICT (id) DO UPDATE SET blocked_until = GREATEST(spotify_block.blocked_until, EXCLUDED.blocked_until)`,
+        [until],
+      );
+    },
+
+    // ---- stored Spotify library per user (QWW-55 PR 2) ----
+    async getLibraryState(userId) {
+      const [r] = await query('SELECT state_json, last_seen_at FROM user_library WHERE user_id = $1', [userId]);
+      return r ? { state: JSON.parse(str(r.state_json)), lastSeenAt: num(r.last_seen_at) } : null;
+    },
+    async putLibraryState(userId, state, lastSeenAt) {
+      await query(
+        `INSERT INTO user_library (user_id, state_json, last_seen_at) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE SET state_json = EXCLUDED.state_json, last_seen_at = EXCLUDED.last_seen_at`,
+        [userId, JSON.stringify(state), lastSeenAt],
+      );
+    },
+    async listSavedTracks(userId) {
+      const rows = await query('SELECT track_json FROM user_saved WHERE user_id = $1 ORDER BY pos DESC, track_id', [userId]);
+      return rows.map((r) => JSON.parse(str(r.track_json)));
+    },
+    async putSavedTracks(userId, rows) {
+      // Many rows per statement (a page of liked songs is 50), in chunks that stay under the parameter limit.
+      // One row per song: a statement that names a key twice is an error in Postgres (a song can sit on two pages when a like arrives mid-read).
+      const unique = [...new Map(rows.map((r) => [r.track.id, r])).values()];
+      for (let i = 0; i < unique.length; i += 100) {
+        const chunk = unique.slice(i, i + 100);
+        const params: unknown[] = [userId];
+        const values = chunk.map((r) => {
+          params.push(r.track.id, r.pos, JSON.stringify(r.track), r.gen ?? 0);
+          return `($1, $${params.length - 3}, $${params.length - 2}, $${params.length - 1}, $${params.length})`;
+        });
+        await query(
+          `INSERT INTO user_saved (user_id, track_id, pos, track_json, gen) VALUES ${values.join(', ')}
+           ON CONFLICT (user_id, track_id) DO UPDATE SET pos = EXCLUDED.pos, track_json = EXCLUDED.track_json, gen = EXCLUDED.gen`,
+          params,
+        );
+      }
+    },
+    async markSavedSeen(userId, trackIds, gen) {
+      for (let i = 0; i < trackIds.length; i += 200) {
+        const chunk = trackIds.slice(i, i + 200);
+        await query(`UPDATE user_saved SET gen = $2 WHERE user_id = $1 AND track_id IN (${chunk.map((_, k) => `$${k + 3}`).join(', ')})`, [userId, gen, ...chunk]);
+      }
+    },
+    async countSavedFromGen(userId, gen) {
+      const [r] = await query('SELECT COUNT(*) AS n FROM user_saved WHERE user_id = $1 AND gen >= $2', [userId, gen]);
+      return r ? num(r.n) : 0;
+    },
+    async removeSavedBeforeGen(userId, gen) {
+      await query('DELETE FROM user_saved WHERE user_id = $1 AND gen < $2', [userId, gen]);
+    },
+    async removeSavedTracks(userId, trackIds) {
+      for (let i = 0; i < trackIds.length; i += 200) {
+        const chunk = trackIds.slice(i, i + 200);
+        await query(`DELETE FROM user_saved WHERE user_id = $1 AND track_id IN (${chunk.map((_, k) => `$${k + 2}`).join(', ')})`, [userId, ...chunk]);
+      }
+    },
+    async deleteUserLibrary(userId) {
+      // The state first: a failure between the two leaves liked rows with no state, which the next first read clears,
+      // not a state that says "complete" over missing rows.
+      await query('DELETE FROM user_library WHERE user_id = $1', [userId]);
+      await query('DELETE FROM user_saved WHERE user_id = $1', [userId]);
+    },
+    async deleteIdleLibraries(before) {
+      const idle = (await query('SELECT user_id FROM user_library WHERE last_seen_at < $1', [before])).map((r) => str(r.user_id));
+      for (const id of idle) {
+        await query('DELETE FROM user_library WHERE user_id = $1', [id]);
+        await query('DELETE FROM user_saved WHERE user_id = $1', [id]);
+      }
+      return idle.length;
+    },
+
+    // ---- Spotify request counts (QWW-55 PR 2) ----
+    async addSpotifyCalls(day, caller, n) {
+      await query(
+        `INSERT INTO spotify_calls (day, caller, calls) VALUES ($1, $2, $3)
+         ON CONFLICT (day, caller) DO UPDATE SET calls = spotify_calls.calls + EXCLUDED.calls`,
+        [day, caller, n],
+      );
+    },
+    async listSpotifyCalls(day) {
+      const rows =
+        day === undefined
+          ? await query('SELECT day, caller, calls FROM spotify_calls ORDER BY day DESC, caller', [])
+          : await query('SELECT day, caller, calls FROM spotify_calls WHERE day = $1 ORDER BY caller', [day]);
+      return rows.map((r) => ({ day: str(r.day), caller: str(r.caller), calls: num(r.calls) }));
+    },
+
+    // ---- tempo (QWW-40) ----
+    async putSongTempo(entries) {
+      // One row per key (fields merged, the last entry winning); a field left unset keeps what is stored,
+      // so tempo:fill and tempo:ultrastar do not overwrite each other.
+      const merged = new Map<string, SongTempoRecord>();
+      for (const e of entries) {
+        const given = Object.fromEntries(Object.entries(e).filter(([, v]) => v !== undefined));
+        merged.set(e.key, { ...merged.get(e.key), ...given } as SongTempoRecord);
+      }
+      const unique = [...merged.values()];
+      const cols = ['deezer_bpm', 'deezer_versions', 'tracker_bpm', 'ultrastar_bpm', 'preview_url', 'checked_at'] as const;
+      const get = (e: SongTempoRecord) => [e.deezerBpm, e.deezerVersions, e.trackerBpm, e.ultrastarBpm, e.previewUrl, e.checkedAt];
+      for (let i = 0; i < unique.length; i += 100) {
+        const params: unknown[] = [];
+        const rows = unique.slice(i, i + 100).map((e) => {
+          params.push(e.key, ...get(e).map((v) => v ?? null));
+          const n = params.length;
+          return `(${Array.from({ length: cols.length + 1 }, (_, j) => `$${n - cols.length + j}`).join(', ')})`;
+        });
+        await query(
+          `INSERT INTO song_tempo (song_key, ${cols.join(', ')}) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET ${cols.map((c) => `${c} = COALESCE(EXCLUDED.${c}, song_tempo.${c})`).join(', ')}`,
+          params,
+        );
+      }
+    },
+    async getSongTempos(songKeys) {
+      const out = new Map<string, SongTempoRecord>();
+      for (let i = 0; i < songKeys.length; i += 1000) {
+        const chunk = songKeys.slice(i, i + 1000);
+        const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
+        for (const r of await query(`SELECT * FROM song_tempo WHERE song_key IN (${placeholders})`, chunk)) out.set(str(r.song_key), toSongTempo(r));
+      }
+      return out;
+    },
+    async listSongTempos() {
+      return new Map((await query('SELECT * FROM song_tempo')).map((r) => [str(r.song_key), toSongTempo(r)] as const));
     },
   };
 }

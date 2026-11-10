@@ -2,13 +2,19 @@
 // so integration tests can call the route files directly with the memory store and mock Spotify.
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type {
+  AdminEventsResponse,
   FeedbackEntry,
   KnownSongsResponse,
   MeResponse,
   RecommendationsResponse,
   Track,
+  VocalRange,
 } from '../contracts';
+import { withoutForbiddenProps } from '../eventRules';
 import { songKey } from '../songs/resolve';
+import { summarizeEvents } from './eventStats';
+import { catalogueKey, type CataloguePage } from './catalogue';
+import { applyDuetsAndMoods, applyDuetsToKnownSongs } from './features';
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_S,
@@ -19,9 +25,11 @@ import {
   serializeCookie,
   signSession,
 } from './session';
-import { ensureFreshTokens, getUserTracks, SpotifyError } from './spotify';
-import type { UserRecord } from './store';
-import { intParam, validateFeedback, validateVocalRange } from './validate';
+import { disconnectUser, loadLibrary } from './library';
+import { assertSpotifyOpen, describeError, noteSpotifyLimit } from './spotify';
+import { withCaller } from './spotifyCalls';
+import { DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT, type UserRecord } from './store';
+import { intParam, validateEvents, validateFeedback, validateVocalRange } from './validate';
 import type { AppContext } from './wiring';
 
 const STATE_MAX_AGE_S = 600;
@@ -77,19 +85,42 @@ async function requireUser(req: Request, ctx: AppContext): Promise<UserRecord | 
   return json({ error: 'signed-out' }, 401, h);
 }
 
-/** The user's library (cached per process), or an error response. */
-async function loadTracks(user: UserRecord, ctx: AppContext): Promise<Track[] | Response> {
+/**
+ * How long a library read may take before the screen gets catalogue songs instead. The library routes have a 60 s
+ * maxDuration, and a host that gives up on a slow function answers with its own 5xx, which is the error this
+ * avoids: Spotify can stall, or answer 429s whose waits add up inside one request's retries.
+ */
+export const LIBRARY_DEADLINE_MS = 50_000;
+
+/** `p`, or a rejection once `ms` have passed. `p` is left running, and a late failure of it has nobody to tell. */
+function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`the library read took more than ${ms / 1000} s`)), ms);
+  });
+  p.catch(() => {});
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * The user's library (cached per process), or null when it cannot be had: Spotify said wait (nothing is requested
+ * while it does), failed, stalled or refused the user's token. Spotify trouble is never the user's error
+ * (QWW-55, which was a 502 and an empty screen): the caller answers with the catalogue's songs and says so.
+ * A read that outlives the deadline carries on and, if it finishes, is cached for the next request.
+ */
+async function loadTracks(user: UserRecord, ctx: AppContext, caller: string): Promise<Track[] | null> {
   try {
-    return await ctx.tracks.get(user.id, async () => {
-      const fresh = await ensureFreshTokens(user, ctx.spotify, ctx.store);
-      return getUserTracks(ctx.spotify, fresh.spotify.accessToken);
-    });
+    const load = () => withCaller(caller, () => loadLibrary(user, { store: ctx.store, spotify: ctx.spotify }));
+    return await withDeadline(ctx.tracks.get(user.id, load), LIBRARY_DEADLINE_MS);
   } catch (err) {
-    if (err instanceof SpotifyError && (err.status === 400 || err.status === 401)) {
-      return errorJson(401, 'signed-out', 'Spotify access expired; sign in again');
-    }
-    return errorJson(502, 'spotify-unavailable', err instanceof Error ? err.message : undefined);
+    console.error(`[spotify] could not load the library: ${describeError(err)}`);
+    return null;
   }
+}
+
+/** The catalogue's songs in place of a library that could not be read, with the flag the screen words its note from. */
+async function withoutLibrary(range: VocalRange, page: CataloguePage, ctx: AppContext): Promise<Response> {
+  return json(await withDuetsAndMoods({ ...(await ctx.catalogue.recommend(range, page)), libraryUnavailable: true }, ctx));
 }
 
 // ---------- auth ----------
@@ -119,18 +150,39 @@ export async function callback(req: Request, ctx: AppContext): Promise<Response>
   if (!expected || !state || !safeEqual(state, expected)) return fail('state');
   if (!code) return fail('missing-code');
 
+  let step = 'rate limit check';
   try {
+    // While Spotify has said to wait (QWW-55) a sign-in would only be refused, and every request counts.
+    await assertSpotifyOpen(ctx.store);
+    step = 'token exchange';
     const tokens = await ctx.spotify.exchangeCode(code);
-    const me = await ctx.spotify.getMe(tokens.accessToken);
+    step = 'profile (/me)';
+    const me = await withCaller('site:/api/auth/callback', () => ctx.spotify.getMe(tokens.accessToken));
+    step = 'saving the user';
     await ctx.store.upsertUser({ id: me.id, displayName: me.displayName, spotify: tokens });
     ctx.tracks.invalidate(me.id);
     return redirect(`${home}/?signedIn=1`, [
       clearState,
       serializeCookie(SESSION_COOKIE, signSession(me.id, ctx.config.sessionSecret), { maxAge: SESSION_MAX_AGE_S, secure }),
     ]);
-  } catch {
+  } catch (err) {
+    // The browser only gets ?authError=spotify, so this line is the only record of why.
+    console.error(`[auth] Spotify sign-in failed at the ${step} step: ${describeError(err)}`);
+    await noteSpotifyLimit(ctx.store, err);
     return fail('spotify');
   }
+}
+
+/**
+ * Disconnect (Spotify's terms, QWW-55 PR 2): deletes everything stored about the user's Spotify library and signs them
+ * out. Their saved vocal range stays, and their sign-in tokens until they remove the app in Spotify's account settings.
+ */
+export async function disconnect(req: Request, ctx: AppContext): Promise<Response> {
+  const user = await requireUser(req, ctx);
+  if (user instanceof Response) return user;
+  await disconnectUser(ctx.store, user.id);
+  ctx.tracks.invalidate(user.id);
+  return json({ ok: true }, 200, [['set-cookie', clearCookie(SESSION_COOKIE, { secure: isSecure(req) })]]);
 }
 
 export async function logout(req: Request): Promise<Response> {
@@ -159,28 +211,83 @@ export async function putRange(req: Request, ctx: AppContext): Promise<Response>
 
 // ---------- songs ----------
 
+/**
+ * What the matches say about duets and moods (QWW-43): nothing unless DUETS_AND_MOODS is on, and then
+ * the shipped mood labels (QWW-11, MOODS_SHIPPED) and the duet markers. After ranking, so never the order.
+ */
+async function withDuetsAndMoods(body: RecommendationsResponse, ctx: AppContext): Promise<RecommendationsResponse> {
+  return { ...body, matches: await applyDuetsAndMoods(body.matches, ctx.store, ctx.config) };
+}
+
 export async function recommendations(req: Request, ctx: AppContext): Promise<Response> {
   const user = await requireUser(req, ctx);
   if (user instanceof Response) return user;
   const params = new URL(req.url).searchParams;
-  const offset = intParam(params.get('offset'), 0, 0, 100_000);
-  const limit = intParam(params.get('limit'), 5, 1, 50);
+  // all=1: every match in one response, for the results screen to sort and filter; no paging.
+  const all = params.get('all') === '1';
+  const offset = all ? 0 : intParam(params.get('offset'), 0, 0, 100_000);
+  const limit = all ? 0 : intParam(params.get('limit'), 5, 1, 50);
   if (offset === null || limit === null) return errorJson(400, 'bad-request', 'offset must be >= 0 and limit 1..50');
   const range = await ctx.store.getRange(user.id);
   if (!range) return errorJson(409, 'no-range', 'Save a vocal range first (PUT /api/me/range)');
-  const tracks = await loadTracks(user, ctx);
-  if (tracks instanceof Response) return tracks;
-  const body: RecommendationsResponse = await ctx.songs.recommend(tracks, range, offset, limit);
-  return json(body);
+  const tracks = await loadTracks(user, ctx, 'site:/api/recommendations');
+  if (!tracks) return withoutLibrary(range, all ? { all: true } : { offset, limit }, ctx);
+  const body: RecommendationsResponse = all
+    ? await ctx.songs.recommend(tracks, range, offset, limit, { all: true })
+    : await ctx.songs.recommend(tracks, range, offset, limit);
+  return json(await withDuetsAndMoods(body, ctx));
 }
 
 export async function knownSongs(req: Request, ctx: AppContext): Promise<Response> {
   const user = await requireUser(req, ctx);
   if (user instanceof Response) return user;
-  const tracks = await loadTracks(user, ctx);
-  if (tracks instanceof Response) return tracks;
+  const tracks = await loadTracks(user, ctx, 'site:/api/songs/known');
+  if (!tracks) return json({ songs: [], libraryUnavailable: true } satisfies KnownSongsResponse);
   const body: KnownSongsResponse = await ctx.songs.knownSongs(tracks);
-  return json(body);
+  return json(applyDuetsToKnownSongs(body, ctx.config));
+}
+
+// ---------- catalogue: results without Spotify (QWW-2 Track B) ----------
+// No session and no account: the range comes with every request, and feedback is stored under a
+// random device id, never a Spotify id.
+
+/** A query value of digits as a number; anything else as it is, so range validation rejects it. */
+const queryInt = (raw: string | null): unknown => (raw !== null && /^\d+$/.test(raw) ? Number(raw) : raw);
+
+/** 8 to 64 letters, digits or dashes, e.g. a random UUID kept on the device. */
+const ANON_ID = /^[A-Za-z0-9-]{8,64}$/;
+
+export async function catalogueRecommendations(req: Request, ctx: AppContext): Promise<Response> {
+  const params = new URL(req.url).searchParams;
+  const range = validateVocalRange({ low: queryInt(params.get('low')), high: queryInt(params.get('high')), source: 'test' });
+  if (!range.ok) return errorJson(400, 'bad-request', range.error);
+  if (params.get('all') === '1') return json(await withDuetsAndMoods(await ctx.catalogue.recommend(range.value, { all: true }), ctx));
+  const offset = intParam(params.get('offset'), 0, 0, 100_000);
+  const limit = intParam(params.get('limit'), 5, 1, 50);
+  if (offset === null || limit === null) return errorJson(400, 'bad-request', 'offset must be >= 0 and limit 1..50');
+  const body: RecommendationsResponse = await ctx.catalogue.recommend(range.value, { offset, limit });
+  return json(await withDuetsAndMoods(body, ctx));
+}
+
+export async function catalogueFeedback(req: Request, ctx: AppContext): Promise<Response> {
+  const parsed = await readJson(req);
+  if (!parsed.ok) return errorJson(400, 'bad-request', 'Body must be JSON');
+  const v = validateFeedback(parsed.body);
+  if (!v.ok) return errorJson(400, 'bad-request', v.error);
+  const { anonId, range } = parsed.body as Record<string, unknown>; // an object: validateFeedback checked
+  if (typeof anonId !== 'string' || !ANON_ID.test(anonId)) {
+    return errorJson(400, 'bad-request', 'anonId must be 8 to 64 letters, digits or dashes');
+  }
+  const r = typeof range === 'object' && range !== null ? (range as Record<string, unknown>) : {};
+  const userRange = validateVocalRange({ low: r.low, high: r.high, source: 'test' });
+  if (!userRange.ok) return errorJson(400, 'bad-request', userRange.error);
+  const key = catalogueKey(v.value.trackId);
+  if (key === null) return errorJson(400, 'bad-request', 'trackId must be a catalogue id (cat:...)');
+  const entry: FeedbackEntry = { userId: `anon:${anonId}`, ...v.value, userRange: userRange.value, at: new Date().toISOString() };
+  const songRange = await songRangeSnapshot(key, ctx);
+  if (songRange) entry.songRange = songRange;
+  await ctx.store.saveFeedback(entry);
+  return json({ ok: true });
 }
 
 // ---------- feedback ----------
@@ -191,7 +298,15 @@ export async function knownSongs(req: Request, ctx: AppContext): Promise<Respons
  */
 async function songRangeAtTap(userId: string, trackId: string, ctx: AppContext): Promise<FeedbackEntry['songRange']> {
   const track = ctx.tracks.peek(userId)?.find((t) => t.id === trackId);
-  const rec = track ? await ctx.store.getSongRange(songKey(track.artist, track.title)) : null;
+  return track ? songRangeSnapshot(songKey(track.artist, track.title), ctx) : undefined;
+}
+
+/**
+ * A copy of the song's stored range at tap time, so later imports cannot change what the tap was
+ * about: where it came from (the log outcome), how it was measured, its notes. Undefined when not stored.
+ */
+async function songRangeSnapshot(key: string, ctx: AppContext): Promise<FeedbackEntry['songRange']> {
+  const rec = await ctx.store.getSongRange(key);
   if (!rec) return undefined;
   const snapshot: NonNullable<FeedbackEntry['songRange']> = { source: rec.log.outcome };
   if (rec.range?.method !== undefined) snapshot.method = rec.range.method;
@@ -218,6 +333,25 @@ export async function postFeedback(req: Request, ctx: AppContext): Promise<Respo
   return json({ ok: true });
 }
 
+// ---------- beta event log (QWW-16, QWW-20) ----------
+
+/**
+ * A batch of beta events from one device. No session: events are keyed by the device's random
+ * id, never by who is signed in. Bad input gets a 400 even while collection is off, so wiring
+ * mistakes show up in local dev. req.json() ignores the content type, so the text/plain body
+ * navigator.sendBeacon sends parses like any other.
+ */
+export async function postEvents(req: Request, ctx: AppContext): Promise<Response> {
+  const parsed = await readJson(req);
+  if (!parsed.ok) return errorJson(400, 'bad-request', 'Body must be JSON');
+  const v = validateEvents(parsed.body);
+  if (!v.ok) return errorJson(400, 'bad-request', v.error);
+  if (ctx.config.collectEvents) {
+    await ctx.store.appendEvents(v.value.anonId, v.value.events.map(withoutForbiddenProps));
+  }
+  return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } });
+}
+
 // ---------- admin ----------
 
 function safeEqual(a: string, b: string): boolean {
@@ -226,10 +360,28 @@ function safeEqual(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-export async function adminLog(req: Request, ctx: AppContext): Promise<Response> {
+/** A 403 unless the x-admin-token header matches ADMIN_TOKEN (always, when it is unset); null when it does. */
+function adminDenied(req: Request, ctx: AppContext): Response | null {
   const token = req.headers.get('x-admin-token') ?? '';
-  if (!ctx.config.adminToken || !safeEqual(token, ctx.config.adminToken)) return errorJson(403, 'forbidden');
+  return ctx.config.adminToken && safeEqual(token, ctx.config.adminToken) ? null : errorJson(403, 'forbidden');
+}
+
+export async function adminLog(req: Request, ctx: AppContext): Promise<Response> {
+  const denied = adminDenied(req, ctx);
+  if (denied) return denied;
   const limit = intParam(new URL(req.url).searchParams.get('limit'), 200, 1, 1000);
   if (limit === null) return errorJson(400, 'bad-request', 'limit must be 1..1000');
   return json({ entries: await ctx.store.listLog(limit) });
+}
+
+// ---------- admin: beta events (QWW-16) ----------
+
+/** Funnel, per-sort numbers and session replays, from the newest `limit` events. */
+export async function adminEvents(req: Request, ctx: AppContext): Promise<Response> {
+  const denied = adminDenied(req, ctx);
+  if (denied) return denied;
+  const limit = intParam(new URL(req.url).searchParams.get('limit'), DEFAULT_EVENTS_LIMIT, 1, MAX_EVENTS_LIMIT);
+  if (limit === null) return errorJson(400, 'bad-request', `limit must be 1..${MAX_EVENTS_LIMIT}`);
+  const body: AdminEventsResponse = summarizeEvents(await ctx.store.listEvents({ limit }));
+  return json(body);
 }

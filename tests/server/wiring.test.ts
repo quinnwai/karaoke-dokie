@@ -8,9 +8,13 @@ import {
   productionSongDeps,
   realResolver,
   SEED_SONGS,
+  seedStore,
+  type SeedSong,
 } from '../../src/lib/server/wiring';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { MOCK_TRACKS } from '../../src/lib/server/mockSpotify';
+import { songRangeFromUltrastar } from '../../src/lib/songs/range';
+import { fixture } from '../songs/fixture';
 
 const track = (artist: string, title: string): Track => ({
   id: 'x',
@@ -22,20 +26,50 @@ const track = (artist: string, title: string): Track => ({
 });
 
 describe('seed song ranges', () => {
-  it('has 10 valid, clearly marked placeholder entries: five stand in for recordings, five for estimates', () => {
-    expect(SEED_SONGS).toHaveLength(10);
+  it('has valid, clearly marked placeholder entries: recordings and note files are sure, estimates are not', () => {
+    expect(SEED_SONGS.length).toBeGreaterThanOrEqual(25);
     for (const s of SEED_SONGS) {
       expect(s.range.low).toBeLessThan(s.range.tessitura);
       expect(s.range.tessitura).toBeLessThan(s.range.high);
       expect(s.provenance).toMatch(/Placeholder/);
-      expect(s.range.confidence).toBe(s.range.source === 'audio-full' ? 'high' : 'low');
+      expect(s.range.confidence).toBe(s.range.source === 'audio-full' || s.range.source === 'note-file' ? 'high' : 'low');
+      for (const p of s.range.parts ?? []) {
+        expect(p.low).toBeLessThan(p.tessitura);
+        expect(p.tessitura).toBeLessThan(p.high);
+      }
     }
-    expect(SEED_SONGS.filter((s) => s.range.confidence === 'high')).toHaveLength(5);
+    // The demo has a few duets, each with both singers' parts, and moods on most songs.
+    const duets = SEED_SONGS.filter((s) => s.range.duet);
+    expect(duets.length).toBeGreaterThanOrEqual(2);
+    for (const d of duets) expect(d.range.parts?.map((p) => p.singer)).toHaveLength(2);
+    expect(SEED_SONGS.filter((s) => s.moods?.length).length).toBeGreaterThan(SEED_SONGS.length / 2);
   });
 
-  it('every seed is in the mock library', () => {
+  it('every seed not marked catalogue-only is in the mock library, and the catalogue-only ones are not', () => {
     const keys = new Set(MOCK_TRACKS.map((t) => songKey(t.artist, t.title)));
-    for (const s of SEED_SONGS) expect(keys.has(songKey(s.artist, s.title))).toBe(true);
+    for (const s of SEED_SONGS) expect(keys.has(songKey(s.artist, s.title))).toBe(!s.catalogueOnly);
+  });
+
+  it('seeds a store with every seed, its log line and USDB row, however many seeds there are', async () => {
+    const seeds: SeedSong[] = Array.from({ length: 300 }, (_, i) => ({
+      artist: `Artist ${i}`,
+      title: `Song ${i}`,
+      range: { low: 50, high: 70, tessitura: 60, source: i % 3 ? 'audio-full' : 'artist-typical', confidence: i % 3 ? 'high' : 'low', fastLyrics: false },
+      provenance: `Placeholder ${i}`,
+      ...(i % 2 ? { usdb: { id: 1000 + i, views: i, year: 1960 + (i % 60), genre: 'Pop' } } : {}),
+    }));
+    const store = createMemoryStore();
+    await seedStore(store, seeds, () => new Date(0));
+    const key = songKey('Artist 7', 'Song 7');
+    expect(await store.getSongRange(key)).toEqual({
+      range: seeds[7]!.range,
+      log: { trackId: '', title: 'Song 7', artist: 'Artist 7', outcome: 'audio-full', reason: 'Placeholder 7', at: '1970-01-01T00:00:00.000Z' },
+    });
+    expect((await store.findUsdbSongs([key])).get(key)).toEqual({ id: 1007, key, artist: 'Artist 7', title: 'Song 7', views: 7, year: 1967, genre: 'Pop' });
+    expect(await store.listLog(1000)).toHaveLength(300);
+    expect((await store.usdbIndexStats()).count).toBe(150);
+    // The estimates (every third seed) stay out of the catalogue.
+    expect(await store.listCatalogue(6000)).toHaveLength(200);
   });
 
   it('resolves seeded songs and skips the rest with a reason', async () => {
@@ -81,6 +115,41 @@ describe('production song wiring', () => {
     expect(log.reason).toMatch(/1 other song by Queen/);
   });
 
+  it('asks the store once for an artist\'s measured ranges while many of their songs are looked up (QWW-31)', async () => {
+    const store = createMemoryStore();
+    await store.putSongRange(songKey('Queen', 'A'), { range: nf(50, 70), log: {} as never });
+    let asks = 0;
+    const counting = { ...store, listMeasuredRangesByArtist: (a: string) => (asks++, store.listMeasuredRangesByArtist(a)) };
+    const resolve = realResolver(counting, { getNoteFile: async () => null });
+    const results = await Promise.all(['B', 'C', 'D', 'E'].map((t) => resolve(track('Queen', t))));
+    expect(results.map((r) => r.range?.source)).toEqual(Array(4).fill('artist-typical'));
+    expect(asks).toBe(1);
+  });
+
+  it('asks again after the minute is up, and after a failed ask', async () => {
+    const store = createMemoryStore();
+    let asks = 0;
+    let fail = true;
+    const flaky = {
+      ...store,
+      listMeasuredRangesByArtist: async (a: string) => {
+        asks++;
+        if (fail) throw new Error('db down');
+        return store.listMeasuredRangesByArtist(a);
+      },
+    };
+    let clock = 0;
+    const resolve = realResolver(flaky, { getNoteFile: async () => null }, () => clock);
+    await expect(resolve(track('Queen', 'B'))).rejects.toThrow('db down');
+    fail = false;
+    await resolve(track('Queen', 'C'));
+    await resolve(track('Queen', 'D'));
+    expect(asks).toBe(2); // the failed ask was not kept; the next one was reused
+    clock = 61_000;
+    await resolve(track('Queen', 'E'));
+    expect(asks).toBe(3);
+  });
+
   it('skips and logs a song with no data at all', async () => {
     const resolve = realResolver(createMemoryStore(), { getNoteFile: async () => null });
     const { range, log } = await resolve(track('Omar Apollo', 'Evergreen'));
@@ -99,5 +168,30 @@ describe('production song wiring', () => {
     expect(deps.matchSong(t, nf(30, 90), { low: 48, high: 72, source: 'test' })).toBeNull();
     const estimate = { ...nf(46, 74), source: 'artist-typical' as const, confidence: 'low' as const };
     expect(deps.matchSong(t, estimate, { low: 48, high: 72, source: 'test' })).toMatchObject({ difficulty: 'maybe', octave: 'none', reasons: ['You play this a lot'] });
+  });
+
+  it('scores and shows a duet on the part the user sings', () => {
+    const deps = productionSongDeps(createMemoryStore(), false);
+    const range = { ...songRangeFromUltrastar(fixture('duet.txt')), usdbViews: 100 };
+    // D4..E5: P2 (G4..C5) fits as written; P1 (C4..D4) only an octave up.
+    const m = deps.matchSong(track('Duo', 'Duet Song'), range, { low: 62, high: 76, source: 'test' })!;
+    expect(m).toMatchObject({ difficulty: 'easy', octave: 'none', part: 2, partSinger: 'Singer Two' });
+    expect(m.range).toEqual({ ...range, low: 67, high: 72, tessitura: range.parts![1]!.tessitura, pitchShare: [[67, 0.333], [72, 0.667]] });
+    expect(m.parts?.comfort).toBe(1); // P2 sits in the middle of this range; P1's notes as written would score 0
+  });
+
+  it("uses the matched part's own fast-lyrics flag", () => {
+    const deps = productionSongDeps(createMemoryStore(), false);
+    const parts = [{ low: 40, high: 74, tessitura: 57, fastLyrics: false }, { low: 56, high: 64, tessitura: 60, fastLyrics: true }];
+    const m = deps.matchSong(track('A', 'B'), { ...nf(40, 74), duet: true, parts }, { low: 48, high: 72, source: 'test' })!;
+    expect(m).toMatchObject({ part: 2, range: { low: 56, high: 64, fastLyrics: true } });
+    expect(m.parts?.penalty).toBe(0.05);
+    expect(m).not.toHaveProperty('partSinger'); // the file named no singers
+  });
+
+  it('leaves a solo match on the stored range, with no part', () => {
+    const m = productionSongDeps(createMemoryStore(), false).matchSong(track('A', 'B'), nf(56, 64), { low: 48, high: 72, source: 'test' })!;
+    expect(m.range).toEqual(nf(56, 64));
+    expect(m).not.toHaveProperty('part');
   });
 });
