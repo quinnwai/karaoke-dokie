@@ -348,7 +348,7 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
           )}
           {signInFailed && (
             <p className={styles.hint} role="status">
-              Couldn’t sign in to Spotify.
+              Couldn’t sign in. Spotify sign-in is for invited testers only right now.
             </p>
           )}
         </div>

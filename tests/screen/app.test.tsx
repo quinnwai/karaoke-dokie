@@ -144,12 +144,12 @@ describe('KaraokeApp', () => {
       window.history.replaceState(null, '', '/?authError=spotify');
       sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
       render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} />);
-      expect((await screen.findByRole('status')).textContent).toBe('Couldn’t sign in to Spotify.');
+      expect((await screen.findByRole('status')).textContent).toBe('Couldn’t sign in. Spotify sign-in is for invited testers only right now.');
       expect(window.location.search).toBe('');
 
       fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
       await screen.findByText('Plastic Love');
-      expect(screen.getByRole('status').textContent).toBe('Couldn’t sign in to Spotify.');
+      expect(screen.getByRole('status').textContent).toBe('Couldn’t sign in. Spotify sign-in is for invited testers only right now.');
       // The logo and the prompt under the list stay, to try again; the failed-load screen is not what this is.
       expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2);
       expect(screen.queryByText('Couldn’t load songs.')).toBeNull();
@@ -160,7 +160,7 @@ describe('KaraokeApp', () => {
       localStorage.setItem('kd.range', JSON.stringify({ low: 45, high: 72 }));
       render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} />);
       await screen.findByText('Plastic Love');
-      expect(screen.getByRole('status').textContent).toBe('Couldn’t sign in to Spotify.');
+      expect(screen.getByRole('status').textContent).toBe('Couldn’t sign in. Spotify sign-in is for invited testers only right now.');
       expect(window.location.search).toBe('');
     });
 
@@ -182,7 +182,7 @@ describe('KaraokeApp', () => {
       window.history.replaceState(null, '', '/?authError=spotify');
       render(<KaraokeApp api={fakeApi(me({ low: 45, high: 72, source: 'test' }))} mic={fakeMic().mic} />);
       await screen.findByText('Plastic Love');
-      expect(screen.queryByText('Couldn’t sign in to Spotify.')).toBeNull();
+      expect(screen.queryByText('Couldn’t sign in. Spotify sign-in is for invited testers only right now.')).toBeNull();
     });
   });
 

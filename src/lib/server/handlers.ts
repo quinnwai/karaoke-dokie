@@ -31,7 +31,6 @@ import { withCaller } from './spotifyCalls';
 import { DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT, type UserRecord } from './store';
 import { intParam, validateEvents, validateFeedback, validateVocalRange } from './validate';
 import type { AppContext } from './wiring';
-import { SpotifyError } from './spotify';
 
 const STATE_MAX_AGE_S = 600;
 
@@ -147,7 +146,13 @@ export async function callback(req: Request, ctx: AppContext): Promise<Response>
   const expected = parseCookies(req.headers.get('cookie'))[STATE_COOKIE];
   const state = url.searchParams.get('state');
   const code = url.searchParams.get('code');
-  if (url.searchParams.get('error')) return fail(url.searchParams.get('error')!);
+  const refused = url.searchParams.get('error');
+  if (refused) {
+    // Cancel is the singer's answer. Anything else is Spotify refusing on its own page (an account off the
+    // allowlist may land here or on a 403 at /me, QWW-53), and this line is the only record of which.
+    if (refused !== 'access_denied') console.error(`[auth] Spotify refused the sign-in on its own page: error=${JSON.stringify(refused.slice(0, 100))}`);
+    return fail(refused);
+  }
   if (!expected || !state || !safeEqual(state, expected)) return fail('state');
   if (!code) return fail('missing-code');
 
@@ -167,14 +172,9 @@ export async function callback(req: Request, ctx: AppContext): Promise<Response>
       serializeCookie(SESSION_COOKIE, signSession(me.id, ctx.config.sessionSecret), { maxAge: SESSION_MAX_AGE_S, secure }),
     ]);
   } catch (err) {
-    // The browser only gets ?authError=spotify (or the invite-only page), so this line is the only record of why.
+    // The browser only gets ?authError=spotify, so this line is the only record of why.
     console.error(`[auth] Spotify sign-in failed at the ${step} step: ${describeError(err)}`);
     await noteSpotifyLimit(ctx.store, err);
-    // In Development Mode Spotify lets any account through its own pages, then answers 403 to an account the app's
-    // owner hasn't added in the dashboard (QWW-45). Say so, instead of "Couldn't sign in" (QWW-53).
-    if (step === 'profile (/me)' && err instanceof SpotifyError && err.status === 403) {
-      return redirect(`${home}/invite-only`, [clearState]);
-    }
     return fail('spotify');
   }
 }

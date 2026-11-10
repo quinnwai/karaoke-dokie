@@ -159,7 +159,7 @@ export function Results(props: ResultsProps) {
       )}
       {props.signInFailed && (
         <p className={styles.libraryNote} role="status">
-          Couldn’t sign in to Spotify.
+          Couldn’t sign in. Spotify sign-in is for invited testers only right now.
         </p>
       )}
 
