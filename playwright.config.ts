@@ -16,6 +16,8 @@ const appEnv = {
   // The demo's placeholder mood labels listed, and the event log on, so e2e covers both.
   MOODS_SHIPPED: 'upbeat,heartfelt',
   EVENTS: 'on',
+  // Builds `window.setlist`, the Setlist tuner's test hook (spec §9). Only this build has it; production does not.
+  NEXT_PUBLIC_SETLIST_TEST_HOOK: '1',
 };
 
 export default defineConfig({

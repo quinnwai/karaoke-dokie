@@ -32,7 +32,15 @@ export function useRankedSetlist(engine: SetlistEngine, request: SetlistRequest 
     }
     const asked = JSON.parse(key) as SetlistRequest;
     let stale = false;
-    engine.rank(asked).then(
+    // An engine that throws before it returns a promise (a bad song in its list) has failed like any other: that must not
+    // be an error that takes the screen down.
+    let answer: Promise<SetlistResponse>;
+    try {
+      answer = engine.rank(asked);
+    } catch (err) {
+      answer = Promise.reject(err);
+    }
+    answer.then(
       (result) => !stale && setState({ result, failed: false }),
       () => !stale && setState((s) => ({ result: s.result, failed: true })),
     );

@@ -16,7 +16,10 @@ export interface SetlistRow {
   era: EraId | null;
   /** "Artist · ’90s", or just the artist for a song with no known year. */
   sub: string;
-  /** The lane at the end of the row, from the song's place on the Difficulty gear. null draws no lane: the range is not trusted. */
+  /**
+   * The lane at the end of the row, from the song's place on the Difficulty gear. null draws no lane: the range is not
+   * trusted (no place on the gear), or it is only an estimate (a Maybe song, which shows no difficulty anywhere).
+   */
   lane: RowLane | null;
   /** What a screen reader says for the row's button: the lane is a picture, so the label says it. */
   label: string;
@@ -33,7 +36,7 @@ export function toRow(song: SetlistSong): SetlistRow {
     artist: match.track.artist,
     era: song.era,
     sub: eraLabel ? `${match.track.artist} · ${eraLabel}` : match.track.artist,
-    lane: difficulty === null ? null : rowLane(difficulty),
+    lane: difficulty === null || match.difficulty === 'maybe' ? null : rowLane(difficulty),
     label: `${match.track.title} by ${match.track.artist}${eraLabel ? `, ${eraLabel}` : ''}, ${difficultyLabel(match.difficulty)}`,
   };
 }

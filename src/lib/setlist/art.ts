@@ -6,7 +6,9 @@
 export const EASY = '#4FD17A';
 export const MID = '#F5B82E';
 export const HARD = '#FF6B70';
-export const laneColor = (v: number): string => (v < 34 ? EASY : v < 67 ? MID : HARD);
+// Cut at exact thirds, as the engine places Easy, Medium and Hard songs. For the whole numbers a slider holds this is the
+// spec's "< 34, < 67" (spec §6); only a fractional place such as 33.4 differs, and that is a Medium song.
+export const laneColor = (v: number): string => (v < 100 / 3 ? EASY : v < 200 / 3 ? MID : HARD);
 
 /** Difficulty art (the pitch lane in a 150×80 viewBox): a band that grows with difficulty, and seven dashes in it. */
 export const DASH_OFFSETS = [0.8, 0.2, -1, -0.3, 1, -0.6, -0.9] as const;

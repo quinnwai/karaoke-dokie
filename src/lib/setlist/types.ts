@@ -97,6 +97,12 @@ export interface SetlistResponse {
   empty?: 'no-era-picked' | 'no-songs-in-era' | 'no-songs-in-range';
   /** True when the singer is signed in but their Spotify library could not be read: the list is the catalogue's. */
   libraryUnavailable?: boolean;
+  /**
+   * True when the singer's library is only partly in the list: looking up its songs ran out of budget (a first visit
+   * to a big library) or one lookup failed. Ask again and the list carries on from where it got to. (Nothing draws
+   * this yet: the interim engine ranks what the server already sent, and the screen already asks again for that.)
+   */
+  libraryIncomplete?: boolean;
 }
 
 export type EmptyReason = NonNullable<SetlistResponse['empty']>

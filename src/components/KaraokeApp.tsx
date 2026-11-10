@@ -206,7 +206,17 @@ export function KaraokeApp({
     () => setlistEngine ?? createLocalEngine(state.matches, { loggedIn: history, sources: state.sources, libraryUnavailable: state.libraryUnavailable }),
     [setlistEngine, state.matches, state.sources, history, state.libraryUnavailable],
   );
-  const ranked = useRankedSetlist(engine, step === 'results' && range && !state.loading && state.error !== 'load' ? toRequest(state.tuner, range) : null);
+  // A big library arrives in pages (loading stays true between them): rank what is there as each page lands, and
+  // the list shows "Loading…" under its rows until the last one. Nothing is asked while there are no songs of this load
+  // yet: `attempt` counts the pages that have landed in it, and starts again at 0 for a first load and for Try again, so a
+  // retry clears the request (the old songs are not asked about again) and the engine is asked anew once the songs land,
+  // whether it is rebuilt from them (the interim engine) or not (a server engine).
+  const hasSongs = !state.loading || (state.attempt > 0 && state.matches.length > 0);
+  const ranked = useRankedSetlist(engine, step === 'results' && range && hasSongs && state.error !== 'load' ? toRequest(state.tuner, range) : null);
+  // A song the singer taps is looked up in the engine's own answer first: a server engine sends the songs it ranked,
+  // which need not be in the list the screen loaded.
+  const findMatch = (trackId: string): Match | undefined =>
+    ranked.result?.songs.find((s) => s.match.track.id === trackId)?.match ?? state.matches.find((m) => m.track.id === trackId);
 
   // ---- mic ----
   const stopTicker = () => {
@@ -355,7 +365,7 @@ export function KaraokeApp({
   };
 
   const sendFeedback = (trackId: string, thumbs: 'up' | 'down') => {
-    const match = state.matches.find((m) => m.track.id === trackId);
+    const match = findMatch(trackId);
     if (!match || !state.range) return;
     dispatch({ type: 'feedback', trackId, thumbs });
     const body = { trackId, thumbs, difficulty: match.difficulty, octave: match.octave, view: feedbackView(state) };
@@ -390,7 +400,7 @@ export function KaraokeApp({
     dispatch({ type: 'loggedOut' });
   };
 
-  const selected = state.selectedId ? state.matches.find((m) => m.track.id === state.selectedId) : undefined;
+  const selected = state.selectedId ? findMatch(state.selectedId) : undefined;
 
   // The Setlist tuner fills the screen: no TV around it. Every other step, and the song page, stay on the TV.
   if (step === 'results' && state.range && !selected) {

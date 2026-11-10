@@ -91,7 +91,7 @@ export function SetlistScreen(props: SetlistScreenProps) {
         <div className={styles.headTools}>
           {/* The range and its redo sit together: redo is about the range. */}
           <span className={styles.rangeGroup}>
-            <span className={styles.rangeChip} aria-label={`Your range ${low} to ${high}`}>
+            <span className={styles.rangeChip} role="group" aria-label={`Your range ${low} to ${high}`}>
               <button type="button" className={styles.rangeNote} onClick={() => props.onRedoEnd('low')} aria-label={`Redo your low note, ${low}`}>
                 {low}
               </button>
@@ -145,9 +145,11 @@ export function SetlistScreen(props: SetlistScreenProps) {
             Try again
           </button>
         )}
-        {waiting && <p className={styles.note}>Loading…</p>}
+        {waiting && visible.length === 0 && <p className={styles.note}>Loading…</p>}
 
         {visible.length > 0 && <SongRows rows={visible} scroller={scroller} onOpen={props.onSelect} renderPlay={props.renderPlay} />}
+        {/* A big library comes in pages: the rows that have arrived are shown, and what is still coming is said under them. */}
+        {waiting && visible.length > 0 && <p className={styles.note}>Loading…</p>}
 
         {!error && visible.length < rows.length && (
           <button type="button" className={styles.more} onClick={props.onMore} aria-label="Load more songs">

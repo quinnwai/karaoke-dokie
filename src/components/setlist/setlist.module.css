@@ -66,6 +66,15 @@
   text-overflow: ellipsis;
 }
 
+/* Narrower than 375 px (a 360 px Android phone) the 28 px heading is cut by the range and the Connect button beside it,
+   when the range has sharps (D#2 to D#5). From 375 px (an iPhone SE or mini) it fits. At 320 px it still clips, which only
+   the oldest phones are. */
+@media (max-width: 374px) {
+  .title {
+    font-size: 24px;
+  }
+}
+
 .headTools {
   flex-shrink: 0;
   display: flex;
@@ -119,7 +128,10 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  /* Room under the last thing in the list, clear of the handle's touch area, which reaches 22 px above the sheet. */
+  /* Rows reorder in the flow of the page, and flip.ts slides them from where they were: the browser must not also move
+     the scroll position to keep one of them still (Chrome's scroll anchoring would). */
+  overflow-anchor: none;
+  /* Room under the last thing in the list, clear of the handle's touch area, which reaches 11 px above the sheet. */
   padding-bottom: 24px;
 }
 
@@ -137,8 +149,7 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  /* A row that changes place slides there (flip.ts takes the offset off and this runs). */
-  transition: transform 280ms ease;
+  /* A row that changes place slides there: flip.ts animates it (spec §5, 280 ms ease). */
 }
 
 .rowOpen {
@@ -693,7 +704,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .row,
   .rack {
     transition: none !important;
   }

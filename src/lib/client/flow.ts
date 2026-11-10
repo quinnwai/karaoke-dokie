@@ -305,7 +305,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       return state.range ? { ...state, ...freshResults(), step: 'results', mode: 'catalogue', loading: true } : state;
     case 'loggedOut': {
       // Nothing of the library stays: not its matches, not the songs offered to pick from.
-      const out = { ...state, signedIn: false, displayName: null, known: null, picks: [], tuner: initialTuner({ mini: state.tuner.mini }) };
+      const out = { ...state, signedIn: false, displayName: null, known: null, picks: [] };
       return state.range ? { ...out, ...freshResults(), step: 'results', mode: 'catalogue', loading: true } : out;
     }
     case 'saveFailed':
