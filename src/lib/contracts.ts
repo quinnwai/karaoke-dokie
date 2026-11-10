@@ -242,10 +242,11 @@ export interface SetlistSong {
   /** From `match.year`; null when the song has no year (it is then left out while Era is on). */
   era: EraId | null;
   /**
-   * The song's place on each gear, 0 to 100, by its rank among the songs that fit the singer (so every tenth of
-   * a track holds about a tenth of the songs). `difficulty` also draws the row's mini lane: Easy songs are 0 to 33,
-   * Medium 33 to 67, Hard 67 to 100. null when we do not know: the song then sorts after the rest on that gear.
-   * `history` is null for any song that is not in the singer's Spotify library.
+   * The song's place on each gear, 0 to 100. Popularity, Tempo and History are by the song's rank among the songs
+   * that fit the singer (so every tenth of the track holds about a tenth of them). `difficulty` is by label, a third
+   * of the track each, and draws the row's mini lane: Easy songs are 0 to 33, Medium 33 to 67, Hard 67 to 100.
+   * null when we do not know: the song then sorts after the rest on that gear. `history` is null for any song that
+   * is not in the singer's Spotify library.
    */
   gears: Record<GearId, number | null>;
 }
@@ -277,6 +278,11 @@ export interface SetlistResponse {
   empty?: 'no-era-picked' | 'no-songs-in-era' | 'no-songs-in-range';
   /** True when the singer is signed in but their Spotify library could not be read: the list is the catalogue's. */
   libraryUnavailable?: boolean;
+  /**
+   * True when the singer's library is only partly in the list: looking up its songs ran out of budget (a first visit
+   * to a big library) or one lookup failed. Ask again and the list carries on from where it got to.
+   */
+  libraryIncomplete?: boolean;
 }
 
 export type LogOutcome = RangeSource | 'skipped';

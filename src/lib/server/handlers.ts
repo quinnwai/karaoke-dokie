@@ -280,31 +280,75 @@ async function optionalUser(req: Request, ctx: AppContext): Promise<UserRecord |
   return userId ? ctx.store.getUser(userId) : null;
 }
 
-/** Ranges whose library songs are kept per library: the sheet moves one slider at a time on one range. */
-const LIBRARY_RANGES_KEPT = 4;
-const libraryLists = new WeakMap<Track[], Map<string, Promise<LibraryMatches>>>();
+/** Library lists the tuner keeps in a process, across all singers: each is a few thousand matches with their pitch histograms. */
+export const LIBRARY_LISTS_KEPT = 6;
+/** How long after a library could not be read the tuner leaves Spotify alone and answers with the catalogue's list. */
+export const LIBRARY_RETRY_MS = 30_000;
+/** Singers remembered as "library down"; far more than the handful of signed-in testers. */
+const LIBRARY_DOWN_KEPT = 100;
+
+interface TunerState {
+  /** By "user:low:high", least recently used first. `tracks` is the library the list was made from. */
+  lists: Map<string, { tracks: Track[]; list: Promise<LibraryMatches> }>;
+  /** Singers whose library could not be read, and until when (epoch ms) the tuner does not ask Spotify again. */
+  down: Map<string, number>;
+}
+/** The tuner's per-process memory, one per app context, so a context made afresh (tests) starts with none. */
+const tunerStates = new WeakMap<AppContext, TunerState>();
+function tunerState(ctx: AppContext): TunerState {
+  let state = tunerStates.get(ctx);
+  if (!state) tunerStates.set(ctx, (state = { lists: new Map(), down: new Map() }));
+  return state;
+}
 
 /**
- * The library's songs that fit a range. The track cache hands out one array for as long as it keeps a library,
- * so the matches are kept against that array: a slider moving asks again and again for the same ones, and a
- * library read again is a new array. A list that is not complete (lookups ran out of budget) is not kept, so
- * the next request carries on with them.
+ * The library's songs that fit a range. A slider moving asks again and again for the same ones, so the last few lists
+ * are kept (LIBRARY_LISTS_KEPT in all, whoever's), each for as long as the track cache hands out the same library:
+ * a library read again is a different array, so its list is made again. A list that is not complete (lookups ran out
+ * of budget, or one failed) or that failed is not kept, so the next request carries on.
  */
-function libraryFor(tracks: Track[], range: { low: number; high: number }, ctx: AppContext): Promise<LibraryMatches> {
-  let byRange = libraryLists.get(tracks);
-  if (!byRange) libraryLists.set(tracks, (byRange = new Map()));
-  const key = `${range.low}:${range.high}`;
-  const hit = byRange.get(key);
-  if (hit) return hit;
-  const list = ctx.songs.libraryMatches(tracks, { ...range, source: 'test' });
-  const kept = byRange;
-  kept.set(key, list);
-  if (kept.size > LIBRARY_RANGES_KEPT) kept.delete(kept.keys().next().value!);
-  list.then(
-    (l) => l.complete || kept.delete(key),
-    () => kept.delete(key),
-  );
-  return list;
+function libraryFor(userId: string, tracks: Track[], range: { low: number; high: number }, ctx: AppContext): Promise<LibraryMatches> {
+  const { lists } = tunerState(ctx);
+  const key = `${userId}:${range.low}:${range.high}`;
+  const hit = lists.get(key);
+  if (hit && hit.tracks === tracks) {
+    lists.delete(key);
+    lists.set(key, hit); // now the most recently used
+    return hit.list;
+  }
+  const entry = { tracks, list: ctx.songs.libraryMatches(tracks, { ...range, source: 'test' }) };
+  lists.delete(key);
+  lists.set(key, entry);
+  if (lists.size > LIBRARY_LISTS_KEPT) lists.delete(lists.keys().next().value!);
+  // Forget it only if it is still the entry for this key: a slow list settling late must not drop a newer one.
+  const forget = () => void (lists.get(key) === entry && lists.delete(key));
+  entry.list.then((l) => l.complete || forget(), forget);
+  return entry.list;
+}
+
+/**
+ * The singer's library as the tuner reads it: the songs of it that fit `range`, or null when it cannot be had (Spotify
+ * said wait, failed or stalled, or looking its songs up failed). After a failure it is not asked for again for
+ * LIBRARY_RETRY_MS: the tuner asks on every slider move, and an unreadable library would otherwise be a retry of
+ * Spotify's calls (each with its own waits) per move, against a quota that is shared and small.
+ */
+async function libraryForSetlist(user: UserRecord, range: { low: number; high: number }, ctx: AppContext): Promise<LibraryMatches | null> {
+  const { down } = tunerState(ctx);
+  if ((down.get(user.id) ?? 0) > Date.now()) return null;
+  try {
+    const tracks = await loadTracks(user, ctx, 'site:/api/setlist');
+    if (tracks) {
+      const list = await libraryFor(user.id, tracks, range, ctx);
+      down.delete(user.id);
+      return list;
+    }
+  } catch (err) {
+    console.error(`[setlist] could not match the library: ${describeError(err)}`);
+  }
+  down.delete(user.id);
+  down.set(user.id, Date.now() + LIBRARY_RETRY_MS);
+  if (down.size > LIBRARY_DOWN_KEPT) down.delete(down.keys().next().value!);
+  return null;
 }
 
 /**
@@ -319,15 +363,10 @@ export async function setlist(req: Request, ctx: AppContext): Promise<Response> 
   if (!v.ok) return errorJson(400, 'bad-request', v.error);
   const base = await ctx.catalogue.setlist(v.value.range);
   const user = await optionalUser(req, ctx);
-  let library: LibraryMatches | null = null;
-  let libraryUnavailable = false;
-  if (user) {
-    const tracks = await loadTracks(user, ctx, 'site:/api/setlist');
-    if (tracks) library = await libraryFor(tracks, v.value.range, ctx);
-    else libraryUnavailable = true;
-  }
+  const library = user ? await libraryForSetlist(user, v.value.range, ctx) : null;
   const body = setlistFor(base, library, v.value);
-  if (libraryUnavailable) body.libraryUnavailable = true;
+  if (user && !library) body.libraryUnavailable = true;
+  if (library && !library.complete) body.libraryIncomplete = true;
   // After ranking, like every response (features.ts): duets and moods can never change the order.
   const matches = await applyDuetsAndMoods(body.songs.map((s) => s.match), ctx.store, ctx.config);
   return json({ ...body, songs: body.songs.map((s, i) => ({ ...s, match: matches[i]! })) } satisfies SetlistResponse);

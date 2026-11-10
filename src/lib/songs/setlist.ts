@@ -10,22 +10,28 @@
 //        distance = sum over the active gears of weight × |song's place − gear value|
 //      An active gear is one that is not in `off` (and History only when the singer's library was read).
 //      Off gears add nothing. A song we do not know on an active gear (no tempo, an implausible range, not in
-//      the singer's library) is a tier of its own: it sorts after every song that has all the active gears,
-//      among the songs that miss as many as it does. That is what "songs without a tempo sort last" and "the
-//      singer's own songs come first" mean. The Maybe songs (estimated ranges) come after all the others, as
-//      everywhere else. Ties go to the more popular song, then the easier, then to a song sung as written
-//      over one an octave away, then to the song's artist and title, then to the track id, so the order never
-//      depends on input order, and a song keeps its place among equals whether it arrives as the catalogue's
-//      track or the singer's own.
+//      the singer's library) sorts after every song that is known on it: "songs without a tempo sort last",
+//      "the singer's own songs come first". When songs miss different gears the more specific control wins
+//      (MISSING_RANK: History, then Tempo, then Popularity, then Difficulty), so a song with no tempo sorts
+//      after every song that has one, whatever else either is missing. The Maybe songs (estimated ranges) come
+//      after all the others, as everywhere else. Ties go to the more popular song, then the easier, then to a
+//      song sung as written over one an octave away, then to the song's artist and title, then to the track
+//      id, so the order never depends on input order, and a song keeps its place among equals whether it
+//      arrives as the catalogue's track or the singer's own.
 //
 // The default state (setlistConfig.ts) is Popularity on at 100, Difficulty on at 0, the rest off. With
-// Popularity counting double, that is "most popular first, then easiest" (QWW-42 rule 3).
+// Popularity counting double, that is a blend that leans on popularity: of two songs, the one that is 10 places
+// less popular needs to be 20 places easier to come first (QWW-42 rule 3, "most popular first, then easiest").
+// It is a blend, not a sort by popularity with difficulty breaking ties: the single most popular song is first
+// only if it is also easy. The weights are GEAR_WEIGHTS, the one knob if the top of the default list needs to
+// lean harder on popularity.
 //
-// A song's place on a gear is its rank among the singer's songs, as a share of them, not its raw score.
-// Raw scores bunch up (most songs are Easy, karaoke popularity sits between 0.5 and 0.9, most songs sit near
-// 120 bpm), and a track laid out by raw score has long stretches where moving the thumb changes nothing
-// (QWW-33). By rank every tenth of the track holds about a tenth of the songs. Songs with the same score
-// share their average place, so equal songs stay equal.
+// A song's place on a gear is its rank among the singer's songs, as a share of them, not its raw score. Raw
+// scores bunch up (karaoke popularity sits between 0.5 and 0.9, most songs sit near 120 bpm), and a track laid
+// out by raw score has long stretches where moving the thumb changes nothing (QWW-33). By rank every tenth of
+// the Popularity, Tempo and History tracks holds about a tenth of the songs, songs with the same score sharing
+// their average place. Difficulty is the exception: it is laid out by label, a third of the track each (see
+// difficultyPlaces), however few songs a label has.
 
 import type { EraId, GearId, Match, SetlistInput, SetlistSong, SetlistState, TunerPart, VocalRange } from '../contracts';
 import { GEAR_IDS } from '../contracts';
@@ -34,15 +40,14 @@ import { difficultyFromEdgeTime, edgeTime, pitchTime } from './match';
 import { eraOf } from './setlistConfig';
 
 /**
- * How much a gear's distance counts. Popularity counts double: that is what makes the default state "most
- * popular first, then easiest" rather than a blend of the two. A ten place gap in popularity then needs a
- * twenty place easier song to make up for it.
+ * How much a gear's distance counts. Popularity counts double (model A), which is what makes the default state lean
+ * on popularity: a ten place gap in popularity needs a twenty place easier song to make up for it.
  */
 export const GEAR_WEIGHTS: Readonly<Record<GearId, number>> = Object.freeze({ difficulty: 1, history: 1, popularity: 2, tempo: 1 });
 
 /**
  * A song range narrower than this many semitones is not a melody. The 5th to 95th percentile of what is sung
- * spans a fifth or more in any real song; a one-note range ("Jump", C4 to C4) is a rap or a measuring error,
+ * spans a fourth or more in any real song; a one-note range ("Jump", C4 to C4) is a rap or a measuring error,
  * and it fits every singer. Its difficulty is unknown, so it cannot win on being easy.
  */
 export const MIN_PLAUSIBLE_SPAN = 5;
@@ -136,6 +141,13 @@ export interface RankedSetlist {
   applied: TunerPart[];
   empty?: 'no-era-picked' | 'no-songs-in-era' | 'no-songs-in-range';
 }
+
+/**
+ * Which missing gear counts most when songs miss different ones, as bits of a sum: a song missing History sorts after
+ * every song that has it, then one missing Tempo after every song that has it, then Popularity, then Difficulty.
+ * The gears the singer chose to switch on (History, Tempo) outrank the ones that are on from the start.
+ */
+const MISSING_RANK: Readonly<Record<GearId, number>> = Object.freeze({ difficulty: 1, popularity: 2, tempo: 4, history: 8 });
 
 /** Values rounded so that equal scores computed two ways compare equal. */
 const quantize = (v: number) => Math.round(v * 1e9);
@@ -251,7 +263,6 @@ export function rankPrepared(prepared: PreparedSetlist, state: SetlistState & { 
   const eraOn = !off.has('era');
   const applied: TunerPart[] = eraOn ? [...active, 'era'] : active;
   const picked = new Set<EraId>(state.eras);
-  const value = (g: GearId) => Math.min(100, Math.max(0, state.gears[g]));
 
   const passing = prepared.songs.filter((s) => !eraOn || (s.era !== null && picked.has(s.era)));
   const scored = passing.map((s) => {
@@ -259,8 +270,8 @@ export function rankPrepared(prepared: PreparedSetlist, state: SetlistState & { 
     let missing = 0;
     for (const g of active) {
       const place = s.gears[g];
-      if (place === null) missing++;
-      else distance += GEAR_WEIGHTS[g] * Math.abs(place - value(g));
+      if (place === null) missing += MISSING_RANK[g];
+      else distance += GEAR_WEIGHTS[g] * Math.abs(place - state.gears[g]);
     }
     const m = s.candidate.match;
     return { s, missing, distance: quantize(distance), who: `${m.track.artist}\u0000${m.track.title}`.toLowerCase() };
@@ -280,7 +291,7 @@ export function rankPrepared(prepared: PreparedSetlist, state: SetlistState & { 
   const songs = scored.map(({ s }): SetlistSong => ({ match: s.candidate.match, era: s.era, gears: s.gears }));
   const result: RankedSetlist = { songs, applied };
   if (songs.length === 0) {
-    result.empty = eraOn && picked.size === 0 ? 'no-era-picked' : prepared.songs.length > 0 ? 'no-songs-in-era' : 'no-songs-in-range';
+    result.empty = prepared.songs.length === 0 ? 'no-songs-in-range' : eraOn && picked.size === 0 ? 'no-era-picked' : 'no-songs-in-era';
   }
   return result;
 }

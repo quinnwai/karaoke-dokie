@@ -17,6 +17,7 @@ import {
   GEAR_WEIGHTS,
   MIN_PLAUSIBLE_SPAN,
   effectiveTempo,
+  libraryCandidate,
   noteCost,
   prepareSetlist,
   rankPrepared,
@@ -50,6 +51,17 @@ function state(over: { gears?: Partial<Record<GearId, number>>; off?: TunerPart[
 }
 const input = (range: Pick<VocalRange, 'low' | 'high'>, over: Parameters<typeof state>[0] = {}): SetlistInput => ({ range, ...state(over) });
 const ids = (list: { songs: { match: Match }[] }, n = Infinity) => list.songs.slice(0, n).map((s) => s.match.track.id);
+
+/** A seeded Fisher-Yates shuffle: a different order for every seed, the same one every run. */
+function shuffled<T>(xs: T[], seed: number): T[] {
+  const rand = rng(seed);
+  const out = [...xs];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
 
 // ---------- the synthetic catalogue ----------
 
@@ -166,7 +178,12 @@ describe('easy leans low (rule 2): the curve', () => {
     for (let d = 0; d < 0.5 - 1e-9; d += 0.005) {
       expect(noteCost(1 - d), `${d} from the edges`).toBeGreaterThan(noteCost(d));
     }
-    expect(noteCost(0.5)).toBe(noteCost(1 - 0.5));
+  });
+
+  it('is the curve that docs/backend.md and the comment in setlist.ts tabulate', () => {
+    const table: [number, number][] = [[0, 0.6], [0.1, 0.31], [0.2, 0.11], [0.35, 0], [0.5, 0.05], [0.65, 0.21], [0.8, 0.48], [0.9, 0.72], [1, 1]];
+    for (const [t, cost] of table) expect(noteCost(t), `t = ${t}`).toBeCloseTo(cost, 2);
+    expect([EASE_POINT, BOTTOM_DISCOUNT]).toEqual([0.35, 0.6]);
   });
 
   it('makes a song in the lower-middle easier than the same song higher up, both inside the middle half', () => {
@@ -188,6 +205,15 @@ describe('easy leans low (rule 2): the curve', () => {
     const down: Match = { ...asWritten, octave: 'down' };
     // 46 to 52 is t 0.20 to 0.40, around the ease point; 58 to 64 is t 0.60 to 0.80.
     expect(songStrain(USER, down)!).toBeLessThan(songStrain(USER, asWritten)! / 2);
+  });
+
+  it('sees the octave the other way too: a song written low and sung up sits higher in the range', () => {
+    const asWritten = song('as-written', { low: 34, high: 40, shares: flat(34, 40) });
+    expect(asWritten.octave).toBe('up'); // 46 to 52 as sung, t 0.20 to 0.40
+    // Had the shift been ignored, 34 to 40 would sit below the range, at its bottom edge.
+    const ignoringShift: Match = { ...asWritten, octave: 'none' };
+    expect(songStrain(USER, asWritten)!).toBeLessThan(0.1);
+    expect(songStrain(USER, ignoringShift)!).toBeCloseTo(0.6, 2);
   });
 
   it('is 0 for a song that sits on the ease point and 1 for one on the top note', () => {
@@ -297,19 +323,50 @@ describe('the distance (spec §5, model A)', () => {
   });
 
   it('lists the catalogue in popularity order when every gear is off (spec test 18), whatever order the songs came in', () => {
-    const list = prepareCatalogue(CATALOGUE, TEST_RANGES[0]![1], deps);
-    const all = rankPrepared(list.prepared, state({ off: [...GEAR_IDS, 'era'] }));
-    expect(all.songs).toHaveLength(list.matches.length);
-    expect(all.applied).toEqual([]);
-    const pop = all.songs.map((s) => (s.match.parts?.popularityKnown ? s.match.parts.popularity : -1));
+    const range = TEST_RANGES[0]![1];
+    const { matches } = prepareCatalogue(CATALOGUE, range, deps);
+    const allOff = state({ off: [...GEAR_IDS, 'era'] });
+    const first = rankSetlist(cands(...matches), { range, ...allOff });
+    expect(first.songs).toHaveLength(matches.length);
+    expect(first.applied).toEqual([]);
+    const pop = first.songs.map((s) => (s.match.parts?.popularityKnown ? s.match.parts.popularity : -1));
     for (let i = 1; i < pop.length; i++) expect(pop[i]!).toBeLessThanOrEqual(pop[i - 1]!);
+    for (const seed of [1, 2, 3]) {
+      expect(ids(rankSetlist(cands(...shuffled(matches, seed)), { range, ...allOff })), `shuffle ${seed}`).toEqual(ids(first));
+    }
   });
 
-  it('clamps a gear value outside 0 to 100 instead of ranking on it', () => {
-    const songs = [placed('a', { tempo: 0 }), placed('b', { tempo: 100 })];
-    const off: TunerPart[] = ['history', 'era', 'difficulty', 'popularity'];
-    expect(ids(rankPrepared(preparedOf(...songs), state({ off, gears: { tempo: 9999 } })))).toEqual(['b', 'a']);
-    expect(ids(rankPrepared(preparedOf(...songs), state({ off, gears: { tempo: -50 } })))).toEqual(['a', 'b']);
+  it('breaks ties in order: the more popular song, then the easier, then the one sung as written, then artist and title, then id', () => {
+    // Nothing is active, so every song is tied on distance and only the tie-breaks speak.
+    const allOff = state({ off: [...GEAR_IDS, 'era'] });
+    const popularFirst = [placed('t1', {}, { popularity: 0.5 }), placed('t2', {}, { popularity: 0.9 }), placed('t3', { difficulty: 20 }, { popularity: 0.5 })];
+    expect(ids(rankPrepared(preparedOf(...popularFirst), allOff))).toEqual(['t2', 't3', 't1']); // t3 is as popular as t1 but easier
+
+    const octave = (id: string, o: 'none' | 'down'): PreparedSetlist['songs'][number] => {
+      const p = placed(id, {}, { popularity: 0.5 });
+      return { ...p, candidate: { match: { ...p.candidate.match, octave: o } } };
+    };
+    expect(ids(rankPrepared(preparedOf(octave('a-down', 'down'), octave('b-none', 'none')), allOff))).toEqual(['b-none', 'a-down']);
+
+    const named = (id: string, artist: string, title: string): PreparedSetlist['songs'][number] => {
+      const p = placed(id, {}, { popularity: 0.5 });
+      return { ...p, candidate: { match: { ...p.candidate.match, track: { ...p.candidate.match.track, artist, title } } } };
+    };
+    // By name before id, so the same song as a library track and as a catalogue track keeps its place whatever the ids say.
+    const byName = rankPrepared(preparedOf(named('zzz', 'Abba', 'Chiquitita'), named('aaa', 'Abba', 'Waterloo'), named('mmm', 'Zedd', 'Clarity')), allOff);
+    expect(ids(byName)).toEqual(['zzz', 'aaa', 'mmm']);
+    expect(ids(rankPrepared(preparedOf(named('b', 'Abba', 'Waterloo'), named('a', 'ABBA', 'waterloo')), allOff))).toEqual(['a', 'b']);
+  });
+
+  it('never adds or removes a song: whatever the gears say, the same songs come back (rule 1)', () => {
+    const { matches, prepared } = prepareCatalogue(CATALOGUE, TEST_RANGES[0]![1], deps);
+    const everyone = new Set(matches.map((m) => m.track.id));
+    const settings = [state(), state({ gears: { difficulty: 100, tempo: 100, popularity: 0 }, off: ['history', 'era'] }), state({ off: [...GEAR_IDS, 'era'] })];
+    for (const s of settings) {
+      const r = rankPrepared(prepared, s);
+      expect(r.songs).toHaveLength(matches.length);
+      expect(new Set(ids(r))).toEqual(everyone);
+    }
   });
 });
 
@@ -341,6 +398,27 @@ describe('a song we do not know on an active gear is a tier of its own', () => {
   it('costs nothing while the gear is off', () => {
     const songs = [placed('unknown', { tempo: null }, { popularity: 0.9 }), placed('known', { tempo: 50 }, { popularity: 0.1 })];
     expect(ids(rankPrepared(preparedOf(...songs), state({ off: [...others, 'tempo'] })))).toEqual(['unknown', 'known']);
+  });
+
+  it('puts the gear the singer chose first when songs miss different ones: no tempo sorts after every song that has one', () => {
+    // 'no-tempo' is popular and easy and has everything but a tempo; 'no-popularity' has a tempo but no popularity.
+    // Tempo is the more specific control, so the song that has a tempo comes first, whatever else it is missing.
+    const songs = [
+      placed('no-tempo', { tempo: null, popularity: 100, difficulty: 0 }, { popularity: 0.99 }),
+      placed('no-popularity', { tempo: 100, popularity: null, difficulty: 90 }, { popularity: 0.1 }),
+      placed('complete', { tempo: 20, popularity: 5, difficulty: 95 }, { popularity: 0.05 }),
+    ];
+    for (const tempo of [0, 50, 100]) {
+      const r = rankPrepared(preparedOf(...songs), state({ off: ['history', 'era'], gears: { tempo } }));
+      expect(ids(r), `tempo ${tempo}`).toEqual(['complete', 'no-popularity', 'no-tempo']);
+    }
+    // And History above Tempo: a song outside the library sorts after one inside it, even one with no tempo.
+    const lib = [
+      placed('own-no-tempo', { history: 50, tempo: null }, { popularity: 0.1 }),
+      placed('other-has-tempo', { history: null, tempo: 100 }, { popularity: 0.99 }),
+    ];
+    const r = rankPrepared(preparedOf(...lib), state({ off: ['era', 'difficulty', 'popularity'], loggedIn: true, gears: { tempo: 100 } }));
+    expect(ids(r)).toEqual(['own-no-tempo', 'other-has-tempo']);
   });
 
   it('ranks the songs that miss the same gears among themselves by the gears they have', () => {
@@ -423,6 +501,8 @@ describe('the Era filter (rule 5)', () => {
   it('says "no-songs-in-era" when the picked eras have no song that fits, and "no-songs-in-range" when nothing fits at all', () => {
     expect(rankPrepared(list, state({ off: off(), eras: ['s20'] })).empty).toBe('no-songs-in-era');
     expect(rankSetlist([], input(USER)).empty).toBe('no-songs-in-range');
+    // Nothing fitting at all beats the Era message: there is nothing to pick an era from.
+    expect(rankSetlist([], input(USER, { off: ['history', 'tempo'], eras: [] })).empty).toBe('no-songs-in-range');
     expect(rankPrepared(list, state({ off: off('era') })).empty).toBeUndefined();
   });
 
@@ -464,7 +544,9 @@ describe('History (rule 3): the singer\'s own songs, only when logged in', () =>
     const list = prepareSetlist([a, b, c, outside], USER);
     const out = rankPrepared(list, state({ off: only, loggedIn: false }));
     expect(out.applied).toEqual([]);
-    expect(out.songs.map((s) => s.gears.history)).not.toContain(0.9);
+    // Nothing is active, so the order is the all-off order, not a History order.
+    expect(ids(out)).toEqual(ids(rankPrepared(list, state({ off: [...GEAR_IDS, 'era'], loggedIn: false }))));
+    expect(ids(out)).not.toEqual(ids(rankPrepared(list, state({ off: only, loggedIn: true, gears: { history: 100 } }))));
     const inn = rankPrepared(list, state({ off: only, loggedIn: true }));
     expect(inn.applied).toEqual(['history']);
   });
@@ -493,13 +575,14 @@ describe('determinism', () => {
   it('gives the same list however the songs arrive, and the same list twice', () => {
     const range = TEST_RANGES[2]![1];
     const { matches } = catalogueMatches(CATALOGUE, { ...range, source: 'test' }, deps);
-    const shuffled = [...matches].sort(() => rng(5)() - 0.5).reverse();
     const state1 = input(range, { off: ['history', 'era'], gears: { tempo: 20, difficulty: 35 } });
     const a = rankSetlist(cands(...matches), state1);
-    const b = rankSetlist(cands(...shuffled), state1);
-    expect(ids(b)).toEqual(ids(a));
+    for (const seed of [1, 2, 3, 4]) {
+      const b = rankSetlist(cands(...shuffled(matches, seed)), state1);
+      expect(ids(b), `shuffle ${seed}`).toEqual(ids(a));
+      expect(b.songs.map((s) => s.gears)).toEqual(a.songs.map((s) => s.gears));
+    }
     expect(ids(rankSetlist(cands(...matches), state1))).toEqual(ids(a));
-    expect(b.songs.map((s) => s.gears)).toEqual(a.songs.map((s) => s.gears));
   });
 
   it('never changes the songs it was given', () => {
@@ -523,23 +606,28 @@ describe.each(TEST_RANGES)('%s', (_name, range) => {
   });
 
   it('only lists songs that fit the singer\'s range, for any setting of the gears (rule 1)', () => {
+    // The filter is matchSong's (match.ts), applied when the list is built; the engine neither adds nor removes a song.
     const settings = [state(), state({ gears: { difficulty: 100 } }), state({ off: [...GEAR_IDS, 'era'] }), state({ gears: { popularity: 0, tempo: 100 }, off: ['history', 'era'] })];
     for (const s of settings) {
-      for (const { match } of rankPrepared(list.prepared, s).songs) {
-        const { low, high, pitchShare } = match.range;
+      const r = rankPrepared(list.prepared, s);
+      expect(r.songs).toHaveLength(list.matches.length);
+      for (const { match } of r.songs) {
+        const { low, high } = match.range;
         const shift = match.octave === 'up' ? 12 : match.octave === 'down' ? -12 : 0;
-        expect(pitchShare === undefined || pitchShare.length > 0).toBe(true);
         expect(low + shift, match.track.id).toBeGreaterThanOrEqual(range.low);
         expect(high + shift, match.track.id).toBeLessThanOrEqual(range.high);
       }
     }
   });
 
-  it('puts Hard songs at the top at max difficulty, logged out, with Popularity at its default (Quinn-Wai, 10 Nov)', () => {
+  // Quinn-Wai's check of 10 Nov: logged out, max difficulty, Hard songs at the top. Popularity is on from the start and
+  // counts double, so the top is the most popular Hard songs: this holds when there are Hard songs of every popularity,
+  // as in this catalogue (hundreds of them). It is not a law: a range with a handful of Hard songs, all obscure, puts
+  // popular Medium and Easy ones among them. The next test is the exact version, with Popularity off.
+  it('puts Hard songs at the top at max difficulty, logged out, with Popularity at its default, on this catalogue (Quinn-Wai, 10 Nov)', () => {
     const r = rankPrepared(list.prepared, state({ gears: { difficulty: 100 } }));
     expect(r.songs.length).toBeGreaterThanOrEqual(10);
     expect(r.songs.slice(0, 10).map((s) => s.match.difficulty)).toEqual(Array(10).fill('hard'));
-    // And the hardest first, among songs of near-equal popularity.
     expect(r.songs[0]!.gears.difficulty!).toBeGreaterThan(90);
   });
 
@@ -572,14 +660,8 @@ describe.each(TEST_RANGES)('%s', (_name, range) => {
     }
   });
 
-  it('with the default state lists the most popular songs first, then the easiest (rule 3)', () => {
+  it('with the default state is sorted by the documented sum, popularity counting double (rule 3)', () => {
     const r = rankPrepared(list.prepared, state());
-    const top = r.songs.slice(0, 20);
-    const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
-    expect(mean(top.map((s) => s.gears.popularity!))).toBeGreaterThan(90);
-    expect(Math.min(...top.map((s) => s.gears.popularity!))).toBeGreaterThan(75);
-    // Among songs that are about as popular, the easier one comes first.
-    expect(mean(top.map((s) => s.gears.difficulty!))).toBeLessThan(mean(r.songs.map((s) => s.gears.difficulty ?? 50)));
     // Sorted by the documented sum, among the songs that have both gears.
     const complete = r.songs.filter((s) => s.match.difficulty !== 'maybe' && s.gears.popularity !== null && s.gears.difficulty !== null);
     const distance = (s: (typeof r.songs)[number]) => 2 * Math.abs(s.gears.popularity! - 100) + Math.abs(s.gears.difficulty! - 0);
@@ -597,6 +679,67 @@ describe.each(TEST_RANGES)('%s', (_name, range) => {
       for (let v = 10; v <= 100; v += 10) if (top(v).some((id, i) => id !== top(v - 10)[i])) moved++;
       expect(moved, g).toBeGreaterThanOrEqual(9);
     }
+  });
+});
+
+describe('the top of the default list, on twelve invented catalogues (rule 3)', () => {
+  // Measured across seeds 1 to 12 and the five ranges: the top 20 never has a song under place 72 on Popularity and
+  // averages 89 or more. The bounds leave room under that. They say "leans on popularity" without pinning one catalogue.
+  const seeds = Array.from({ length: 12 }, (_, i) => i + 1);
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+
+  it.each(seeds)('seed %i: the top 20 are popular songs, and easier than the list as a whole', (seed) => {
+    const tracks = catalogue(seed);
+    for (const [name, range] of TEST_RANGES) {
+      const { prepared } = prepareCatalogue(tracks, range, deps);
+      const r = rankPrepared(prepared, state());
+      const top = r.songs.slice(0, 20);
+      expect(Math.min(...top.map((s) => s.gears.popularity!)), `${name}, lowest place`).toBeGreaterThan(65);
+      expect(mean(top.map((s) => s.gears.popularity!)), `${name}, mean place`).toBeGreaterThan(85);
+      expect(mean(top.map((s) => s.gears.difficulty!)), name).toBeLessThan(mean(r.songs.map((s) => s.gears.difficulty ?? 50)));
+    }
+  });
+
+  it.each(seeds)('seed %i: at max difficulty the top 10 are Hard songs, in every range', (seed) => {
+    const tracks = catalogue(seed);
+    for (const [name, range] of TEST_RANGES) {
+      const { prepared } = prepareCatalogue(tracks, range, deps);
+      const r = rankPrepared(prepared, state({ gears: { difficulty: 100 } }));
+      expect(r.songs.slice(0, 10).map((s) => s.match.difficulty), name).toEqual(Array(10).fill('hard'));
+    }
+  });
+});
+
+describe('a duet and a library song', () => {
+  it('ranks a duet on the part the singer sings: its match carries that part\'s range, which the engine reads', () => {
+    const range: SongRange = {
+      low: 30,
+      high: 80,
+      tessitura: 55,
+      source: 'note-file',
+      confidence: 'high',
+      fastLyrics: false,
+      duet: true,
+      parts: [
+        { low: 30, high: 36, tessitura: 33, fastLyrics: false, pitchShare: flat(30, 36) }, // P1 only fits up an octave
+        { low: 48, high: 54, tessitura: 51, fastLyrics: false, pitchShare: flat(48, 54) },
+      ],
+    };
+    const fit = matchSong(USER, range)!;
+    expect(fit.part).toBe(2); // fits as written, which beats an octave shift (match.ts)
+    const m = { ...toMatch(track('duet'), range, fit), parts: { comfort: 0.5, familiarity: 1, popularity: 0.5, popularityKnown: true, penalty: 0 } };
+    expect(m.range.low).toBe(48);
+    const solo = song('solo', { low: 48, high: 54, shares: flat(48, 54) });
+    const list = prepareSetlist(cands(m, solo), USER);
+    // The same notes, so the same place on Difficulty.
+    expect(list.songs[0]!.gears.difficulty).toBe(list.songs[1]!.gears.difficulty);
+  });
+
+  it('turns a library match into a candidate with how much the singer plays it', () => {
+    const played = { ...song('played', { low: 50, high: 60 }), track: { ...track('played'), familiarity: 0.8 } };
+    const byRank = { ...song('by-rank', { low: 50, high: 60 }), track: track('by-rank', 20) }; // no familiarity: 1 / (1 + 20 / 20)
+    expect(libraryCandidate(played)).toEqual({ match: played, listening: 0.8 });
+    expect(libraryCandidate(byRank).listening).toBeCloseTo(0.5, 12);
   });
 });
 

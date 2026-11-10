@@ -81,7 +81,7 @@ export interface LibraryMatches {
   keys: Map<string, string>;
   /** The data-source line of each match, by track id. */
   logs: Map<string, DataSourceLogEntry>;
-  /** False while lookups have run out of budget (a first visit to a very large library): asking again carries on. */
+  /** False while lookups have run out of budget (a first visit to a very large library) or one failed: asking again carries on. */
   complete: boolean;
 }
 
@@ -183,9 +183,10 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
   /**
    * Visits tracks in playRank order, using cached ranges and resolving uncached ones (at most
    * maxResolves per call), calling `visit` for each track that has a record. Stops early when
-   * visit returns true. Returns true only when every track was visited.
+   * visit returns true. Returns true when every track was visited, one whose lookup failed (and is skipped, to be
+   * retried next time) included: `stats.failed`, when given, says how many of those there were.
    */
-  async function walk(tracks: Track[], visit: (w: Walked) => boolean): Promise<boolean> {
+  async function walk(tracks: Track[], visit: (w: Walked) => boolean, stats?: { failed: number }): Promise<boolean> {
     const ordered = [...tracks].sort((a, b) => a.playRank - b.playRank);
     const keys = ordered.map((t) => deps.songKey(t.artist, t.title));
     const cache = await store.getSongRanges(keys);
@@ -203,7 +204,10 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         if (record && visit({ track, key, record: { ...record, log: { ...record.log, trackId: track.id } } })) return false;
       }
       if (i >= ordered.length) break;
-      if (resolves >= maxResolves) return false; // budget spent; the client can ask again
+      if (resolves >= maxResolves) {
+        if (stats) stats.failed = failed.size;
+        return false; // budget spent; the client can ask again
+      }
 
       // Look up the next few unknown songs in parallel (lookahead of `concurrency`).
       const batch: { track: Track; key: string }[] = [];
@@ -221,6 +225,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         }),
       );
     }
+    if (stats) stats.failed = failed.size;
     return true;
   }
 
@@ -231,12 +236,17 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
    */
   async function collect(tracks: Track[], userRange: VocalRange, all: boolean) {
     const candidates: { track: Track; key: string; range: SongRange; log: DataSourceLogEntry }[] = [];
-    const exhausted = await walk(tracks, ({ track, key, record }) => {
-      if (!record.range) return false; // skipped songs never match
-      if (hasLittleSinging(track.title)) return false; // a dub or instrumental shares the original's key
-      candidates.push({ track, key, range: record.range, log: record.log });
-      return false;
-    });
+    const stats = { failed: 0 };
+    const exhausted = await walk(
+      tracks,
+      ({ track, key, record }) => {
+        if (!record.range) return false; // skipped songs never match
+        if (hasLittleSinging(track.title)) return false; // a dub or instrumental shares the original's key
+        candidates.push({ track, key, range: record.range, log: record.log });
+        return false;
+      },
+      stats,
+    );
 
     const keys = candidates.map((c) => c.key);
     const [index, popularity, tempos] = all ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys), store.getSongTempos(keys)]) : [null, null, null];
@@ -253,7 +263,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       logs.set(track.id, log);
       keyOf.set(track.id, key);
     }
-    return { matches, logs, keyOf, exhausted };
+    return { matches, logs, keyOf, exhausted, failed: stats.failed };
   }
 
   return {
@@ -298,7 +308,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
     },
 
     async libraryMatches(tracks, userRange) {
-      const { matches, logs, keyOf, exhausted } = await collect(tracks, userRange, true);
+      const { matches, logs, keyOf, exhausted, failed } = await collect(tracks, userRange, true);
       // Matches come in play order, so the first of a song under two Spotify ids is the one played more.
       const seen = new Set<string>();
       const unique = matches.filter((m) => {
@@ -307,7 +317,8 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         seen.add(key);
         return true;
       });
-      return { matches: unique, keys: keyOf, logs, complete: exhausted };
+      // A song whose lookup failed is left out and tried again next time, so a list with one is not complete.
+      return { matches: unique, keys: keyOf, logs, complete: exhausted && failed === 0 };
     },
 
     async knownSongs(tracks) {

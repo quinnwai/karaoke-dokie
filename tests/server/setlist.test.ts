@@ -6,8 +6,11 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as login from '../../app/api/auth/login/route';
 import * as callback from '../../app/api/auth/callback/route';
 import * as setlistRoute from '../../app/api/setlist/route';
-import type { EraId, GearValues, SetlistRequest, SetlistResponse, TunerPart } from '../../src/lib/contracts';
-import { createCatalogue, SETLIST_RANGES_KEPT } from '../../src/lib/server/catalogue';
+import type { EraId, GearValues, Match, SetlistRequest, SetlistResponse, SongRange, TunerPart } from '../../src/lib/contracts';
+import { catalogueTracks, createCatalogue, prepareCatalogue, SETLIST_RANGES_KEPT } from '../../src/lib/server/catalogue';
+import { LIBRARY_LISTS_KEPT, LIBRARY_RETRY_MS } from '../../src/lib/server/handlers';
+import { setlistFor } from '../../src/lib/server/setlistService';
+import { MOCK_USER } from '../../src/lib/server/mockSpotify';
 import { SESSION_COOKIE } from '../../src/lib/server/session';
 import { SpotifyError } from '../../src/lib/server/spotify';
 import { validateSetlistRequest } from '../../src/lib/server/validate';
@@ -77,6 +80,7 @@ beforeEach(() => {
 afterAll(() => {
   process.env = savedEnv;
   resetAppContextForTests();
+  vi.useRealTimers();
 });
 
 describe('validateSetlistRequest', () => {
@@ -355,5 +359,226 @@ describe('the catalogue keeps the tuner\'s songs for the last few ranges', () =>
     const again = await catalogue.setlist({ low: 40, high: 70 });
     expect(again).not.toBe(first);
     expect(again.matches.length).toBe(first.matches.length);
+  });
+});
+
+describe('what the response carries', () => {
+  const deps = productionSongDeps(createMemoryStore(), false);
+  const tracks = catalogueTracks(catalogueEntries(rng(3), 300));
+  const range = { low: 40, high: 76 };
+  const request = (over: Partial<SetlistRequest> = {}): SetlistRequest => ({ ...body({ range }), ...over });
+
+  /** A library song made from a catalogue one: its stored range has a histogram and the karaoke inputs it was scored with. */
+  function libraryMatch(from: Match): Match {
+    const range = {
+      ...from.range,
+      pitchShare: [[from.range.low, 0.5], [from.range.high, 0.5]],
+      karaokeViews: 12_345,
+      chartRank: 4,
+      deezerRank: 9,
+      parts: [{ low: from.range.low, high: from.range.high, tessitura: from.range.tessitura, fastLyrics: false, pitchShare: [[from.range.low, 1]] }],
+    } as SongRange;
+    return { ...from, track: { ...from.track, id: 'spotify-own-1', familiarity: 0.9, known: true }, range };
+  }
+
+  it('has no pitch histograms and none of the karaoke popularity a song was scored with, whoever the song is', () => {
+    const base = prepareCatalogue(tracks, range, deps);
+    expect(base.matches.some((m) => m.range.pitchShare)).toBe(true); // the engine has them: the strain needs them
+    const own = libraryMatch(base.matches[0]!);
+    const library = { matches: [own], keys: new Map([['spotify-own-1', 'someone|somewhere']]), logs: new Map(), complete: true };
+    const res = setlistFor(base, library, request({ off: ['tempo', 'era', 'difficulty', 'popularity'], gears: { ...request().gears, history: 100 }, limit: 200 }));
+    expect(res.songs[0]!.match.track.id).toBe('spotify-own-1'); // On repeat, first: it is on the page
+    const sent = JSON.stringify(res);
+    for (const name of ['pitchShare', 'karaokeViews', 'chartRank', 'deezerRank']) expect(sent, name).not.toContain(name);
+  });
+
+  it('takes sources for the songs on the page only, and leaves the catalogue\'s own list as it found it', () => {
+    const base = prepareCatalogue(tracks, range, deps);
+    const before = JSON.stringify([...base.logs]);
+    const own = libraryMatch(base.matches[0]!);
+    const log = { trackId: 'spotify-own-1', title: 'T', artist: 'A', outcome: 'note-file' as const, reason: 'library line', at: '2026-01-01T00:00:00.000Z' };
+    const library = { matches: [own], keys: new Map([['spotify-own-1', 'someone|somewhere']]), logs: new Map([['spotify-own-1', log]]), complete: true };
+    const res = setlistFor(base, library, request({ limit: 3 }));
+    expect(res.songs).toHaveLength(3);
+    expect(Object.keys(res.sources).sort()).toEqual(res.songs.map((s) => s.match.track.id).sort());
+    expect(JSON.stringify([...base.logs])).toBe(before); // merging a library never changes what the next request reads
+    // And a library song shows its own line, not the catalogue's.
+    const first = setlistFor(base, library, request({ off: ['tempo', 'era', 'difficulty', 'popularity'], gears: { ...request().gears, history: 100 }, limit: 1 }));
+    expect(first.sources['spotify-own-1']?.reason).toBe('library line');
+  });
+});
+
+describe('POST /api/setlist, signed in: what is kept, and what is not asked twice', () => {
+  const only: TunerPart[] = ['tempo', 'era', 'difficulty', 'popularity'];
+
+  it('shows no duet or mood markers to a signed-in singer either, and the order does not depend on the switch', async () => {
+    const jar = await signIn();
+    const off = await post(body({ off: ['tempo', 'era'] }), jar);
+    for (const { match } of off.body.songs) {
+      expect(match.moods).toBeUndefined();
+      expect(match.part).toBeUndefined();
+      expect(match.partSinger).toBeUndefined();
+      expect(match.range.duet).toBeUndefined();
+      expect(match.range.parts).toBeUndefined();
+    }
+    process.env.DUETS_AND_MOODS = 'on';
+    resetAppContextForTests();
+    const on = await post(body({ off: ['tempo', 'era'] }), await signIn());
+    expect(ids(on.body)).toEqual(ids(off.body));
+    expect(on.body.songs.some((s) => s.match.range.duet === true)).toBe(true);
+  });
+
+  it('makes the library\'s list again for a range with another top note, not just another bottom one', async () => {
+    const jar = await signIn();
+    const spy = vi.spyOn(getAppContext().songs, 'libraryMatches');
+    await post(body({ range: { low: 45, high: 80 } }), jar);
+    await post(body({ range: { low: 45, high: 79 } }), jar);
+    await post(body({ range: { low: 46, high: 80 } }), jar);
+    expect(spy).toHaveBeenCalledTimes(3);
+    await post(body({ range: { low: 45, high: 80 } }), jar);
+    expect(spy).toHaveBeenCalledTimes(3); // the first is still kept
+  });
+
+  it('keeps at most LIBRARY_LISTS_KEPT lists, dropping the least recently used', async () => {
+    const jar = await signIn();
+    const spy = vi.spyOn(getAppContext().songs, 'libraryMatches');
+    const at = (n: number) => body({ range: { low: 45, high: 70 + n } });
+    for (let n = 0; n <= LIBRARY_LISTS_KEPT; n++) await post(at(n), jar); // one more than are kept
+    expect(spy).toHaveBeenCalledTimes(LIBRARY_LISTS_KEPT + 1);
+    await post(at(LIBRARY_LISTS_KEPT), jar);
+    expect(spy).toHaveBeenCalledTimes(LIBRARY_LISTS_KEPT + 1); // the newest is kept
+    await post(at(0), jar);
+    expect(spy).toHaveBeenCalledTimes(LIBRARY_LISTS_KEPT + 2); // the oldest was dropped
+  });
+
+  it('keeps a list that is used again ahead of one that is not', async () => {
+    const jar = await signIn();
+    const spy = vi.spyOn(getAppContext().songs, 'libraryMatches');
+    const at = (n: number) => body({ range: { low: 45, high: 70 + n } });
+    for (let n = 0; n < LIBRARY_LISTS_KEPT; n++) await post(at(n), jar);
+    await post(at(0), jar); // used again: now the newest, and the oldest is range 1
+    await post(at(LIBRARY_LISTS_KEPT), jar); // pushes one out
+    const calls = spy.mock.calls.length;
+    await post(at(0), jar);
+    expect(spy).toHaveBeenCalledTimes(calls); // range 0 survived
+    await post(at(1), jar);
+    expect(spy).toHaveBeenCalledTimes(calls + 1); // range 1 did not
+  });
+
+  it('makes the list again when the singer\'s library has been read again, since its songs may have changed', async () => {
+    const jar = await signIn();
+    const ctx = getAppContext();
+    const spy = vi.spyOn(ctx.songs, 'libraryMatches');
+    await post(body(), jar);
+    await post(body(), jar);
+    expect(spy).toHaveBeenCalledTimes(1);
+    ctx.tracks.invalidate(MOCK_USER.id); // the track cache lets go of the library: the next request reads it again
+    await post(body(), jar);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not keep a list that is not complete, says so, and carries on with the next request', async () => {
+    const jar = await signIn();
+    const songs = getAppContext().songs;
+    const real = songs.libraryMatches.bind(songs);
+    const spy = vi.spyOn(songs, 'libraryMatches').mockImplementationOnce(async (...args) => ({ ...(await real(...args)), complete: false }));
+    const first = await post(body({ off: only }), jar);
+    expect(first.body.libraryIncomplete).toBe(true);
+    expect(first.body.applied).toEqual(['history']); // the part of the library that is there still counts
+    const second = await post(body({ off: only }), jar);
+    expect(spy).toHaveBeenCalledTimes(2); // not kept: it asked again
+    expect(second.body.libraryIncomplete).toBeUndefined();
+    await post(body({ off: only }), jar);
+    expect(spy).toHaveBeenCalledTimes(2); // complete: kept
+  });
+
+  it('does not let a slow list that settles late drop a newer list for the same range', async () => {
+    const jar = await signIn();
+    const songs = getAppContext().songs;
+    const real = songs.libraryMatches.bind(songs);
+    let release!: (late: Awaited<ReturnType<typeof real>>) => void;
+    const spy = vi.spyOn(songs, 'libraryMatches').mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    const at = (n: number) => body({ range: { low: 45, high: 70 + n } });
+
+    const slow = post(at(0), jar); // its list is still being made...
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    for (let n = 1; n <= LIBRARY_LISTS_KEPT; n++) await post(at(n), jar); // ...while enough others push it out
+    await post(at(0), jar); // the same range again: a new list, made in full
+    expect(spy).toHaveBeenCalledTimes(LIBRARY_LISTS_KEPT + 2);
+
+    release({ ...(await real(...spy.mock.calls[0]!)), complete: false }); // the first one settles at last, not complete
+    await slow;
+    await post(at(0), jar);
+    expect(spy).toHaveBeenCalledTimes(LIBRARY_LISTS_KEPT + 2); // the newer list is still kept
+  });
+
+  it('answers with the catalogue\'s list when matching the library fails, and does not try again for a moment', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const jar = await signIn();
+      const spy = vi.spyOn(getAppContext().songs, 'libraryMatches').mockRejectedValueOnce(new Error('database is down'));
+      const first = await post(body(), jar);
+      expect(first.status).toBe(200);
+      expect(first.body.libraryUnavailable).toBe(true);
+      expect(first.body.songs.every((s) => s.match.track.id.startsWith('cat:'))).toBe(true);
+      expect(error).toHaveBeenCalledWith(expect.stringMatching(/\[setlist\] could not match the library: .*database is down/));
+      expect((await post(body(), jar)).body.libraryUnavailable).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1); // left alone for LIBRARY_RETRY_MS
+      vi.setSystemTime(Date.now() + LIBRARY_RETRY_MS + 1000);
+      const later = await post(body(), jar);
+      expect(later.body.libraryUnavailable).toBeUndefined();
+      expect(later.body.songs.some((s) => !s.match.track.id.startsWith('cat:'))).toBe(true);
+    } finally {
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not ask Spotify again on every slider move once its library could not be read', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const jar = await signIn();
+      const ctx = getAppContext();
+      let calls = 0;
+      ctx.spotify.getSavedPage = async () => {
+        calls++;
+        throw new Error('network down'); // not a quota 429: nothing else keeps the next request from trying
+      };
+      for (let move = 0; move < 8; move++) {
+        const res = await post(body({ gears: { difficulty: move * 10 } }), jar);
+        expect(res.status).toBe(200);
+        expect(res.body.libraryUnavailable).toBe(true);
+      }
+      expect(calls).toBe(1);
+      vi.setSystemTime(Date.now() + LIBRARY_RETRY_MS + 1000);
+      await post(body(), jar);
+      expect(calls).toBe(2); // a moment later it is allowed to try once more
+    } finally {
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps one singer\'s library list from another\'s', async () => {
+    const jar = await signIn();
+    const other = await signIn(); // the mock signs in as the same user; the keys are per user id, so it shares one entry
+    const spy = vi.spyOn(getAppContext().songs, 'libraryMatches');
+    const a = await post(body({ off: only }), jar);
+    const b = await post(body({ off: only }), other);
+    expect(ids(b.body)).toEqual(ids(a.body));
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the catalogue\'s per-range list, keyed by both ends of the range', () => {
+  const deps = productionSongDeps(createMemoryStore(), false);
+  it('is made again for a range with another top note', async () => {
+    const catalogue = createCatalogue(async () => catalogueEntries(rng(3), 300), deps);
+    const a = await catalogue.setlist({ low: 40, high: 70 });
+    expect(await catalogue.setlist({ low: 40, high: 70 })).toBe(a);
+    expect(await catalogue.setlist({ low: 40, high: 71 })).not.toBe(a);
+    expect(await catalogue.setlist({ low: 41, high: 70 })).not.toBe(a);
   });
 });
