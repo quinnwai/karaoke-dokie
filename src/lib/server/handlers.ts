@@ -31,6 +31,7 @@ import { withCaller } from './spotifyCalls';
 import { DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT, type UserRecord } from './store';
 import { intParam, validateEvents, validateFeedback, validateVocalRange } from './validate';
 import type { AppContext } from './wiring';
+import { SpotifyError } from './spotify';
 
 const STATE_MAX_AGE_S = 600;
 
@@ -166,9 +167,14 @@ export async function callback(req: Request, ctx: AppContext): Promise<Response>
       serializeCookie(SESSION_COOKIE, signSession(me.id, ctx.config.sessionSecret), { maxAge: SESSION_MAX_AGE_S, secure }),
     ]);
   } catch (err) {
-    // The browser only gets ?authError=spotify, so this line is the only record of why.
+    // The browser only gets ?authError=spotify (or the invite-only page), so this line is the only record of why.
     console.error(`[auth] Spotify sign-in failed at the ${step} step: ${describeError(err)}`);
     await noteSpotifyLimit(ctx.store, err);
+    // In Development Mode Spotify lets any account through its own pages, then answers 403 to an account the app's
+    // owner hasn't added in the dashboard (QWW-45). Say so, instead of "Couldn't sign in" (QWW-53).
+    if (step === 'profile (/me)' && err instanceof SpotifyError && err.status === 403) {
+      return redirect(`${home}/invite-only`, [clearState]);
+    }
     return fail('spotify');
   }
 }

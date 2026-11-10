@@ -155,6 +155,27 @@ describe('sign-in flow', () => {
     }
   });
 
+  // Development Mode answers 403 to an account the app's owner hasn't added (QWW-45): say it's invite-only (QWW-53).
+  it('callback sends an account Spotify refuses at /me (403) to the invite-only page, signed out', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const jar = new Jar();
+      const r1 = jar.take(await login.GET(req('/api/auth/login')));
+      getAppContext().spotify.getMe = async () => {
+        throw new SpotifyError('Spotify API /me failed (403)', 403, 'Check settings on developer.spotify.com/dashboard, the user may not be registered.');
+      };
+      const r2 = await callback.GET(new Request(r1.headers.get('location')!, { headers: { cookie: jar.header() } }));
+      expect(r2.status).toBe(302);
+      expect(r2.headers.get('location')).toBe(`${BASE}/invite-only`);
+      const cookies = r2.headers.getSetCookie();
+      expect(cookies.some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(false);
+      expect(cookies.some((c) => c.startsWith(`${STATE_COOKIE}=`) && /max-age=0/i.test(c))).toBe(true);
+      expect(String(spy.mock.calls[0]![0])).toContain('failed at the profile (/me) step');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   // Was a 502 and an empty "Couldn't load songs" screen (10 Nov 2026); now the catalogue's songs and a flag (QWW-55).
   it('logs why the library could not be read, and answers with catalogue songs and a flag, not a 502', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
