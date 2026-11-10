@@ -8,12 +8,12 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | Method | Path | Body / query | Response |
 | --- | --- | --- | --- |
 | GET | `/api/auth/login` | | 302 to Spotify (or straight to the callback with `SPOTIFY_MOCK=1`); sets a 10-minute `kd_oauth_state` cookie |
-| GET | `/api/auth/callback` | `code`, `state` | Checks state, stores the user and tokens, sets the `kd_session` cookie, 302 to `/?signedIn=1`. On failure 302 to `/?authError=<reason>` (`state`, `spotify`, `missing-code`, or Spotify's `error`) |
+| GET | `/api/auth/callback` | `code`, `state` | Checks state, stores the user and tokens, sets the `kd_session` cookie, 302 to `/?signedIn=1`. On failure 302 to `/?authError=<reason>` (`state`, `spotify`, `missing-code`, or Spotify's `error`). Makes no Spotify request while Spotify has told the app to wait (see Spotify rate limit): it is `authError=spotify` at once, and a 429 on the profile step starts that wait |
 | POST | `/api/auth/logout` | | `{ ok: true }`, clears the session cookie |
 | GET | `/api/me` | | `MeResponse` |
 | PUT | `/api/me/range` | `VocalRange` | `{ ok: true }`; 400 unless `low`/`high` are integers, 28 <= low < high <= 96, span 5..48, `source` is `test` or `songs` |
 | GET | `/api/recommendations` | `offset` (default 0), `limit` (1..50, default 5), or `all=1` | `RecommendationsResponse`; songs with a low-confidence range come last with `difficulty: 'maybe'` (the Maybe group); 409 `{ error: 'no-range' }` before a range is saved. `all=1` ignores `offset` and `limit` and sends every match (at most 1,000, the best-ranked) with its `year` and `yearSource` (the earlier of USDB's and Spotify's album year, else the Billboard Year-End chart year, `chart`), `genre` (USDB's), USDB views and stars for songs whose range has none, and no pitch histograms; it is ranked with karaoke popularity too (see Song popularity), which is not sent. `complete: true` when that is every match. `complete: false` with a `nextOffset` means lookups ran out of budget (a first visit to a very large library): ask `all=1` again to carry on, not a page from `nextOffset`, since pages rank without the USDB and karaoke popularity. `complete: false` with `nextOffset: null` means the list was cut at 1,000 |
-| GET | `/api/songs/known` | | `KnownSongsResponse` (up to 50 library songs with a known range, play order) |
+| GET | `/api/songs/known` | | `KnownSongsResponse` (up to 50 library songs with a known range, play order); `{ songs: [], libraryUnavailable: true }` when the library cannot be read |
 | POST | `/api/feedback` | `FeedbackRequest` (`difficulty` may be `maybe`; optional `view`, the results view the song was found in) | `{ ok: true }`; 400 on bad input, including a `view` without `difficulty`, `familiarity` and `popularity` that are each null or a number from 0 to 1, a `decade` and `mood` that are known or null, and a boolean `duetsOnly`; 409 before a range is saved. Stored with the user's current range, the view (`view_json`) and, when the song is in the cached library, its range at that moment (`range_source` = the log outcome, `range_method`, `range_low`, `range_high`); the tap never loads the library from Spotify |
 | GET | `/api/admin/log` | header `x-admin-token`, `limit` (1..1000, default 200) | `{ entries: DataSourceLogEntry[] }`, newest first; 403 on a wrong token or when `ADMIN_TOKEN` is unset |
 | GET | `/api/catalogue/recommendations` | `low`, `high` (the range: integers, 28 <= low < high <= 96, span 5..48), then `all=1` or `offset`/`limit`; no session | `RecommendationsResponse` from the public catalogue (QWW-2 Track B): every song with a note-file or recording range, most-viewed USDB row and karaoke popularity attached, cached per process for an hour (the 6,000 most popular, plus every Billboard Year-End song). Tracks have `cat:<songKey>` ids and Spotify search links, `known: false`, so no familiarity reasons. `all=1` sends at most the best 1,000 matches with year (USDB's, else the Year-End chart year) and genre; `complete: false` and `nextOffset: null` when trimmed. 400 on a bad range |
@@ -22,7 +22,14 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | GET | `/api/admin/events` | header `x-admin-token`, `limit` (1..20000, default 5000) | `AdminEventsResponse` from the newest `limit` events (see Beta event log); 403 like `/api/admin/log` |
 
 Errors are JSON `{ error, message? }`. Every user route returns 401 `{ error: 'signed-out' }`
-without a valid session (also when Spotify access was revoked). Spotify outages give 502.
+without a valid session. A Spotify failure is never an error response (QWW-55; it was a 502 and an empty
+screen): when the signed-in user's library cannot be read (429, a 5xx, a network error, a refused token),
+`/api/recommendations` answers 200 with the catalogue's songs for the user's range, built as
+`/api/catalogue/recommendations` builds them, and `libraryUnavailable: true` (paged or `all=1`), and
+`/api/songs/known` answers 200 with no songs and the same flag. The reason goes to the server log as
+`[spotify] could not load the library: ...`. A read that takes longer than `LIBRARY_DEADLINE_MS` (50 s, inside
+the routes' 60 s `maxDuration`) gets the same answer, so a stalled Spotify is never the host's own timeout; the
+read carries on and, if it finishes, is cached for the next request.
 
 ### Paging
 
@@ -45,12 +52,35 @@ ran out of budget (a first visit to a very large library), `all=1` returns `comp
 | `EVENTS` | `on` or `off`: whether `POST /api/events` stores beta events. Unset or blank, it is on only when `NODE_ENV=production`, `SPOTIFY_MOCK` is not `1` and the store is Postgres, so tests, e2e and local dev collect nothing. Any other value counts as off |
 | `DUETS_AND_MOODS` | `on` shows duets and moods on screen; unset, blank or any other value (`1`, `true`, a typo) hides them (QWW-43). Off, the four recommendation responses (`/api/recommendations` and `/api/catalogue/recommendations`, paged or `all=1`) carry no `moods` and no duet markers (`range.duet`, `range.parts`, `part`, `partSinger`), so the Duets and mood chips, the "Duet: take ..." lines and the song-page mood pills never appear. It is applied after ranking (`src/lib/server/features.ts`), so the songs and their order are the same either way; a duet is still scored on the part that fits the singer |
 | `MOODS_SHIPPED` | Comma-separated moods (`upbeat`, `heartfelt`) allowed on screen as chips, while `DUETS_AND_MOODS=on`. Set a mood here only after it passes the QWW-11 precision gate (`npm run moods:report`). Unset = no mood chips |
+| `PICK_SONGS` | `on` shows "or pick songs you sing well" on the title screen and "or use songs from your Spotify" under the range; unset, blank or any other value hides both (QWW-55: one onboarding flow for the first release; the Spotify logo on the list is then the one way to sign in). Read per request by `app/page.tsx` (`pickSongsOn` in `src/lib/server/config.ts`), not baked in at build time, so one build can serve it on or off; no API response changes |
 
 ## Store
 
 `getStore()` (`src/lib/server/getStore.ts`) uses the in-memory store when `KARAOKE_STORE=memory`
 or `DATABASE_URL` is empty, otherwise Postgres through Neon's HTTP driver. There is one instance per
 server process (kept on `globalThis`). The memory store is lost on restart.
+
+## Spotify rate limit (QWW-55)
+
+Spotify's Development Mode quota is one pool for the whole app, and it is not published. On 10 Nov 2026 a few
+sign-ins, each reading the user's whole library again, used it up, and Spotify answered 429 (`QUOTA_EXCEEDED`,
+`retry-after` 12,098 s) to every call for 3.4 hours: `/api/recommendations` answered 502 and the screen said
+"Couldn't load songs".
+
+- **A block is kept in the database.** A 429 whose body says `QUOTA_EXCEEDED`, or whose Retry-After is over 30 s,
+  is stored (`spotify_block`, one row) as "blocked until": that Retry-After, an hour when a quota 429 gives none,
+  at most a day. It is one value for the whole app, because the quota is the app's, and it is read from the
+  store, so every serverless instance and every script sees it. A shorter 429 is waited out inside the request
+  (3 retries of at most 10 s; 6 of at most 30 s for saved songs) and blocks nothing. A later block never shortens
+  an earlier one. To lift it by hand: `DELETE FROM spotify_block`.
+- **No request while it holds.** `readUserTracks` (`src/lib/server/spotify.ts`), the one place that reads a user's
+  library, checks it first; the library routes use it, and so do `usdb:sync`, `report:coverage`, `report:facets`
+  and `popularity:calibrate`. The sign-in callback checks it before the token exchange. A block that cannot be
+  read counts as none (logged), and one more than a day away counts as a day, so a problem with that one row
+  never hides a healthy Spotify or locks the app for good.
+- **Never an error response.** See the paragraph under the routes: catalogue songs and `libraryUnavailable`.
+- **How much of a library is read is unchanged**: every saved song, the three top-50 lists, the last 50 plays
+  and the user's own playlists.
 
 Postgres tables are in `db/schema.sql` (an identical copy is inlined in
 `src/lib/server/schema.ts`). The Postgres store runs `migrate()` (idempotent `CREATE ... IF NOT

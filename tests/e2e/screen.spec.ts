@@ -677,7 +677,9 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
 
     await page.getByRole('button', { name: /^Song Sung Blue/ }).click();
     await expect(page.getByRole('heading', { name: 'Song Sung Blue' })).toBeVisible();
-    await expect(page.locator('[class*="barShape"] i')).toHaveCount(12);
+    // One bar for each bin that has singing in it and room inside the song's pink stretch (43 to 60): bins 2 to 7 of the
+    // mock's shape. Empty bins draw nothing (QWW-55), and bin 1 (4%) lies wholly below the song, so it draws nothing too.
+    await expect(page.locator('[class*="barShape"] i')).toHaveCount(6);
     await expect(page.locator('[class*="barOriginal"]')).toHaveCount(0);
     await page.waitForTimeout(300);
     await shot(page, `qww33-bar-density-${viewport.width}px`);

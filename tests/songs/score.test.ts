@@ -58,10 +58,10 @@ describe('strain and shape (QWW-33)', () => {
   });
 
   it('shape is the sung time per twelfth of the user’s range, as sung', () => {
-    const m = match(track('s'), song(48, 60, { pitchShare: [[48, 0.25], [60, 0.75]] }));
+    const m = match(track('s'), song(48, 61, { pitchShare: [[48, 0.25], [61, 0.75]] }));
     expect(m.shape).toHaveLength(12);
     expect(m.shape![0]).toBe(25);
-    expect(m.shape![6]).toBe(75); // 60 is the middle of 48 to 72
+    expect(m.shape![6]).toBe(75); // 61 is just above the middle of 48 to 72 (60), in the seventh twelfth
     expect(m.shape!.reduce((a, b) => a + b, 0)).toBe(100);
     // Sung an octave down: the notes move down 12 semitones, half the range
     const shifted = scoreMatch(user, { ...match(track('s'), song(60, 72, { pitchShare: [[60, 0.5], [72, 0.5]] })), range: song(60, 84, { pitchShare: [[60, 0.5], [84, 0.5]] }), octave: 'down' });

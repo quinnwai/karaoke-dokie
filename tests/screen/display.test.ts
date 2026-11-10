@@ -41,10 +41,22 @@ describe('rangeBar', () => {
     expect(rangeBar(user, song(50, 64), 'none').original).toBeUndefined();
   });
 
-  it('scales the time-in-range shape so the tallest bin is 100, and has none without a histogram', () => {
-    expect(rangeBar(user, song(50, 64), 'none', [0, 10, 40, 20, 0, 0, 0, 0, 0, 0, 0, 0]).shape).toEqual([0, 25, 100, 50, 0, 0, 0, 0, 0, 0, 0, 0]);
+  it('draws one bar per bin with sung time, the tallest at 100, and none without a histogram', () => {
+    // A2 to C5 is 27 semitones, so a bin is 2.25: bin 2 is 49.5 to 51.75, which the song (D3, 50) enters part-way.
+    const bar = rangeBar(user, song(50, 64), 'none', [0, 0, 10, 40, 20, 0, 0, 0, 0, 0, 0, 0]);
+    expect(bar.shape).toEqual([
+      { left: 22.58, width: 5.65, height: 25 }, // cut at the song's start, 22.58% of the bar
+      { left: 28.23, width: 7.25, height: 100 },
+      { left: 35.48, width: 7.26, height: 50 },
+    ]);
     expect(rangeBar(user, song(50, 64), 'none').shape).toBeUndefined();
     expect(rangeBar(user, song(50, 64), 'none', new Array(12).fill(0)).shape).toBeUndefined();
+  });
+
+  it('draws nothing for a bin outside the song’s stretch, so the bar it would have made is not there', () => {
+    // Bin 1 (47.25 to 49.5) is wholly below the song's D3 (50), so its 10 has no pink to sit over.
+    expect(rangeBar(user, song(50, 64), 'none', [0, 10, 40, 20, 0, 0, 0, 0, 0, 0, 0, 0]).shape).toHaveLength(2);
+    expect(rangeBar(user, song(50, 64), 'none', [9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).shape).toBeUndefined();
   });
 
   it('keeps spans inside 0..100', () => {

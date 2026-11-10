@@ -14,7 +14,7 @@ import { getStore, neonQuery, pickStoreKind } from '../src/lib/server/getStore';
 import { createMockSpotifyClient } from '../src/lib/server/mockSpotify';
 import { createPostgresStore } from '../src/lib/server/postgresStore';
 import { createSongService } from '../src/lib/server/songService';
-import { createSpotifyClient, ensureFreshTokens, getUserTracks } from '../src/lib/server/spotify';
+import { createSpotifyClient, readUserTracks } from '../src/lib/server/spotify';
 import { productionSongDeps } from '../src/lib/server/wiring';
 
 async function main() {
@@ -32,8 +32,7 @@ async function main() {
   // made-up tokens must never replace a real user's, so with the mock nothing is saved.
   const config = readConfig();
   const spotify = config.spotifyMock ? createMockSpotifyClient() : createSpotifyClient(config.spotify);
-  const fresh = await ensureFreshTokens(user, spotify, config.spotifyMock ? reader : store);
-  const tracks = await getUserTracks(spotify, fresh.spotify.accessToken);
+  const tracks = await readUserTracks(config.spotifyMock ? reader : store, spotify, user);
   // Enough lookups for the whole library, so every song is counted.
   const songs = createSongService(reader, productionSongDeps(reader, config.spotifyMock), { maxResolvesPerRequest: tracks.length });
   const res = await songs.recommend(tracks, userRange, 0, 0, { all: true });

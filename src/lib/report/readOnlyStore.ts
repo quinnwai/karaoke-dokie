@@ -32,6 +32,8 @@ const ACCESS: Record<keyof Store, 'read' | 'write'> = {
   getSongPopularity: 'read',
   putSongDeezer: 'write',
   listSongDeezer: 'read',
+  getSpotifyBlock: 'read',
+  setSpotifyBlock: 'write',
   putSongTempo: 'write',
   getSongTempos: 'read',
   listSongTempos: 'read',

@@ -274,6 +274,38 @@ describe('logging out', () => {
   });
 });
 
+describe('a Spotify library the server could not read (QWW-55)', () => {
+  const signedInRange = { low: 45, high: 72, source: 'test' as const };
+  const atResults = run([{ type: 'booted', me: me(signedInRange), progress: null, wantsPick: false }]);
+  const unavailable = { ...allMatches(), libraryUnavailable: true };
+
+  it('shows the catalogue songs it was sent as a catalogue list for a singer who is still signed in', () => {
+    expect(atResults).toMatchObject({ mode: 'library', libraryUnavailable: false, signedIn: true });
+    const s = run([{ type: 'allLoaded', page: unavailable }], atResults);
+    expect(s).toMatchObject({ mode: 'catalogue', libraryUnavailable: true, signedIn: true, loading: false, error: null });
+    expect(s.matches).toHaveLength(unavailable.matches.length);
+  });
+
+  it('unsets the listening slider, which a catalogue list cannot offer', () => {
+    const tuned = run([{ type: 'allLoaded', page: allMatches() }, { type: 'setSlider', slider: 'familiarity', value: 0.8 }, { type: 'setSlider', slider: 'difficulty', value: 0.2 }], atResults);
+    expect(tuned.view.familiarity).toBe(0.8);
+    const s = run([{ type: 'allLoaded', page: unavailable }], tuned);
+    expect(s.view).toMatchObject({ familiarity: null, difficulty: 0.2 });
+  });
+
+  it('leaves a library list that loaded fine as it was', () => {
+    const s = run([{ type: 'allLoaded', page: allMatches() }], atResults);
+    expect(s).toMatchObject({ mode: 'library', libraryUnavailable: false });
+  });
+
+  it('goes away with a new range, a redo or a log out, which ask the server again or leave the library', () => {
+    const down = run([{ type: 'allLoaded', page: unavailable }], atResults);
+    expect(run([{ type: 'redo' }], down).libraryUnavailable).toBe(false);
+    expect(run([{ type: 'rangeSaved' }], down)).toMatchObject({ libraryUnavailable: false, mode: 'library', loading: true });
+    expect(run([{ type: 'loggedOut' }], down)).toMatchObject({ libraryUnavailable: false, mode: 'catalogue', signedIn: false });
+  });
+});
+
 describe('pick songs you sing well', () => {
   const songs = knownSongs().songs;
   const atPick = run([{ type: 'booted', me: me(), progress: null, wantsPick: true }, { type: 'knownLoaded', songs }]);

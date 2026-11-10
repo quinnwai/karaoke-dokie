@@ -61,8 +61,11 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
       if (prev.attempt > 0) break;
       const matchCount = action.page.matches.filter((m) => m.difficulty !== 'maybe').length;
       const maybeCount = action.page.matches.length - matchCount;
-      out.push({ name: 'results_viewed', props: { mode: prev.mode, matchCount, maybeCount } });
-      if (action.page.matches.length === 0) out.push({ name: 'results_empty', props: { mode: prev.mode } });
+      // A library the server could not read comes back as catalogue songs, whatever the screen asked for (QWW-55).
+      const unavailable = action.page.libraryUnavailable === true;
+      const mode = unavailable ? 'catalogue' : prev.mode;
+      out.push({ name: 'results_viewed', props: { mode, matchCount, maybeCount, ...(unavailable ? { libraryUnavailable: true } : {}) } });
+      if (action.page.matches.length === 0) out.push({ name: 'results_empty', props: { mode } });
       break;
     }
     case 'loadFailed':

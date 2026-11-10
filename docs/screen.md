@@ -5,18 +5,28 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
 
 ## Flow
 
-1. **Landing**: カラオケ sign, a round Start button, and "or pick songs you sing well".
+1. **Landing**: カラオケ sign and a round Start button. "or pick songs you sing well" shows only while the
+   server has `PICK_SONGS=on` (off by default, QWW-55: the first release has one onboarding flow). `app/page.tsx`
+   reads it on every request and passes it to `KaraokeApp` as `pickSongs`; off, the link is not drawn and a
+   pick left over in `sessionStorage` (`kd.wantsPick`) from an earlier visit is dropped. The pick screen's code stays.
+   The same switch also decides the link under the range (step 5).
 2. **Find a quiet spot**: lyric line, moves on by itself after ~2.6 s (or tap).
 3. **Lowest note**: press and hold the round button (Space/Enter also work). While held,
    the mic records and a dot moves on a C2–C6 scale with the current note. On release,
    `detectHeldNote` runs on the recording. Too short a hold → "Try again…" lyric.
 4. **Highest note**: same button; the low note shows small in the corner. A high note at
    or below the low one asks to go higher.
-5. **Range + arrow**: "That's your range A2 – C5", a wordless arrow bouncing bottom-right
-   (`aria-label="Continue"`) and "or use songs from your Spotify". The arrow goes straight to
-   catalogue results with no sign-in (QWW-2 Track B); the range is kept on the device
-   (`localStorage` `kd.range`). The text button keeps the range in `sessionStorage` (`kd.test`) and
-   goes to `/api/auth/login`.
+5. **Range + arrow**: "That's your range A2 – C5" and a wordless arrow bouncing bottom-right
+   (`aria-label="Continue"`). The arrow goes straight to catalogue results with no sign-in
+   (QWW-2 Track B); the range is kept on the device (`localStorage` `kd.range`). "or use songs from your
+   Spotify" under it shows only while `PICK_SONGS=on`, the switch of step 1 (QWW-55); it keeps the range in
+   `sessionStorage` (`kd.test`) and goes to `/api/auth/login`. With the switch off, the Spotify logo on the
+   results (step 6) is the one way to sign in.
+   A sign-in that fails (Spotify says wait, one of the sign-in's Spotify calls fails, the sign-in cookie is gone,
+   ...) is sent back by the callback as `/?authError=<reason>`. The range was kept for the round trip, so
+   it lands here: `?authError` is taken out of the address and one quiet line, "Couldn’t sign in to Spotify.",
+   shows under the arrow, and again under the bar of the results the arrow leads to. `access_denied` is the
+   singer pressing Cancel on Spotify's page, which is their answer, so nothing is said.
 6. **Results**: one request for every match (`/api/catalogue/recommendations?...&all=1` without
    Spotify, `/api/recommendations?all=1` with it), then the phone orders, filters and pages them
    (`src/lib/songs/browse.ts`), 5 at a time. Two panels sit above the list: **Tune** (pink), sliders
@@ -34,10 +44,18 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    Signed in, pointing at it (or a tap) opens a small box, "Logged in as <display name> · Log out";
    Log out POSTs `/api/auth/logout`, forgets the library and shows catalogue results for the same
    range, which stays on the device (`kd.range`). If the request fails the box says so and nothing changes.
+   When the server cannot read the singer's Spotify library (Spotify says wait, fails or is down) it answers
+   `/api/recommendations?all=1` with the catalogue's songs for their range and `libraryUnavailable: true` (QWW-55).
+   The list is then a catalogue list (no "Rediscover to On repeat" slider, no connect prompts) for a singer who stays
+   signed in, with the green logo, Log out and one quiet line under the bar: "Couldn’t reach Spotify, showing
+   popular songs." The next range save or redo asks the server again.
 7. **Song detail**: range bar (song in neon pink over the user's range, note names at the
    ends; a song sung an octave away is drawn as sung, with the recording as a dashed outline;
    faint bars above it show where the song's singing time sits across your range, `Match.shape`,
-   so an Easy song that spans most of your range reads as Easy), difficulty (or a quiet "Maybe"), "Fast lyrics", an "i" button explaining where the
+   so an Easy song that spans most of your range reads as Easy: one bar for each twelfth of your range
+   that has singing in it, none for a twelfth without, and each cut to the song's pink stretch so none
+   sticks out of it (the shape only counts notes inside the song's range, `shapeOf` in `score.ts`;
+   `rangeBar` in `display.ts` does the cutting)), difficulty (or a quiet "Maybe"), "Fast lyrics", an "i" button explaining where the
    data came from (for Maybe songs, also that the range is an estimate), Spotify's own player
    (see below), and "How'd it go?" thumbs that POST `/api/feedback`.
 8. **Returning user** with a saved range lands on results; "redo" restarts the test. Someone

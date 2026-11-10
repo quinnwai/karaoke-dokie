@@ -60,6 +60,11 @@ export interface FlowState {
   range: VocalRange | null;
   /** Where results come from: the Spotify library (signed in) or the catalogue (no Spotify). */
   mode: ResultsMode;
+  /**
+   * A signed-in singer whose Spotify library could not be read: the server sent the catalogue's songs instead
+   * (`libraryUnavailable`), so `mode` is 'catalogue' for the list but the singer is still signed in (QWW-55).
+   */
+  libraryUnavailable: boolean;
   /** Every match, in the server's Top picks order. */
   matches: Match[];
   sources: Record<string, DataSourceLogEntry>;
@@ -90,6 +95,7 @@ export const initialState: FlowState = {
   displayName: null,
   range: null,
   mode: 'library',
+  libraryUnavailable: false,
   matches: [],
   sources: {},
   view: DEFAULT_VIEW,
@@ -153,6 +159,7 @@ const testRange = (low: Midi, high: Midi): VocalRange => ({ low, high, source: '
 /** Clears everything about results so a new range starts from the top, keeping only the sliders. */
 function freshResults(state: FlowState) {
   return {
+    libraryUnavailable: false,
     matches: [] as Match[],
     sources: {} as Record<string, DataSourceLogEntry>,
     view: { ...DEFAULT_VIEW, difficulty: state.view.difficulty, familiarity: state.view.familiarity, popularity: state.view.popularity, tempo: state.view.tempo },
@@ -237,10 +244,13 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       // The server stops its lookups at a budget on a very large first visit, and says so with a
       // nextOffset; ask again to finish. A list trimmed to the best matches has no nextOffset.
       const again = page.complete === false && page.nextOffset !== null && attempt < MAX_LOAD_ATTEMPTS;
+      // A library the server could not read comes back as catalogue songs: shown as such (no listening sliders), with its note.
+      const libraryUnavailable = page.libraryUnavailable === true;
+      const mode = libraryUnavailable ? 'catalogue' : state.mode;
       // Sliders this list cannot offer (no listening data, no popularity) are unset.
-      const view = fitViewTo(state.view, availableSliders(state.mode, page.matches));
+      const view = fitViewTo(state.view, availableSliders(mode, page.matches));
       const leadSlider = state.leadSlider && view[state.leadSlider] !== null ? state.leadSlider : null;
-      return { ...state, loading: again, attempt, error: null, matches: page.matches, sources: page.sources, view, leadSlider };
+      return { ...state, mode, libraryUnavailable, loading: again, attempt, error: null, matches: page.matches, sources: page.sources, view, leadSlider };
     }
     case 'loadFailed':
       return { ...state, loading: false, error: 'load' };

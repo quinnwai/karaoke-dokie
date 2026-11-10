@@ -1,5 +1,5 @@
 // Integration tests: call the app/api route handlers directly with the memory store and mock Spotify.
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as login from '../../app/api/auth/login/route';
 import * as callback from '../../app/api/auth/callback/route';
 import * as logout from '../../app/api/auth/logout/route';
@@ -26,13 +26,15 @@ import type {
 import { withoutDuetRange, withoutDuetsAndMoods } from '../../src/lib/server/features';
 import { getStore } from '../../src/lib/server/getStore';
 import { MOCK_USER } from '../../src/lib/server/mockSpotify';
-import { SpotifyError } from '../../src/lib/server/spotify';
+import { LIBRARY_DEADLINE_MS } from '../../src/lib/server/handlers';
+import { createSpotifyClient, SpotifyError } from '../../src/lib/server/spotify';
 import { availableFacets, DEFAULT_VIEW, orderMatches } from '../../src/lib/songs/browse';
 import { songKey } from '../../src/lib/songs/resolve';
 import { isMeasured } from '../../src/lib/songs/sourceRank';
 import { CHART_FLOOR } from '../../src/lib/songs/score';
 import { SESSION_COOKIE, STATE_COOKIE } from '../../src/lib/server/session';
 import { getAppContext, resetAppContextForTests, SEED_SONGS } from '../../src/lib/server/wiring';
+import { fakeSpotify, type FakeSpotify } from '../helpers/fakeSpotify';
 
 const BASE = 'http://127.0.0.1:3000';
 const savedEnv = { ...process.env };
@@ -152,7 +154,8 @@ describe('sign-in flow', () => {
     }
   });
 
-  it('logs why the library could not be read, and still answers 502 for a Spotify outage', async () => {
+  // Was a 502 and an empty "Couldn't load songs" screen (10 Nov 2026); now the catalogue's songs and a flag (QWW-55).
+  it('logs why the library could not be read, and answers with catalogue songs and a flag, not a 502', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const jar = await signIn();
@@ -161,10 +164,15 @@ describe('sign-in flow', () => {
         throw new SpotifyError('Spotify API /me/tracks?limit=50&offset=0 failed (429)', 429, '', '48000');
       };
       const res = await recs.GET(req('/api/recommendations?all=1', jar));
-      expect(res.status).toBe(502);
-      expect(await res.json()).toMatchObject({ error: 'spotify-unavailable' });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as RecommendationsResponse;
+      expect(body.libraryUnavailable).toBe(true);
+      expect(body.matches.length).toBeGreaterThan(0);
+      expect(body.matches.every((m) => m.track.id.startsWith('cat:'))).toBe(true);
       expect(spy).toHaveBeenCalledWith(expect.stringContaining('[spotify] could not load the library: Spotify API /me/tracks'));
       expect(String(spy.mock.calls[0]![0])).toContain('retry-after 48000 s');
+      // Spotify's wait is kept for every later request.
+      expect(await getStore().getSpotifyBlock()).toBeGreaterThan(Date.now() + 47_000_000);
     } finally {
       spy.mockRestore();
     }
@@ -1053,5 +1061,180 @@ describe('karaoke popularity (QWW-6)', () => {
     expect(song).toMatchObject({ year: 1999, yearSource: 'chart', parts: { popularity: CHART_FLOOR.top20, popularityKnown: true } });
     expect(song.reasons).toContain('Crowd favourite');
     expect(song.range).toEqual(range);
+  });
+});
+
+// QWW-55. On 10 Nov 2026 Spotify answered 429 (QUOTA_EXCEEDED, retry-after 12098 s) to the whole app, and a signed-in
+// tester saw "Couldn't load songs" (a 502 from /api/recommendations). These go through the real Spotify client on a
+// fake Web API that counts its requests, from sign-in to the song list.
+describe('Spotify trouble is never a server error', () => {
+  const CFG = { clientId: 'x', clientSecret: 'y', redirectUri: `${BASE}/api/auth/callback` };
+  beforeEach(() => void vi.spyOn(console, 'info').mockImplementation(() => {}));
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** Signs in through the real client on the fake Web API: login sets the state, and Spotify would send the browser back with a code. */
+  async function signInThrough(spotify: FakeSpotify, jar = new Jar()) {
+    getAppContext().spotify = createSpotifyClient(CFG, spotify.fetch, async () => {});
+    jar.take(await login.GET(req('/api/auth/login', jar)));
+    const back = `${BASE}/api/auth/callback?code=spotify-code&state=${jar.cookies.get(STATE_COOKIE)}`;
+    const r2 = jar.take(await callback.GET(new Request(back, { headers: { cookie: jar.header() } })));
+    return { jar, location: r2.headers.get('location'), status: r2.status };
+  }
+
+  const list = async (jar: Jar, path = '/api/recommendations?all=1') => {
+    const res = await recs.GET(req(path, jar));
+    return { status: res.status, body: (await res.json()) as RecommendationsResponse };
+  };
+
+  it('with Spotify answering 429 QUOTA_EXCEEDED, the song list still loads, no request is a 5xx, and Spotify is left alone until the wait is over', async () => {
+    const spotify = fakeSpotify({ liked: 120 });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { jar } = await signInThrough(spotify);
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    spotify.quota.on = true; // 429 QUOTA_EXCEEDED, retry-after 12098 s, from here on
+
+    const statuses: number[] = [];
+    const first = await recs.GET(req('/api/recommendations?all=1', jar));
+    statuses.push(first.status);
+    const body = (await first.json()) as RecommendationsResponse;
+    expect(body.libraryUnavailable).toBe(true);
+    expect(body.complete).toBe(true);
+    expect(body.matches.length).toBeGreaterThan(0);
+    expect(body.matches.every((m) => m.track.id.startsWith('cat:'))).toBe(true);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/\[spotify\] could not load the library: Spotify API .* failed \(429\).*retry-after 12098 s/));
+    const spent = spotify.requests.length;
+    expect(await getStore().getSpotifyBlock()).toBeGreaterThan(Date.now() + 12_000_000);
+
+    // Every route that wants the library, again and again: 200, the flag, and not one more request to Spotify.
+    for (let i = 0; i < 10; i++) {
+      const all = await recs.GET(req('/api/recommendations?all=1', jar));
+      const paged = await recs.GET(req('/api/recommendations?offset=0&limit=5', jar));
+      const knownRes = await known.GET(req('/api/songs/known', jar));
+      statuses.push(all.status, paged.status, knownRes.status);
+      expect(((await all.json()) as RecommendationsResponse).libraryUnavailable).toBe(true);
+      const page = (await paged.json()) as RecommendationsResponse;
+      expect(page).toMatchObject({ libraryUnavailable: true });
+      expect(page.matches).toHaveLength(5);
+      expect(await knownRes.json()).toEqual({ songs: [], libraryUnavailable: true });
+    }
+    expect((await me.GET(req('/api/me', jar))).status).toBe(200);
+    expect(statuses.every((st) => st === 200)).toBe(true);
+    expect(spotify.requests).toHaveLength(spent);
+    // Signing in again, from another browser, asks Spotify for nothing either.
+    expect((await signInThrough(spotify)).location).toBe(`${BASE}/?authError=spotify`);
+    expect(spotify.requests).toHaveLength(spent);
+
+    // The wait is over, and Spotify answers again: the library is read, and the flag is gone.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 12_099_000);
+    spotify.quota.on = false;
+    const later = await list(jar);
+    expect(later.status).toBe(200);
+    expect(later.body.libraryUnavailable).toBeUndefined();
+    expect(later.body.matches.some((m) => m.track.id.startsWith('mock-'))).toBe(true);
+    expect(spotify.requests.length).toBeGreaterThan(spent);
+  });
+
+  it('a quota 429 that sends no Retry-After blocks for an hour; a plain rate limit of a few seconds blocks nothing', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const spotify = fakeSpotify({ liked: 120 });
+    const { jar } = await signInThrough(spotify);
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+
+    // Rate limited for 2 s, again after every wait: the retries run out, the screen gets catalogue songs, and Spotify is not blocked.
+    spotify.shortLimit = { match: '/me/top/tracks', times: 99, retryAfter: 2 };
+    const limited = await list(jar);
+    expect(limited.status).toBe(200);
+    expect(limited.body.libraryUnavailable).toBe(true);
+    expect(await getStore().getSpotifyBlock()).toBeNull();
+    spotify.shortLimit = null;
+    const again = await list(jar);
+    expect(again.body.libraryUnavailable).toBeUndefined(); // the next request asked Spotify again, and got the library
+
+    // A quota 429 with no Retry-After at all.
+    getAppContext().tracks.invalidate('real-singer');
+    spotify.quota.on = true;
+    spotify.quota.retryAfter = null;
+    const before = Date.now();
+    expect((await list(jar)).body.libraryUnavailable).toBe(true);
+    const until = (await getStore().getSpotifyBlock())!;
+    expect(until - before).toBeGreaterThanOrEqual(3_600_000 - 5000);
+    expect(until - before).toBeLessThan(3_600_000 + 5000);
+  });
+
+  it('a stalled Spotify gets catalogue songs at the read deadline, not the host\'s own 5xx', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const spotify = fakeSpotify({ liked: 120 });
+    const { jar } = await signInThrough(spotify);
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const asked: string[] = [];
+    getAppContext().spotify = createSpotifyClient(CFG, (input) => {
+      asked.push(input);
+      return new Promise<Response>(() => {}); // never answers
+    }, async () => {});
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const pending = list(jar);
+    await vi.advanceTimersByTimeAsync(LIBRARY_DEADLINE_MS - 1);
+    expect(asked.length).toBeGreaterThan(0);
+    let settled = false;
+    void pending.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect(res.body.libraryUnavailable).toBe(true);
+    expect(res.body.matches.length).toBeGreaterThan(0);
+  });
+
+  it('a 429 at the profile step sends the browser back with authError=spotify, keeps the wait, and the next sign-in asks Spotify for nothing', async () => {
+    const spotify = fakeSpotify();
+    spotify.quota.on = true;
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const first = await signInThrough(spotify);
+    expect(first.status).toBe(302);
+    expect(first.location).toBe(`${BASE}/?authError=spotify`);
+    expect(first.jar.cookies.has(SESSION_COOKIE)).toBe(false);
+    expect(spotify.requests).toEqual(['POST accounts.spotify.com/api/token', 'GET /v1/me']);
+    expect(await getStore().getSpotifyBlock()).toBeGreaterThan(Date.now() + 12_000_000);
+    expect(error).toHaveBeenLastCalledWith(expect.stringContaining('failed at the profile (/me) step'));
+
+    const second = await signInThrough(spotify);
+    expect(second.status).toBe(302);
+    expect(second.location).toBe(`${BASE}/?authError=spotify`);
+    expect(spotify.requests).toHaveLength(2);
+    expect(error).toHaveBeenLastCalledWith(expect.stringContaining('failed at the rate limit check step: SpotifyBlockedError'));
+  });
+
+  it('any other Spotify failure gives catalogue songs too, without keeping a wait', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const jar = await signIn();
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    getAppContext().spotify.getTopTracks = async () => {
+      throw new TypeError('fetch failed');
+    };
+    const res = await list(jar);
+    expect(res.status).toBe(200);
+    expect(res.body.libraryUnavailable).toBe(true);
+    expect(res.body.matches.length).toBeGreaterThan(0);
+    expect(error).toHaveBeenCalledWith('[spotify] could not load the library: TypeError: fetch failed');
+    expect(await getStore().getSpotifyBlock()).toBeNull();
+  });
+
+  it('a block that cannot be read does not hide a healthy Spotify', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const spotify = fakeSpotify({ liked: 120 });
+    vi.spyOn(getStore(), 'getSpotifyBlock').mockRejectedValue(new Error('relation "spotify_block" does not exist'));
+    const { jar, location } = await signInThrough(spotify);
+    expect(location).toBe(`${BASE}/?signedIn=1`);
+    await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: WIDE }));
+    const res = await list(jar);
+    expect(res.status).toBe(200);
+    expect(res.body.libraryUnavailable).toBeUndefined();
+    expect(res.body.matches.some((m) => m.track.id.startsWith('mock-'))).toBe(true);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('[spotify] could not read the rate limit: Error: relation "spotify_block" does not exist'));
   });
 });

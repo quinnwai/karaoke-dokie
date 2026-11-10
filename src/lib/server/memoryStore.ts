@@ -32,6 +32,7 @@ export function createMemoryStore(): Store {
   const songPopularity = new Map<string, SongPopularityRecord>();
   const songDeezer = new Map<string, SongDeezerRecord>();
   const songTempo = new Map<string, SongTempoRecord>();
+  let spotifyBlock: number | null = null;
   /** A song's popularity row with its Deezer rank, as getSongPopularity reads it. */
   const popularityOf = (key: string): SongPopularityRecord | undefined => {
     const p = songPopularity.get(key);
@@ -194,6 +195,14 @@ export function createMemoryStore(): Store {
     },
     async listSongDeezer() {
       return new Map([...songDeezer].map(([k, v]) => [k, clone(v)]));
+    },
+
+    // ---- Spotify rate-limit block (QWW-55) ----
+    async getSpotifyBlock() {
+      return spotifyBlock;
+    },
+    async setSpotifyBlock(until) {
+      spotifyBlock = spotifyBlock === null ? until : Math.max(spotifyBlock, until);
     },
 
     // ---- tempo (QWW-40) ----

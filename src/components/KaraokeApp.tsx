@@ -35,6 +35,13 @@ export interface KaraokeAppProps {
   navigate?: (url: string) => void;
   /** How long "Find a quiet spot" stays up. */
   quietMs?: number;
+  /**
+   * Offers the two extra ways in (PICK_SONGS, off by default; app/page.tsx reads it): "or pick songs you sing well"
+   * on the title screen and "or use songs from your Spotify" under the range. Off, the first release has one
+   * onboarding flow, the Spotify logo on the list is the one way to sign in, and a pick left over from an earlier
+   * visit is ignored.
+   */
+  pickSongs?: boolean;
 }
 
 const LIVE_FRAME = 2048;
@@ -42,7 +49,7 @@ const LIVE_EVERY_MS = 50; // ~20 times a second
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 
-export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, quietMs = 2600 }: KaraokeAppProps) {
+export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, quietMs = 2600, pickSongs: canPick = false }: KaraokeAppProps) {
   const [api] = useState(() => apiProp ?? createApi());
   const [state, rawDispatch] = useReducer(flowReducer, initialState);
 
@@ -64,6 +71,8 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
     [tracker],
   );
   const [live, setLive] = useState<number | null>(null);
+  // Spotify refused the sign-in the singer just tried: the server sends them back with ?authError=<reason> and nothing else.
+  const [signInFailed, setSignInFailed] = useState(false);
   const recorder = useRef<MicRecorder | null>(null);
   const holding = useRef(false);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -75,22 +84,28 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
       const me = await api.me().catch(() => null);
       if (cancelled) return;
       const url = new URL(window.location.href);
-      if (url.searchParams.has('signedIn')) {
+      const authError = url.searchParams.get('authError');
+      if (url.searchParams.has('signedIn') || authError !== null) {
         url.searchParams.delete('signedIn');
+        url.searchParams.delete('authError');
         window.history.replaceState(null, '', url.pathname + url.search + url.hash);
       }
+      // Say so (QWW-55), unless the singer pressed Cancel on Spotify's page: that was their answer, not a failure.
+      if (authError && authError !== 'access_denied' && !me) setSignInFailed(true);
+      // Always taken, so a pick left over from an earlier visit cannot surface later; only used when picking is on.
+      const wantedPick = me ? takeWantsPick() : false;
       dispatch({
         type: 'booted',
         me,
         progress: loadProgress(),
-        wantsPick: me ? takeWantsPick() : false,
+        wantsPick: wantedPick && canPick,
         savedRange: me ? null : loadSavedRange(),
       });
     })();
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, canPick]);
 
   // Keep test progress across the Spotify round trip.
   useEffect(() => {
@@ -286,9 +301,11 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
               <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />
             </svg>
           </button>
-          <button type="button" className={styles.textButton} onClick={pickSongs}>
-            or pick songs you sing well
-          </button>
+          {canPick && (
+            <button type="button" className={styles.textButton} onClick={pickSongs}>
+              or pick songs you sing well
+            </button>
+          )}
         </div>
       )}
 
@@ -324,9 +341,16 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
               <path d="M2 12h40M32 3l10 9-10 9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
-          <button type="button" className={styles.textButton} onClick={connectSpotify}>
-            or use songs from your Spotify
-          </button>
+          {canPick && (
+            <button type="button" className={styles.textButton} onClick={connectSpotify}>
+              or use songs from your Spotify
+            </button>
+          )}
+          {signInFailed && (
+            <p className={styles.hint} role="status">
+              Couldn’t sign in to Spotify.
+            </p>
+          )}
         </div>
       )}
 
@@ -354,6 +378,8 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
           shown={state.shown}
           loading={state.loading}
           error={state.error === 'load'}
+          libraryUnavailable={state.libraryUnavailable}
+          signInFailed={signInFailed}
           onSelect={(trackId, position) => dispatch({ type: 'select', trackId, position })}
           onMore={() => dispatch({ type: 'loadMore' })}
           onRetry={() => dispatch({ type: 'retryLoad' })}

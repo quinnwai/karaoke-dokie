@@ -29,9 +29,9 @@ export function RangeBarView({ userRange, match }: { userRange: VocalRange; matc
       onClick={() => setOpen((o) => !o)}
     >
       {bar.shape && (
-        <div className={styles.barShape} style={{ left: `${bar.user.left}%`, width: `${bar.user.width}%` }} aria-hidden>
-          {bar.shape.map((h, i) => (
-            <i key={i} style={{ height: `${Math.max(h, 3)}%` }} />
+        <div className={styles.barShape} aria-hidden>
+          {bar.shape.map((b, i) => (
+            <i key={i} style={{ left: `${b.left}%`, width: `${b.width}%`, height: `${Math.max(b.height, 3)}%` }} />
           ))}
         </div>
       )}

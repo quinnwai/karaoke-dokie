@@ -8,7 +8,7 @@
 
 import { getStore } from '../src/lib/server/getStore';
 import { readConfig } from '../src/lib/server/config';
-import { createSpotifyClient, ensureFreshTokens, getUserTracks } from '../src/lib/server/spotify';
+import { createSpotifyClient, readUserTracks } from '../src/lib/server/spotify';
 import { createUsdbClient } from '../src/lib/usdb/client';
 import { syncNoteFiles } from '../src/lib/usdb/sync';
 
@@ -33,8 +33,7 @@ async function main() {
       console.log(`No user ${id}`);
       continue;
     }
-    const fresh = await ensureFreshTokens(user, spotify, store);
-    const tracks = await getUserTracks(spotify, fresh.spotify.accessToken);
+    const tracks = await readUserTracks(store, spotify, user);
     console.log(`${user.displayName}: ${tracks.length} songs`);
     const summary = await syncNoteFiles({ store, usdb, tracks, rescan, rescanDuets, onProgress: (l) => console.log(`  ${l}`) });
     console.log(JSON.stringify(summary));

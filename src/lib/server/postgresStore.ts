@@ -500,6 +500,20 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       return out;
     },
 
+    // ---- Spotify rate-limit block (QWW-55) ----
+    async getSpotifyBlock() {
+      const [r] = await query('SELECT blocked_until FROM spotify_block WHERE id = 1', []);
+      return r ? num(r.blocked_until) : null;
+    },
+    async setSpotifyBlock(until) {
+      // The later of the stored and the new time, so a short 429 never shortens a long block.
+      await query(
+        `INSERT INTO spotify_block (id, blocked_until) VALUES (1, $1)
+         ON CONFLICT (id) DO UPDATE SET blocked_until = GREATEST(spotify_block.blocked_until, EXCLUDED.blocked_until)`,
+        [until],
+      );
+    },
+
     // ---- tempo (QWW-40) ----
     async putSongTempo(entries) {
       // One row per key (fields merged, the last entry winning); a field left unset keeps what is stored,

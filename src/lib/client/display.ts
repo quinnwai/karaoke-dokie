@@ -47,14 +47,27 @@ export interface Span {
   high: string;
 }
 
+/** One bar of the time-in-range histogram above the range bar. */
+export interface ShapeBar {
+  /** Percent from the left edge of the bar, on the same scale as Span. */
+  left: number;
+  /** Percent of the bar's width. */
+  width: number;
+  /** Share of sung time as a height, 0 to 100: the tallest bin is 100. */
+  height: number;
+}
+
 export interface RangeBar {
   user: Span;
   /** The song as the user will sing it (octave shift applied). */
   song: Span;
   /** The song as recorded, drawn faintly, when it is sung an octave away; clipped to the bar. */
   original?: { left: number; width: number };
-  /** Share of sung time per bin across the user's range, as bar heights 0 to 100 (tallest bin 100). */
-  shape?: number[];
+  /**
+   * The time-in-range histogram: one bar for each bin of the user's range that has sung time, none for an
+   * empty bin, and each cut to the song's span so no bar sticks out of the pink stretch. Unset when there are none.
+   */
+  shape?: ShapeBar[];
 }
 
 const PAD = 2; // semitones of breathing room at each end
@@ -83,7 +96,22 @@ export function rangeBar(user: VocalRange, song: SongRange, octave: OctaveShift,
     if (hi > lo) bar.original = { left: span(lo, hi).left, width: span(lo, hi).width };
   }
   const tallest = Math.max(0, ...(shape ?? []));
-  if (shape && tallest > 0) bar.shape = shape.map((b) => Math.round((100 * b) / tallest));
+  if (shape && tallest > 0) {
+    // The bins are equal slices of the user's range, 2.9 semitones wide for D#2 to D5, so a bin holding the song's
+    // top note ran on past it. Each bar is cut to the pink stretch as drawn instead; a bin outside it has no bar.
+    const pinkLeft = bar.song.left;
+    const pinkRight = bar.song.left + bar.song.width;
+    const binWidth = (user.high - user.low) / shape.length;
+    const edge = (i: number) => round(((user.low + i * binWidth - min) / (max - min)) * 100);
+    const bars: ShapeBar[] = [];
+    shape.forEach((share, i) => {
+      if (!(share > 0)) return;
+      const left = Math.max(edge(i), pinkLeft);
+      const width = round(Math.min(edge(i + 1), pinkRight) - left);
+      if (width > 0) bars.push({ left, width, height: Math.round((100 * share) / tallest) });
+    });
+    if (bars.length) bar.shape = bars;
+  }
   return bar;
 }
 

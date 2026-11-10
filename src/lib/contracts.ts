@@ -128,7 +128,7 @@ export interface ScoreParts {
 export type Mood = 'upbeat' | 'heartfelt';
 export const MOODS: Mood[] = ['upbeat', 'heartfelt'];
 
-/** Bins in Match.shape. */
+/** Bins in Match.shape: equal slices of the singer's range. */
 export const SHAPE_BINS = 12;
 
 export interface Match {
@@ -149,7 +149,9 @@ export interface Match {
   strain?: number;
   /**
    * Where the song's sung time sits across the singer's range, as it is sung (octave shift applied):
-   * SHAPE_BINS whole percents, lowest note first. Unset for a song with no pitch histogram.
+   * SHAPE_BINS whole percents, lowest note first. Only notes inside the song's own range count (not the
+   * outliers its range skips), so every bin with a value lies where the song is drawn. A bin with any sung
+   * time is at least 1, so 0 means no notes. Unset for a song with no pitch histogram.
    */
   shape?: number[];
   /**
@@ -238,7 +240,10 @@ export interface FeedbackEntry {
 // PUT  /api/me/range   body VocalRange -> { ok: true }
 // GET  /api/recommendations?offset=0&limit=5 -> RecommendationsResponse
 // GET  /api/recommendations?all=1      -> RecommendationsResponse with every match, `complete: true`
-// GET  /api/songs/known                -> KnownSongsResponse (saved songs with a known range, for "pick songs you sing well")
+//   When the signed-in user's Spotify library cannot be read (Spotify says wait, fails or is down) these answer 200
+//   with the catalogue's songs for the user's range and `libraryUnavailable: true`, never a 5xx (QWW-55).
+// GET  /api/songs/known                -> KnownSongsResponse (saved songs with a known range, for "pick songs you sing well");
+//   no songs and `libraryUnavailable: true` when the library cannot be read
 // POST /api/feedback   body FeedbackRequest -> { ok: true }
 // GET  /api/admin/log  (header x-admin-token) -> { entries: DataSourceLogEntry[] }
 // No Spotify (QWW-2 Track B), no session needed:
@@ -262,10 +267,17 @@ export interface RecommendationsResponse {
   sources: Record<string, DataSourceLogEntry>;
   /** True when `matches` is every match there is (an `all=1` request whose lookups all finished). */
   complete?: boolean;
+  /**
+   * True when a signed-in user's Spotify library could not be read, so `matches` are the catalogue's songs for
+   * their range, as someone without Spotify gets them (QWW-55). The screen says so in one quiet line.
+   */
+  libraryUnavailable?: boolean;
 }
 
 export interface KnownSongsResponse {
   songs: { track: Track; range: SongRange }[];
+  /** True when the library could not be read: `songs` is then empty (QWW-55). */
+  libraryUnavailable?: boolean;
 }
 
 export interface FeedbackRequest {
