@@ -436,9 +436,32 @@ describe('KaraokeApp', () => {
     expect(api.catalogue).toHaveBeenCalledWith({ low: 45, high: 72 });
   });
 
+  // The title screen has one way in (QWW-55): the link is behind the PICK_SONGS switch, which app/page.tsx passes as `pickSongs`.
+  it('the title screen has no "pick songs you sing well" link unless the switch is on', async () => {
+    const { unmount } = render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} />);
+    await screen.findByRole('button', { name: 'Start' });
+    expect(screen.queryByRole('button', { name: 'or pick songs you sing well' })).toBeNull();
+    expect(screen.queryByText(/pick songs/i)).toBeNull();
+    unmount();
+
+    render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} pickSongs />);
+    await screen.findByRole('button', { name: 'Start' });
+    expect(screen.getByRole('button', { name: 'or pick songs you sing well' })).toBeTruthy();
+  });
+
+  it('with the switch off, a pick left over from an earlier visit is dropped, not shown later', async () => {
+    sessionStorage.setItem('kd.wantsPick', '1');
+    const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
+    render(<KaraokeApp api={api} mic={fakeMic().mic} />);
+    await screen.findByRole('button', { name: 'Load more songs' });
+    expect(screen.queryByRole('button', { name: 'Use 3 songs' })).toBeNull();
+    expect(api.knownSongs).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('kd.wantsPick')).toBeNull();
+  });
+
   it('pick songs you sing well: signed out goes to sign-in first', async () => {
     const navigate = vi.fn();
-    render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} navigate={navigate} />);
+    render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} navigate={navigate} pickSongs />);
     fireEvent.click(await screen.findByRole('button', { name: 'or pick songs you sing well' }));
     expect(navigate).toHaveBeenCalledWith('/api/auth/login');
     expect(sessionStorage.getItem('kd.wantsPick')).toBe('1');
@@ -447,7 +470,7 @@ describe('KaraokeApp', () => {
   it('pick songs you sing well: up to 3 songs set the range', async () => {
     sessionStorage.setItem('kd.wantsPick', '1');
     const api = fakeApi(me());
-    render(<KaraokeApp api={api} mic={fakeMic().mic} />);
+    render(<KaraokeApp api={api} mic={fakeMic().mic} pickSongs />);
 
     for (const title of ['Plastic Love', 'Fly Me to the Moon', 'Dancing Queen']) {
       fireEvent.click(await screen.findByRole('button', { name: new RegExp(title) }));

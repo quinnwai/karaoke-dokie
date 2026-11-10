@@ -5,7 +5,10 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
 
 ## Flow
 
-1. **Landing**: カラオケ sign, a round Start button, and "or pick songs you sing well".
+1. **Landing**: カラオケ sign and a round Start button. "or pick songs you sing well" shows only while the
+   server has `PICK_SONGS=on` (off by default, QWW-55: the first release has one onboarding flow). `app/page.tsx`
+   reads it on every request and passes it to `KaraokeApp` as `pickSongs`; off, the link is not drawn and a
+   pick left over in `sessionStorage` (`kd.wantsPick`) from an earlier visit is dropped. The pick screen's code stays.
 2. **Find a quiet spot**: lyric line, moves on by itself after ~2.6 s (or tap).
 3. **Lowest note**: press and hold the round button (Space/Enter also work). While held,
    the mic records and a dot moves on a C2–C6 scale with the current note. On release,

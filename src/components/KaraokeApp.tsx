@@ -35,6 +35,11 @@ export interface KaraokeAppProps {
   navigate?: (url: string) => void;
   /** How long "Find a quiet spot" stays up. */
   quietMs?: number;
+  /**
+   * Offers "or pick songs you sing well" on the title screen (PICK_SONGS, off by default; app/page.tsx reads it).
+   * Off, the first release has one onboarding flow, and a pick left over from an earlier visit is ignored.
+   */
+  pickSongs?: boolean;
 }
 
 const LIVE_FRAME = 2048;
@@ -42,7 +47,7 @@ const LIVE_EVERY_MS = 50; // ~20 times a second
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 
-export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, quietMs = 2600 }: KaraokeAppProps) {
+export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, quietMs = 2600, pickSongs: canPick = false }: KaraokeAppProps) {
   const [api] = useState(() => apiProp ?? createApi());
   const [state, rawDispatch] = useReducer(flowReducer, initialState);
 
@@ -79,18 +84,20 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
         url.searchParams.delete('signedIn');
         window.history.replaceState(null, '', url.pathname + url.search + url.hash);
       }
+      // Always taken, so a pick left over from an earlier visit cannot surface later; only used when picking is on.
+      const wantedPick = me ? takeWantsPick() : false;
       dispatch({
         type: 'booted',
         me,
         progress: loadProgress(),
-        wantsPick: me ? takeWantsPick() : false,
+        wantsPick: wantedPick && canPick,
         savedRange: me ? null : loadSavedRange(),
       });
     })();
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, canPick]);
 
   // Keep test progress across the Spotify round trip.
   useEffect(() => {
@@ -286,9 +293,11 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
               <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />
             </svg>
           </button>
-          <button type="button" className={styles.textButton} onClick={pickSongs}>
-            or pick songs you sing well
-          </button>
+          {canPick && (
+            <button type="button" className={styles.textButton} onClick={pickSongs}>
+              or pick songs you sing well
+            </button>
+          )}
         </div>
       )}
 

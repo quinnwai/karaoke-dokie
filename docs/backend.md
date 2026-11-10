@@ -50,6 +50,7 @@ ran out of budget (a first visit to a very large library), `all=1` returns `comp
 
 `getStore()` (`src/lib/server/getStore.ts`) uses the in-memory store when `KARAOKE_STORE=memory`
 or `DATABASE_URL` is empty, otherwise Postgres through Neon's HTTP driver. There is one instance per
+| `PICK_SONGS` | `on` shows "or pick songs you sing well" on the title screen; unset, blank or any other value hides it (QWW-55: one onboarding flow for the first release). Read per request by `app/page.tsx` (`pickSongsOn` in `src/lib/server/config.ts`), not baked in at build time, so one build can serve it on or off; no API response changes |
 server process (kept on `globalThis`). The memory store is lost on restart.
 
 Postgres tables are in `db/schema.sql` (an identical copy is inlined in

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KnownSongsResponse, Match } from '../../src/lib/contracts';
-import { duetsAndMoodsOn, readConfig } from '../../src/lib/server/config';
+import { duetsAndMoodsOn, pickSongsOn, readConfig } from '../../src/lib/server/config';
 import { applyDuetsAndMoods, applyDuetsToKnownSongs, withoutDuetRange, withoutDuetsAndMoods } from '../../src/lib/server/features';
 import type { SongMoodsRecord } from '../../src/lib/server/store';
 
@@ -21,6 +21,34 @@ describe('the duets and moods switch (QWW-43)', () => {
       duetsAndMoods: true,
       moodsShipped: ['upbeat', 'heartfelt'],
     });
+  });
+});
+
+describe('the pick-songs switch (QWW-55)', () => {
+  it('is off unless PICK_SONGS is exactly "on", and does not depend on the duets switch', () => {
+    expect(pickSongsOn({})).toBe(false);
+    for (const v of ['', ' ', 'off', '0', '1', 'true', 'yes', 'onn', 'on!', 'of']) {
+      expect(pickSongsOn({ PICK_SONGS: v }), JSON.stringify(v)).toBe(false);
+    }
+    for (const v of ['on', 'ON', ' On ']) expect(pickSongsOn({ PICK_SONGS: v }), JSON.stringify(v)).toBe(true);
+    expect(pickSongsOn({ DUETS_AND_MOODS: 'on' })).toBe(false);
+    expect(duetsAndMoodsOn({ PICK_SONGS: 'on' })).toBe(false);
+  });
+
+  it('reaches the page as a prop, read at request time', async () => {
+    const { default: Home } = await import('../../app/page');
+    const was = process.env.PICK_SONGS;
+    try {
+      delete process.env.PICK_SONGS;
+      expect(Home().props.pickSongs).toBe(false);
+      process.env.PICK_SONGS = 'on';
+      expect(Home().props.pickSongs).toBe(true);
+      process.env.PICK_SONGS = 'true';
+      expect(Home().props.pickSongs).toBe(false);
+    } finally {
+      if (was === undefined) delete process.env.PICK_SONGS;
+      else process.env.PICK_SONGS = was;
+    }
   });
 });
 
