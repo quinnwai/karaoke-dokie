@@ -1,41 +1,21 @@
 // Spotify Web API client: authorization code flow, token refresh, library reads.
 // `fetch` is injected so tests run offline; SPOTIFY_MOCK=1 swaps in mockSpotify.ts.
-import type { TimeRange, Track } from '../contracts';
+import type { Track } from '../contracts';
 import type { SpotifyTokens, Store, UserRecord } from './store';
 
 export const SPOTIFY_SCOPES = 'user-library-read user-top-read user-read-recently-played playlist-read-private playlist-read-collaborative';
 export const SPOTIFY_ACCOUNTS = 'https://accounts.spotify.com';
 export const SPOTIFY_API = 'https://api.spotify.com/v1';
-/**
- * Saved (liked) songs read per sign-in: more than any real library, so all of them. It was 2,000,
- * which silently dropped the older likes of a big library (QWW-31: Easy was liked 3,283rd of 11,139).
- */
-export const MAX_SAVED_TRACKS = 20_000;
+export const MAX_SAVED_TRACKS = 2000;
 /** Playlists and playlist songs read per sign-in. */
 export const MAX_PLAYLISTS = 100;
 export const MAX_PLAYLIST_TRACKS = 3000;
 /** Saved-song pages fetched at once (50 songs each). */
 const SAVED_PAGE_CONCURRENCY = 5;
-/**
- * A group of saved-song pages takes at least this long, so a big library is read at about 8
- * requests a second (5 pages per 600 ms) instead of as fast as Spotify answers, which keeps clear of
- * its rate limit. An 11,000 song library is 223 pages: about 27 s.
- */
-const SAVED_BATCH_MIN_MS = 600;
-/** Saved songs are the library itself, so a rate limit is waited out for longer than the optional lists. */
-const SAVED_RATE_LIMIT_RETRIES = 6;
-const SAVED_RATE_LIMIT_MAX_WAIT_MS = 30_000;
 /** Refresh this long before the access token actually expires. */
 const REFRESH_MARGIN_MS = 60_000;
-/**
- * When Spotify answers 429 (rate limited), a request waits the Retry-After it is given and tries
- * again, up to this many times, but only when the wait is short enough to keep the page usable.
- */
-const RATE_LIMIT_RETRIES = 3;
-const RATE_LIMIT_MAX_WAIT_MS = 10_000;
 
 export type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
-export type SleepFn = (ms: number) => Promise<void>;
 
 export interface SpotifyConfig {
   clientId: string;
@@ -56,10 +36,7 @@ export interface SpotifyClient {
   getMe(accessToken: string): Promise<SpotifyProfile>;
   /** Saved songs in Spotify's order (newest saved first), up to `max` (default 2000). playRank is the saved position. */
   getSavedTracks(accessToken: string, max?: number): Promise<Track[]>;
-  /**
-   * Top tracks for one time span (about 4 weeks, 6 months, or a year), most played first.
-   * Spotify computes long_term from about a year of data, so it is not all time.
-   */
+  /** Top tracks for one time span (about 4 weeks, 6 months, or all time), most played first. */
   getTopTracks(accessToken: string, timeRange?: TimeRange): Promise<Track[]>;
   /** The last 50 plays, newest first (a song can appear more than once). */
   getRecentlyPlayed(accessToken: string): Promise<Track[]>;
@@ -67,49 +44,17 @@ export interface SpotifyClient {
   getPlaylistTracks(accessToken: string): Promise<Track[]>;
 }
 
-export type { TimeRange };
+export type TimeRange = 'short_term' | 'medium_term' | 'long_term';
 export const TIME_RANGES: TimeRange[] = ['short_term', 'medium_term', 'long_term'];
 
 export class SpotifyError extends Error {
   constructor(
     message: string,
     readonly status: number,
-    /** What Spotify answered (its error body, shortened to one line), for the server log only. */
-    readonly detail?: string,
-    /** A 429's Retry-After, in seconds as Spotify sent it, for the server log only. */
-    readonly retryAfter?: string,
   ) {
     super(message);
     this.name = 'SpotifyError';
   }
-}
-
-/**
- * Thrown in place of a request while Spotify has told the app to wait (QWW-55): a 429's Retry-After, kept in the
- * store so every server instance and every script honours it. No request was made.
- */
-export class SpotifyBlockedError extends Error {
-  constructor(readonly until: number) {
-    super(`Spotify asked the app to wait until ${new Date(until).toISOString()}; no request was made`);
-    this.name = 'SpotifyBlockedError';
-  }
-}
-
-/** One line of a failed Spotify response's body, e.g. {"error":"invalid_grant"}; empty when it cannot be read. */
-async function errorDetail(res: Response): Promise<string> {
-  try {
-    return (await res.text()).replace(/\s+/g, ' ').trim().slice(0, 200);
-  } catch {
-    return '';
-  }
-}
-
-/** One line for the server log saying what failed. Never includes a token, the code or the client secret. */
-export function describeError(err: unknown): string {
-  if (err instanceof SpotifyError) {
-    return [err.message, err.detail, err.retryAfter ? `retry-after ${err.retryAfter} s` : ''].filter(Boolean).join(' | ');
-  }
-  return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
 }
 
 // ---- mapping ----
@@ -124,8 +69,7 @@ interface SpotifyTrackObject {
   is_local?: boolean;
   artists: { id: string; name: string | null }[];
   external_urls?: { spotify?: string };
-  external_ids?: { isrc?: string | null };
-  album?: { images?: SpotifyImage[]; release_date?: string | null; album_type?: string | null };
+  album?: { images?: SpotifyImage[] };
   popularity?: number;
 }
 
@@ -153,21 +97,7 @@ export function mapTrack(t: SpotifyTrackObject | null | undefined, playRank: num
   const art = pickImage(t.album?.images);
   if (art) track.albumArtUrl = art;
   if (typeof t.popularity === 'number') track.popularity = t.popularity;
-  // A compilation's date is the compilation's ("Greatest Hits", 2004), not the song's.
-  const year = t.album?.album_type === 'compilation' ? undefined : releaseYear(t.album?.release_date);
-  if (year !== undefined) track.releaseYear = year;
-  if (t.external_ids?.isrc) track.isrc = t.external_ids.isrc;
   return track;
-}
-
-/**
- * The year of an album's release_date ("1975", "1975-10" or "1975-10-31", by its precision), or
- * undefined for anything else, such as the "0000" Spotify sends for an unknown date.
- */
-function releaseYear(date: string | null | undefined): number | undefined {
-  const m = /^(\d{4})(?:-\d{2}){0,2}$/.exec(date ?? '');
-  const year = m ? Number(m[1]) : NaN;
-  return year >= 1900 && year <= new Date().getUTCFullYear() + 1 ? year : undefined;
 }
 
 export interface Listening {
@@ -195,39 +125,29 @@ export const PLAYLIST_ONLY = 0.4;
  * the three time spans, plus a bonus for each extra span it appears in and for recent plays.
  * Songs in the user's own playlists get at least 0.4; songs that are only saved get 0.15.
  * `known` is true for songs in a top list, recent plays or a playlist: the ones the user knows.
- * Each song also keeps where it was found (topLists, recentPlays, inPlaylist, saved), so its
- * reason can name the list.
  * playRank is the order by familiarity (0 = most familiar).
  */
 export function buildLibrary({ top, recent, saved, playlists = [] }: Listening): Track[] {
   const byId = new Map<string, Track>();
   const best = new Map<string, number>();
   const windows = new Map<string, number>();
-  const lists = new Map<string, Set<TimeRange>>();
   const plays = new Map<string, number>();
   const savedIds = new Set(saved.map((t) => t.id));
   const playlistIds = new Set(playlists.map((t) => t.id));
   const order: string[] = [];
-  // A song can come from several lists; facts one copy lacks are taken from another.
   const add = (t: Track) => {
-    const kept = byId.get(t.id);
-    if (!kept) {
+    if (!byId.has(t.id)) {
       byId.set(t.id, t);
       order.push(t.id);
-      return;
+    } else if (t.popularity !== undefined && byId.get(t.id)!.popularity === undefined) {
+      byId.set(t.id, { ...byId.get(t.id)!, popularity: t.popularity });
     }
-    const filled = { ...kept };
-    if (filled.popularity === undefined && t.popularity !== undefined) filled.popularity = t.popularity;
-    if (filled.releaseYear === undefined && t.releaseYear !== undefined) filled.releaseYear = t.releaseYear;
-    if (filled.isrc === undefined && t.isrc !== undefined) filled.isrc = t.isrc;
-    byId.set(t.id, filled);
   };
   for (const range of TIME_RANGES) {
     (top[range] ?? []).forEach((t, i) => {
       add(t);
       best.set(t.id, Math.max(best.get(t.id) ?? 0, topPositionScore(i)));
       windows.set(t.id, (windows.get(t.id) ?? 0) + 1);
-      lists.set(t.id, (lists.get(t.id) ?? new Set<TimeRange>()).add(range));
     });
   }
   for (const t of recent) {
@@ -246,36 +166,15 @@ export function buildLibrary({ top, recent, saved, playlists = [] }: Listening):
     if (savedIds.has(id)) f = f === 0 ? SAVED_ONLY : f + SAVED_BONUS;
     return Math.min(1, Math.round(f * 1000) / 1000);
   };
-  /** Where the song was found, leaving out the lists it is not in. */
-  const foundIn = (id: string): Partial<Track> => {
-    const found: Partial<Track> = {};
-    const spans = lists.get(id);
-    if (spans) found.topLists = [...spans];
-    const n = plays.get(id);
-    if (n) found.recentPlays = n;
-    if (playlistIds.has(id)) found.inPlaylist = true;
-    if (savedIds.has(id)) found.saved = true;
-    return found;
-  };
   return order
     .map((id, i) => ({ track: byId.get(id)!, f: familiarity(id), i }))
     .sort((a, b) => b.f - a.f || a.i - b.i)
-    .map(({ track, f }, playRank) => ({ ...track, ...foundIn(track.id), familiarity: f, known: known(track.id), playRank }));
+    .map(({ track, f }, playRank) => ({ ...track, familiarity: f, known: known(track.id), playRank }));
 }
 
 // ---- real client ----
 
-/** Spotify's Retry-After is in seconds; a missing or unreadable one counts as 1 s. */
-export function retryAfterMs(header: string | null): number {
-  const seconds = Number(header);
-  return header !== null && header.trim() !== '' && Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 1000;
-}
-
-export function createSpotifyClient(
-  cfg: SpotifyConfig,
-  fetchFn: FetchFn = (i, init) => fetch(i, init),
-  sleep: SleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-): SpotifyClient {
+export function createSpotifyClient(cfg: SpotifyConfig, fetchFn: FetchFn = (i, init) => fetch(i, init)): SpotifyClient {
   async function tokenRequest(body: Record<string, string>, previousRefresh?: string): Promise<SpotifyTokens> {
     const basic = Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString('base64');
     const res = await fetchFn(`${SPOTIFY_ACCOUNTS}/api/token`, {
@@ -283,39 +182,19 @@ export function createSpotifyClient(
       headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(body).toString(),
     });
-    if (!res.ok) {
-      const retryAfter = res.status === 429 ? (res.headers.get('retry-after') ?? undefined) : undefined;
-      throw new SpotifyError(`Spotify token request failed (${res.status})`, res.status, await errorDetail(res), retryAfter);
-    }
+    if (!res.ok) throw new SpotifyError(`Spotify token request failed (${res.status})`, res.status);
     const j = (await res.json()) as { access_token: string; refresh_token?: string; expires_in: number };
     const refreshToken = j.refresh_token ?? previousRefresh;
     if (!j.access_token || !refreshToken) throw new SpotifyError('Spotify token response was incomplete', 502);
     return { accessToken: j.access_token, refreshToken, expiresAt: Date.now() + j.expires_in * 1000 };
   }
 
-  async function api<T>(
-    accessToken: string,
-    url: string,
-    patience: { retries: number; maxWaitMs: number; onRateLimited?: () => void } = { retries: RATE_LIMIT_RETRIES, maxWaitMs: RATE_LIMIT_MAX_WAIT_MS },
-  ): Promise<T> {
-    for (let attempt = 0; ; attempt++) {
-      const res = await fetchFn(url.startsWith('http') ? url : `${SPOTIFY_API}${url}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (res.status === 429) patience.onRateLimited?.();
-      if (res.status === 429 && attempt < patience.retries) {
-        const wait = retryAfterMs(res.headers.get('retry-after'));
-        if (wait <= patience.maxWaitMs) {
-          await sleep(wait);
-          continue;
-        }
-      }
-      if (!res.ok) {
-        const retryAfter = res.status === 429 ? (res.headers.get('retry-after') ?? undefined) : undefined;
-        throw new SpotifyError(`Spotify API ${url} failed (${res.status})`, res.status, await errorDetail(res), retryAfter);
-      }
-      return (await res.json()) as T;
-    }
+  async function api<T>(accessToken: string, url: string): Promise<T> {
+    const res = await fetchFn(url.startsWith('http') ? url : `${SPOTIFY_API}${url}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) throw new SpotifyError(`Spotify API ${url} failed (${res.status})`, res.status);
+    return (await res.json()) as T;
   }
 
   return {
@@ -342,20 +221,14 @@ export function createSpotifyClient(
     async getSavedTracks(accessToken, max = MAX_SAVED_TRACKS) {
       type Page = { items: { track: SpotifyTrackObject | null }[]; next: string | null; total?: number };
       const pageUrl = (offset: number) => `/me/tracks?limit=50&offset=${offset}`;
-      let rateLimited = 0;
-      const patience = { retries: SAVED_RATE_LIMIT_RETRIES, maxWaitMs: SAVED_RATE_LIMIT_MAX_WAIT_MS, onRateLimited: () => rateLimited++ };
-      const started = Date.now();
-      const first: Page = await api(accessToken, pageUrl(0), patience);
+      const first: Page = await api(accessToken, pageUrl(0));
       const pages: Page[] = [first];
       if (typeof first.total === 'number') {
         // The first page says how many songs there are, so fetch the rest a few pages at a time.
         const offsets: number[] = [];
         for (let o = 50; o < Math.min(first.total, max); o += 50) offsets.push(o);
         for (let i = 0; i < offsets.length; i += SAVED_PAGE_CONCURRENCY) {
-          const batchStarted = Date.now();
-          pages.push(...(await Promise.all(offsets.slice(i, i + SAVED_PAGE_CONCURRENCY).map((o) => api<Page>(accessToken, pageUrl(o), patience)))));
-          const pause = SAVED_BATCH_MIN_MS - (Date.now() - batchStarted);
-          if (pause > 0 && i + SAVED_PAGE_CONCURRENCY < offsets.length) await sleep(pause);
+          pages.push(...(await Promise.all(offsets.slice(i, i + SAVED_PAGE_CONCURRENCY).map((o) => api<Page>(accessToken, pageUrl(o))))));
         }
       } else {
         let page = first;
@@ -364,8 +237,6 @@ export function createSpotifyClient(
           pages.push(page);
         }
       }
-      // One line per load in the server log, so a rate limit or a slow big library shows up.
-      if (pages.length > 10) console.info(`[spotify] read ${pages.length} pages of saved songs in ${Date.now() - started} ms, rate limited ${rateLimited} times`);
       const out: Track[] = [];
       for (const page of pages) {
         for (const item of page.items) {
@@ -454,11 +325,10 @@ export async function ensureFreshTokens(
 /** The user's library as contract Tracks with familiarity, ordered by playRank. */
 export async function getUserTracks(client: SpotifyClient, accessToken: string): Promise<Track[]> {
   // Recently played and playlists need permissions that users who signed in before they were added
-  // have not granted; without them we skip that signal rather than fail. Playlists are also the
-  // most requests by far, so when Spotify still rate-limits after the retries, they are skipped too.
+  // have not granted; without them we skip that signal rather than fail.
   const optional = (p: Promise<Track[]>) =>
     p.catch((err) => {
-      if (err instanceof SpotifyError && (err.status === 401 || err.status === 403 || err.status === 429)) return [] as Track[];
+      if (err instanceof SpotifyError && (err.status === 401 || err.status === 403)) return [] as Track[];
       throw err;
     });
   const [short, medium, long, plays, saved, playlists] = await Promise.all([
@@ -470,66 +340,4 @@ export async function getUserTracks(client: SpotifyClient, accessToken: string):
     optional(client.getPlaylistTracks(accessToken)),
   ]);
   return buildLibrary({ top: { short_term: short, medium_term: medium, long_term: long }, recent: plays, saved, playlists });
-}
-
-// ---- Spotify's "wait" (QWW-55) ----
-
-/** However long a 429 asks, the app waits no more than a day, so a bogus value cannot lock it for good. */
-const MAX_BLOCK_MS = 24 * 60 * 60_000;
-/** A 429 with reason QUOTA_EXCEEDED that does not say how long: the quota resets daily, so an hour is a cautious guess. */
-const QUOTA_UNSAID_BLOCK_MS = 60 * 60_000;
-/** A Retry-After of no more than this is a rate limit, waited out inside the request (RATE_LIMIT_MAX_WAIT_MS), not a block. */
-const BLOCK_OVER_SECONDS = 30;
-
-/**
- * When the app may call Spotify again after this error (epoch ms), or null when there is nothing to wait for: it is
- * not a 429, or it is a short rate limit. A block follows a 429 with reason QUOTA_EXCEEDED, as on 10 Nov 2026
- * (retry-after 12098 s, the whole app locked for 3.4 hours), or any Retry-After over 30 s.
- */
-export function blockedUntilOf(err: unknown, now: number = Date.now()): number | null {
-  if (!(err instanceof SpotifyError) || err.status !== 429) return null;
-  const said = err.retryAfter?.trim() ? Number(err.retryAfter) : NaN;
-  const seconds = Number.isFinite(said) && said >= 0 ? said : null;
-  const quota = err.detail?.includes('QUOTA_EXCEEDED') === true;
-  if (!quota && (seconds === null || seconds <= BLOCK_OVER_SECONDS)) return null;
-  return now + Math.min(MAX_BLOCK_MS, seconds === null ? QUOTA_UNSAID_BLOCK_MS : seconds * 1000);
-}
-
-/**
- * Throws SpotifyBlockedError, before any request, while Spotify has told the app to wait. A block that cannot be
- * read counts as none, and one that is more than a day away (a clock gone wrong, a hand-edited row) as a day:
- * a problem with that one row must not hide a healthy Spotify, or lock the app for good.
- */
-export async function assertSpotifyOpen(store: Pick<Store, 'getSpotifyBlock'>, now: number = Date.now()): Promise<void> {
-  const until = await store.getSpotifyBlock().catch((err) => {
-    console.error(`[spotify] could not read the rate limit: ${describeError(err)}`);
-    return null;
-  });
-  if (until !== null && until > now) throw new SpotifyBlockedError(Math.min(until, now + MAX_BLOCK_MS));
-}
-
-/**
- * Keeps a 429's wait in the store, so the next request, every other server instance and every script stay away
- * until it passes. Anything else is ignored. A store that cannot be written is logged, not thrown: the error
- * being handled matters more.
- */
-export async function noteSpotifyLimit(store: Pick<Store, 'setSpotifyBlock'>, err: unknown, now: number = Date.now()): Promise<void> {
-  const until = blockedUntilOf(err, now);
-  if (until === null) return;
-  await store.setSpotifyBlock(until).catch((e) => console.error(`[spotify] could not keep the rate limit: ${describeError(e)}`));
-}
-
-/**
- * The user's library for the site and for scripts: none of it when Spotify has told the app to wait, and a 429's
- * wait kept for everyone else. It reads what getUserTracks reads, which this does not change.
- */
-export async function readUserTracks(store: Store, client: SpotifyClient, user: UserRecord): Promise<Track[]> {
-  await assertSpotifyOpen(store);
-  try {
-    const fresh = await ensureFreshTokens(user, client, store);
-    return await getUserTracks(client, fresh.spotify.accessToken);
-  } catch (err) {
-    await noteSpotifyLimit(store, err);
-    throw err;
-  }
 }

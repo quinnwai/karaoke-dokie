@@ -1,21 +1,6 @@
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
-import { catalogueRank, pickCatalogue } from '../songs/score';
 import { isMeasured } from '../songs/sourceRank';
-import {
-  DEFAULT_EVENTS_LIMIT,
-  DEFAULT_LIST_LIMIT,
-  MAX_EVENTS_LIMIT,
-  type CatalogueSong,
-  type SongMoodsRecord,
-  type SongDeezerRecord,
-  type SongTempoRecord,
-  type SongPopularityRecord,
-  type SongRangeRecord,
-  type Store,
-  type StoredEvent,
-  type UsdbIndexEntry,
-  type UserRecord,
-} from './store';
+import { DEFAULT_LIST_LIMIT, type SongRangeRecord, type Store, type UsdbIndexEntry, type UserRecord } from './store';
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -27,19 +12,6 @@ export function createMemoryStore(): Store {
   const log: DataSourceLogEntry[] = [];
   const feedback: FeedbackEntry[] = [];
   const usdbSongs = new Map<number, UsdbIndexEntry>();
-  const events: StoredEvent[] = [];
-  const songMoods = new Map<string, SongMoodsRecord>();
-  const songPopularity = new Map<string, SongPopularityRecord>();
-  const songDeezer = new Map<string, SongDeezerRecord>();
-  const songTempo = new Map<string, SongTempoRecord>();
-  let spotifyBlock: number | null = null;
-  /** A song's popularity row with its Deezer rank, as getSongPopularity reads it. */
-  const popularityOf = (key: string): SongPopularityRecord | undefined => {
-    const p = songPopularity.get(key);
-    const rank = songDeezer.get(key)?.rank;
-    if (rank === undefined) return p && clone(p);
-    return { ...(p ? clone(p) : { key, source: 'deezer' }), deezerRank: rank };
-  };
 
   const newestFirst = <T extends { at: string }>(items: T[]): T[] =>
     items
@@ -87,11 +59,6 @@ export function createMemoryStore(): Store {
       }
       return out;
     },
-    async listSongRangesByArtist(artistKey) {
-      const out = new Map<string, SongRangeRecord>();
-      for (const [k, rec] of songs) if (k.startsWith(`${artistKey}|`) && rec.range) out.set(k, clone(rec));
-      return out;
-    },
     async putUsdbSongs(entries) {
       for (const e of entries) usdbSongs.set(e.id, clone(e));
     },
@@ -125,103 +92,6 @@ export function createMemoryStore(): Store {
     async listFeedback(opts = {}) {
       const items = opts.userId ? feedback.filter((f) => f.userId === opts.userId) : feedback;
       return newestFirst(items).slice(0, opts.limit ?? DEFAULT_LIST_LIMIT).map(clone);
-    },
-    // ---- catalogue (QWW-2 Track B) ----
-    async listCatalogue(limit) {
-      // The most-viewed USDB row per key, as findUsdbSongs picks it; a tie goes to the lower id.
-      const best = new Map<string, UsdbIndexEntry>();
-      for (const e of usdbSongs.values()) {
-        const b = best.get(e.key);
-        const more = (e.views ?? 0) - (b?.views ?? 0);
-        if (!b || more > 0 || (more === 0 && e.id < b.id)) best.set(e.key, e);
-      }
-      const out: { key: string; rank: number; charted: boolean; song: CatalogueSong }[] = [];
-      for (const [key, { range, log }] of songs) {
-        // Measured ranges only. Artist estimates exist only because a tester's library had the song.
-        if (!range || !isMeasured(range)) continue;
-        const song: CatalogueSong = { key, artist: log.artist, title: log.title, range, log };
-        const usdb = best.get(key);
-        if (usdb) song.usdb = usdb;
-        const popularity = popularityOf(key);
-        out.push({ key, rank: catalogueRank(range, usdb, popularity), charted: popularity?.chartRank !== undefined, song });
-      }
-      return pickCatalogue(out, limit).map(({ song }) => clone(song));
-    },
-
-    // ---- beta event log (QWW-16) ----
-    async appendEvents(anonId, list) {
-      // Only the fields the Postgres table keeps, so both stores read back the same thing.
-      for (const e of list) {
-        const stored: StoredEvent = { anonId, name: e.name, at: e.at };
-        if (e.props) stored.props = clone(e.props);
-        events.push(stored);
-      }
-    },
-    async listEvents(opts = {}) {
-      const items = opts.anonId ? events.filter((e) => e.anonId === opts.anonId) : events;
-      const limit = Math.min(opts.limit ?? DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
-      return newestFirst(items).slice(0, limit).reverse().map(clone);
-    },
-
-    // ---- mood labels (QWW-11) ----
-    async putSongMoods(entries) {
-      for (const e of entries) songMoods.set(e.key, clone(e));
-    },
-    async getSongMoods(songKeys) {
-      const out = new Map<string, SongMoodsRecord>();
-      for (const k of songKeys) {
-        const m = songMoods.get(k);
-        if (m) out.set(k, clone(m));
-      }
-      return out;
-    },
-
-    // ---- song popularity (QWW-6) ----
-    async putSongPopularity(entries) {
-      for (const e of entries) songPopularity.set(e.key, clone(e));
-    },
-    async getSongPopularity(songKeys) {
-      const out = new Map<string, SongPopularityRecord>();
-      for (const k of songKeys) {
-        const p = popularityOf(k);
-        if (p) out.set(k, p);
-      }
-      return out;
-    },
-
-    // ---- Deezer track rank (QWW-37) ----
-    async putSongDeezer(entries) {
-      for (const e of entries) songDeezer.set(e.key, clone(e));
-    },
-    async listSongDeezer() {
-      return new Map([...songDeezer].map(([k, v]) => [k, clone(v)]));
-    },
-
-    // ---- Spotify rate-limit block (QWW-55) ----
-    async getSpotifyBlock() {
-      return spotifyBlock;
-    },
-    async setSpotifyBlock(until) {
-      spotifyBlock = spotifyBlock === null ? until : Math.max(spotifyBlock, until);
-    },
-
-    // ---- tempo (QWW-40) ----
-    async putSongTempo(entries) {
-      for (const e of entries) {
-        const given = Object.fromEntries(Object.entries(e).filter(([, v]) => v !== undefined));
-        songTempo.set(e.key, { ...songTempo.get(e.key), ...clone(given) } as SongTempoRecord);
-      }
-    },
-    async getSongTempos(songKeys) {
-      const out = new Map<string, SongTempoRecord>();
-      for (const k of songKeys) {
-        const t = songTempo.get(k);
-        if (t) out.set(k, clone(t));
-      }
-      return out;
-    },
-    async listSongTempos() {
-      return new Map([...songTempo].map(([k, v]) => [k, clone(v)]));
     },
   };
 }

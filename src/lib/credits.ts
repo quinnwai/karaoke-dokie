@@ -38,35 +38,13 @@ export const CREDITS: Credit[] = [
     what: 'Labeled sung notes used to test note detection (CC BY 4.0).',
   },
   {
-    name: 'MGPHot, SiriusXM',
-    url: 'https://doi.org/10.5334/tismir.236',
-    what: "Music experts' notes on Billboard Hot 100 songs from 1958 to 2022, by Oramas, Gouyon, Hogan, Landau and Ehmann (2025). We used it offline only, to check our mood labels; none of it is shown in the app (CC BY-NC-ND 4.0, © SiriusXM 2025).",
-  },
-  // AcousticBrainz (CC0) joins this list once its mood labels are imported; its API was down when
-  // the first labels were made, so none of what the app shows comes from it yet (QWW-17).
-  {
-    name: 'OpenAI GPT-6 Luna',
-    url: 'https://openai.com/',
-    what: "An AI model that suggests Upbeat and Heartfelt labels from a song's artist, title and year, ahead of time. We show a mood only once its labels pass our accuracy check.",
-  },
-  {
     name: 'Material Symbols, Google',
     url: 'https://fonts.google.com/icons',
-    what: 'The fast-lyrics, book and reset icons (Apache 2.0).',
-  },
-  {
-    name: 'KaraFun',
-    url: 'https://www.karafun.com/',
-    what: 'How often KaraFun’s karaoke video of a song has been watched on YouTube, one of the signs of how well known a song is.',
-  },
-  {
-    name: 'Billboard Year-End Hot 100',
-    url: 'https://www.billboard.com/charts/year-end/hot-100-songs/',
-    what: 'Each song’s best year-end chart position, which marks it as widely known, and its year when we have no other.',
+    what: 'The fast-lyrics icon (Apache 2.0).',
   },
   {
     name: 'Spotify',
     url: 'https://developer.spotify.com/',
-    what: 'Your saved songs, top tracks and recent plays, and the song player (it loads from Spotify, which sets its own cookies).',
+    what: 'Your saved songs, top tracks and recent plays.',
   },
 ];

@@ -2,10 +2,8 @@
 // pipeline's export of measured recordings (karaoke_ranges.json).
 // Usage: npx tsx scripts/note-ranges-import.ts ranges.json [--recheck-fast]   (needs DATABASE_URL)
 // A row replaces a lower-ranked source or the same source from another export; note files are
-// only replaced by the same song's duet read with each singer's part, so re-running
-// note-ranges-build.ts and this import adds parts to duets stored before they had them
-// (src/lib/songs/sourceRank.ts). With --recheck-fast, note-file songs imported earlier from the
-// same collection get their fast-lyrics flag corrected.
+// never replaced (src/lib/songs/sourceRank.ts). With --recheck-fast, note-file songs imported
+// earlier from the same collection get their fast-lyrics flag corrected.
 
 import { readFile } from 'node:fs/promises';
 import { getStore } from '../src/lib/server/getStore';

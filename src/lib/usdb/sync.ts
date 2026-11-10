@@ -7,24 +7,18 @@
 // Songs synced before ranking v2 lack USDB views/rating and the pitch histogram. Views and rating
 // are backfilled with a search only (fast); the histogram needs the note file again (about 25 s
 // per song), so that only happens with `rescan: true`.
-// Songs synced before duets got each singer's part are re-read with `rescanDuets: true`, but only
-// those USDB lists as a duet. USDB can have a song as both "Song" and "Song [DUET]" (one songKey),
-// so the rescan takes the duet upload: the most-viewed index row titled as a duet, or without the
-// index, the first search result whose title or edition says duet (isDuetListing).
 // When the USDB song index is filled (npm run usdb:index), songs are looked up there instead of
 // searched one by one: a song not in the index is a miss at no cost, and a hit is downloaded by id.
 
 import type { SongRange, Track } from '../contracts';
-import type { SongRangeRecord, Store, UsdbIndexEntry } from '../server/store';
+import type { Store } from '../server/store';
 import { songRangeFromUltrastar } from '../songs/range';
 import { resolveSongRange, songKey } from '../songs/resolve';
 import { MEASURED_RANK, sourceRank } from '../songs/sourceRank';
-import { isDuetListing, type UsdbClient, type UsdbSong } from './client';
+import type { UsdbClient, UsdbSong } from './client';
 
 /** A song USDB had no note file for is not searched again for this long. */
 export const MISS_RECHECK_DAYS = 90;
-
-const USDB_NOTE_FILE_REASON = 'Used the UltraStar note file for this song (from USDB).';
 
 export interface SyncSummary {
   checked: number;
@@ -34,7 +28,7 @@ export interface SyncSummary {
   alreadyKnown: number;
   /** Songs USDB lacked when checked in the last MISS_RECHECK_DAYS, so not searched again. */
   recentMiss: number;
-  /** Already-known songs that got USDB views/rating, a pitch histogram or duet parts added. */
+  /** Already-known songs that got USDB views/rating or a pitch histogram added. */
   updated: number;
   errors: number;
 }
@@ -45,11 +39,6 @@ export interface SyncOptions {
   tracks: Track[];
   /** Re-download note files for known songs that lack a pitch histogram. */
   rescan?: boolean;
-  /**
-   * Re-download note files for known songs stored without duet parts that USDB lists as a duet
-   * (title, or edition when searching; the index keeps titles only), to add each singer's part.
-   */
-  rescanDuets?: boolean;
   /** First fetch one note file per artist, so every song gets an artist estimate early. Default true. */
   artistsFirst?: boolean;
   now?: () => Date;
@@ -69,7 +58,6 @@ export async function syncNoteFiles({
   usdb,
   tracks,
   rescan = false,
-  rescanDuets = false,
   artistsFirst = true,
   now = () => new Date(),
   onProgress,
@@ -87,19 +75,11 @@ export async function syncNoteFiles({
   const remaining: Track[] = [];
   const indexed = (await store.usdbIndexStats()).count > 0 && usdb.downloadById !== undefined;
   const index = indexed ? await store.findUsdbSongs(tracks.map((t) => songKey(t.artist, t.title))) : new Map();
-  /** With rescanDuets and the index: per song key, the most-viewed upload titled as a duet. */
-  const duetIndex = new Map<string, UsdbIndexEntry>();
-  if (rescanDuets && indexed) {
-    for (const e of await store.listUsdbSongs()) if (isDuetListing(e) && !duetIndex.has(e.key)) duetIndex.set(e.key, e);
-  }
 
-  /**
-   * The song on USDB (from the index when there is one, else a search), optionally with its notes.
-   * With `duet`, only an upload USDB lists as a duet.
-   */
-  async function lookup(track: Track, download: boolean, duet = false): Promise<UsdbSong | null> {
-    if (!indexed) return usdb.findSong(track.artist, track.title, duet ? { download, duet } : { download });
-    const entry = (duet ? duetIndex : index).get(songKey(track.artist, track.title));
+  /** The song on USDB (from the index when there is one, else a search), optionally with its notes. */
+  async function lookup(track: Track, download: boolean): Promise<UsdbSong | null> {
+    if (!indexed) return usdb.findSong(track.artist, track.title, { download });
+    const entry = index.get(songKey(track.artist, track.title));
     if (!entry) return null;
     return { id: entry.id, views: entry.views, rating: entry.rating, noteText: download ? await usdb.downloadById!(entry.id) : null };
   }
@@ -116,7 +96,7 @@ export async function syncNoteFiles({
         return false;
       }
       const range = withPopularity(songRangeFromUltrastar(text), song);
-      const log = { trackId: track.id, title: track.title, artist: track.artist, outcome: 'note-file' as const, reason: USDB_NOTE_FILE_REASON, at: now().toISOString() };
+      const log = { trackId: track.id, title: track.title, artist: track.artist, outcome: 'note-file' as const, reason: 'Used the UltraStar note file for this song (from USDB).', at: now().toISOString() };
       await store.putSongRange(key, { range, log });
       await store.appendLog(log);
       summary.noteFile++;
@@ -161,24 +141,7 @@ export async function syncNoteFiles({
     }
   }
 
-  /**
-   * With rescanDuets: re-reads a known song from the upload USDB lists as a duet. True when that
-   * file has both singers' parts and its range was stored (with that upload's id, views and stars).
-   */
-  async function addDuetParts(track: Track, key: string, cached: SongRangeRecord): Promise<boolean> {
-    const song = await lookup(track, true, true);
-    const range = song?.noteText ? songRangeFromUltrastar(song.noteText) : null;
-    if (!song || !range?.parts) return false; // no duet upload, or one that has a single sung part
-    // The file can differ from the one stored before (the solo upload, or a public collection's).
-    const log = { ...cached.log, reason: USDB_NOTE_FILE_REASON, at: now().toISOString() };
-    await store.putSongRange(key, { range: withPopularity(range, song), log });
-    summary.updated++;
-    onProgress?.(`duet parts: ${track.artist} - ${track.title}`);
-    return true;
-  }
-
-  // Songs we already have: skip, or top up USDB views/stars and (with rescan) the pitch histogram
-  // or (with rescanDuets) duet parts.
+  // Songs we already have: skip, or top up USDB views/stars and (with rescan) the pitch histogram.
   for (const track of tracks) {
     const key = songKey(track.artist, track.title);
     const cached = await store.getSongRange(key);
@@ -194,11 +157,8 @@ export async function syncNoteFiles({
     summary.alreadyKnown++;
     const needsHistogram = rescan && !cached.range.pitchShare;
     const needsPopularity = cached.range.usdbViews === undefined && cached.range.usdbRating === undefined;
-    const mayNeedParts = rescanDuets && !cached.range.parts?.length;
-    if (!needsHistogram && !needsPopularity && !mayNeedParts) continue;
+    if (!needsHistogram && !needsPopularity) continue;
     try {
-      if (mayNeedParts && (await addDuetParts(track, key, cached))) continue;
-      if (!needsHistogram && !needsPopularity) continue;
       const song = await lookup(track, needsHistogram);
       if (song) {
         const base = needsHistogram && song.noteText ? songRangeFromUltrastar(song.noteText) : cached.range;

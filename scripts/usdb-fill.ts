@@ -1,10 +1,7 @@
 // Computes ranges for every USDB song we don't have yet, most popular first (run usdb:index first).
-// Usage: npm run usdb:fill [-- --limit N] [--skip-countdown] [--recheck-fast | --rescan-duets]   (needs DATABASE_URL, USDB_USERNAME, USDB_PASSWORD)
+// Usage: npm run usdb:fill [-- --limit N] [--skip-countdown] [--recheck-fast]   (needs DATABASE_URL, USDB_USERNAME, USDB_PASSWORD)
 // --recheck-fast re-reads only the songs flagged as fast lyrics and clears the flag where the
 // current rule disagrees.
-// --rescan-duets re-reads only songs stored before duets had each singer's part whose USDB title
-// says "duet", taking the duet upload when USDB also has a solo one; for catalogue songs that
-// usdb:sync (signed-in libraries only) never sees.
 // By default waits out USDB's download countdown (about 27 s per song). --skip-countdown asks
 // for each file straight away, like USDB Syncer (OK'd by the USDB folks for this fill), still one
 // request every 2.5 s, so about 2.5 s per song. Stop and rerun any time.
@@ -25,7 +22,6 @@ async function main() {
     usdb: createUsdbClient({ username, password, skipCountdown: process.argv.includes('--skip-countdown') }),
     limit,
     recheckFast: process.argv.includes('--recheck-fast'),
-    rescanDuets: process.argv.includes('--rescan-duets'),
     onProgress: (l) => console.log(l),
   });
   console.log(JSON.stringify(summary));

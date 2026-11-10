@@ -27,13 +27,8 @@
 // tenor's melody around E6). When the song's typical note lands outside
 // E2 to C5, where almost every pop vocal sits, we shift the whole song by
 // octaves until it lands inside.
-//
-// Duets: a file with sung notes in both P1 and P2 is sung as a pair, each
-// singer on their own part, so each part gets its own range, measured the
-// same way as a whole song (its own octave fix included). Lines marked P3 are
-// sung by both, so the parser gives them to both parts.
 
-import type { SongPart, SongRange } from '../contracts';
+import type { SongRange } from '../contracts';
 import { parseUltrastar, secondsPerBeat, type UltrastarFile, type UltrastarNote } from './ultrastar';
 
 export const FAST_LYRICS_SYLLABLES_PER_SECOND = 4.5;
@@ -105,12 +100,17 @@ export function fastShare(notes: UltrastarNote[], bpm: number): number {
   return rates.length ? rates.filter((r) => r > FAST_LYRICS_SYLLABLES_PER_SECOND).length / rates.length : 0;
 }
 
-/** Notes that carry a judged pitch and take up time: the only ones that measure a range. */
-const pitchedNotes = (notes: UltrastarNote[]) => notes.filter((n) => isPitched(n) && n.length > 0);
-
-/** One singer's notes measured: trimmed range and tessitura (octave-fixed), pitch histogram, fast-lyrics flag. */
-function measure(notes: UltrastarNote[], bpm: number): Required<Omit<SongPart, 'singer'>> {
-  const pitched = pitchedNotes(notes);
+/**
+ * Range of one singer in an UltraStar file. `part` is the duet singer number
+ * (1 = P1, 2 = P2); duets default to P1.
+ */
+export function songRangeFromUltrastar(file: UltrastarFile | string, part = 1): SongRange {
+  const song = typeof file === 'string' ? parseUltrastar(file) : file;
+  const notes = song.players[part - 1];
+  if (!notes || notes.length === 0) {
+    throw new Error(`UltraStar file has no part ${part}`);
+  }
+  const pitched = notes.filter((n) => isPitched(n) && n.length > 0);
   if (pitched.length === 0) {
     throw new Error('UltraStar file has no pitched notes to measure');
   }
@@ -134,39 +134,9 @@ function measure(notes: UltrastarNote[], bpm: number): Required<Omit<SongPart, '
     low: low + shift,
     high: high + shift,
     tessitura: tessitura + shift,
+    source: 'note-file',
+    confidence: 'high',
+    fastLyrics: fastShare(notes, song.bpm) >= FAST_LYRICS_MIN_SHARE,
     pitchShare,
-    fastLyrics: fastShare(notes, bpm) >= FAST_LYRICS_MIN_SHARE,
   };
-}
-
-/** Each singer's part of a duet, P1 first; null unless both P1 and P2 have pitched notes. */
-function duetParts(song: UltrastarFile): SongPart[] | null {
-  const pair = song.players.slice(0, 2);
-  if (pair.length < 2 || pair.some((notes) => pitchedNotes(notes).length === 0)) return null;
-  return pair.map((notes, i) => {
-    // #P1/#P2 since format 1.0; older duet files name the singers in #DUETSINGERP1/#DUETSINGERP2.
-    const singer = song.headers[`P${i + 1}`] || song.headers[`DUETSINGERP${i + 1}`];
-    return { ...(singer ? { singer } : {}), ...measure(notes, song.bpm) };
-  });
-}
-
-/**
- * Range of one singer in an UltraStar file. `part` is the duet singer number
- * (1 = P1, 2 = P2); duets default to P1. A duet also gets `duet` and both
- * singers' `parts`; the top-level fields stay the asked-for part's.
- */
-export function songRangeFromUltrastar(file: UltrastarFile | string, part = 1): SongRange {
-  const song = typeof file === 'string' ? parseUltrastar(file) : file;
-  const notes = song.players[part - 1];
-  if (!notes || notes.length === 0) {
-    throw new Error(`UltraStar file has no part ${part}`);
-  }
-  const { low, high, tessitura, pitchShare, fastLyrics } = measure(notes, song.bpm);
-  const range: SongRange = { low, high, tessitura, source: 'note-file', confidence: 'high', fastLyrics, pitchShare };
-  const parts = duetParts(song);
-  if (parts) {
-    range.duet = true;
-    range.parts = parts;
-  }
-  return range;
 }
