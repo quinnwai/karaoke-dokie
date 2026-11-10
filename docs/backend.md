@@ -96,12 +96,14 @@ for the liked songs), then synced by reading only what changed (`src/lib/server/
 A visit to a complete library makes at most `INCREMENTAL_BUDGET` (5) requests: the likes check comes first, then
 what is due in the order top tracks, recent plays, playlist list, changed playlists; the rest waits for the next
 visit. With nothing changed a visit is 2 requests. The first read and a resumed one are not limited. When a sync
-fails, the stored library is served as it is. Known gap: one song liked and another un-liked between two visits
-leaves the count unchanged, so the un-like is only noticed at the next visit where it does change.
-Other limits: the budget counts calls to the Spotify client, not HTTP requests (a retry after a short 429, or a
-user with over 50 playlists, costs more); new likes beyond the first page are read before anything else whatever the
-budget; one un-like costs a re-read of all likes (1 request per 50 songs, not resumable), and nothing is dropped
-if that read does not account for every item Spotify counts; a first read resumed after the library changed can
+fails, the stored library is served as it is. Spotify's count of liked songs must equal the stored count plus the new likes; when it does not, a
+song was un-liked, and a check pass reads the likes again, 3 pages per visit (`VERIFY_PAGES_PER_VISIT`), marking each song
+seen (`user_saved.gen`). When the pass has seen every item Spotify counts, the songs it did not see are removed, so an
+un-like disappears a few visits later (a library of 11,000 likes: about 75 visits), never in one expensive visit. If the
+pass does not account for every item (the library changed while it ran), nothing is removed and it runs once more.
+The budget counts real HTTP requests (the client counts each one, retries and playlist pages included, and refuses to send
+more); a changed playlist that needs more pages than are left is read at a later visit. Other limits: new likes beyond the
+first page are read before anything else whatever the budget; a first read resumed after the library changed can
 miss a few songs until a later count mismatch; two simultaneous visits of one user (two instances) are not
 coordinated and can both read.
 

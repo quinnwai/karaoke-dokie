@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS user_saved (
   track_id TEXT NOT NULL,
   pos BIGINT NOT NULL,
   track_json TEXT NOT NULL,
+  gen BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY (user_id, track_id)
 );
 -- Spotify Web API requests per day and caller (QWW-55 PR 2): "site:/api/recommendations", "script:usdb-sync".

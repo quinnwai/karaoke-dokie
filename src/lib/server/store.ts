@@ -17,6 +17,13 @@ export interface LibrarySyncState {
   recent: { at: number; tracks: Track[] } | null;
   /** Own playlists by id, each with the snapshot_id its songs were read at. */
   playlists: Record<string, { snapshotId: string; tracks: Track[] }>;
+  /**
+   * A check pass over all likes that runs a few pages per visit, started when Spotify's count of liked songs does not
+   * add up (something was un-liked). Songs it has not seen when it ends are removed. `gen` is the pass's number.
+   */
+  verify?: { gen: number; offset: number; unreadable: number; attempt: number } | null;
+  /** The number of the last check pass started, so the next is larger. */
+  lastGen?: number;
   /** Playlists are not asked for again before this (a user who never granted the scope), or 0. */
   playlistsRetryAt: number;
 }
@@ -217,7 +224,13 @@ export interface Store {
   /** The user's liked songs, newest first. */
   listSavedTracks(userId: string): Promise<Track[]>;
   /** Adds or replaces liked songs; `pos` orders them (higher = liked later). */
-  putSavedTracks(userId: string, rows: { track: Track; pos: number }[]): Promise<void>;
+  putSavedTracks(userId: string, rows: { track: Track; pos: number; gen?: number }[]): Promise<void>;
+  /** Marks stored liked songs as seen by the check pass `gen` (ids that are not stored are ignored). */
+  markSavedSeen(userId: string, trackIds: string[], gen: number): Promise<void>;
+  /** How many liked songs were seen by the check pass `gen` or a later one. */
+  countSavedFromGen(userId: string, gen: number): Promise<number>;
+  /** Removes the liked songs no check pass from `gen` on has seen: the ones un-liked on Spotify. */
+  removeSavedBeforeGen(userId: string, gen: number): Promise<void>;
   /** Removes liked songs by track id (the ones un-liked on Spotify). */
   removeSavedTracks(userId: string, trackIds: string[]): Promise<void>;
   /** Deletes everything stored about the user's library (disconnect). */

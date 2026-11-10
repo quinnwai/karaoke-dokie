@@ -1,5 +1,6 @@
 // Spotify Web API client: authorization code flow, token refresh, library reads.
 // `fetch` is injected so tests run offline; SPOTIFY_MOCK=1 swaps in mockSpotify.ts.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { TimeRange, Track } from '../contracts';
 import type { SpotifyTokens, Store, UserRecord } from './store';
 
@@ -33,6 +34,20 @@ const REFRESH_MARGIN_MS = 60_000;
  */
 const RATE_LIMIT_RETRIES = 3;
 const RATE_LIMIT_MAX_WAIT_MS = 10_000;
+
+/**
+ * A per-visit meter of Web API requests (QWW-55 PR 2): the library sync runs inside one, and the client counts every
+ * request it sends (a retry after a 429, each page of a playlist) and refuses to send more once `limit` is reached.
+ */
+export const requestMeter = new AsyncLocalStorage<{ count: number; limit: number }>();
+
+/** Thrown, with nothing sent, when the visit's request budget is used up. */
+export class RequestBudgetError extends Error {
+  constructor() {
+    super('the request budget of this visit is used up');
+    this.name = 'RequestBudgetError';
+  }
+}
 
 export type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 export type SleepFn = (ms: number) => Promise<void>;
@@ -308,6 +323,11 @@ export function createSpotifyClient(
     patience: { retries: number; maxWaitMs: number; onRateLimited?: () => void } = { retries: RATE_LIMIT_RETRIES, maxWaitMs: RATE_LIMIT_MAX_WAIT_MS },
   ): Promise<T> {
     for (let attempt = 0; ; attempt++) {
+      const meter = requestMeter.getStore();
+      if (meter) {
+        if (meter.count >= meter.limit) throw new RequestBudgetError();
+        meter.count++;
+      }
       const res = await fetchFn(url.startsWith('http') ? url : `${SPOTIFY_API}${url}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });

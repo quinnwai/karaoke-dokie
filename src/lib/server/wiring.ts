@@ -158,10 +158,10 @@ export function getAppContext(): AppContext {
   const store = getStore();
   if (!g.__karaokeApp || g.__karaokeApp.store !== store) {
     const config = readConfig();
-    const deps = productionSongDeps(store, config.spotifyMock);
+    const deps = productionSongDeps(store, config.demoSongs);
     // Mock mode's memory store starts empty, so the catalogue would be too. Never into Postgres,
     // where the placeholder seeds would overwrite real ranges.
-    const seeded = config.spotifyMock && pickStoreKind() === 'memory' ? seedStore(store, SEED_SONGS) : Promise.resolve();
+    const seeded = config.demoSongs && pickStoreKind() === 'memory' ? seedStore(store, SEED_SONGS) : Promise.resolve();
     g.__karaokeApp = {
       config,
       store,

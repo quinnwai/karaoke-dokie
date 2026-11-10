@@ -35,7 +35,7 @@ export function createMemoryStore(): Store {
   const songTempo = new Map<string, SongTempoRecord>();
   let spotifyBlock: number | null = null;
   const libraryStates = new Map<string, StoredLibraryState>();
-  const savedTracks = new Map<string, Map<string, { track: Track; pos: number }>>();
+  const savedTracks = new Map<string, Map<string, { track: Track; pos: number; gen: number }>>();
   const spotifyCalls = new Map<string, { day: string; caller: string; calls: number }>();
   /** A song's popularity row with its Deezer rank, as getSongPopularity reads it. */
   const popularityOf = (key: string): SongPopularityRecord | undefined => {
@@ -222,8 +222,21 @@ export function createMemoryStore(): Store {
     },
     async putSavedTracks(userId, rows) {
       const m = savedTracks.get(userId) ?? new Map();
-      for (const r of rows) m.set(r.track.id, clone(r));
+      for (const r of rows) m.set(r.track.id, clone({ track: r.track, pos: r.pos, gen: r.gen ?? 0 }));
       savedTracks.set(userId, m);
+    },
+    async markSavedSeen(userId, trackIds, gen) {
+      for (const id of trackIds) {
+        const r = savedTracks.get(userId)?.get(id);
+        if (r) r.gen = gen;
+      }
+    },
+    async countSavedFromGen(userId, gen) {
+      return [...(savedTracks.get(userId)?.values() ?? [])].filter((r) => r.gen >= gen).length;
+    },
+    async removeSavedBeforeGen(userId, gen) {
+      const m = savedTracks.get(userId);
+      for (const [id, r] of m ?? []) if (r.gen < gen) m!.delete(id);
     },
     async removeSavedTracks(userId, trackIds) {
       for (const id of trackIds) savedTracks.get(userId)?.delete(id);

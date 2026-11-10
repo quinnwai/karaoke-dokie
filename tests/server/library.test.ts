@@ -125,6 +125,58 @@ describe('a return visit', () => {
     expect((await visit(NOW + 2 * HOUR)).calls).toBe(2);
   });
 
+  it('finds one un-like in a library of 11,139 likes without any visit going over 5 requests, and drops it when the check pass ends', async () => {
+    const { visit, fake, store } = setup(11_139);
+    const first = await visit();
+    expect(first.calls).toBeGreaterThan(200); // the first read is the one visit that is not limited
+    const gone = fake.liked[6000]!;
+    fake.unlike(gone);
+    let at = NOW;
+    let visits = 0;
+    let removedAt = 0;
+    const calls: number[] = [];
+    while (visits < 120) {
+      visits++;
+      at += 60_000;
+      const v = await visit(at);
+      calls.push(v.calls);
+      if (!ids(v.tracks).has(`filler-${gone}`)) {
+        removedAt = visits;
+        break;
+      }
+    }
+    expect(Math.max(...calls)).toBeLessThanOrEqual(INCREMENTAL_BUDGET);
+    expect(removedAt).toBeGreaterThan(1); // spread over visits, not in one
+    expect(removedAt).toBeLessThan(120);
+    expect(await store.listSavedTracks(user.id)).toHaveLength(11_138);
+    expect((await store.getLibraryState(user.id))!.state.verify).toBeNull();
+    // Afterwards a visit is a plain likes check again.
+    expect((await visit(at + 60_000)).calls).toBe(2);
+  });
+
+  it('one like and one un-like between visits (the count does not move) is still found', async () => {
+    const { visit, fake, store } = setup(120);
+    await visit();
+    const gone = fake.liked[30]!;
+    fake.unlike(gone);
+    const added = fake.like();
+    const again = await visit(NOW + HOUR);
+    expect(ids(again.tracks).has(`filler-${added}`)).toBe(true);
+    expect(ids(again.tracks).has(`filler-${gone}`)).toBe(false);
+    expect(await store.listSavedTracks(user.id)).toHaveLength(120);
+  });
+
+  it('counts real requests: more than 50 playlists, all changed, never take a visit over 5', async () => {
+    const { visit, fake } = setup(60);
+    fake.playlistCount = 120;
+    await visit(); // the first read
+    fake.playlist.snapshotId = 'snap-2';
+    const perVisit: number[] = [];
+    for (let i = 1; i <= 5; i++) perVisit.push((await visit(NOW + i * 60_000)).calls);
+    expect(Math.max(...perVisit)).toBeLessThanOrEqual(INCREMENTAL_BUDGET);
+    expect(perVisit[0]).toBe(5); // likes check, three pages of playlists, one playlist's songs
+  });
+
   it('drops every liked song when the user has un-liked them all', async () => {
     const { visit, fake, store } = setup(60);
     await visit();

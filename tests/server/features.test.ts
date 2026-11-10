@@ -43,6 +43,13 @@ describe('real Spotify only where it is meant (QWW-55 PR 2)', () => {
     expect(readConfig({ ...creds, SPOTIFY_LIVE: '1' }).spotifyMock).toBe(false);
     expect(readConfig({ ...creds, VERCEL_ENV: 'production', SPOTIFY_MOCK: '1' }).spotifyMock).toBe(true);
   });
+
+  it('keeps the placeholder demo songs and ranges for SPOTIFY_MOCK=1 only, so a local run against a real database never caches them', () => {
+    expect(readConfig({}).spotifyMock).toBe(true);
+    expect(readConfig({}).demoSongs).toBe(false);
+    expect(readConfig({ SPOTIFY_MOCK: '1' }).demoSongs).toBe(true);
+    expect(readConfig({ VERCEL_ENV: 'production' }).demoSongs).toBe(false);
+  });
 });
 
 describe('the pick-songs switch (QWW-55)', () => {

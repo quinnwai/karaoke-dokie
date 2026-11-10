@@ -8,6 +8,8 @@ export interface ServerConfig {
   /** Empty = admin pages disabled (always 403). */
   adminToken: string;
   spotifyMock: boolean;
+  /** SPOTIFY_MOCK=1 asked for the offline demo: the placeholder songs and ranges. Not set just because real Spotify is not allowed (spotifyMock is). */
+  demoSongs: boolean;
   spotify: SpotifyConfig;
   /** Whether POST /api/events stores the beta events it is sent (EVENTS; see eventsOn). */
   collectEvents: boolean;
@@ -22,6 +24,7 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     sessionSecret: env.SESSION_SECRET ?? '',
     adminToken: env.ADMIN_TOKEN ?? '',
     spotifyMock: env.SPOTIFY_MOCK === '1' || !liveSpotifyAllowed(env),
+    demoSongs: env.SPOTIFY_MOCK === '1',
     spotify: {
       clientId: env.SPOTIFY_CLIENT_ID ?? '',
       clientSecret: env.SPOTIFY_CLIENT_SECRET ?? '',

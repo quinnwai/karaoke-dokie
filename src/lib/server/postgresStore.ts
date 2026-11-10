@@ -538,15 +538,28 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         const chunk = unique.slice(i, i + 100);
         const params: unknown[] = [userId];
         const values = chunk.map((r) => {
-          params.push(r.track.id, r.pos, JSON.stringify(r.track));
-          return `($1, $${params.length - 2}, $${params.length - 1}, $${params.length})`;
+          params.push(r.track.id, r.pos, JSON.stringify(r.track), r.gen ?? 0);
+          return `($1, $${params.length - 3}, $${params.length - 2}, $${params.length - 1}, $${params.length})`;
         });
         await query(
-          `INSERT INTO user_saved (user_id, track_id, pos, track_json) VALUES ${values.join(', ')}
-           ON CONFLICT (user_id, track_id) DO UPDATE SET pos = EXCLUDED.pos, track_json = EXCLUDED.track_json`,
+          `INSERT INTO user_saved (user_id, track_id, pos, track_json, gen) VALUES ${values.join(', ')}
+           ON CONFLICT (user_id, track_id) DO UPDATE SET pos = EXCLUDED.pos, track_json = EXCLUDED.track_json, gen = EXCLUDED.gen`,
           params,
         );
       }
+    },
+    async markSavedSeen(userId, trackIds, gen) {
+      for (let i = 0; i < trackIds.length; i += 200) {
+        const chunk = trackIds.slice(i, i + 200);
+        await query(`UPDATE user_saved SET gen = $2 WHERE user_id = $1 AND track_id IN (${chunk.map((_, k) => `$${k + 3}`).join(', ')})`, [userId, gen, ...chunk]);
+      }
+    },
+    async countSavedFromGen(userId, gen) {
+      const [r] = await query('SELECT COUNT(*) AS n FROM user_saved WHERE user_id = $1 AND gen >= $2', [userId, gen]);
+      return r ? num(r.n) : 0;
+    },
+    async removeSavedBeforeGen(userId, gen) {
+      await query('DELETE FROM user_saved WHERE user_id = $1 AND gen < $2', [userId, gen]);
     },
     async removeSavedTracks(userId, trackIds) {
       for (let i = 0; i < trackIds.length; i += 200) {

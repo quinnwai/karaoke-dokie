@@ -27,6 +27,8 @@ import {
   describeError,
   ensureFreshTokens,
   noteSpotifyLimit,
+  RequestBudgetError,
+  requestMeter,
   SpotifyError,
   TIME_RANGES,
   type SleepFn,
@@ -46,6 +48,8 @@ const PURGE_EVERY_MS = 60 * 60_000;
 /** Liked-song pages (50 songs each) read at once, at least this long per group: about 8 requests a second. */
 const PAGE_CONCURRENCY = 5;
 const BATCH_MIN_MS = 600;
+/** Pages of the check for un-liked songs read per visit (the likes check and the rest of the budget share the 5). */
+export const VERIFY_PAGES_PER_VISIT = 3;
 
 export interface LibraryDeps {
   store: Store;
@@ -111,22 +115,28 @@ const logStore = (what: string) => (err: unknown) => {
 const dedupe = (tracks: Track[]): Track[] => [...new Map(tracks.map((t) => [t.id, t])).values()];
 
 async function syncLibrary(user: UserRecord, state: LibrarySyncState, { store, spotify, sleep = defaultSleep }: LibraryDeps, now: number): Promise<void> {
-  const token = user.spotify.accessToken;
   const budget = state.savedComplete ? INCREMENTAL_BUDGET : Infinity;
-  let used = 0;
-  const call = <T>(f: () => Promise<T>): Promise<T> => {
-    used++;
-    return f();
-  };
-  const open = () => used < budget;
+  // Every Web API request of this visit is counted by the client (retries and playlist pages included), and refused
+  // once the budget is used up. The likes themselves are read whatever the budget (below).
+  const meter = { count: 0, limit: budget };
+  await requestMeter.run(meter, () => syncWithin(user, state, { store, spotify, sleep }, now, meter, budget));
+}
 
-  /** Liked items a read could not map (local files, no title); Spotify's count includes them. */
-  let unreadable = 0;
+async function syncWithin(
+  user: UserRecord,
+  state: LibrarySyncState,
+  { store, spotify, sleep = defaultSleep }: LibraryDeps,
+  now: number,
+  meter: { count: number; limit: number },
+  budget: number,
+): Promise<void> {
+  const token = user.spotify.accessToken;
+  const open = () => meter.count < meter.limit;
+
   /** Reads liked-song pages from `offset` to the end, a few at a time; `onBatch` gets each group with its absolute indices. */
   async function readLikes(offset: number, onBatch: (items: { track: Track; index: number }[], total: number) => Promise<void>): Promise<number> {
-    const first = await call(() => spotify.getSavedPage(token, offset));
+    const first = await spotify.getSavedPage(token, offset);
     const total = first.total;
-    unreadable += first.items.filter((t) => !t).length;
     await onBatch(first.items.flatMap((track, i) => (track ? [{ track, index: offset + i }] : [])), total);
     state.savedNextOffset = Math.min(total, offset + 50);
     const offsets: number[] = [];
@@ -134,8 +144,7 @@ async function syncLibrary(user: UserRecord, state: LibrarySyncState, { store, s
     for (let i = 0; i < offsets.length; i += PAGE_CONCURRENCY) {
       const started = Date.now();
       const group = offsets.slice(i, i + PAGE_CONCURRENCY);
-      const pages = await Promise.all(group.map((o) => call(() => spotify.getSavedPage(token, o))));
-      unreadable += pages.reduce((n, p) => n + p.items.filter((t) => !t).length, 0);
+      const pages = await Promise.all(group.map((o) => spotify.getSavedPage(token, o)));
       await onBatch(pages.flatMap((p, k) => p.items.flatMap((track, j) => (track ? [{ track, index: group[k]! + j }] : []))), total);
       state.savedNextOffset = Math.min(total, group[group.length - 1]! + 50);
       if (i + PAGE_CONCURRENCY < offsets.length) {
@@ -162,17 +171,25 @@ async function syncLibrary(user: UserRecord, state: LibrarySyncState, { store, s
     state.savedNextOffset = total;
     state.savedComplete = true;
   } else {
-    await syncNewLikes();
+    await syncLikes();
   }
   await store.putLibraryState(user.id, state, now);
 
-  async function syncNewLikes(): Promise<void> {
+  /**
+   * A visit to a complete library: the newest likes first (always read, however many; counted but not limited by the
+   * budget), then, only when Spotify's count says something was un-liked, a few pages of a check pass that finds out
+   * what. The pass is spread over visits so that none goes over the budget.
+   */
+  async function syncLikes(): Promise<void> {
+    meter.limit = Infinity;
     const known = new Set((await store.listSavedTracks(user.id)).map((t) => t.id));
     const fresh: Track[] = [];
     let raw = 0; // new items in Spotify's count, the unreadable ones included
     let total = state.savedTotal;
+    let firstPage: (Track | null)[] = [];
     for (let offset = 0; ; offset += 50) {
-      const page = await call(() => spotify.getSavedPage(token, offset));
+      const page = await spotify.getSavedPage(token, offset);
+      if (offset === 0) firstPage = page.items;
       total = page.total;
       let reachedKnown = false;
       for (const item of page.items) {
@@ -185,35 +202,75 @@ async function syncLibrary(user: UserRecord, state: LibrarySyncState, { store, s
       }
       if (reachedKnown || page.items.length === 0 || offset + 50 >= total) break;
     }
-    if (total === state.savedTotal + raw) {
-      const base = Math.floor(now / 1000) * 10_000;
-      await store.putSavedTracks(user.id, fresh.map((track, i) => ({ track, pos: base + raw - i })));
-      state.savedTotal = total;
-      return;
+    meter.limit = budget;
+
+    const mismatch = total !== state.savedTotal + raw;
+    if (mismatch && !state.verify) {
+      // Something was un-liked (or the count changed some other way): start a check pass.
+      const gen = Math.max(Math.floor(now / 1000), (state.lastGen ?? 0) + 1);
+      state.lastGen = gen;
+      state.verify = { gen, offset: 0, unreadable: 0, attempt: 1 };
     }
-    // Something was un-liked (or the count changed some other way): read the likes in full and drop what is gone.
-    const all = new Map<string, { track: Track; pos: number }>();
-    const readTotal = await readLikes(0, async (items, t) => {
-      for (const { track, index } of items) all.set(track.id, { track, pos: posOf(index, t) });
-    });
-    await store.putSavedTracks(user.id, [...all.values()]);
-    // The library can change while it is read (a song moves across a page boundary and is missed), so nothing is
-    // dropped unless the read accounts for every item Spotify counted; a song kept by mistake is gone at the next
-    // count mismatch, one dropped by mistake would be lost until it is liked again.
-    if (all.size + unreadable >= readTotal) {
-      await store.removeSavedTracks(user.id, [...known].filter((id) => !all.has(id)));
+    const base = Math.floor(now / 1000) * 10_000;
+    await store.putSavedTracks(user.id, fresh.map((track, i) => ({ track, pos: base + raw - i, gen: state.verify?.gen ?? 0 })));
+    for (const t of fresh) known.add(t.id);
+    state.savedTotal = total;
+    if (state.verify) await verifyStep(state.verify, known, firstPage, total);
+  }
+
+  async function verifyStep(v: NonNullable<LibrarySyncState['verify']>, known: Set<string>, firstPage: (Track | null)[], total: number): Promise<void> {
+    /** Marks the songs of a page as seen by this pass, storing the ones we did not have. */
+    const mark = async (items: (Track | null)[], pageOffset: number, pageTotal: number) => {
+      v.unreadable += items.filter((t) => !t).length;
+      const seen: string[] = [];
+      const added: { track: Track; pos: number; gen: number }[] = [];
+      items.forEach((track, i) => {
+        if (!track) return;
+        if (known.has(track.id)) seen.push(track.id);
+        else {
+          added.push({ track, pos: posOf(pageOffset + i, pageTotal), gen: v.gen });
+          known.add(track.id);
+        }
+      });
+      await store.markSavedSeen(user.id, seen, v.gen);
+      await store.putSavedTracks(user.id, added);
+    };
+    if (v.offset === 0) {
+      await mark(firstPage, 0, total);
+      v.offset = 50;
     }
-    state.savedTotal = readTotal;
+    for (let n = 0; n < VERIFY_PAGES_PER_VISIT && open() && v.offset < total; n++) {
+      const page = await spotify.getSavedPage(token, v.offset);
+      total = page.total;
+      await mark(page.items, v.offset, page.total);
+      v.offset += 50;
+    }
+    if (v.offset < total) return; // the pass goes on at the next visit
+    // The pass is over. Nothing is removed unless it accounts for every item Spotify counts: the library can change while
+    // it is read (a song moves across a page boundary and is missed), and a song dropped by mistake is lost until it is
+    // liked again, while one kept by mistake only waits for the next pass.
+    const seen = await store.countSavedFromGen(user.id, v.gen);
+    if (seen + v.unreadable >= total) {
+      await store.removeSavedBeforeGen(user.id, v.gen);
+      state.verify = null;
+    } else if (v.attempt < 2) {
+      const gen = (state.lastGen ?? v.gen) + 1;
+      state.lastGen = gen;
+      state.verify = { gen, offset: 0, unreadable: 0, attempt: v.attempt + 1 };
+    } else {
+      state.verify = null;
+    }
+    state.savedTotal = total;
   }
 
   // ---- the rest, in order of importance, while the budget lasts ----
   const due = (at: number | undefined) => at === undefined || now - at >= TOP_REFRESH_MS;
   for (const range of TIME_RANGES) {
-    if (open() && due(state.top[range]?.at)) state.top[range] = { at: now, tracks: await call(() => spotify.getTopTracks(token, range)) };
+    if (open() && due(state.top[range]?.at)) state.top[range] = { at: now, tracks: await spotify.getTopTracks(token, range) };
   }
   if (open() && due(state.recent?.at)) {
     // Recent plays need a permission that users who signed in before it was added have not granted.
-    state.recent = await call(() => spotify.getRecentlyPlayed(token)).then(
+    state.recent = await spotify.getRecentlyPlayed(token).then(
       (tracks) => ({ at: now, tracks }),
       (err) => {
         if (!isScopeError(err)) throw err;
@@ -223,7 +280,7 @@ async function syncLibrary(user: UserRecord, state: LibrarySyncState, { store, s
   }
   if (open() && now >= state.playlistsRetryAt) {
     try {
-      const own = await call(() => spotify.getOwnPlaylists(token, user.id));
+      const own = await spotify.getOwnPlaylists(token, user.id);
       const ids = new Set(own.map((p) => p.id));
       for (const id of Object.keys(state.playlists)) if (!ids.has(id)) delete state.playlists[id];
       for (const p of own) {
@@ -231,15 +288,18 @@ async function syncLibrary(user: UserRecord, state: LibrarySyncState, { store, s
         // A playlist with no snapshot_id cannot be told apart from itself, so it is read once.
         if (stored && (stored.snapshotId === p.snapshotId || p.snapshotId === '')) continue;
         if (!open()) break;
-        const tracks = await call(() => spotify.getPlaylistSongs(token, p.id)).catch((err) => {
+        const tracks = await spotify.getPlaylistSongs(token, p.id).catch((err) => {
           if (err instanceof SpotifyError && [403, 404, 410].includes(err.status)) return [] as Track[];
           throw err;
         });
         state.playlists[p.id] = { snapshotId: p.snapshotId, tracks };
       }
     } catch (err) {
-      if (!isScopeError(err)) throw err;
-      state.playlistsRetryAt = now + PLAYLIST_RETRY_MS;
+      // Out of requests for this visit: the rest of the playlists wait for the next one.
+      if (err instanceof RequestBudgetError) {
+        // nothing to do
+      } else if (isScopeError(err)) state.playlistsRetryAt = now + PLAYLIST_RETRY_MS;
+      else throw err;
     }
   }
   await store.putLibraryState(user.id, state, now);
