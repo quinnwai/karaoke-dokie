@@ -22,11 +22,16 @@ export function levelOf(samples: ArrayLike<number>): number {
   return Math.min(1, Math.max(0, (db - LEVEL_FLOOR_DB) / (LEVEL_CEIL_DB - LEVEL_FLOOR_DB)));
 }
 
+/** Fewest samples that can say "muted": more than two recorder chunks (2048 each at most), so a tap is never mistaken for it. */
+export const MIN_MUTED_SAMPLES = 4800;
+
 /**
- * True for nothing at all, or only exact zeros: not a quiet room (even a quiet room's microphone wobbles), but a
- * microphone the system has muted (a call, another app, a permission taken back) or audio that never started.
+ * True for a long enough run of exact zeros: not a quiet room (even a quiet room's microphone wobbles), but a
+ * microphone the system has muted (a call, another app, a permission taken back). Too short a take (a quick tap on the
+ * hold button gives nothing at all) is a short hold, not a muted mic.
  */
 export function isDigitalSilence(samples: ArrayLike<number>): boolean {
+  if (samples.length < MIN_MUTED_SAMPLES) return false;
   for (let i = 0; i < samples.length; i++) if (samples[i] !== 0) return false;
   return true;
 }

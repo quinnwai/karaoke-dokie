@@ -550,6 +550,20 @@ describe('KaraokeApp', () => {
       expect(opened.closed).toBe(0);
     });
 
+    it('a tap that records nothing at all is a short hold, not a muted microphone, every time', async () => {
+      asBrowser(IPHONE);
+      const { mic, play, opened } = fakeMic('prompt');
+      render(<KaraokeApp api={fakeApi(null)} mic={mic} quietMs={0} />);
+      await startTest();
+      for (let i = 0; i < 2; i++) {
+        play(new Float32Array(0)); // pointerdown and pointerup back to back: no chunk was recorded
+        await hold(/lowest note/);
+        await waitFor(() => expect(lyrics()).toContain('Try again and hold the note a little longer'));
+        expect(screen.queryByRole('button', { name: 'Turn on microphone' })).toBeNull();
+      }
+      expect(opened.closed).toBe(0);
+    });
+
     it('a microphone that is on while the browser holds the audio back says to tap, and a tap starts it', async () => {
       asBrowser(PIXEL);
       const { mic, stall, hear, opened } = fakeMic('granted');

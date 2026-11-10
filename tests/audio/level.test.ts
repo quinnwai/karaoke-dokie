@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HEARD_LEVEL, isDigitalSilence, LEVEL_CEIL_DB, LEVEL_FLOOR_DB, levelOf } from '../../src/lib/audio/level';
+import { HEARD_LEVEL, isDigitalSilence, MIN_MUTED_SAMPLES, LEVEL_CEIL_DB, LEVEL_FLOOR_DB, levelOf } from '../../src/lib/audio/level';
 import { noise, sine, voice } from '../helpers/synth';
 
 /** A constant signal at this many dBFS (its RMS is its amplitude). */
@@ -52,10 +52,15 @@ describe('levelOf', () => {
 });
 
 describe('isDigitalSilence', () => {
-  it('is true for nothing and for exact zeros: a microphone the system muted, or audio that never started', () => {
-    expect(isDigitalSilence(new Float32Array(0))).toBe(true);
+  it('is true for a long run of exact zeros: a microphone the system muted', () => {
     expect(isDigitalSilence(new Float32Array(48000))).toBe(true);
-    expect(isDigitalSilence([0, 0, 0])).toBe(true);
+    expect(isDigitalSilence(new Float32Array(MIN_MUTED_SAMPLES))).toBe(true);
+  });
+
+  it('is false for an empty or short take: a quick tap on the hold button is a short hold, not a muted mic', () => {
+    expect(isDigitalSilence(new Float32Array(0))).toBe(false);
+    expect(isDigitalSilence([0, 0, 0])).toBe(false);
+    expect(isDigitalSilence(new Float32Array(2048 * 2))).toBe(false); // two of the largest recorder chunks
   });
 
   it('is false for any sound at all, even a quiet room\'s hiss far below the meter\'s floor', () => {

@@ -291,8 +291,8 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
       return;
     }
     const samples = rec.take();
-    // Nothing at all came in, or only exact zeros. A quiet singer's microphone still wobbles; this is one the system has
-    // muted (a call, another app) or audio that never started, and "hold the note a little longer" would be said for
+    // Only exact zeros for long enough (a tap gives a short or empty take, which is just a short hold). A quiet singer's microphone still wobbles; this is one the system has
+    // muted (a call, another app) and "hold the note a little longer" would be said for
     // ever. Back to the mic step, which asks again and shows what the microphone hears.
     if (isDigitalSilence(samples)) {
       releaseMic();
