@@ -17,6 +17,14 @@ export interface FakeSpotify {
   quota: { on: boolean; retryAfter: number | null };
   /** The next `times` requests whose "path?query" contains `match` are answered 429 (not a quota one) with this Retry-After, then it passes. */
   shortLimit: { match: string; times: number; retryAfter: number } | null;
+  /** The liked songs by index into the song pool, newest first. `like` adds a new song on top; `unlike` removes one wherever it is. */
+  liked: number[];
+  like(): number;
+  unlike(index: number): void;
+  /** The user's own playlist "p1": its snapshot_id and songs. Change both to simulate an edit. */
+  playlist: { snapshotId: string; items: number[] };
+  /** How many own playlists there are (p1, p2, ...), all with the playlist's snapshot and songs; listed 50 to a page. */
+  playlistCount: number;
 }
 
 const apiTrack = (i: number) => {
@@ -40,8 +48,19 @@ const apiTrack = (i: number) => {
 
 export function fakeSpotify({ liked = 1750 }: { liked?: number } = {}): FakeSpotify {
   const requests: string[] = [];
+  let nextNew = 100_000;
   const fake: FakeSpotify = {
     requests,
+    liked: Array.from({ length: liked }, (_, i) => i),
+    like: () => {
+      fake.liked.unshift(nextNew);
+      return nextNew++;
+    },
+    unlike: (index) => {
+      fake.liked = fake.liked.filter((i) => i !== index);
+    },
+    playlist: { snapshotId: 'snap-1', items: [15] },
+    playlistCount: 1,
     apiRequests: () => requests.filter((r) => !r.includes('accounts.spotify.com')),
     quota: { on: false, retryAfter: 12098 },
     shortLimit: null,
@@ -67,11 +86,16 @@ export function fakeSpotify({ liked = 1750 }: { liked?: number } = {}): FakeSpot
       if (path === '/me/player/recently-played') return json({ items: [3, 7, 3].map((i) => ({ track: apiTrack(i) })) });
       if (path === '/me/tracks') {
         const offset = Number(url.searchParams.get('offset') ?? 0);
-        const count = Math.max(0, Math.min(50, liked - offset));
-        return json({ items: Array.from({ length: count }, (_, k) => ({ track: apiTrack(offset + k) })), total: liked, next: null });
+        const page = fake.liked.slice(offset, offset + 50);
+        return json({ items: page.map((i) => ({ track: apiTrack(i) })), total: fake.liked.length, next: null });
       }
-      if (path === '/me/playlists') return json({ items: [{ id: 'p1', owner: { id: 'real-singer' } }], next: null });
-      if (path.startsWith('/playlists/')) return json({ items: [{ item: apiTrack(15) }], next: null });
+      if (path === '/me/playlists') {
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        const ids = Array.from({ length: Math.max(0, Math.min(50, fake.playlistCount - offset)) }, (_, k) => `p${offset + k + 1}`);
+        const next = offset + 50 < fake.playlistCount ? `https://api.spotify.com/v1/me/playlists?limit=50&offset=${offset + 50}` : null;
+        return json({ items: ids.map((id) => ({ id, snapshot_id: fake.playlist.snapshotId, owner: { id: 'real-singer' } })), next });
+      }
+      if (path.startsWith('/playlists/')) return json({ items: fake.playlist.items.map((i) => ({ item: apiTrack(i) })), next: null });
       return json('not found', 404);
     },
   };

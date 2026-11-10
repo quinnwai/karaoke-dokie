@@ -109,6 +109,16 @@ export function createMockSpotifyClient(): SpotifyClient {
     async getPlaylistTracks() {
       return [MOCK_TRACKS[10]!, MOCK_TRACKS[15]!].map((t, i) => ({ ...t, playRank: i }));
     },
+    async getSavedPage(_token, offset) {
+      const saved = [...MOCK_TRACKS].reverse();
+      return { items: saved.slice(offset, offset + 50), total: saved.length };
+    },
+    async getOwnPlaylists() {
+      return [{ id: 'mock-playlist', snapshotId: 'mock-snapshot' }];
+    },
+    async getPlaylistSongs() {
+      return [MOCK_TRACKS[10]!, MOCK_TRACKS[15]!];
+    },
     async getRecentlyPlayed() {
       return [MOCK_TRACKS[3]!, MOCK_TRACKS[7]!, MOCK_TRACKS[3]!].map((t, i) => ({ ...t, playRank: i }));
     },

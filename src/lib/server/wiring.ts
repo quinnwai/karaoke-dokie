@@ -13,6 +13,7 @@ import { scoreMatch } from '../songs/score';
 import { resolveSongRange, songKey } from '../songs/resolve';
 import { createSongService, type ResolveResult, type SongDeps, type SongService } from './songService';
 import { createSpotifyClient, type SpotifyClient } from './spotify';
+import { countingFetch } from './spotifyCalls';
 import type { SongMoodsRecord, Store, UsdbIndexEntry } from './store';
 import { createTrackCache, type TrackCache } from './trackCache';
 
@@ -157,14 +158,14 @@ export function getAppContext(): AppContext {
   const store = getStore();
   if (!g.__karaokeApp || g.__karaokeApp.store !== store) {
     const config = readConfig();
-    const deps = productionSongDeps(store, config.spotifyMock);
+    const deps = productionSongDeps(store, config.demoSongs);
     // Mock mode's memory store starts empty, so the catalogue would be too. Never into Postgres,
     // where the placeholder seeds would overwrite real ranges.
-    const seeded = config.spotifyMock && pickStoreKind() === 'memory' ? seedStore(store, SEED_SONGS) : Promise.resolve();
+    const seeded = config.demoSongs && pickStoreKind() === 'memory' ? seedStore(store, SEED_SONGS) : Promise.resolve();
     g.__karaokeApp = {
       config,
       store,
-      spotify: config.spotifyMock ? createMockSpotifyClient() : createSpotifyClient(config.spotify),
+      spotify: config.spotifyMock ? createMockSpotifyClient() : createSpotifyClient(config.spotify, countingFetch((i, init) => fetch(i, init), store)),
       songs: createSongService(store, deps),
       tracks: createTrackCache(),
       catalogue: createCatalogue(async () => {

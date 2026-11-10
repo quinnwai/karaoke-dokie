@@ -1,5 +1,6 @@
 // Spotify Web API client: authorization code flow, token refresh, library reads.
 // `fetch` is injected so tests run offline; SPOTIFY_MOCK=1 swaps in mockSpotify.ts.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { TimeRange, Track } from '../contracts';
 import type { SpotifyTokens, Store, UserRecord } from './store';
 
@@ -34,6 +35,20 @@ const REFRESH_MARGIN_MS = 60_000;
 const RATE_LIMIT_RETRIES = 3;
 const RATE_LIMIT_MAX_WAIT_MS = 10_000;
 
+/**
+ * A per-visit meter of Web API requests (QWW-55 PR 2): the library sync runs inside one, and the client counts every
+ * request it sends (a retry after a 429, each page of a playlist) and refuses to send more once `limit` is reached.
+ */
+export const requestMeter = new AsyncLocalStorage<{ count: number; limit: number }>();
+
+/** Thrown, with nothing sent, when the visit's request budget is used up. */
+export class RequestBudgetError extends Error {
+  constructor() {
+    super('the request budget of this visit is used up');
+    this.name = 'RequestBudgetError';
+  }
+}
+
 export type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 export type SleepFn = (ms: number) => Promise<void>;
 
@@ -65,6 +80,15 @@ export interface SpotifyClient {
   getRecentlyPlayed(accessToken: string): Promise<Track[]>;
   /** Songs in playlists the user made or collaborates on (not ones they only follow), deduplicated. */
   getPlaylistTracks(accessToken: string): Promise<Track[]>;
+  /**
+   * One page (50) of liked songs from `offset`, newest first. An item that cannot be matched (a local file, no title)
+   * is null, so positions stay Spotify's; `total` is Spotify's count of liked items, unmatched ones included.
+   */
+  getSavedPage(accessToken: string, offset: number): Promise<{ items: (Track | null)[]; total: number }>;
+  /** The playlists the user made or collaborates on, with the snapshot_id that changes when a playlist's songs do. */
+  getOwnPlaylists(accessToken: string, ownerId: string): Promise<{ id: string; snapshotId: string }[]>;
+  /** One playlist's songs (the first MAX_PLAYLIST_TRACKS), deduplicated. */
+  getPlaylistSongs(accessToken: string, playlistId: string): Promise<Track[]>;
 }
 
 export type { TimeRange };
@@ -299,6 +323,11 @@ export function createSpotifyClient(
     patience: { retries: number; maxWaitMs: number; onRateLimited?: () => void } = { retries: RATE_LIMIT_RETRIES, maxWaitMs: RATE_LIMIT_MAX_WAIT_MS },
   ): Promise<T> {
     for (let attempt = 0; ; attempt++) {
+      const meter = requestMeter.getStore();
+      if (meter) {
+        if (meter.count >= meter.limit) throw new RequestBudgetError();
+        meter.count++;
+      }
       const res = await fetchFn(url.startsWith('http') ? url : `${SPOTIFY_API}${url}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -392,6 +421,48 @@ export function createSpotifyClient(
         if (t) out.push(t);
       }
       return out;
+    },
+    async getSavedPage(accessToken, offset) {
+      type Page = { items: { track: SpotifyTrackObject | null }[]; total?: number };
+      const patience = { retries: SAVED_RATE_LIMIT_RETRIES, maxWaitMs: SAVED_RATE_LIMIT_MAX_WAIT_MS };
+      const page = await api<Page>(accessToken, `/me/tracks?limit=50&offset=${offset}`, patience);
+      return { items: page.items.map((item) => mapTrack(item.track, 0)), total: typeof page.total === 'number' ? page.total : offset + page.items.length };
+    },
+    async getOwnPlaylists(accessToken, ownerId) {
+      type ListPage = { items: { id: string; snapshot_id?: string; collaborative?: boolean; owner?: { id?: string } }[]; next: string | null };
+      const own: { id: string; snapshotId: string }[] = [];
+      let list: ListPage | null = await api<ListPage>(accessToken, '/me/playlists?limit=50');
+      while (list) {
+        for (const p of list.items) {
+          if (p && (p.owner?.id === ownerId || p.collaborative)) own.push({ id: p.id, snapshotId: p.snapshot_id ?? '' });
+        }
+        list = list.next && own.length < MAX_PLAYLISTS ? await api<ListPage>(accessToken, list.next) : null;
+      }
+      return own.slice(0, MAX_PLAYLISTS);
+    },
+    async getPlaylistSongs(accessToken, playlistId) {
+      // Newer apps read playlist songs from /items (entries carry `item`); older ones from /tracks (`track`).
+      type ItemPage = { items: { item?: SpotifyTrackObject | null; track?: SpotifyTrackObject | null }[]; next: string | null };
+      let page: ItemPage;
+      try {
+        page = await api<ItemPage>(accessToken, `/playlists/${playlistId}/items?limit=50`);
+      } catch (err) {
+        if (!(err instanceof SpotifyError && (err.status === 404 || err.status === 410))) throw err;
+        page = await api<ItemPage>(accessToken, `/playlists/${playlistId}/tracks?limit=50`);
+      }
+      const out: Track[] = [];
+      const seen = new Set<string>();
+      for (;;) {
+        for (const entry of page.items) {
+          const t = mapTrack(entry.item ?? entry.track, out.length);
+          if (t && !seen.has(t.id) && out.length < MAX_PLAYLIST_TRACKS) {
+            seen.add(t.id);
+            out.push(t);
+          }
+        }
+        if (!page.next || out.length >= MAX_PLAYLIST_TRACKS) return out;
+        page = await api<ItemPage>(accessToken, page.next);
+      }
     },
     async getPlaylistTracks(accessToken) {
       type ListPage = { items: { id: string; collaborative?: boolean; owner?: { id?: string } }[]; next: string | null };

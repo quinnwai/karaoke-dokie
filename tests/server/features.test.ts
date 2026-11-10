@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KnownSongsResponse, Match } from '../../src/lib/contracts';
-import { duetsAndMoodsOn, pickSongsOn, readConfig } from '../../src/lib/server/config';
+import { duetsAndMoodsOn, liveSpotifyAllowed, pickSongsOn, readConfig } from '../../src/lib/server/config';
 import { applyDuetsAndMoods, applyDuetsToKnownSongs, withoutDuetRange, withoutDuetsAndMoods } from '../../src/lib/server/features';
 import type { SongMoodsRecord } from '../../src/lib/server/store';
 
@@ -21,6 +21,34 @@ describe('the duets and moods switch (QWW-43)', () => {
       duetsAndMoods: true,
       moodsShipped: ['upbeat', 'heartfelt'],
     });
+  });
+});
+
+describe('real Spotify only where it is meant (QWW-55 PR 2)', () => {
+  it('is allowed on a deployed preview or production, and on SPOTIFY_LIVE=1, and nowhere else', () => {
+    expect(liveSpotifyAllowed({ VERCEL_ENV: 'preview' })).toBe(true);
+    expect(liveSpotifyAllowed({ VERCEL_ENV: 'production' })).toBe(true);
+    expect(liveSpotifyAllowed({ SPOTIFY_LIVE: '1' })).toBe(true);
+    for (const env of [{}, { VERCEL_ENV: 'development' }, { SPOTIFY_LIVE: 'on' }, { SPOTIFY_LIVE: '' }, { CI: 'true' }, { NODE_ENV: 'production' }]) {
+      expect(liveSpotifyAllowed(env), JSON.stringify(env)).toBe(false);
+    }
+  });
+
+  it('makes the config use the offline mock wherever real Spotify is not allowed, even with credentials', () => {
+    const creds = { SPOTIFY_CLIENT_ID: 'id', SPOTIFY_CLIENT_SECRET: 'secret', SPOTIFY_REDIRECT_URI: 'http://x/cb' };
+    expect(readConfig({ ...creds }).spotifyMock).toBe(true);
+    expect(readConfig({ ...creds, NODE_ENV: 'production' }).spotifyMock).toBe(true);
+    expect(readConfig({ ...creds, VERCEL_ENV: 'production' }).spotifyMock).toBe(false);
+    expect(readConfig({ ...creds, VERCEL_ENV: 'preview' }).spotifyMock).toBe(false);
+    expect(readConfig({ ...creds, SPOTIFY_LIVE: '1' }).spotifyMock).toBe(false);
+    expect(readConfig({ ...creds, VERCEL_ENV: 'production', SPOTIFY_MOCK: '1' }).spotifyMock).toBe(true);
+  });
+
+  it('keeps the placeholder demo songs and ranges for SPOTIFY_MOCK=1 only, so a local run against a real database never caches them', () => {
+    expect(readConfig({}).spotifyMock).toBe(true);
+    expect(readConfig({}).demoSongs).toBe(false);
+    expect(readConfig({ SPOTIFY_MOCK: '1' }).demoSongs).toBe(true);
+    expect(readConfig({ VERCEL_ENV: 'production' }).demoSongs).toBe(false);
   });
 });
 

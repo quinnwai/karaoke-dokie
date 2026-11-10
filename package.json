@@ -15,6 +15,7 @@
     "usdb:fill": "tsx scripts/usdb-fill.ts",
     "report:coverage": "tsx scripts/coverage-report.ts",
     "report:facets": "tsx scripts/facets-report.ts",
+    "report:library": "tsx scripts/library-measure.ts",
     "ranges:build": "tsx scripts/note-ranges-build.ts",
     "ranges:import": "tsx scripts/note-ranges-import.ts",
     "moods:label": "tsx scripts/moods-label.ts",

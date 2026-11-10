@@ -514,6 +514,90 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       );
     },
 
+    // ---- stored Spotify library per user (QWW-55 PR 2) ----
+    async getLibraryState(userId) {
+      const [r] = await query('SELECT state_json, last_seen_at FROM user_library WHERE user_id = $1', [userId]);
+      return r ? { state: JSON.parse(str(r.state_json)), lastSeenAt: num(r.last_seen_at) } : null;
+    },
+    async putLibraryState(userId, state, lastSeenAt) {
+      await query(
+        `INSERT INTO user_library (user_id, state_json, last_seen_at) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE SET state_json = EXCLUDED.state_json, last_seen_at = EXCLUDED.last_seen_at`,
+        [userId, JSON.stringify(state), lastSeenAt],
+      );
+    },
+    async listSavedTracks(userId) {
+      const rows = await query('SELECT track_json FROM user_saved WHERE user_id = $1 ORDER BY pos DESC, track_id', [userId]);
+      return rows.map((r) => JSON.parse(str(r.track_json)));
+    },
+    async putSavedTracks(userId, rows) {
+      // Many rows per statement (a page of liked songs is 50), in chunks that stay under the parameter limit.
+      // One row per song: a statement that names a key twice is an error in Postgres (a song can sit on two pages when a like arrives mid-read).
+      const unique = [...new Map(rows.map((r) => [r.track.id, r])).values()];
+      for (let i = 0; i < unique.length; i += 100) {
+        const chunk = unique.slice(i, i + 100);
+        const params: unknown[] = [userId];
+        const values = chunk.map((r) => {
+          params.push(r.track.id, r.pos, JSON.stringify(r.track), r.gen ?? 0);
+          return `($1, $${params.length - 3}, $${params.length - 2}, $${params.length - 1}, $${params.length})`;
+        });
+        await query(
+          `INSERT INTO user_saved (user_id, track_id, pos, track_json, gen) VALUES ${values.join(', ')}
+           ON CONFLICT (user_id, track_id) DO UPDATE SET pos = EXCLUDED.pos, track_json = EXCLUDED.track_json, gen = EXCLUDED.gen`,
+          params,
+        );
+      }
+    },
+    async markSavedSeen(userId, trackIds, gen) {
+      for (let i = 0; i < trackIds.length; i += 200) {
+        const chunk = trackIds.slice(i, i + 200);
+        await query(`UPDATE user_saved SET gen = $2 WHERE user_id = $1 AND track_id IN (${chunk.map((_, k) => `$${k + 3}`).join(', ')})`, [userId, gen, ...chunk]);
+      }
+    },
+    async countSavedFromGen(userId, gen) {
+      const [r] = await query('SELECT COUNT(*) AS n FROM user_saved WHERE user_id = $1 AND gen >= $2', [userId, gen]);
+      return r ? num(r.n) : 0;
+    },
+    async removeSavedBeforeGen(userId, gen) {
+      await query('DELETE FROM user_saved WHERE user_id = $1 AND gen < $2', [userId, gen]);
+    },
+    async removeSavedTracks(userId, trackIds) {
+      for (let i = 0; i < trackIds.length; i += 200) {
+        const chunk = trackIds.slice(i, i + 200);
+        await query(`DELETE FROM user_saved WHERE user_id = $1 AND track_id IN (${chunk.map((_, k) => `$${k + 2}`).join(', ')})`, [userId, ...chunk]);
+      }
+    },
+    async deleteUserLibrary(userId) {
+      // The state first: a failure between the two leaves liked rows with no state, which the next first read clears,
+      // not a state that says "complete" over missing rows.
+      await query('DELETE FROM user_library WHERE user_id = $1', [userId]);
+      await query('DELETE FROM user_saved WHERE user_id = $1', [userId]);
+    },
+    async deleteIdleLibraries(before) {
+      const idle = (await query('SELECT user_id FROM user_library WHERE last_seen_at < $1', [before])).map((r) => str(r.user_id));
+      for (const id of idle) {
+        await query('DELETE FROM user_library WHERE user_id = $1', [id]);
+        await query('DELETE FROM user_saved WHERE user_id = $1', [id]);
+      }
+      return idle.length;
+    },
+
+    // ---- Spotify request counts (QWW-55 PR 2) ----
+    async addSpotifyCalls(day, caller, n) {
+      await query(
+        `INSERT INTO spotify_calls (day, caller, calls) VALUES ($1, $2, $3)
+         ON CONFLICT (day, caller) DO UPDATE SET calls = spotify_calls.calls + EXCLUDED.calls`,
+        [day, caller, n],
+      );
+    },
+    async listSpotifyCalls(day) {
+      const rows =
+        day === undefined
+          ? await query('SELECT day, caller, calls FROM spotify_calls ORDER BY day DESC, caller', [])
+          : await query('SELECT day, caller, calls FROM spotify_calls WHERE day = $1 ORDER BY caller', [day]);
+      return rows.map((r) => ({ day: str(r.day), caller: str(r.caller), calls: num(r.calls) }));
+    },
+
     // ---- tempo (QWW-40) ----
     async putSongTempo(entries) {
       // One row per key (fields merged, the last entry winning); a field left unset keeps what is stored,

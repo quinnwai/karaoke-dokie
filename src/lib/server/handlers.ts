@@ -25,7 +25,9 @@ import {
   serializeCookie,
   signSession,
 } from './session';
-import { assertSpotifyOpen, describeError, noteSpotifyLimit, readUserTracks } from './spotify';
+import { disconnectUser, loadLibrary } from './library';
+import { assertSpotifyOpen, describeError, noteSpotifyLimit } from './spotify';
+import { withCaller } from './spotifyCalls';
 import { DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT, type UserRecord } from './store';
 import { intParam, validateEvents, validateFeedback, validateVocalRange } from './validate';
 import type { AppContext } from './wiring';
@@ -106,9 +108,10 @@ function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
  * (QWW-55, which was a 502 and an empty screen): the caller answers with the catalogue's songs and says so.
  * A read that outlives the deadline carries on and, if it finishes, is cached for the next request.
  */
-async function loadTracks(user: UserRecord, ctx: AppContext): Promise<Track[] | null> {
+async function loadTracks(user: UserRecord, ctx: AppContext, caller: string): Promise<Track[] | null> {
   try {
-    return await withDeadline(ctx.tracks.get(user.id, () => readUserTracks(ctx.store, ctx.spotify, user)), LIBRARY_DEADLINE_MS);
+    const load = () => withCaller(caller, () => loadLibrary(user, { store: ctx.store, spotify: ctx.spotify }));
+    return await withDeadline(ctx.tracks.get(user.id, load), LIBRARY_DEADLINE_MS);
   } catch (err) {
     console.error(`[spotify] could not load the library: ${describeError(err)}`);
     return null;
@@ -154,7 +157,7 @@ export async function callback(req: Request, ctx: AppContext): Promise<Response>
     step = 'token exchange';
     const tokens = await ctx.spotify.exchangeCode(code);
     step = 'profile (/me)';
-    const me = await ctx.spotify.getMe(tokens.accessToken);
+    const me = await withCaller('site:/api/auth/callback', () => ctx.spotify.getMe(tokens.accessToken));
     step = 'saving the user';
     await ctx.store.upsertUser({ id: me.id, displayName: me.displayName, spotify: tokens });
     ctx.tracks.invalidate(me.id);
@@ -168,6 +171,18 @@ export async function callback(req: Request, ctx: AppContext): Promise<Response>
     await noteSpotifyLimit(ctx.store, err);
     return fail('spotify');
   }
+}
+
+/**
+ * Disconnect (Spotify's terms, QWW-55 PR 2): deletes everything stored about the user's Spotify library and signs them
+ * out. Their saved vocal range stays, and their sign-in tokens until they remove the app in Spotify's account settings.
+ */
+export async function disconnect(req: Request, ctx: AppContext): Promise<Response> {
+  const user = await requireUser(req, ctx);
+  if (user instanceof Response) return user;
+  await disconnectUser(ctx.store, user.id);
+  ctx.tracks.invalidate(user.id);
+  return json({ ok: true }, 200, [['set-cookie', clearCookie(SESSION_COOKIE, { secure: isSecure(req) })]]);
 }
 
 export async function logout(req: Request): Promise<Response> {
@@ -215,7 +230,7 @@ export async function recommendations(req: Request, ctx: AppContext): Promise<Re
   if (offset === null || limit === null) return errorJson(400, 'bad-request', 'offset must be >= 0 and limit 1..50');
   const range = await ctx.store.getRange(user.id);
   if (!range) return errorJson(409, 'no-range', 'Save a vocal range first (PUT /api/me/range)');
-  const tracks = await loadTracks(user, ctx);
+  const tracks = await loadTracks(user, ctx, 'site:/api/recommendations');
   if (!tracks) return withoutLibrary(range, all ? { all: true } : { offset, limit }, ctx);
   const body: RecommendationsResponse = all
     ? await ctx.songs.recommend(tracks, range, offset, limit, { all: true })
@@ -226,7 +241,7 @@ export async function recommendations(req: Request, ctx: AppContext): Promise<Re
 export async function knownSongs(req: Request, ctx: AppContext): Promise<Response> {
   const user = await requireUser(req, ctx);
   if (user instanceof Response) return user;
-  const tracks = await loadTracks(user, ctx);
+  const tracks = await loadTracks(user, ctx, 'site:/api/songs/known');
   if (!tracks) return json({ songs: [], libraryUnavailable: true } satisfies KnownSongsResponse);
   const body: KnownSongsResponse = await ctx.songs.knownSongs(tracks);
   return json(applyDuetsToKnownSongs(body, ctx.config));

@@ -1,16 +1,16 @@
 // Puts every popularity source on one scale and writes it to src/lib/songs/popularityScale.ts
 // (QWW-32; how, in src/lib/popularity/calibrate.ts). Reads the measured catalogue's USDB views and
 // karaoke popularity and Deezer rank (song_deezer), plus Spotify popularity from signed-in libraries when Spotify sends it.
-// Usage: npm run popularity:calibrate [-- --dry-run] [--no-spotify]
-// Needs DATABASE_URL (run usdb:index first), and for Spotify SPOTIFY_CLIENT_ID/SECRET/REDIRECT_URI.
+// Usage: npm run popularity:calibrate [-- --dry-run] [--no-spotify] [--live | --snapshot library.json]
+// Needs DATABASE_URL (run usdb:index first). Spotify popularity comes from signed-in libraries, but only with --live (real Spotify,
+// SPOTIFY_CLIENT_ID/SECRET/REDIRECT_URI, spends the shared quota); otherwise from a snapshot or the offline mock.
 // Rerun after usdb:index or popularity:import changes the numbers a lot.
 
 import { writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { calibrate, type CalibrationSong } from '../src/lib/popularity/calibrate';
-import { readConfig } from '../src/lib/server/config';
 import { getStore, neonQuery } from '../src/lib/server/getStore';
-import { createSpotifyClient, readUserTracks } from '../src/lib/server/spotify';
+import { readScriptLibrary } from '../src/lib/server/scriptLibrary';
 import { songKey } from '../src/lib/songs/resolve';
 import { MEASURED_RANK, SOURCE_RANK } from '../src/lib/songs/sourceRank';
 
@@ -20,12 +20,11 @@ const num = (v: unknown): number | undefined => (v === null || v === undefined |
 
 async function spotifyPopularity(): Promise<Map<string, number>> {
   const store = getStore();
-  const spotify = createSpotifyClient(readConfig().spotify);
   const out = new Map<string, number>();
   for (const id of await store.listUserIds()) {
     const user = await store.getUser(id);
     if (!user) continue;
-    const tracks = await readUserTracks(store, spotify, user);
+    const { tracks } = await readScriptLibrary(user, { script: 'popularity-calibrate', argv: process.argv.slice(2), env: process.env, store });
     const withPopularity = tracks.filter((t) => typeof t.popularity === 'number');
     console.log(`${user.displayName}: ${tracks.length} songs, ${withPopularity.length} with Spotify popularity`);
     for (const t of withPopularity) out.set(songKey(t.artist, t.title), t.popularity!);
@@ -34,7 +33,7 @@ async function spotifyPopularity(): Promise<Map<string, number>> {
 }
 
 async function main() {
-  const { values } = parseArgs({ options: { 'dry-run': { type: 'boolean' }, 'no-spotify': { type: 'boolean' } } });
+  const { values } = parseArgs({ options: { 'dry-run': { type: 'boolean' }, 'no-spotify': { type: 'boolean' }, live: { type: 'boolean' }, snapshot: { type: 'string' }, 'save-snapshot': { type: 'string' } } });
   const url = process.env.DATABASE_URL?.trim();
   if (!url) throw new Error('Set DATABASE_URL');
   const query = neonQuery(url);

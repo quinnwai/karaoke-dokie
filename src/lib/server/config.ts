@@ -8,6 +8,8 @@ export interface ServerConfig {
   /** Empty = admin pages disabled (always 403). */
   adminToken: string;
   spotifyMock: boolean;
+  /** SPOTIFY_MOCK=1 asked for the offline demo: the placeholder songs and ranges. Not set just because real Spotify is not allowed (spotifyMock is). */
+  demoSongs: boolean;
   spotify: SpotifyConfig;
   /** Whether POST /api/events stores the beta events it is sent (EVENTS; see eventsOn). */
   collectEvents: boolean;
@@ -21,7 +23,8 @@ export function readConfig(env: Record<string, string | undefined> = process.env
   return {
     sessionSecret: env.SESSION_SECRET ?? '',
     adminToken: env.ADMIN_TOKEN ?? '',
-    spotifyMock: env.SPOTIFY_MOCK === '1',
+    spotifyMock: env.SPOTIFY_MOCK === '1' || !liveSpotifyAllowed(env),
+    demoSongs: env.SPOTIFY_MOCK === '1',
     spotify: {
       clientId: env.SPOTIFY_CLIENT_ID ?? '',
       clientSecret: env.SPOTIFY_CLIENT_SECRET ?? '',
@@ -31,6 +34,15 @@ export function readConfig(env: Record<string, string | undefined> = process.env
     duetsAndMoods: duetsAndMoodsOn(env),
     moodsShipped: parseShippedMoods(env.MOODS_SHIPPED),
   };
+}
+
+/**
+ * Whether this process may call the real Spotify (QWW-55 PR 2): a deployed preview or production (Vercel sets
+ * VERCEL_ENV), or SPOTIFY_LIVE=1 for a run that means it (a script's --live sets it). Everywhere else (local dev, CI,
+ * an agent's run) the offline mock is used, so nothing takes from the quota that testers share.
+ */
+export function liveSpotifyAllowed(env: Record<string, string | undefined>): boolean {
+  return env.VERCEL_ENV === 'preview' || env.VERCEL_ENV === 'production' || env.SPOTIFY_LIVE === '1';
 }
 
 /**

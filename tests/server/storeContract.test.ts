@@ -460,6 +460,57 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(await s.getSpotifyBlock()).toBe(1_800_000_012_000);
   });
 
+  it('stores a user\'s library: liked songs by position, the sync state, removal, disconnect and the idle sweep (QWW-55 PR 2)', async () => {
+    const s = make();
+    const track = (id: string) => ({ id, title: `Song ${id}`, artist: 'Artist', artistId: 'a', spotifyUrl: `https://open.spotify.com/track/${id}`, playRank: 0 });
+    const state = { savedTotal: 3, savedComplete: true, savedNextOffset: 3, top: { short_term: { at: 5, tracks: [track('t1')] } }, recent: null, playlists: { p1: { snapshotId: 's1', tracks: [track('x')] } }, playlistsRetryAt: 0 };
+    expect(await s.getLibraryState('u1')).toBeNull();
+    expect(await s.listSavedTracks('u1')).toEqual([]);
+    await s.putSavedTracks('u1', [{ track: track('a'), pos: 1 }, { track: track('c'), pos: 3 }, { track: track('b'), pos: 2 }]);
+    await s.putSavedTracks('u2', [{ track: track('z'), pos: 1 }]);
+    await s.putLibraryState('u1', state, 1000);
+    expect((await s.listSavedTracks('u1')).map((t) => t.id)).toEqual(['c', 'b', 'a']); // newest first
+    expect(await s.getLibraryState('u1')).toStrictEqual({ state, lastSeenAt: 1000 });
+    await s.putSavedTracks('u1', [{ track: track('a'), pos: 9 }]); // a song liked again moves up, no duplicate
+    expect((await s.listSavedTracks('u1')).map((t) => t.id)).toEqual(['a', 'c', 'b']);
+    await s.removeSavedTracks('u1', ['c', 'nope']);
+    expect((await s.listSavedTracks('u1')).map((t) => t.id)).toEqual(['a', 'b']);
+    await s.putLibraryState('u2', { ...state, savedTotal: 1 }, 50);
+    expect(await s.deleteIdleLibraries(100)).toBe(1); // u2 was last seen at 50
+    expect(await s.getLibraryState('u2')).toBeNull();
+    expect(await s.listSavedTracks('u2')).toEqual([]);
+    expect(await s.listSavedTracks('u1')).toHaveLength(2);
+    await s.deleteUserLibrary('u1');
+    expect(await s.getLibraryState('u1')).toBeNull();
+    expect(await s.listSavedTracks('u1')).toEqual([]);
+  });
+
+  it('writes a big page of liked songs at once (QWW-55 PR 2)', async () => {
+    const s = make();
+    const rows = Array.from({ length: 250 }, (_, i) => ({ track: { id: `t${i}`, title: `Song ${i}`, artist: 'A', artistId: 'a', spotifyUrl: '', playRank: 0 }, pos: i }));
+    await s.putSavedTracks('u1', rows);
+    expect(await s.listSavedTracks('u1')).toHaveLength(250);
+    // A song on two pages (a like arrived mid-read) is one row, and one statement may not name a key twice in Postgres.
+    await s.putSavedTracks('u1', [rows[0]!, { ...rows[0]!, pos: 999 }, rows[1]!]);
+    expect(await s.listSavedTracks('u1')).toHaveLength(250);
+    await s.removeSavedTracks('u1', rows.slice(0, 230).map((r) => r.track.id));
+    expect(await s.listSavedTracks('u1')).toHaveLength(20);
+  });
+
+  it('adds Spotify request counts per day and caller (QWW-55 PR 2)', async () => {
+    const s = make();
+    await s.addSpotifyCalls('2026-11-10', 'site:/api/recommendations', 3);
+    await s.addSpotifyCalls('2026-11-10', 'site:/api/recommendations', 2);
+    await s.addSpotifyCalls('2026-11-10', 'script:usdb-sync', 7);
+    await s.addSpotifyCalls('2026-11-09', 'script:usdb-sync', 1);
+    expect(await s.listSpotifyCalls('2026-11-10')).toEqual([
+      { day: '2026-11-10', caller: 'script:usdb-sync', calls: 7 },
+      { day: '2026-11-10', caller: 'site:/api/recommendations', calls: 5 },
+    ]);
+    expect(await s.listSpotifyCalls()).toHaveLength(3);
+    expect((await s.listSpotifyCalls())[2]).toEqual({ day: '2026-11-09', caller: 'script:usdb-sync', calls: 1 });
+  });
+
   it('reads back the results view stored with feedback, and no view for a tap without one', async () => {
     const s = make();
     const filtered = {

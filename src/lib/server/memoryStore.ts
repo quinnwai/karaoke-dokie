@@ -1,4 +1,4 @@
-import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, FeedbackEntry, SongRange, Track, VocalRange } from '../contracts';
 import { catalogueRank, pickCatalogue } from '../songs/score';
 import { isMeasured } from '../songs/sourceRank';
 import {
@@ -13,6 +13,7 @@ import {
   type SongRangeRecord,
   type Store,
   type StoredEvent,
+  type StoredLibraryState,
   type UsdbIndexEntry,
   type UserRecord,
 } from './store';
@@ -33,6 +34,9 @@ export function createMemoryStore(): Store {
   const songDeezer = new Map<string, SongDeezerRecord>();
   const songTempo = new Map<string, SongTempoRecord>();
   let spotifyBlock: number | null = null;
+  const libraryStates = new Map<string, StoredLibraryState>();
+  const savedTracks = new Map<string, Map<string, { track: Track; pos: number; gen: number }>>();
+  const spotifyCalls = new Map<string, { day: string; caller: string; calls: number }>();
   /** A song's popularity row with its Deezer rank, as getSongPopularity reads it. */
   const popularityOf = (key: string): SongPopularityRecord | undefined => {
     const p = songPopularity.get(key);
@@ -203,6 +207,65 @@ export function createMemoryStore(): Store {
     },
     async setSpotifyBlock(until) {
       spotifyBlock = spotifyBlock === null ? until : Math.max(spotifyBlock, until);
+    },
+
+    // ---- stored Spotify library per user (QWW-55 PR 2) ----
+    async getLibraryState(userId) {
+      const s = libraryStates.get(userId);
+      return s ? clone(s) : null;
+    },
+    async putLibraryState(userId, state, lastSeenAt) {
+      libraryStates.set(userId, clone({ state, lastSeenAt }));
+    },
+    async listSavedTracks(userId) {
+      return [...(savedTracks.get(userId)?.values() ?? [])].sort((a, b) => b.pos - a.pos).map((r) => clone(r.track));
+    },
+    async putSavedTracks(userId, rows) {
+      const m = savedTracks.get(userId) ?? new Map();
+      for (const r of rows) m.set(r.track.id, clone({ track: r.track, pos: r.pos, gen: r.gen ?? 0 }));
+      savedTracks.set(userId, m);
+    },
+    async markSavedSeen(userId, trackIds, gen) {
+      for (const id of trackIds) {
+        const r = savedTracks.get(userId)?.get(id);
+        if (r) r.gen = gen;
+      }
+    },
+    async countSavedFromGen(userId, gen) {
+      return [...(savedTracks.get(userId)?.values() ?? [])].filter((r) => r.gen >= gen).length;
+    },
+    async removeSavedBeforeGen(userId, gen) {
+      const m = savedTracks.get(userId);
+      for (const [id, r] of m ?? []) if (r.gen < gen) m!.delete(id);
+    },
+    async removeSavedTracks(userId, trackIds) {
+      for (const id of trackIds) savedTracks.get(userId)?.delete(id);
+    },
+    async deleteUserLibrary(userId) {
+      libraryStates.delete(userId);
+      savedTracks.delete(userId);
+    },
+    async deleteIdleLibraries(before) {
+      let n = 0;
+      for (const [id, s] of libraryStates) {
+        if (s.lastSeenAt >= before) continue;
+        libraryStates.delete(id);
+        savedTracks.delete(id);
+        n++;
+      }
+      return n;
+    },
+
+    // ---- Spotify request counts (QWW-55 PR 2) ----
+    async addSpotifyCalls(day, caller, n) {
+      const k = JSON.stringify([day, caller]);
+      spotifyCalls.set(k, { day, caller, calls: (spotifyCalls.get(k)?.calls ?? 0) + n });
+    },
+    async listSpotifyCalls(day) {
+      return [...spotifyCalls.values()]
+        .filter((r) => day === undefined || r.day === day)
+        .sort((a, b) => b.day.localeCompare(a.day) || a.caller.localeCompare(b.caller))
+        .map((r) => ({ ...r }));
     },
 
     // ---- tempo (QWW-40) ----

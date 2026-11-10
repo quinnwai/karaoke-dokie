@@ -117,3 +117,26 @@ CREATE TABLE IF NOT EXISTS spotify_block (
   id INTEGER PRIMARY KEY,
   blocked_until BIGINT NOT NULL
 );
+-- A signed-in user's stored Spotify library (QWW-55 PR 2), so a visit reads only what changed. user_library holds the
+-- sync state (what was read when, the top lists, recent plays and playlists) as JSON; user_saved has one row per liked
+-- song, pos higher = liked later. Deleted when the user disconnects and after 30 days without a visit.
+CREATE TABLE IF NOT EXISTS user_library (
+  user_id TEXT PRIMARY KEY,
+  state_json TEXT NOT NULL,
+  last_seen_at BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS user_saved (
+  user_id TEXT NOT NULL,
+  track_id TEXT NOT NULL,
+  pos BIGINT NOT NULL,
+  track_json TEXT NOT NULL,
+  gen BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, track_id)
+);
+-- Spotify Web API requests per day and caller (QWW-55 PR 2): "site:/api/recommendations", "script:usdb-sync".
+CREATE TABLE IF NOT EXISTS spotify_calls (
+  day TEXT NOT NULL,
+  caller TEXT NOT NULL,
+  calls INTEGER NOT NULL,
+  PRIMARY KEY (day, caller)
+);
