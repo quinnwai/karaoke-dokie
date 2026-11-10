@@ -1,6 +1,4 @@
-// Our copy of USDB's song list: id, artist, title, views, stars, last-changed time, genre, year and
-// language, no note text. Rows indexed before genre, year and language were read get them on the
-// next full read (`npm run usdb:index -- --full`).
+// Our copy of USDB's song list: id, artist, title, views, stars and last-changed time, no note text.
 // With it, a sync knows which songs USDB has without searching for each one, and goes straight to
 // the note file by id. The approach (read the list 100 rows at a time sorted by id for a full
 // copy, or newest-changed first and stop at the last known change for an update) follows
@@ -25,9 +23,6 @@ function toEntry(row: UsdbSongRow): UsdbIndexEntry {
   if (row.views !== undefined) e.views = row.views;
   if (row.rating !== undefined) e.rating = row.rating;
   if (row.lastChange !== undefined) e.lastChange = row.lastChange;
-  if (row.year !== undefined) e.year = row.year;
-  if (row.genre !== undefined) e.genre = row.genre;
-  if (row.language !== undefined) e.language = row.language;
   return e;
 }
 

@@ -1,6 +1,6 @@
 // Persistence interface for the backend. Two implementations:
 // memoryStore.ts (dev, tests, e2e) and postgresStore.ts (Neon in production, pg-mem in tests).
-import type { AppEvent, DataSourceLogEntry, FeedbackEntry, Mood, SongRange, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, FeedbackEntry, SongRange, VocalRange } from '../contracts';
 
 export interface UserRecord {
   id: string;
@@ -32,77 +32,7 @@ export interface UsdbIndexEntry {
   rating?: number;
   /** USDB's last-changed time, epoch seconds. */
   lastChange?: number;
-  /** Year, genre and language as listed on USDB's song list (the note file's #YEAR, #GENRE, #LANGUAGE). */
-  year?: number;
-  genre?: string;
-  language?: string;
 }
-
-/** One catalogue song for the no-Spotify mode: a song with a usable range, and its most-viewed USDB row. */
-export interface CatalogueSong {
-  key: string;
-  /** Display names from the range record's log line, not the normalised key. */
-  artist: string;
-  title: string;
-  range: SongRange;
-  log: DataSourceLogEntry;
-  /** The most-viewed USDB index row with this key, when there is one (views, rating, year, genre). */
-  usdb?: UsdbIndexEntry;
-}
-
-/** A stored beta event: what a device did, keyed by its random id. */
-export interface StoredEvent extends AppEvent {
-  anonId: string;
-}
-
-/** listEvents returns this many events unless asked for another number, and never more than the max. */
-export const DEFAULT_EVENTS_LIMIT = 5_000;
-export const MAX_EVENTS_LIMIT = 20_000;
-
-/** Mood labels for one song (QWW-11), from one labelling method. */
-export interface SongMoodsRecord {
-  key: string;
-  moods: Mood[];
-  /** Labelling method and version, e.g. "claude-haiku-5-5/moods-v1"; a newer method replaces an older one's row. */
-  method: string;
-  /** Where the label came from, e.g. "claude" or "hand". */
-  source: string;
-}
-
-/**
- * How well known one song is, from our own karaoke data (QWW-6): the YouTube views of its KaraFun
- * karaoke videos and its best Billboard Year-End Hot 100 rank. Only for scoring; never stored with
- * the song's range.
- */
-export interface SongPopularityRecord {
-  /** songKey(artist, title). */
-  key: string;
-  /** Total YouTube views of the song's KaraFun karaoke videos. */
-  karaokeViews?: number;
-  /** The song's best (lowest) Billboard Year-End Hot 100 rank, 1 to 100, and the year of that chart. */
-  chartRank?: number;
-  chartYear?: number;
-  /** Deezer's track rank (QWW-37), from song_deezer; higher is more popular. */
-  deezerRank?: number;
-  /**
-   * Which files the numbers came from: "karafun", "billboard" or "karafun+billboard"; "deezer"
-   * when a song has only a Deezer rank.
-   */
-  source: string;
-}
-
-/** One Deezer lookup (QWW-37): the best-ranked matching track, or a miss (no rank). */
-export interface SongDeezerRecord {
-  /** songKey(artist, title). */
-  key: string;
-  rank?: number;
-  deezerId?: number;
-  /** ISO time of the lookup. */
-  checkedAt: string;
-}
-
-import type { SongTempoRecord } from '../tempo/tempo';
-export type { SongTempoRecord };
 
 export interface Store {
   getUser(id: string): Promise<UserRecord | null>;
@@ -121,8 +51,6 @@ export interface Store {
    * part of songKey), for the artist fallback.
    */
   listMeasuredRangesByArtist(artistKey: string): Promise<SongRange[]>;
-  /** Every stored (not skipped) song range for one artist (the artist part of songKey), by song key; for the octave fix. */
-  listSongRangesByArtist(artistKey: string): Promise<Map<string, SongRangeRecord>>;
 
   /** Adds or updates songs in the USDB song index. */
   putUsdbSongs(entries: UsdbIndexEntry[]): Promise<void>;
@@ -140,58 +68,6 @@ export interface Store {
   saveFeedback(entry: FeedbackEntry): Promise<void>;
   /** Newest first, optionally for one user. */
   listFeedback(opts?: { userId?: string; limit?: number }): Promise<FeedbackEntry[]>;
-
-  // ---- catalogue: results without Spotify (QWW-2 Track B) ----
-  /**
-   * Songs with a measured range (note file or recording), one per song key, each with its
-   * most-viewed USDB row, most popular first by catalogueRank (songs/score.ts: USDB views, karaoke
-   * views, Year-End rank; songs with none of them last, by key): the `limit` most popular, plus
-   * every Year-End Hot 100 song below them (pickCatalogue).
-   */
-  listCatalogue(limit: number): Promise<CatalogueSong[]>;
-
-  // ---- beta event log (QWW-16, QWW-20) ----
-  appendEvents(anonId: string, events: AppEvent[]): Promise<void>;
-  /** Oldest first within a device; at most `limit` events overall, the newest ones. */
-  listEvents(opts?: { anonId?: string; limit?: number }): Promise<StoredEvent[]>;
-
-  // ---- mood labels (QWW-11) ----
-  putSongMoods(entries: SongMoodsRecord[]): Promise<void>;
-  /** The map only has keys that have a label. */
-  getSongMoods(songKeys: string[]): Promise<Map<string, SongMoodsRecord>>;
-
-  // ---- song popularity from karaoke data (QWW-6) ----
-  /** Adds rows, or replaces a key's whole row; within one call the last entry for a key wins. */
-  putSongPopularity(entries: SongPopularityRecord[]): Promise<void>;
-  /**
-   * Batch read; the map only has keys that have a row or a Deezer rank. Carries the song's Deezer
-   * rank (song_deezer) as well.
-   */
-  getSongPopularity(songKeys: string[]): Promise<Map<string, SongPopularityRecord>>;
-
-  // ---- Deezer track rank (QWW-37) ----
-  /** Adds or replaces lookups; within one call the last entry for a key wins. */
-  putSongDeezer(entries: SongDeezerRecord[]): Promise<void>;
-  /** Every lookup, hits and misses, by song key. */
-  listSongDeezer(): Promise<Map<string, SongDeezerRecord>>;
-
-  // ---- Spotify rate-limit block (QWW-55) ----
-  /**
-   * Epoch ms until which Spotify has told the app to stop calling it (a 429's Retry-After), or null when it
-   * has not. One value for the whole app, shared by every server instance and script: Spotify's quota is the
-   * app's, not a user's.
-   */
-  getSpotifyBlock(): Promise<number | null>;
-  /** Blocks Spotify until `until`. A later block wins; an earlier one never shortens it. */
-  setSpotifyBlock(until: number): Promise<void>;
-
-  // ---- tempo (QWW-40) ----
-  /** Adds rows, or sets the fields given on a key's row: a field left unset keeps its stored value. */
-  putSongTempo(entries: SongTempoRecord[]): Promise<void>;
-  /** Batch read; the map only has keys that have a row. */
-  getSongTempos(songKeys: string[]): Promise<Map<string, SongTempoRecord>>;
-  /** Every row, for the fill script's skip list. */
-  listSongTempos(): Promise<Map<string, SongTempoRecord>>;
 }
 
 export const DEFAULT_LIST_LIMIT = 200;

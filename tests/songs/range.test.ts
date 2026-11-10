@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { SongPart, SongRange } from '../../src/lib/contracts';
 import { FAST_LYRICS_SYLLABLES_PER_SECOND, fastShare, octaveCorrection, songRangeFromUltrastar, syllableRate, trimmedRange } from '../../src/lib/songs/range';
 import { parseUltrastar } from '../../src/lib/songs/ultrastar';
 import { fixture } from './fixture';
@@ -34,62 +33,6 @@ describe('songRangeFromUltrastar', () => {
   it('throws for a missing part or a file with no pitched notes', () => {
     expect(() => songRangeFromUltrastar(parseUltrastar(fixture('solo.txt')), 2)).toThrow(/part/);
     expect(() => songRangeFromUltrastar('#BPM:100\nR 0 4 0 yo\nF 4 4 0 hey\n')).toThrow(/pitched/);
-  });
-});
-
-describe('duet parts', () => {
-  const PART_ONE = { singer: 'Singer One', low: 60, high: 62, tessitura: 61, pitchShare: [[60, 0.5], [62, 0.5]], fastLyrics: false };
-  const PART_TWO = { singer: 'Singer Two', low: 67, high: 72, tessitura: 70 + 1 / 3, pitchShare: [[67, 0.333], [72, 0.667]], fastLyrics: false };
-
-  it("gives a duet each singer's range and name, keeping the asked-for part on top", () => {
-    const duet = parseUltrastar(fixture('duet.txt'));
-    expect(songRangeFromUltrastar(duet)).toMatchObject({ low: 60, high: 62, duet: true, parts: [PART_ONE, PART_TWO] });
-    expect(songRangeFromUltrastar(duet, 2)).toMatchObject({ low: 67, high: 72, duet: true, parts: [PART_ONE, PART_TWO] });
-  });
-
-  it('counts lines both singers sing (P3) in each part', () => {
-    const text = ['#BPM:120', 'P1', ': 0 4 0 a', ': 4 4 2 b', 'P2', ': 8 4 7 c', ': 12 4 9 d', 'P3', ': 16 8 -5 both', 'E'].join('\n');
-    const { parts } = songRangeFromUltrastar(text);
-    expect(parts).toMatchObject([
-      { low: 55, high: 62, pitchShare: [[55, 0.5], [60, 0.25], [62, 0.25]] },
-      { low: 55, high: 69, pitchShare: [[55, 0.5], [67, 0.25], [69, 0.25]] },
-    ]);
-  });
-
-  it('is not a duet when P2 is empty or has no sung pitches', () => {
-    const solo = ['#BPM:120', 'P1', ': 0 4 0 a', ': 4 4 2 b'];
-    const alone = JSON.stringify(songRangeFromUltrastar([...solo, 'E'].join('\n')));
-    for (const p2 of [[], ['R 8 4 0 yo', 'F 12 4 0 hey'], [': 8 0 5 x']]) {
-      const range = songRangeFromUltrastar([...solo, 'P2', ...p2, 'E'].join('\n'));
-      expect(range).not.toHaveProperty('duet');
-      expect(range).not.toHaveProperty('parts');
-      expect(JSON.stringify(range)).toBe(alone);
-    }
-  });
-
-  it('takes singer names from the older #DUETSINGERP1/#DUETSINGERP2 headers, and #P1/#P2 over them', () => {
-    const older = fixture('duet.txt').replace('#P1:Singer One', '#DUETSINGERP1:Old One').replace('#P2:Singer Two', '#DUETSINGERP2:Old Two');
-    expect(songRangeFromUltrastar(older).parts?.map((p) => p.singer)).toEqual(['Old One', 'Old Two']);
-    const both = fixture('duet.txt').replace('#P1:Singer One', '#P1:Singer One\n#DUETSINGERP1:Old One');
-    expect(songRangeFromUltrastar(both).parts?.[0]?.singer).toBe('Singer One');
-    const unnamed = fixture('duet.txt').replace(/#P[12]:.*\n/g, '');
-    expect(songRangeFromUltrastar(unnamed).parts?.map((p) => 'singer' in p)).toEqual([false, false]);
-  });
-
-  it('fixes the octave and flags fast lyrics per part', () => {
-    // BPM 150, so a beat is 0.1 s. P1: one syllable a second, written two octaves too high.
-    // P2: five syllables a second, written where it is sung.
-    const p1 = Array.from({ length: 20 }, (_, i) => `: ${i * 10} 4 ${26 + (i % 5)} la`);
-    const p2 = Array.from({ length: 100 }, (_, i) => `: ${i * 2} 1 0 la`);
-    const text = ['#BPM:150', 'P1', ...p1, 'P2', ...p2, 'E'].join('\n');
-    const range = songRangeFromUltrastar(text);
-    expect(range.parts).toMatchObject([
-      { low: 62, high: 66, fastLyrics: false },
-      { low: 60, high: 60, tessitura: 60, fastLyrics: true },
-    ]);
-    const top = ({ low, high, tessitura, pitchShare, fastLyrics }: SongPart | SongRange) => ({ low, high, tessitura, pitchShare, fastLyrics });
-    expect(top(range)).toEqual(top(range.parts![0]!));
-    expect(top(songRangeFromUltrastar(text, 2))).toEqual(top(range.parts![1]!));
   });
 });
 
@@ -184,39 +127,5 @@ describe('outliers and octave errors', () => {
     expect(range.tessitura).toBeGreaterThanOrEqual(62);
     expect(range.tessitura).toBeLessThan(67);
     expect(range).toMatchObject({ low: 62, high: 66 });
-  });
-});
-
-describe('ranges stay as they were before duet parts', () => {
-  // Every fixture's range as JSON, computed before duets got each singer's part (commit fd3fde1),
-  // plus two made-up songs for the octave fix and the outlier trim. Solo songs must come out
-  // byte for byte the same; a duet keeps these top-level fields (P1's, or the part asked for).
-  const song = (notes: [number, number][]) => '#BPM:120\n' + notes.map(([pitch, len], i) => `: ${i * 8} ${len} ${pitch} la`).join('\n') + '\nE\n';
-  const twoOctavesHigh = song(Array.from({ length: 12 }, (_, i) => [26 + (i % 5), 4]));
-  const shout = song([...Array.from({ length: 30 }, (_, i): [number, number] => [i % 2 ? 2 : 4, 4]), [19, 1]]);
-  const before: [name: string, text: string, part: number, json: string][] = [
-    ['ballad.txt', fixture('ballad.txt'), 1, '{"low":58,"high":62,"tessitura":60,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[58,0.2],[59,0.2],[60,0.2],[61,0.2],[62,0.2]]}'],
-    ['comma-bpm.txt', fixture('comma-bpm.txt'), 1, '{"low":60,"high":60,"tessitura":60,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,1]]}'],
-    ['crlf-bom.txt', fixture('crlf-bom.txt'), 1, '{"low":65,"high":69,"tessitura":66.6,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[65,0.4],[67,0.4],[69,0.2]]}'],
-    ['fast.txt', fixture('fast.txt'), 1, '{"low":60,"high":62,"tessitura":60.6,"source":"note-file","confidence":"high","fastLyrics":true,"pitchShare":[[60,0.6],[61,0.2],[62,0.2]]}'],
-    ['low-song.txt', fixture('low-song.txt'), 1, '{"low":36,"high":48,"tessitura":42,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[36,0.333],[42,0.333],[48,0.333]]}'],
-    ['melisma.txt', fixture('melisma.txt'), 1, '{"low":60,"high":60,"tessitura":60,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,1]]}'],
-    ['rap.txt', fixture('rap.txt'), 1, '{"low":57,"high":69,"tessitura":63.8,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[57,0.2],[62,0.4],[69,0.4]]}'],
-    ['relative.txt', fixture('relative.txt'), 1, '{"low":60,"high":65,"tessitura":62.75,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,0.25],[62,0.25],[64,0.25],[65,0.25]]}'],
-    ['solo.txt', fixture('solo.txt'), 1, '{"low":55,"high":67,"tessitura":62.5,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[55,0.167],[60,0.167],[62,0.167],[64,0.167],[67,0.333]]}'],
-    ['two octaves high', twoOctavesHigh, 1, '{"low":62,"high":66,"tessitura":63.75,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[62,0.25],[63,0.25],[64,0.167],[65,0.167],[66,0.167]]}'],
-    ['one-beat shout', shout, 1, '{"low":62,"high":64,"tessitura":63.13223140495868,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[62,0.496],[64,0.496],[79,0.008]]}'],
-    ['duet.txt', fixture('duet.txt'), 1, '{"low":60,"high":62,"tessitura":61,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,0.5],[62,0.5]]}'],
-    ['duet.txt', fixture('duet.txt'), 2, '{"low":67,"high":72,"tessitura":70.33333333333333,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[67,0.333],[72,0.667]]}'],
-  ];
-
-  it.each(before)('%s, part %i', (name, text, part, json) => {
-    const range = songRangeFromUltrastar(text, part);
-    if (name === 'duet.txt') {
-      const { duet: _duet, parts: _parts, ...topLevel } = range;
-      expect(JSON.stringify(topLevel)).toBe(json);
-    } else {
-      expect(JSON.stringify(range)).toBe(json);
-    }
   });
 });

@@ -9,7 +9,7 @@ import type { SongRange } from '../src/lib/contracts';
 import { coverageCsv, coverageReport } from '../src/lib/report/coverage';
 import { readConfig } from '../src/lib/server/config';
 import { getStore } from '../src/lib/server/getStore';
-import { createSpotifyClient, readUserTracks } from '../src/lib/server/spotify';
+import { createSpotifyClient, ensureFreshTokens, getUserTracks } from '../src/lib/server/spotify';
 import { noteFileSource, realResolver } from '../src/lib/server/wiring';
 import { songKey } from '../src/lib/songs/resolve';
 
@@ -26,7 +26,8 @@ async function main() {
   if (!userRange) throw new Error(`${user.displayName} has not recorded a vocal range yet`);
 
   const spotify = createSpotifyClient(readConfig().spotify);
-  const tracks = await readUserTracks(store, spotify, user);
+  const fresh = await ensureFreshTokens(user, spotify, store);
+  const tracks = await getUserTracks(spotify, fresh.spotify.accessToken);
   const keys = tracks.map((t) => songKey(t.artist, t.title));
   const cached = await store.getSongRanges(keys);
   const resolve = realResolver(store, noteFileSource);

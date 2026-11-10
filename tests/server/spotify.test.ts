@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   createSpotifyClient,
-  describeError,
   ensureFreshTokens,
   getUserTracks,
   mapTrack,
   buildLibrary,
-  retryAfterMs,
   SpotifyError,
   type FetchFn,
 } from '../../src/lib/server/spotify';
@@ -89,34 +87,6 @@ describe('Spotify authorization', () => {
     const f = fakeFetch({ 'https://accounts.spotify.com/api/token': () => new Response('{}', { status: 400 }) });
     await expect(createSpotifyClient(cfg, f).exchangeCode('x')).rejects.toBeInstanceOf(SpotifyError);
   });
-
-  it('keeps what Spotify answered on a failed token request, so the server log can say why', async () => {
-    const body = '{"error":"invalid_client",\n "error_description":"Invalid client secret"}';
-    const f = fakeFetch({ 'https://accounts.spotify.com/api/token': () => new Response(body, { status: 400 }) });
-    const err = await createSpotifyClient(cfg, f).exchangeCode('x').catch((e) => e);
-    expect(err).toMatchObject({ status: 400, detail: '{"error":"invalid_client", "error_description":"Invalid client secret"}' });
-  });
-});
-
-describe('describing a failure for the server log', () => {
-  it('names the status, what Spotify said and a Retry-After, and nothing secret', async () => {
-    const f = fakeFetch({
-      'https://api.spotify.com/v1/me': () => new Response('{"error":{"status":429,"message":"API rate limit exceeded"}}', { status: 429, headers: { 'retry-after': '48000' } }),
-    });
-    const err = await createSpotifyClient(cfg, f, async () => {}).getMe('the-access-token').catch((e) => e);
-    // 48,000 s is far past what a request will wait, so it fails at once instead of sleeping.
-    expect(err).toMatchObject({ status: 429, retryAfter: '48000' });
-    const line = describeError(err);
-    expect(line).toBe('Spotify API /me failed (429) | {"error":{"status":429,"message":"API rate limit exceeded"}} | retry-after 48000 s');
-    expect(line).not.toContain('the-access-token');
-    expect(line).not.toContain(cfg.clientSecret);
-  });
-
-  it('copes with an unreadable body and with errors that are not from Spotify', () => {
-    expect(describeError(new SpotifyError('Spotify API /me failed (502)', 502))).toBe('Spotify API /me failed (502)');
-    expect(describeError(new TypeError('fetch failed'))).toBe('TypeError: fetch failed');
-    expect(describeError('boom')).toBe('boom');
-  });
 });
 
 describe('Spotify library reads', () => {
@@ -148,40 +118,23 @@ describe('Spotify library reads', () => {
     expect(tracks[499]!.playRank).toBe(499);
   });
 
-  it('reads every saved song of a big library (11,139 liked songs, QWW-31), pages in parallel once the total is known', async () => {
+  it('reads up to 2000 saved songs, fetching pages in parallel once the total is known', async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
-    const total = 11_139;
     const f = fakeFetch(
       {
         'https://api.spotify.com/v1/me/tracks': (u) => {
           const offset = Number(u.searchParams.get('offset'));
-          const items = Array.from({ length: Math.max(0, Math.min(50, total - offset)) }, (_, i) => ({ track: sTrack(offset + i) }));
-          return { items, total, next: null };
+          const items = Array.from({ length: Math.max(0, Math.min(50, 3000 - offset)) }, (_, i) => ({ track: sTrack(offset + i) }));
+          return { items, total: 3000, next: null };
         },
       },
       calls,
     );
-    const tracks = await createSpotifyClient(cfg, f, async () => {}).getSavedTracks('tok');
-    expect(tracks).toHaveLength(total);
-    expect(calls).toHaveLength(Math.ceil(total / 50));
+    const tracks = await createSpotifyClient(cfg, f).getSavedTracks('tok');
+    expect(tracks).toHaveLength(2000);
+    expect(calls).toHaveLength(40);
     expect(tracks.map((t) => t.playRank)).toEqual(tracks.map((_, i) => i));
-    // The oldest like is read: it used to be cut at the 2,000th.
-    expect(tracks[3282]!.id).toBe('id3282');
-    expect(tracks[total - 1]!.id).toBe(`id${total - 1}`);
-  });
-
-  it('spaces groups of pages so a big library is read at about 8 requests a second', async () => {
-    const waits: number[] = [];
-    const f = fakeFetch({
-      'https://api.spotify.com/v1/me/tracks': (u) => {
-        const offset = Number(u.searchParams.get('offset'));
-        return { items: Array.from({ length: 50 }, (_, i) => ({ track: sTrack(offset + i) })), total: 2000, next: null };
-      },
-    });
-    await createSpotifyClient(cfg, f, async (ms) => void waits.push(ms)).getSavedTracks('tok');
-    // 40 pages: the first alone, then 39 in groups of 5 (8 groups); no pause after the last group.
-    expect(waits).toHaveLength(7);
-    expect(waits.every((ms) => ms > 0 && ms <= 600)).toBe(true);
+    expect(tracks[1999]!.id).toBe('id1999');
   });
 
   it('stops at the last page and skips local or missing tracks', async () => {
@@ -225,110 +178,12 @@ describe('Spotify library reads', () => {
     expect(mapTrack(null, 0)).toBeNull();
   });
 
-  const onAlbum = (album: { release_date?: string | null; album_type?: string }) => mapTrack({ ...sTrack(1), album: { ...sTrack(1).album, ...album } }, 0);
-
-  it('keeps the year of the album release date at any precision', () => {
-    expect(onAlbum({ release_date: '1975' })?.releaseYear).toBe(1975);
-    expect(onAlbum({ release_date: '1975-10' })?.releaseYear).toBe(1975);
-    expect(onAlbum({ release_date: '1975-10-31', album_type: 'album' })?.releaseYear).toBe(1975);
-    expect(onAlbum({ release_date: '2011-01-24', album_type: 'single' })?.releaseYear).toBe(2011);
-  });
-
-  it('leaves the year out for a junk date, a missing album or a compilation', () => {
-    for (const junk of ['0000', '0000-00-00', '', '75', 'n/a', '1975/10/31', '1975-10-31T00:00:00Z', '2999-01-01', null]) {
-      expect(onAlbum({ release_date: junk }), String(junk)).not.toHaveProperty('releaseYear');
-    }
-    const { album: _album, ...noAlbum } = sTrack(1);
-    expect(mapTrack(noAlbum, 0)).not.toHaveProperty('releaseYear');
-    // A greatest-hits album's date is the compilation's, not the song's.
-    expect(onAlbum({ release_date: '2004-11-08', album_type: 'compilation' })).not.toHaveProperty('releaseYear');
-  });
-
-  it('keeps the ISRC when Spotify sends one', () => {
-    expect(mapTrack({ ...sTrack(1), external_ids: { isrc: 'GBUM71029604' } }, 0)?.isrc).toBe('GBUM71029604');
-    expect(mapTrack({ ...sTrack(1), external_ids: { isrc: null } }, 0)).not.toHaveProperty('isrc');
-    expect(mapTrack({ ...sTrack(1), external_ids: {} }, 0)).not.toHaveProperty('isrc');
-    expect(mapTrack(sTrack(1), 0)).not.toHaveProperty('isrc');
-  });
-
   it('skips items without a title or artist name, which cannot be matched (they crashed recommendations on Oct 22)', () => {
     expect(mapTrack({ ...sTrack(1), name: null }, 0)).toBeNull();
     expect(mapTrack({ ...sTrack(1), name: '  ' }, 0)).toBeNull();
     expect(mapTrack({ ...sTrack(1), artists: [{ id: 'a1', name: null }] }, 0)).toBeNull();
     expect(mapTrack({ ...sTrack(1), artists: [{ id: 'a1', name: '' }] }, 0)).toBeNull();
     expect(mapTrack(sTrack(1), 0)).toMatchObject({ title: 'Song 1', artist: 'Artist 1' });
-  });
-});
-
-describe('Spotify rate limits (429)', () => {
-  const limited = (retryAfter: string | null) =>
-    new Response('', { status: 429, headers: retryAfter === null ? {} : { 'retry-after': retryAfter } });
-
-  it('waits the Retry-After it is given, then tries again', async () => {
-    const calls: Call[] = [];
-    const waits: number[] = [];
-    let n = 0;
-    const f = fakeFetch({ 'https://api.spotify.com/v1/me': () => (n++ === 0 ? limited('2') : { id: 'user1', display_name: 'Ann' }) }, calls);
-    const client = createSpotifyClient(cfg, f, async (ms) => void waits.push(ms));
-    expect(await client.getMe('tok')).toEqual({ id: 'user1', displayName: 'Ann' });
-    expect(waits).toEqual([2000]);
-    expect(calls).toHaveLength(2);
-  });
-
-  it('gives up after three retries', async () => {
-    const calls: Call[] = [];
-    const waits: number[] = [];
-    const f = fakeFetch({ 'https://api.spotify.com/v1/me': () => limited('1') }, calls);
-    const client = createSpotifyClient(cfg, f, async (ms) => void waits.push(ms));
-    await expect(client.getMe('tok')).rejects.toMatchObject({ status: 429 });
-    expect(waits).toEqual([1000, 1000, 1000]);
-    expect(calls).toHaveLength(4);
-  });
-
-  it('waits out a longer rate limit for saved songs (up to 30 s, 6 times), since they are the library itself', async () => {
-    const waits: number[] = [];
-    let n = 0;
-    const f = fakeFetch({
-      'https://api.spotify.com/v1/me/tracks': () => (n++ < 2 ? limited('25') : { items: [{ track: sTrack(1) }], next: null }),
-    });
-    const tracks = await createSpotifyClient(cfg, f, async (ms) => void waits.push(ms)).getSavedTracks('tok');
-    expect(tracks).toHaveLength(1);
-    expect(waits).toEqual([25_000, 25_000]);
-  });
-
-  it('still gives up on saved songs when Spotify asks for more than 30 seconds', async () => {
-    const waits: number[] = [];
-    const f = fakeFetch({ 'https://api.spotify.com/v1/me/tracks': () => limited('120') });
-    await expect(createSpotifyClient(cfg, f, async (ms) => void waits.push(ms)).getSavedTracks('tok')).rejects.toMatchObject({ status: 429 });
-    expect(waits).toEqual([]);
-  });
-
-  it('does not wait when Spotify asks for longer than 10 seconds', async () => {
-    const waits: number[] = [];
-    const f = fakeFetch({ 'https://api.spotify.com/v1/me': () => limited('120') });
-    const client = createSpotifyClient(cfg, f, async (ms) => void waits.push(ms));
-    await expect(client.getMe('tok')).rejects.toMatchObject({ status: 429 });
-    expect(waits).toEqual([]);
-  });
-
-  it('reads Retry-After as seconds, and a missing or junk one as 1 second', () => {
-    expect(retryAfterMs('3')).toBe(3000);
-    expect(retryAfterMs('0')).toBe(0);
-    expect(retryAfterMs(null)).toBe(1000);
-    expect(retryAfterMs('')).toBe(1000);
-    expect(retryAfterMs('soon')).toBe(1000);
-    expect(retryAfterMs('-5')).toBe(1000);
-  });
-
-  it('still loads the library when playlists stay rate-limited', async () => {
-    const client = { ...createMockSpotifyClient(), getPlaylistTracks: async () => { throw new SpotifyError('rate limited', 429); } };
-    const lib = await getUserTracks(client, 'tok');
-    expect(lib.length).toBeGreaterThan(20);
-  });
-
-  it('fails the load when saved songs stay rate-limited, rather than show a partial library', async () => {
-    const client = { ...createMockSpotifyClient(), getSavedTracks: async () => { throw new SpotifyError('rate limited', 429); } };
-    await expect(getUserTracks(client, 'tok')).rejects.toMatchObject({ status: 429 });
   });
 });
 
@@ -380,17 +235,6 @@ describe('familiarity', () => {
     expect(lib[0]!.popularity).toBe(70);
   });
 
-  it('fills a missing release year or ISRC from another copy of the same song, keeping the first one found', () => {
-    const lib = buildLibrary({
-      top: { medium_term: [t('a')] },
-      recent: [t('a', 0, { releaseYear: 1975 })],
-      saved: [t('a', 0, { releaseYear: 1999, isrc: 'GBUM71029604' })],
-    });
-    expect(lib).toHaveLength(1);
-    expect(lib[0]).toMatchObject({ releaseYear: 1975, isrc: 'GBUM71029604' });
-    expect(buildLibrary({ top: {}, recent: [], saved: [t('b')] })[0]).not.toHaveProperty('releaseYear');
-  });
-
   it('counts songs in your playlists as known, at least 0.4, and saved-only songs as not known', () => {
     const lib = buildLibrary({ top: { medium_term: [t('top')] }, recent: [t('played')], saved: [t('saved'), t('both')], playlists: [t('list'), t('both')] });
     const by = Object.fromEntries(lib.map((x) => [x.id, x]));
@@ -401,37 +245,6 @@ describe('familiarity', () => {
     expect(by.both!.familiarity).toBeCloseTo(0.45);
     expect(by.saved!.known).toBe(false);
     expect(by.saved!.familiarity).toBe(0.15);
-  });
-
-  it('records where it found each song, without changing its familiarity', () => {
-    const lib = buildLibrary({
-      top: { short_term: [t('all'), t('month')], medium_term: [t('all'), t('half')], long_term: [t('all'), t('year')] },
-      recent: [t('played'), t('all'), t('played')],
-      saved: [t('saved'), t('all')],
-      playlists: [t('list'), t('all')],
-    });
-    // Only the lists a song is in are set.
-    const signals = ['topLists', 'recentPlays', 'inPlaylist', 'saved'];
-    const found = Object.fromEntries(lib.map((x) => [x.id, Object.fromEntries(Object.entries(x).filter(([k]) => signals.includes(k)))]));
-    expect(found).toStrictEqual({
-      all: { topLists: ['short_term', 'medium_term', 'long_term'], recentPlays: 1, inPlaylist: true, saved: true },
-      month: { topLists: ['short_term'] },
-      half: { topLists: ['medium_term'] },
-      year: { topLists: ['long_term'] },
-      played: { recentPlays: 2 },
-      list: { inPlaylist: true },
-      saved: { saved: true },
-    });
-    // The familiarity, known flags and order this library had before the lists were recorded.
-    expect(lib.map((x) => [x.id, x.familiarity, x.known, x.playRank])).toEqual([
-      ['all', 1, true, 0],
-      ['month', 0.984, true, 1],
-      ['half', 0.984, true, 2],
-      ['year', 0.984, true, 3],
-      ['list', 0.4, true, 4],
-      ['played', 0.2, true, 5],
-      ['saved', 0.15, false, 6],
-    ]);
   });
 
   it('skips playlists when the permission is missing', async () => {
@@ -530,12 +343,5 @@ describe('mock Spotify client', () => {
     for (const want of ['Queen - Bohemian Rhapsody', 'Omar Apollo - Evergreen', 'Whitney Houston', 'Journey', 'Justin Bieber']) {
       expect(names.some((n) => n.startsWith(want))).toBe(true);
     }
-  });
-
-  it('sends each song\'s release year and, like Spotify for Development Mode apps, no popularity', async () => {
-    const tracks = await getUserTracks(createMockSpotifyClient(), 'tok');
-    expect(tracks.every((x) => typeof x.releaseYear === 'number')).toBe(true);
-    expect(tracks.find((x) => x.title === 'Bohemian Rhapsody')?.releaseYear).toBe(1975);
-    expect(tracks.filter((x) => x.popularity !== undefined)).toEqual([]);
   });
 });

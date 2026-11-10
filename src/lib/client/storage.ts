@@ -60,7 +60,10 @@ export function takeWantsPick(): boolean {
   }
 }
 
-/** localStorage, which outlasts the tab; null where the browser blocks it. */
+// A range the user said to keep despite the warning, remembered on this device.
+const RANGE_OK_KEY = 'kd.rangeOk';
+const rangeKey = (low: number, high: number) => `${low}-${high}`;
+
 function local(): Storage | null {
   try {
     return typeof window === 'undefined' ? null : window.localStorage;
@@ -69,30 +72,16 @@ function local(): Storage | null {
   }
 }
 
-// ---- no-Spotify mode (QWW-2 Track B) ----
-
-const SAVED_RANGE_KEY = 'kd.range';
-
-/** The range of someone without Spotify, kept on this device so they come back to their songs. */
-export function loadSavedRange(): { low: number; high: number } | null {
+export function isRangeKept(low: number, high: number): boolean {
   try {
-    const raw = local()?.getItem(SAVED_RANGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { low?: unknown; high?: unknown };
-    return isMidi(parsed.low) && isMidi(parsed.high) && parsed.low < parsed.high ? { low: parsed.low, high: parsed.high } : null;
+    return local()?.getItem(RANGE_OK_KEY) === rangeKey(low, high);
   } catch {
-    return null;
+    return false;
   }
 }
 
-export function saveRangeOnDevice(range: { low: number; high: number }): void {
+export function keepRange(low: number, high: number): void {
   try {
-    local()?.setItem(SAVED_RANGE_KEY, JSON.stringify({ low: range.low, high: range.high }));
-  } catch {}
-}
-
-export function clearSavedRange(): void {
-  try {
-    local()?.removeItem(SAVED_RANGE_KEY);
+    local()?.setItem(RANGE_OK_KEY, rangeKey(low, high));
   } catch {}
 }

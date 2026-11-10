@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { SongPart, SongRange, VocalRange } from '../../src/lib/contracts';
-import { edgeTime, MAYBE_SLACK, matchSong, partRange } from '../../src/lib/songs/match';
+import type { SongRange, VocalRange } from '../../src/lib/contracts';
+import { edgeTime, MAYBE_SLACK, matchSong } from '../../src/lib/songs/match';
 import { songRangeFromUltrastar } from '../../src/lib/songs/range';
 import { fixture } from './fixture';
 
@@ -84,69 +84,8 @@ describe('matchSong octave shifts', () => {
   });
 });
 
-const part = (low: number, high: number, over: Partial<SongPart> = {}): SongPart => ({ low, high, tessitura: (low + high) / 2, fastLyrics: false, ...over });
-/** A duet whose top level is P1's, as range.ts writes it. */
-const duet = (p1: SongPart, p2: SongPart): SongRange => ({ ...song(p1.low, p1.high), ...(p1.pitchShare ? { pitchShare: p1.pitchShare } : {}), duet: true, parts: [p1, p2] });
-
-describe('matchSong for duets (user C3..C5)', () => {
-  it('matches on P2 when only P2 fits', () => {
-    expect(matchSong(C3C5, duet(part(40, 74), part(56, 64)))).toEqual({ difficulty: 'easy', octave: 'none', part: 2 });
-  });
-
-  it('takes the easier part when both fit, and P1 when they are as easy', () => {
-    expect(matchSong(C3C5, duet(part(48, 72), part(56, 64)))).toEqual({ difficulty: 'easy', octave: 'none', part: 2 });
-    expect(matchSong(C3C5, duet(part(56, 64), part(48, 72)))).toEqual({ difficulty: 'easy', octave: 'none', part: 1 });
-    expect(matchSong(C3C5, duet(part(56, 64), part(55, 65)))).toEqual({ difficulty: 'easy', octave: 'none', part: 1 });
-  });
-
-  it("judges each part's difficulty by its own singing", () => {
-    // Same lowest and highest notes; P1 spends 40% of its time at the user's edges, P2 1%.
-    const p1 = part(50, 70, { pitchShare: [[50, 0.2], [60, 0.6], [70, 0.2]] });
-    const p2 = part(50, 70, { pitchShare: [[50, 0.005], [60, 0.99], [70, 0.005]] });
-    expect(matchSong(C3C5, duet(p1, p2))).toEqual({ difficulty: 'easy', octave: 'none', part: 2 });
-  });
-
-  it('prefers a part that fits as written over an easier one an octave away', () => {
-    // P1 fits an octave down (56..64, easy); P2 fits as written but touches both edges (hard).
-    expect(matchSong(C3C5, duet(part(68, 76), part(48, 72)))).toEqual({ difficulty: 'hard', octave: 'none', part: 2 });
-  });
-
-  it('tries each part an octave down, then up, when no part fits as written', () => {
-    expect(matchSong(C3C5, duet(part(40, 74), part(68, 76)))).toEqual({ difficulty: 'easy', octave: 'down', part: 2 });
-    expect(matchSong(C3C5, duet(part(44, 52), part(40, 74)))).toEqual({ difficulty: 'easy', octave: 'up', part: 1 });
-  });
-
-  it('returns null when no part fits', () => {
-    expect(matchSong(C3C5, duet(part(40, 74), part(80, 90)))).toBeNull();
-  });
-
-  it('matches a parsed duet file on the part that fits', () => {
-    // duet.txt: P1 C4..D4, P2 G4..C5. For a D4..E5 singer P1 only fits an octave up, P2 as written.
-    expect(matchSong(user(62, 76), songRangeFromUltrastar(fixture('duet.txt')))).toEqual({ difficulty: 'easy', octave: 'none', part: 2 });
-  });
-});
-
-describe('partRange', () => {
-  it("swaps in one part's notes and keeps the rest of the song", () => {
-    const p2 = part(56, 64, { singer: 'Two', pitchShare: [[56, 0.5], [64, 0.5]], fastLyrics: true });
-    const whole = { ...duet(part(40, 74, { pitchShare: [[40, 1]] }), p2), usdbViews: 7 };
-    expect(partRange(whole, 2)).toEqual({ ...whole, low: 56, high: 64, tessitura: 60, pitchShare: [[56, 0.5], [64, 0.5]], fastLyrics: true });
-  });
-
-  it("drops the whole song's pitch histogram when the part has none", () => {
-    const whole = duet(part(40, 74, { pitchShare: [[40, 1]] }), part(56, 64));
-    expect(partRange(whole, 2)).not.toHaveProperty('pitchShare');
-  });
-});
-
 describe('matchSong for low-confidence ranges (the Maybe group)', () => {
   const rough = (low: number, high: number): SongRange => ({ ...song(low, high), source: 'artist-typical', confidence: 'low' });
-
-  it('goes by the whole range even when it has duet parts', () => {
-    const parts = [part(40, 80), part(56, 64)];
-    expect(matchSong(C3C5, { ...rough(46, 74), duet: true, parts })).toEqual({ difficulty: 'maybe', octave: 'none' });
-    expect(matchSong(C3C5, { ...rough(45, 70), duet: true, parts })).toBeNull(); // P2 would fit, but estimates have no parts to sing
-  });
 
   it('widens the user range by 2 semitones at each end', () => {
     expect(MAYBE_SLACK).toBe(2);
