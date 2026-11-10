@@ -21,7 +21,8 @@ A change is not ready for review until all of these are in the PR, with the outp
 1. `npm run typecheck`, unit tests on Node 22 and `npx playwright test` pass.
 2. `npm run smoke:live -- --url <the preview deployment>` passes. That checks what the deployment really
    reads; `npm run smoke:live` alone checks only the `DATABASE_URL` in your shell, which proves nothing
-   about the deployment. A protected preview needs `VERCEL_BYPASS_TOKEN`. If you cannot reach the
+   about the deployment. A protected preview needs `VERCEL_BYPASS_TOKEN`, or, in a checkout linked to the project
+   (`vercel link`), run it as `vercel env run -- npm run smoke:live -- --url <preview>`. If you cannot reach the
    preview, say so in the PR; do not substitute the database mode.
 3. **Looked at the running deployment, logged out and logged in where possible**, at 375 px: every control
    present, each slider moved to both ends changes the list, the first 20 songs are ones a person knows.

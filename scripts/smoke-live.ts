@@ -10,7 +10,8 @@
 //     90% of them also play: the deployment's /api/preview redirects to Deezer, and Deezer sends audio
 // Usage: npm run smoke:live                      reads DATABASE_URL directly
 //        npm run smoke:live -- --url https://<deployment>   calls the deployed API instead
-//          (a protected preview needs VERCEL_BYPASS_TOKEN, the project's protection-bypass secret)
+//          (a protected preview needs VERCEL_BYPASS_TOKEN, the project's protection-bypass secret, or in a checkout
+//          linked to the project: vercel env run -- npm run smoke:live -- --url <preview>)
 //          Duets are hidden unless the deployment has DUETS_AND_MOODS=on (QWW-43), so its API sends none
 //          and this does not look for them; add --duets for a deployment that has the switch on. Reading
 //          the database always looks for them, because the data must be there for the day it is switched on.
@@ -115,7 +116,13 @@ async function main() {
   // A deployment sends duets only with DUETS_AND_MOODS=on; the database always has them (QWW-43).
   const duets = !values.url || values.duets === true;
   let load: (range: VocalRange) => Promise<Match[]>;
-  const bypass: Record<string, string> = process.env.VERCEL_BYPASS_TOKEN ? { 'x-vercel-protection-bypass': process.env.VERCEL_BYPASS_TOKEN } : {};
+  // A protected preview takes the project's bypass secret, or the short-lived token that `vercel env run` gives a
+  // checkout linked to the project (sent to the deployment only, never to Deezer).
+  const bypass: Record<string, string> = process.env.VERCEL_BYPASS_TOKEN
+    ? { 'x-vercel-protection-bypass': process.env.VERCEL_BYPASS_TOKEN }
+    : process.env.VERCEL_OIDC_TOKEN
+      ? { 'x-vercel-trusted-oidc-idp-token': process.env.VERCEL_OIDC_TOKEN }
+      : {};
   if (values.url) {
     const base = values.url.replace(/\/$/, '');
     load = async (r) => {
