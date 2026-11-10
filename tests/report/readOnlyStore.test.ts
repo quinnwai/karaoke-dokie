@@ -27,6 +27,7 @@ describe('readOnlyStore', () => {
     await ro.appendEvents('device', [{ name: 'landing_viewed', at: log.at }]);
     await ro.putSongMoods([{ key: 'band|song', moods: ['upbeat'], method: 'm', source: 'hand' }]);
     await ro.putSongPopularity([{ key: 'band|song', karaokeViews: 100, source: 'karafun' }]);
+    await ro.putSongCanonical([{ key: 'band|song', canonicalKey: 'band|song', title: 'Song', artist: 'Band', method: 'titles-v1', reason: 'same', sourceTitle: 'Song', sourceArtist: 'Band' }]);
 
     expect(await store.getUser('u1')).toMatchObject({ displayName: 'Ann', spotify: tokens });
     expect(await store.getRange('u1')).toBeNull();
@@ -35,6 +36,8 @@ describe('readOnlyStore', () => {
     expect(await store.listLog()).toEqual([]);
     expect(await store.listFeedback()).toEqual([]);
     expect((await store.getSongPopularity(['band|song'])).size).toBe(0);
+    expect((await store.listSongCanonical()).size).toBe(0); // the one-song-one-row mapping (QWW-49) is never written by a report
+    expect(await ro.listCanonicalInputs()).toHaveLength(1); // ... and its inputs are read through
   });
 
   it('lets the song service look songs up without caching or logging them', async () => {

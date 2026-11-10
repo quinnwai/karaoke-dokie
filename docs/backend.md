@@ -173,6 +173,84 @@ every measured source (`tempoOf(record, key)`, `src/lib/tempo/reviewed.ts`). Pre
 - `npm run tempo:report`: gold-set accuracy (`data/tempo-gold.json`), coverage and a spot check, from
   saved data only.
 
+## One song, one row (QWW-49)
+
+The logged-out list shows each catalogue song once, with a clean title. The catalogue is `song_ranges`, keyed by a
+loose song key, with the title and artist of whatever source wrote each row. Two things were wrong on screen: titles
+with the release's tags on them ("(Album Version)", "[DUET]", "(Live at Donington)", "- Remastered 2011",
+"(feat. X)"), and the same song twice, because two sources spelled it two ways (a curly and a straight apostrophe, an
+ASCII and a Unicode hyphen, "A*Teens" and "A★Teens"): hundreds of songs in the real catalogue, many of them identical on screen).
+
+**Where it is done.** Offline, in `npm run titles:build`, never per request. It writes `song_canonical`, one row for
+every measured song; the catalogue (`loadCatalogue(store, size, { canonical: true })`, which the app's wiring and the
+live-data smoke test use) reads it once per load and applies it (`applyCanonical`, `src/lib/songs/canonical.ts`).
+
+| Column | |
+|---|---|
+| `song_key` | The row it is about: any measured song, the shown one included |
+| `canonical_key` | The row shown for this song: its own key for the row shown, another's for a folded variant |
+| `title`, `artist` | What to show, the same on every row of one song (clean title; artist line with any "feat." from the title) |
+| `reason` | `same` (as stored), `cleaned` (a tag or featured artist came off), `folded` |
+| `method` | The rules version (`titles-v1`); a newer value rewrites every row |
+| `source_title`, `source_artist` | What the row had when the record was worked out; the record is used only while the row still has them |
+
+**Titles** (`src/lib/songs/title.ts`). A closed list of tags, each rule reading the whole text of a bracket or a dash
+tail: "(… Version)", "[DUET]", "- Remastered 2011" / "(2011 Remaster)", "(Live …)" / "(MTV Unplugged)" / "(En Vivo)",
+"(feat. X)", "(Radio Edit)", "(Single Mix)", "(… Remix)", "(TV)", "(Lyric Video)", "(Acoustic)", "(From "Film")",
+"(Once OST)", "(ESC 2015 Romania)" and a few more. What is not on the list stays, so a missed tag shows a bracket and a
+wrong one never turns a song into another: "(I Can't Get No) Satisfaction", "Sweet Dreams (Are Made of This)" and
+"Running Up That Hill (A Deal With God)" are untouched (the tests pin real titles like these, and near misses that only start or end like a tag). Kept on purpose:
+language versions ("(German Version)", "(Spanish Radio Edit)": the lyrics differ), instrumental, karaoke and dub tags
+(`hasLittleSinging` hides those songs on the tag), and a bracket naming a part, a reprise or an interlude. A bare
+"feat." with no bracket is left alone ("A Feat of Strength").
+
+**Folding** (`canonical.ts`). Two rows are one song only when all of these hold; anything else stays two rows:
+- the lead artist (the first credit) matches, ignoring case, accents, quotes, dashes and "&" against "and", and so do
+  the cleaned titles. A featured artist or a further credit is set aside: "Calvin Harris" and "Calvin Harris & Dua
+  Lipa" are one song (the release eval harness counts duplicates by lead artist too); "A" and "B" are not, and
+  neither are "A & B" and "B & A";
+- their ranges agree at both ends within 4 semitones (`MAX_RANGE_GAP`). A popular row measured an octave off would
+  otherwise hide the row that fits the singer; those pairs stay two rows and the dry run lists them;
+- neither is an instrumental, karaoke or dub row.
+
+The row shown is the main version, the one with no tag on its title (the most popular such row), unless an alternate
+(a row with a tag on its title) is clearly more popular: 0.15 higher on the popularity score (`ALTERNATE_MARGIN`; the
+score is `catalogueRank`, which counts Deezer rank, USDB and karaoke views and a Year-End chart entry). Its title is
+clean either way. A row that is not shown but is on a Year-End chart is still loaded by the catalogue, and stands in
+for the song if the row shown ranked too low to load.
+
+**Until the table is on a database, and when it goes wrong.** The app shows the titles as stored: no row, an empty or
+missing table, or a read that fails (retried once, logged, and kept for a minute rather than the hour) all fall back
+to that. A record is ignored when its row's title or artist has changed since the build, so a sync that renames a
+song never gets a stale clean title (or an un-hidden instrumental). A folded row is dropped only when the row it folds
+into is in the list and the mapping is consistent; otherwise the song stays. `report:library` and `tempo:report` ask for
+no mapping, so they still see the catalogue as stored.
+
+**Running it.**
+```sh
+npm run titles:build -- --lists titles-before-after.md   # a dry run: reads, writes nothing (not even the table), prints what to check
+npm run titles:build -- --apply --confirm-database karaoke_pr4_preview
+npm run titles:build -- --apply --confirm-database neondb --production   # production: Stage 3's data step, dry run first
+```
+Needs `DATABASE_URL`. Resumable: a run writes only the rows that are missing or differ, so after a stop, run it
+again. `--apply` refuses unless `--confirm-database` names the database it is connected to, and a database named
+`neondb` (production) also needs `--production`; a Neon branch of production keeps that name, so check the host the
+script prints. The dry run prints: songs before and after folding, tags removed by kind, the brackets still in shown titles
+(to see tags the rules do not know), the most popular folded songs, the alternates shown, and the names kept apart for
+their ranges. `--lists` writes the logged-out list for the release eval harness's five test ranges
+before and after, with counts of tagged titles and duplicates in the top 50, 200 and 1000.
+
+**Feedback and events.** Both keep the key of the row the visitor saw (`cat:<key>`), which after the build is the
+shown row. Anything recorded against a folded row, before or after, joins to its song through the table:
+```sql
+SELECT f.*, COALESCE(c.canonical_key, substr(f.track_id, 5)) AS song
+FROM feedback f LEFT JOIN song_canonical c ON f.track_id = 'cat:' || c.song_key;
+```
+**Not covered.** The signed-in list shows Spotify's titles as Spotify writes them. A name spelled two ways
+("Diddy – Dirty Money", "DiddyDirtyMoney") stays two rows. Apostrophes are set aside entirely, so "I'll" and "Ill" by one
+artist would fold.
+Rerun the build after `usdb:sync`, `ranges:import`, `popularity:*` or the octave fix changes titles, ranges or popularity.
+
 ## Beta event log
 
 Our own `events` table, not a third-party tool, to see where testers drop out of onboarding and

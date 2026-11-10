@@ -87,7 +87,7 @@ async function main() {
     if (!url) throw new Error('Set DATABASE_URL, or pass --url');
     console.log(`Reading database ${url.split('@')[1]?.split('?')[0] ?? '(unparsed)'} directly; use --url <deployment> to check what a deployment reads.`);
     const store = createPostgresStore(neonQuery(url));
-    const tracks = catalogueTracks(await loadCatalogue(store));
+    const tracks = catalogueTracks(await loadCatalogue(store, undefined, { canonical: true })); // what the app shows: the stored one-song-one-row mapping applied
     const deps = productionSongDeps(store, false);
     load = async (r) => recommendCatalogue(tracks, r, deps, { all: true }).matches;
   }

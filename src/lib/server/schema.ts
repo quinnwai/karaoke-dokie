@@ -142,4 +142,19 @@ CREATE TABLE IF NOT EXISTS spotify_calls (
   calls INTEGER NOT NULL,
   PRIMARY KEY (day, caller)
 );
+-- Which row is shown for a song, with its clean title and artist line (QWW-49), written by npm run titles:build. Every
+-- measured song has a row once the build has run; a variant folded into another song points at the row shown
+-- (canonical_key). source_title and source_artist are what the row had when the record was worked out: the app uses the
+-- record only while the row still has them. A song with no usable row is shown as it is stored, so the table may be empty or half written.
+CREATE TABLE IF NOT EXISTS song_canonical (
+  song_key TEXT PRIMARY KEY,
+  canonical_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  artist TEXT NOT NULL,
+  method TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  source_title TEXT NOT NULL,
+  source_artist TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS song_canonical_canonical ON song_canonical (canonical_key);
 `;
