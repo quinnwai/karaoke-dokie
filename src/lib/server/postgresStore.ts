@@ -239,6 +239,22 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       }
       return out;
     },
+    async listSongRangesPage(afterKey, limit) {
+      const rows = await query(
+        `SELECT * FROM song_ranges WHERE skipped = false AND range_json IS NOT NULL AND song_key > $1 ORDER BY song_key LIMIT $2`,
+        [afterKey, limit],
+      );
+      const out = new Map<string, SongRangeRecord>();
+      for (const r of rows) {
+        try {
+          const rec = toSongRecord(r);
+          if (rec.range) out.set(str(r.song_key), rec);
+        } catch (err) {
+          throw new Error(`song_ranges row ${JSON.stringify(str(r.song_key))} does not parse: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+      return out;
+    },
     async putUsdbSongs(entries) {
       // Multi-row inserts, 100 at a time, so a full index (about 32k songs) is a few hundred queries.
       for (let i = 0; i < entries.length; i += 100) {

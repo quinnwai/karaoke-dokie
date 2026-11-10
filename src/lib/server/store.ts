@@ -154,6 +154,12 @@ export interface Store {
   listMeasuredRangesByArtist(artistKey: string): Promise<SongRange[]>;
   /** Every stored (not skipped) song range for one artist (the artist part of songKey), by song key; for the octave fix. */
   listSongRangesByArtist(artistKey: string): Promise<Map<string, SongRangeRecord>>;
+  /**
+   * Up to `limit` stored (not skipped) song ranges whose song key sorts after `afterKey`, in key
+   * order; pass the last key of one page to get the next. Empty when the table is done. For walking
+   * every range, such as the octave fix.
+   */
+  listSongRangesPage(afterKey: string, limit: number): Promise<Map<string, SongRangeRecord>>;
 
   /** Adds or updates songs in the USDB song index. */
   putUsdbSongs(entries: UsdbIndexEntry[]): Promise<void>;

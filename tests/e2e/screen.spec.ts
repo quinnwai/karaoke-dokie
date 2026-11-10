@@ -885,3 +885,44 @@ test('Easy by the Commodores shows no octave mark for F2 to C5', async ({ browse
     await context.close();
   }
 });
+
+// QWW-31, second round: Are You With Me (no recording, no artist evidence: the pitch rule) and Talk Dirty (a recording
+// flagged mostly-rap). Their stored rows, as imported, go through the real fix and matcher for D#2 to D5, the range
+// they were reported with, and the song page shows no octave mark and the label the published range gives.
+const knownCases = (JSON.parse(readFileSync(path.resolve('tests/fixtures/octave-known-cases.json'), 'utf8')) as {
+  songs: { key: string; stored: Pick<SongRange, 'low' | 'high' | 'tessitura' | 'pitchShare' | 'fastLyrics'> }[];
+}).songs;
+
+for (const song of [
+  { key: 'lost frequencies|are you with me', title: 'Are You With Me - Radio Edit', artist: 'Lost Frequencies', label: 'Easy', slug: 'are-you-with-me' },
+  { key: 'jason derulo|talk dirty', title: 'Talk Dirty (feat. 2 Chainz)', artist: 'Jason Derulo', label: 'Easy', slug: 'talk-dirty' },
+] as const) {
+  test(`${song.title} shows no octave mark and ${song.label} for D#2 to D5`, async ({ browser, baseURL }) => {
+    const evidence = JSON.parse(readFileSync(path.resolve('data/octave-evidence.json'), 'utf8')) as OctaveEvidence;
+    const user = { low: 39, high: 74, source: 'test' } as const;
+    const row = knownCases.find((c) => c.key === song.key)!.stored;
+    const stored: SongRange = { ...row, source: 'note-file', confidence: 'high', fastLyrics: row.fastLyrics ?? false };
+    const range = correctOctave(song.key, stored, evidence);
+    const fit = matchSong(user, range)!;
+    const track = { id: song.slug, title: song.title, artist: song.artist, artistId: `a-${song.slug}`, spotifyUrl: `https://open.spotify.com/track/${song.slug}`, playRank: 0 };
+    const api = freshState();
+    api.user = me(user);
+    api.response = { matches: [toMatch(track, range, fit)], nextOffset: null, sources: {}, complete: true };
+    expect(range.octaveFrom).toBeDefined();
+    expect(fit).toMatchObject({ octave: 'none', difficulty: song.label.toLowerCase() });
+
+    for (const [name, viewport] of [['375', { width: 375, height: 812 }], ['1280', { width: 1280, height: 800 }]] as const) {
+      const context = await browser.newContext({ ...iPhone, viewport, baseURL, reducedMotion: 'reduce' });
+      await mockApi(context, api);
+      const page = await context.newPage();
+      await page.goto('/');
+      await page.getByRole('button', { name: new RegExp(`^${song.title.replace(/[()]/g, '\\$&')}`) }).click();
+      await expect(page.getByRole('heading', { name: song.title })).toBeVisible();
+      await expect(page.getByText(song.label, { exact: true })).toBeVisible();
+      await expect(page.getByRole('img', { name: /octave/ })).toHaveCount(0);
+      await expect(page.getByText(/lower than the artist|higher than the artist/)).toHaveCount(0);
+      await shot(page, `qww-31-${song.slug}-${name}`);
+      await context.close();
+    }
+  });
+}
