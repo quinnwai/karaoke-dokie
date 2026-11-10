@@ -61,8 +61,8 @@ export const VIEWS = {
 /** What the script knows about one song (by track id), from sources the ranking does not grade itself on. */
 export interface SongFacts {
   deezerRank?: number;
-  /** Deezer answered this track with a non-empty 30 s preview. */
-  playable?: boolean;
+  /** Deezer answered this track with a non-empty 30 s preview; 'error' when Deezer could not be asked (quota, network). */
+  playable?: boolean | 'error';
 }
 
 /** A Deezer rank at or above this counts as a hit (about the top tenth of the catalogue's ranked songs). */
@@ -83,7 +83,7 @@ export function isRecognisable(m: Match, billboard: Set<string>, facts: SongFact
 // ---------- 4. titles ----------
 
 const VERSION_WORDS =
-  /\b(version|live|remaster(ed)?|edit|mix|remix|acoustic|duet|radio|demo|mono|stereo|single|album|extended|explicit|clean|unplugged|instrumental|karaoke|cover|deluxe|bonus|re-?recorded|taylor's|sped up|slowed|feat\.?|ft\.|featuring|from)\b/i;
+  /\b(version|live|remaster(ed)?|edit|mix|remix|acoustic|duet|radio|demo|mono|stereo|album|extended|explicit|clean|unplugged|instrumental|karaoke|cover|deluxe|bonus|re-?recorded|taylor's|sped up|slowed|feat\.?|ft\.|featuring)\b/i;
 
 /**
  * True for a title that names a version: anything in square brackets ("[DUET]"), or a version word
@@ -247,14 +247,15 @@ export function checkTitles(t: RangeInput): Check {
 export function checkPlay(t: RangeInput, facts: Map<string, SongFacts>): Check {
   const top = VIEWS.default(t.matches, t.test.range).slice(0, 20);
   const missing = top.filter((m) => facts.get(m.track.id)?.playable !== true);
+  const errors = missing.filter((m) => facts.get(m.track.id)?.playable === 'error').length;
   const ok = top.length - missing.length;
   return {
     criterion: 6,
     range: t.test.id,
     pass: top.length > 0 && ok / top.length >= 0.9,
-    value: `${ok}/${top.length}`,
+    value: `${ok}/${top.length}${errors ? ` (${errors} not checked: Deezer error)` : ''}`,
     want: '>=90%',
-    notes: missing.map((m) => `no preview: ${m.track.artist} - ${m.track.title}`),
+    notes: missing.map((m) => `${facts.get(m.track.id)?.playable === 'error' ? 'Deezer error' : 'no preview'}: ${m.track.artist} - ${m.track.title}`),
   };
 }
 
@@ -286,7 +287,7 @@ export interface TempoResult {
 
 /**
  * 10/10 of the top 10 and 18/20 of the top 20 fit. A list shorter than 20 is held to the same share:
- * all of its first ten, and all but one in ten of the rest. An empty list is left to criterion 3.
+ * all of its first ten, and all but one in ten of the rest (the details name short lists). An empty list fails.
  */
 export function judgeList(list: TempoList, labels: Map<string, JudgeLabel[]>): TempoResult {
   const fits = list.songs.map((m) => fitsEnd(labels.get(key(m)) ?? [], list.end));
@@ -295,7 +296,8 @@ export function judgeList(list: TempoList, labels: Map<string, JudgeLabel[]>): T
   const top10 = fits.slice(0, 10).filter((f) => f.fits).length;
   const top20 = fits.filter((f) => f.fits).length;
   const flaky = fits.filter((f) => f.flaky).length;
-  return { list, top10, top20, flaky, pass: top10 === n10 && top20 >= Math.ceil(n20 * 0.9) };
+  // An empty list fails here too, not only under criterion 3.
+  return { list, top10, top20, flaky, pass: n20 > 0 && top10 === n10 && top20 >= Math.ceil(n20 * 0.9) };
 }
 
 export function checkTempo(range: string, results: TempoResult[]): Check {
@@ -308,7 +310,7 @@ export function checkTempo(range: string, results: TempoResult[]): Check {
     value: `${mine.length - failed.length}/${mine.length} era-ends`,
     want: 'all',
     notes: failed.map(
-      (r) => `${r.list.era ?? 'any era'} ${r.list.end}: top 10 ${r.top10}/${Math.min(10, r.list.songs.length)}, top 20 ${r.top20}/${r.list.songs.length}${r.flaky ? `, ${r.flaky} flaky` : ''}`,
+      (r) => `${r.list.era ?? 'any era'} ${r.list.end}${r.list.songs.length < 20 ? ` (only ${r.list.songs.length} songs)` : ''}: top 10 ${r.top10}/${Math.min(10, r.list.songs.length)}, top 20 ${r.top20}/${r.list.songs.length}${r.flaky ? `, ${r.flaky} flaky` : ''}`,
     ),
   };
 }
@@ -355,13 +357,23 @@ export function sample<T>(items: T[], n: number, seed = 52): T[] {
   return copy.slice(0, n);
 }
 
+/**
+ * PASS needs every criterion checked on every range, and all of them passing: a skipped criterion is
+ * not a pass. INCOMPLETE when everything that ran passed but something was skipped.
+ */
+export function verdict(checks: Check[]): 'PASS' | 'FAIL' | 'INCOMPLETE' {
+  if (checks.some((c) => !c.pass)) return 'FAIL';
+  const crits = Object.keys(CRITERIA).map(Number) as Check['criterion'][];
+  const complete = crits.every((c) => TEST_RANGES.every((t) => checks.some((x) => x.criterion === c && x.range === t.id)));
+  return complete ? 'PASS' : 'INCOMPLETE';
+}
+
 export function toMarkdown(r: Report): string {
   const ranges = TEST_RANGES.map((t) => t.id);
   const cell = (c: Check | undefined) => (c ? `${c.pass ? 'PASS' : '**FAIL**'} ${c.value}` : 'not run');
   const crits = (Object.keys(CRITERIA).map(Number) as Check['criterion'][]).filter((c) => r.checks.some((x) => x.criterion === c));
-  const overall = r.checks.length > 0 && r.checks.every((c) => c.pass);
   const lines = [
-    `## ${r.title}: ${overall ? 'PASS' : 'FAIL'}`,
+    `## ${r.title}: ${verdict(r.checks)}`,
     '',
     ...r.meta.map((m) => `- ${m}`),
     '',

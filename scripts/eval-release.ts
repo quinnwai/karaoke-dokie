@@ -12,9 +12,11 @@
 // Needs DATABASE_URL_UNPOOLED or DATABASE_URL (production's; --db preview reads karaoke_pr4_preview on
 // the same host) and, for the judge, the first of ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY
 // that is set (Claude Sonnet, or the provider's default model in moods/providers.ts). Writes <out>/release-<db>-<time>.md and .json,
-// prints the Markdown, and exits 1 when any check fails.
+// prints the Markdown, and exits 1 unless every criterion ran and passed.
 
+import { realpathSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { Match } from '../src/lib/contracts';
@@ -34,6 +36,7 @@ import {
   TEST_RANGES,
   tempoLists,
   toMarkdown,
+  verdict,
   topTen,
   type Check,
   type JudgeLabel,
@@ -52,10 +55,14 @@ import { productionSongDeps } from '../src/lib/server/wiring';
 const JUDGE_BATCH = 40;
 const PARALLEL = 4;
 
-/** Every statement must be a read; anything else throws before it reaches the database. */
-function selectOnly(query: QueryFn): QueryFn {
+/**
+ * Every statement must be a plain read; anything else throws before it reaches the database. A
+ * statement that names a writing command anywhere (a data-modifying CTE included) is refused too.
+ */
+const WRITES = /\b(insert|update|delete|merge|upsert|create|alter|drop|truncate|grant|revoke|copy|vacuum|call|do)\b/i;
+export function selectOnly(query: QueryFn): QueryFn {
   return (text, params) => {
-    if (!/^\s*(select|with)\b/i.test(text)) throw new Error(`eval:release reads only; refused: ${text.slice(0, 60)}`);
+    if (!/^\s*(select|with)\b/i.test(text) || WRITES.test(text)) throw new Error(`eval:release reads only; refused: ${text.slice(0, 60)}`);
     return query(text, params);
   };
 }
@@ -64,7 +71,12 @@ function databaseUrl(db: string): string {
   const url = (process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL || '').trim();
   if (!url) throw new Error('Set DATABASE_URL_UNPOOLED or DATABASE_URL (production, from vercel env pull)');
   if (db === 'production') return url;
-  if (db === 'preview') return url.replace(/\/neondb(\?|$)/, '/karaoke_pr4_preview$1');
+  if (db === 'preview') {
+    const u = new URL(url);
+    if (u.pathname !== '/neondb') throw new Error(`--db preview expects production's URL (database neondb), got ${u.pathname}`);
+    u.pathname = '/karaoke_pr4_preview';
+    return u.toString();
+  }
   throw new Error(`--db must be production or preview, not ${db}`);
 }
 
@@ -85,18 +97,26 @@ async function pool<T, R>(items: T[], n: number, f: (item: T) => Promise<R>): Pr
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Whether Deezer has a 30 s preview for the track. Deezer answers a quota error with HTTP 200 and code 4. */
-async function deezerPlayable(id: number): Promise<boolean> {
+/**
+ * Whether Deezer has a 30 s preview for the track, or 'error' when it could not be asked (quota still
+ * hit after retries, network). Deezer answers a quota error with HTTP 200 and code 4.
+ */
+async function deezerPlayable(id: number): Promise<boolean | 'error'> {
   for (let attempt = 0; attempt < 4; attempt++) {
-    const res = await fetch(`https://api.deezer.com/track/${id}`, { signal: AbortSignal.timeout(15_000) });
+    const res = await fetch(`https://api.deezer.com/track/${id}`, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
+    if (!res) {
+      await sleep(1000 * (attempt + 1));
+      continue;
+    }
     const body = (await res.json().catch(() => null)) as { preview?: string; readable?: boolean; error?: { code?: number } } | null;
     if (body?.error?.code === 4 || res.status === 429) {
       await sleep(1000 * (attempt + 1));
       continue;
     }
-    return !!body && !body.error && body.readable !== false && typeof body.preview === 'string' && body.preview.length > 0;
+    if (!body) return 'error';
+    return !body.error && body.readable !== false && typeof body.preview === 'string' && body.preview.length > 0;
   }
-  return false;
+  return 'error';
 }
 
 async function main() {
@@ -113,6 +133,8 @@ async function main() {
   });
   const db = values.db!;
   const runs = Number(values.runs);
+  // Fewer than 3 runs could not show a flaky label (QWW-52 asks for 3, and flaky counts as a miss).
+  if (!Number.isInteger(runs) || runs < 3) throw new Error(`--runs must be a whole number, 3 or more (got ${values.runs})`);
   const query = selectOnly(neonQuery(databaseUrl(db)));
   const store = createPostgresStore(query, { autoMigrate: false });
 
@@ -151,7 +173,7 @@ async function main() {
     const top = new Map<string, Match>();
     for (const t of inputs) for (const m of VIEWS.default(t.matches, t.test.range).slice(0, 20)) top.set(m.track.id, m);
     const ids = [...top.keys()];
-    const playable = await pool(ids, 5, async (id) => {
+    const playable = await pool(ids, 5, async (id): Promise<boolean | 'error'> => {
       const d = deezer.get(id.replace(/^cat:/, ''));
       return d?.deezerId ? deezerPlayable(d.deezerId) : false;
     });
@@ -214,6 +236,7 @@ async function main() {
     tempoSample,
     meta,
   };
+  report.meta.push('Not checked by the harness: 1b (Quinn-Wai recognises 8 of the top 10, list below), 5 (octave), 7 (design), 8 (funnel). Criterion 4 flags every variant, including one that is the more popular version.');
   const md = toMarkdown(report);
   await mkdir(values.out!, { recursive: true });
   const stem = join(values.out!, `release-${db}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
@@ -221,10 +244,12 @@ async function main() {
   await writeFile(`${stem}.json`, JSON.stringify(report, null, 2));
   console.log(md);
   console.error(`Wrote ${stem}.md and .json`);
-  if (checks.some((c) => !c.pass)) process.exit(1);
+  if (verdict(checks) !== 'PASS') process.exit(1);
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  });
+}

@@ -19,7 +19,9 @@ import {
   type JudgeLabel,
   type RangeInput,
   type SongFacts,
+  verdict,
 } from '../../src/lib/eval/release';
+import { selectOnly } from '../../scripts/eval-release';
 import { songKey } from '../../src/lib/songs/resolve';
 
 const range = TEST_RANGES[0]!;
@@ -166,5 +168,37 @@ describe('report', () => {
     });
     expect(md).toContain('## Release eval: FAIL');
     expect(md).toContain('| 4. Titles (top 50) | **FAIL** 1 version, 0 duplicate | not run');
+  });
+});
+
+describe('review fixes', () => {
+  it('is INCOMPLETE, not PASS, when a criterion was skipped', () => {
+    const clean = TEST_RANGES.map((t) => checkTitles({ test: t, matches: list(60) }));
+    expect(verdict(clean)).toBe('INCOMPLETE');
+    expect(verdict([...clean, { ...clean[0]!, pass: false }])).toBe('FAIL');
+  });
+
+  it('fails an empty tempo list and names a short one', () => {
+    expect(judgeList({ range: range.id, era: '60s', end: 'slow', songs: [] }, new Map()).pass).toBe(false);
+    const songs = list(5);
+    const r = judgeList({ range: range.id, era: '60s', end: 'slow', songs }, new Map());
+    expect(checkTempo(range.id, [r]).notes[0]).toContain('(only 5 songs)');
+  });
+
+  it('reports a Deezer error apart from a missing preview', () => {
+    const ms = list(20);
+    const facts = new Map<string, SongFacts>(ms.map((m, i) => [m.track.id, { playable: i < 2 ? 'error' : true }]));
+    expect(checkPlay(input(ms), facts)).toMatchObject({ pass: true, value: '18/20 (2 not checked: Deezer error)' });
+  });
+
+  it('passes "Theme from" titles', () => {
+    expect(isVersionTitle('Do You Know Where You’re Going To (Theme from Mahogany)')).toBe(false);
+  });
+
+  it('refuses any statement that writes, including a data-modifying CTE', async () => {
+    const q = selectOnly(async () => []);
+    await expect(q('SELECT * FROM song_tempo WHERE key = ANY($1)')).resolves.toEqual([]);
+    expect(() => q('WITH x AS (DELETE FROM song_tempo RETURNING *) SELECT * FROM x')).toThrow(/reads only/);
+    expect(() => q('INSERT INTO t VALUES (1)')).toThrow(/reads only/);
   });
 });
