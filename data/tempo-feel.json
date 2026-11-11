@@ -81,7 +81,7 @@
 {"keys":["a-ha|cry wolf"],"feel":"mid","method":"claude-opus-5-5/feel-recheck-v1"},
 {"keys":["a-ha|crying in the rain"],"feel":"mid","method":"claude-opus-5-5/feel-recheck-v1"},
 {"keys":["a-ha|hunting high and low"],"feel":"slow","method":"claude-opus-5-5/feel-plain-v1"},
-{"keys":["a-ha|take on me"],"feel":"mid"},
+{"keys":["a-ha|take on me"],"feel":"upbeat","method":"manual/hand-fix-qww-54"},
 {"keys":["a-ha|the sun always shines on t.v."],"feel":"upbeat"},
 {"keys":["a.r. rahman & the pussycat dolls feat nicole scherzinger|jai ho!"],"feel":"upbeat"},
 {"keys":["a.r. rahman & the pussycat dolls|jai ho!"],"feel":"upbeat"},

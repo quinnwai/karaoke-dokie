@@ -12,8 +12,9 @@ a measurement: no audio, no measured tempo and no lyrics went in. They were made
 songs, each batch a separate fresh run that saw only its own songs and the instructions below; a song the model did not know
 got no label, and a song that two batches labelled differently became "mid". The second look and the recheck are described
 further down. The file holds 6,196 labels, which cover 6,202 of the catalogue's 7,638 songs (81%) and 97 to 98% of the 300, 1,000, 2,000 and
-3,000 most popular: **685 slow, 3,738 mid and 1,779 upbeat songs**. Of the mids, 691 are songs a later pass
-took away a slow or upbeat label from (method `claude-opus-5-5/feel-recheck-v1`).
+3,000 most popular: **685 slow, 3,737 mid and 1,780 upbeat songs**. Of the mids, 691 are songs a later pass
+took away a slow or upbeat label from (method `claude-opus-5-5/feel-recheck-v1`). One label was set by hand after review
+(method `manual/hand-fix-qww-54`): a-ha, Take On Me, from mid to upbeat.
 
 The labels are tuned for precision at the two ends: the instructions say to answer slow or upbeat only when it is
 unmistakable, and mid otherwise. So a song missing from an end is expected, and a song at an end has been vouched for.
@@ -91,8 +92,8 @@ which is why the second look added so little in the end.
 The recheck was chosen from the labelling runs' own agreement, not from any judge's answer on a list. The judges' answers
 motivated looking (they showed which labels were weak) but no label was changed because a judge called its song something else.
 All three passes are one model answering the same question in different words, so they share blind spots; the hand check of one
-era's lists by Quinn-Wai (QWW-54 "Done when") is the independent test, and a known error stays in: Take On Me, published at 170
-bpm, is labelled mid.
+era's lists by Quinn-Wai (QWW-54 "Done when") is the independent test. The one error known so far, Take On Me (published at
+170 bpm, marked "Fast"), was labelled mid by the model and has been set to upbeat by hand.
 
 ## Where the songs came from
 
@@ -109,7 +110,10 @@ The file keeps each label under every key the catalogue may know the song by (th
 
 These labels are not graded by their maker. The release harness' judge never sees them, and Quinn-Wai checks one era's
 lists by ear (QWW-54 "Done when"). A label is also not proof: where a person disagrees, change the song's entry in
-`tempo-feel.json` (or remove it) and run `npm run tempo:feel -- --apply` again; it writes only the rows that changed.
+`tempo-feel.json` and run `npm run tempo:feel -- --apply` again; it writes only the rows that changed. Change an entry,
+do not delete it: the import never deletes a row, so a deleted entry leaves the song's old label in `song_feel`. Use `mid`
+for a song that is neither slow nor upbeat, and give a hand-set entry its own `method` (as the Take On Me entry has), so
+`song_feel.source` shows who set it.
 
 ## File format
 
