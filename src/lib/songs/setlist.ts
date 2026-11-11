@@ -6,25 +6,37 @@
 //      away (match.ts matchSong). That happens before this file: `candidates` are the songs that fit.
 //   2. Every song gets a place on each gear, 0 to 100 (prepareSetlist). It depends on the songs and the
 //      singer's range only, never on the gears, so it is made once per range and reused while a slider moves.
-//   3. Era filter, then the songs are sorted by distance to the gear values (rankPrepared):
+//   3. Era filter, then the songs are sorted. The first thing that counts is how a song is sung (QWW-58,
+//      Quinn-Wai's decision A, 11 Nov): every song that fits as written comes before any song that needs an
+//      octave jump, whatever the gears say. The jump songs still follow, so a singer whose popular songs all
+//      need a jump still gets a full list. The Maybe songs (estimated ranges) come after all the others, as
+//      everywhere else, and are sorted that way inside too. Inside each of those groups the songs are sorted
+//      by distance to the gear values (rankPrepared):
 //        distance = sum over the active gears of weight × |song's place − gear value|
 //      An active gear is one that is not in `off` (and History only when the singer's library was read).
 //      Off gears add nothing. A song we do not know on an active gear (no tempo, an implausible range, not in
-//      the singer's library) sorts after every song that is known on it: "songs without a tempo sort last",
-//      "the singer's own songs come first". When songs miss different gears the more specific control wins
-//      (MISSING_RANK: History, then Tempo, then Popularity, then Difficulty), so a song with no tempo sorts
-//      after every song that has one, whatever else either is missing. The Maybe songs (estimated ranges) come
-//      after all the others, as everywhere else. Ties go to the more popular song, then the easier, then to a
-//      song sung as written over one an octave away, then to the song's artist and title, then to the track
-//      id, so the order never depends on input order, and a song keeps its place among equals whether it
-//      arrives as the catalogue's track or the singer's own.
+//      the singer's library) sorts after every song of its group that is known on it: "songs without a tempo
+//      sort last", "the singer's own songs come first". When songs miss different gears the more specific
+//      control wins (MISSING_RANK: History, then Tempo, then Popularity, then Difficulty), so a song with no
+//      tempo sorts after every song that has one, whatever else either is missing. Ties go to the more popular
+//      song, then the easier, then to the song's artist and title, then to the track id, so the order never
+//      depends on input order, and a song keeps its place among equals whether it arrives as the catalogue's
+//      track or the singer's own.
+//
+// Why the octave is a group of its own and not a penalty in the distance (QWW-58; the penalty was option B,
+// not chosen): the octave used to break exact ties only, which a sum of places almost never produces, and the
+// places themselves favour the jump. A song that is too high for you sits in the lower half of your range an
+// octave down, where the "easy leans low" curve below is kindest, so it reads Easy and beats the same song
+// sung as written; and the biggest hits (mostly tenor and female pop) win in whichever octave fits them, which
+// put octave jumps at the top of a bass's list. The places do not change: a jump song keeps the Difficulty and
+// Popularity place it is shown at, it just comes after the songs sung as written.
 //
 // The default state (setlistConfig.ts) is Popularity on at 100, Difficulty on at 0, the rest off. With
-// Popularity counting double, that is a blend that leans on popularity: of two songs, the one that is 10 places
-// less popular needs to be 20 places easier to come first (QWW-42 rule 3, "most popular first, then easiest").
-// It is a blend, not a sort by popularity with difficulty breaking ties: the single most popular song is first
-// only if it is also easy. The weights are GEAR_WEIGHTS, the one knob if the top of the default list needs to
-// lean harder on popularity.
+// Popularity counting double, that is a blend that leans on popularity: of two songs sung the same way, the one
+// that is 10 places less popular needs to be 20 places easier to come first (QWW-42 rule 3, "most popular
+// first, then easiest"). It is a blend, not a sort by popularity with difficulty breaking ties: the single most
+// popular song is first only if it is also easy. The weights are GEAR_WEIGHTS, the one knob if the top of the
+// default list needs to lean harder on popularity.
 //
 // A song's place on a gear is its rank among the singer's songs, as a share of them, not its raw score. Raw
 // scores bunch up (karaoke popularity sits between 0.5 and 0.9, most songs sit near 120 bpm), and a track laid
@@ -274,16 +286,18 @@ export function rankPrepared(prepared: PreparedSetlist, state: SetlistState & { 
       else distance += GEAR_WEIGHTS[g] * Math.abs(place - state.gears[g]);
     }
     const m = s.candidate.match;
-    return { s, missing, distance: quantize(distance), who: `${m.track.artist}\u0000${m.track.title}`.toLowerCase() };
+    // 0 for a song sung as written, 1 for one that needs an octave jump, up or down (QWW-58).
+    const jump = octaveSemitones(m) === 0 ? 0 : 1;
+    return { s, jump, missing, distance: quantize(distance), who: `${m.track.artist}\u0000${m.track.title}`.toLowerCase() };
   });
   scored.sort(
     (a, b) =>
       Number(a.s.maybe) - Number(b.s.maybe) ||
+      a.jump - b.jump ||
       a.missing - b.missing ||
       a.distance - b.distance ||
       quantize(b.s.popularity) - quantize(a.s.popularity) ||
       (a.s.gears.difficulty ?? 1000) - (b.s.gears.difficulty ?? 1000) ||
-      Math.abs(octaveSemitones(a.s.candidate.match)) - Math.abs(octaveSemitones(b.s.candidate.match)) ||
       compareIds(a.who, b.who) ||
       compareIds(a.s.candidate.match.track.id, b.s.candidate.match.track.id),
   );
