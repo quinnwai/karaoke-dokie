@@ -16,12 +16,6 @@ import { RACK_FULL } from './sheet';
 export const ROW_HEIGHT = 66;
 /** A phone opens expanded only if that leaves at least this many whole rows. */
 export const MIN_OPENING_ROWS = 3;
-/**
- * The line that names Deezer over the first row (QWW-48; `p.deezer` in rows.module.css: 2 px above, a 16 px line, 4 px below).
- * The mode is chosen when the screen first draws, while the list is still loading, so the line is not there to measure yet; a
- * screen that offers previews counts it from the start (useSheetFit), and errs towards mini, the safe mode, if it is never drawn.
- */
-export const DEEZER_LINE = 22;
 
 export interface ExpandedFit {
   /** How tall the song list would be with the sheet expanded, px. Negative: the expanded sheet is taller than the room for it. */
@@ -39,12 +33,10 @@ export interface ExpandedFit {
  * rack height (416 expanded, 164 mini, anything in between mid-drag), and `overflow` how far the screen's content runs past
  * its bottom edge (0 when everything fits; an expanded sheet that is too tall squeezes the list to nothing and spills
  * over). The list and the rack always add up to the same room, so the answer does not depend on the mode it is read in.
- * `above` is what stands over the first row inside the list (Deezer's credit line, a note about Spotify): the rows start that
- * far down, so that much less of the list is rows. It does not change whether the sheet fits the screen, only the rows.
  */
-export function expandedFit({ list, rack, overflow = 0, above = 0 }: { list: number; rack: number; overflow?: number; above?: number }): ExpandedFit {
+export function expandedFit({ list, rack, overflow = 0 }: { list: number; rack: number; overflow?: number }): ExpandedFit {
   const listHeight = list + (rack - RACK_FULL) - overflow;
-  const rows = Math.max(0, Math.floor((listHeight - above) / ROW_HEIGHT));
+  const rows = Math.max(0, Math.floor(listHeight / ROW_HEIGHT));
   return { listHeight, rows, canExpand: listHeight >= 0, opensMini: rows < MIN_OPENING_ROWS };
 }
 

@@ -214,11 +214,22 @@ for (const engine of engines) {
   });
 }
 
-test('the row and its play button fit a 375 px phone, with Deezer named over the list', async ({ browser, baseURL }) => {
+test('the row and its play button fit a 375 px phone, with Deezer named under the list', async ({ browser, baseURL }) => {
   const mock: Mock = { response: songs([1]), missing: new Set(), previewCalls: [] };
   for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
     const { context, page } = await open(browser, baseURL, mock, viewport);
-    await expect(page.getByText('Previews from')).toBeVisible();
+    // Deezer is named under the list (#34's notes), over the credits link: below the last row, at the end of what scrolls.
+    const credit = page.getByText('Previews from');
+    await credit.scrollIntoViewIfNeeded();
+    await expect(credit).toBeVisible();
+    expect(
+      await page.evaluate(() => {
+        const line = [...document.querySelectorAll('p')].find((p) => /Previews from/.test(p.textContent ?? ''))!;
+        const last = [...document.querySelectorAll('[data-row]')].at(-1)!;
+        return line.getBoundingClientRect().top >= last.getBoundingClientRect().bottom;
+      }),
+    ).toBe(true);
+    await page.locator('#list-scroll').evaluate((el) => el.scrollTo(0, 0));
     const button = (await play(page, 'Plastic Love').boundingBox())!;
     expect(button.width).toBeGreaterThanOrEqual(44);
     expect(button.height).toBeGreaterThanOrEqual(44);
@@ -228,29 +239,6 @@ test('the row and its play button fit a 375 px phone, with Deezer named over the
     await expect(play(page, 'Plastic Love')).toHaveAttribute('data-preview', 'playing');
     await page.waitForTimeout(600);
     await shot(page, `qww-48-row-${viewport.width}x${viewport.height}`);
-    await context.close();
-  }
-});
-
-test('Deezer\'s line over the first row counts in the sheet\'s fit: a screen that shows 3 whole rows only without it opens in mini (QWW-57, decision 1)', async ({ browser, baseURL }) => {
-  // The mode is chosen when the screen first draws, before the list is there, so the 22 px line is counted from the start.
-  // 390x844 leaves the expanded list 226 px: 204 below the line, 3 whole rows. 390x830 leaves 212: 190 below it, 2 whole rows.
-  const mock: Mock = { response: songs(), missing: new Set(), previewCalls: [] };
-  for (const [height, mode] of [[844, 'expanded'], [830, 'mini']] as const) {
-    const { context, page } = await open(browser, baseURL, mock, { width: 390, height });
-    await expect(page.getByText('Previews from')).toBeVisible();
-    await expect(page.locator('#app')).toHaveAttribute('data-mode', mode);
-    if (mode === 'expanded') {
-      // And three whole rows are in view, under the line.
-      const whole = await page.evaluate(() => {
-        const list = document.getElementById('list-scroll')!.getBoundingClientRect();
-        return [...document.querySelectorAll('[data-row]')].filter((r) => {
-          const b = r.getBoundingClientRect();
-          return b.top >= list.top - 0.5 && b.bottom <= list.bottom + 0.5;
-        }).length;
-      });
-      expect(whole).toBeGreaterThanOrEqual(3);
-    }
     await context.close();
   }
 });

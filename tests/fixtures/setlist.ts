@@ -17,6 +17,8 @@ export interface MockSong {
   tempo: number;
   /** 'up' or 'down': the song fits only if sung an octave higher or lower than the artist (QWW-57, R13). Default 'none'. */
   octave?: OctaveShift;
+  /** The song's Deezer track, which its play button plays (QWW-48). Default: none, so the button is disabled. */
+  deezerId?: number;
 }
 
 const s = (title: string, artist: string, era: EraId, difficulty: number, history: number, popularity: number, tempo: number): MockSong => ({
@@ -91,6 +93,7 @@ export function mockMatch(song: MockSong, i: number, idPrefix = 'cat:'): Match {
     },
     range,
     octave: song.octave ?? 'none',
+    ...(song.deezerId === undefined ? {} : { deezerId: song.deezerId }),
     ...difficultyFields(song.difficulty),
     year: YEAR[song.era],
     yearSource: 'usdb',

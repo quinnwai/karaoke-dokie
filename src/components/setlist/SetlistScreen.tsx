@@ -11,7 +11,6 @@ import './setlist-global.css';
 import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
 import type { Match, ResultsMode, VocalRange } from '../../lib/contracts';
 import { midiToNoteName } from '../../lib/audio/notes';
-import { DEEZER_LINE } from '../../lib/setlist/fit';
 import { toRows } from '../../lib/setlist/rows';
 import { HISTORY_HINT_LOGGED_OUT, HISTORY_HINT_UNREACHABLE } from '../../lib/setlist/gears';
 import type { TunerAction } from '../../lib/setlist/tuner';
@@ -107,8 +106,7 @@ export function SetlistScreen(props: SetlistScreenProps) {
   // How the expanded sheet fits this screen. On a short phone the first time it opens mini (decision 1); where the expanded
   // sheet is taller than the screen can hold at all (an iPhone SE with Safari's bars, a phone on its side), the handle keeps
   // it in mini. Before the first measure (and in jsdom, which has no layout) nothing is known and nothing is changed.
-  // A screen that offers previews will have Deezer's line over its first row (QWW-48): the fit counts it from the first measure.
-  const fit = useSheetFit(root, props.renderPlay ? DEEZER_LINE : 0);
+  const fit = useSheetFit(root);
   const canExpand = fit?.canExpand ?? true;
   const { openMiniIfShort, onSheetSized, onTuner } = props;
   const sized = useRef(false);
@@ -206,9 +204,6 @@ export function SetlistScreen(props: SetlistScreenProps) {
         )}
         {waiting && visible.length === 0 && <p className={listStyles.empty}>Loading…</p>}
 
-        {/* Deezer's API terms ask for its logo where its previews are: one quiet line over the first row (QWW-48), which scrolls
-            away with the list. Only while a row on screen has a preview to play. */}
-        {props.renderPlay && visible.some((r) => r.match.deezerId !== undefined) && <DeezerCredit className={listStyles.deezer} />}
         {visible.length > 0 && <SongRows rows={visible} scroller={scroller} onOpen={props.onSelect} renderPlay={props.renderPlay} />}
         {/* A big library comes in pages: the rows that have arrived are shown, and what is still coming is said under them. */}
         {waiting && visible.length > 0 && <p className={listStyles.note}>Loading…</p>}
@@ -232,6 +227,9 @@ export function SetlistScreen(props: SetlistScreenProps) {
             <p>Invited testers only for now.</p>
           </div>
         )}
+        {/* Deezer's API terms ask for its logo where its previews are (QWW-48): one quiet line under the list, over the credits link,
+            which tells listeners the rest. Only while a row on screen has a preview to play. */}
+        {props.renderPlay && visible.some((r) => r.match.deezerId !== undefined) && <DeezerCredit className={listStyles.deezer} />}
         <a className={listStyles.credits} href="/credits" aria-label="Sources and credits" title="Sources and credits">
           <BookIcon />
         </a>

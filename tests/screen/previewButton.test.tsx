@@ -171,11 +171,17 @@ describe('play button in the tuner rows', () => {
     expect(screen.getByRole('button', { name: 'Play Lemon by Kenshi Yonezu' }).getAttribute('data-preview')).toBe('idle');
   });
 
-  it("shows Deezer's logo above the list when a song on it has a preview, and not otherwise", () => {
+  it("shows Deezer's logo under the list, over the credits link, when a song on it has a preview, and not otherwise", () => {
     const { wrap } = withPlayer();
     const { unmount } = render(wrap(<SetlistScreen {...setlistProps(RANGE, [withId(plastic(), 101), lemon()], { renderPlay: play })} />));
     expect(screen.getByText('Previews from')).toBeTruthy();
     expect(screen.getByText('Deezer')).toBeTruthy();
+    // Under the list: after the rows, and before the link that tells listeners the rest.
+    const credit = screen.getByText('Previews from').closest('p')!;
+    const rows = document.getElementById('list')!;
+    expect(rows.compareDocumentPosition(credit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const credits = screen.getByRole('link', { name: 'Sources and credits' });
+    expect(credit.compareDocumentPosition(credits) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     unmount();
     render(wrap(<SetlistScreen {...setlistProps(RANGE, [plastic(), lemon()], { renderPlay: play })} />));
     expect(screen.queryByText('Previews from')).toBeNull();

@@ -35,6 +35,41 @@ export const ME: MeResponse = { userId: 'u1', displayName: 'Quinn', range: RANGE
 
 // ---- the mocked API and a way in ----
 
+/** 16-bit mono WAV: `seconds` of a quiet 440 Hz tone, so a preview has something to play. */
+function toneWav(seconds: number, sampleRate = 22050): Buffer {
+  const n = Math.round(seconds * sampleRate);
+  const data = Buffer.alloc(n * 2);
+  for (let i = 0; i < n; i++) data.writeInt16LE(Math.round(0.1 * 32767 * Math.sin((2 * Math.PI * 440 * i) / sampleRate)), i * 2);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(data.length, 40);
+  return Buffer.concat([header, data]);
+}
+const TONE = toneWav(30);
+
+/** How long /api/preview/<id> takes to answer, so a test can look at the button while it loads. */
+export const PREVIEW_DELAY_MS = 1200;
+
+/** The tone, or the bytes a Range header asks for (206), as Deezer's CDN answers (Safari asks for media in ranges). */
+function previewAnswer(rangeHeader: string | undefined): { status: number; contentType: string; headers: Record<string, string>; body: Buffer } {
+  const range = /bytes=(\d+)-(\d*)/.exec(rangeHeader ?? '');
+  if (!range) return { status: 200, contentType: 'audio/wav', headers: { 'accept-ranges': 'bytes' }, body: TONE };
+  const start = Number(range[1]);
+  const end = Math.min(range[2] ? Number(range[2]) : TONE.length - 1, TONE.length - 1);
+  return { status: 206, contentType: 'audio/wav', headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${TONE.length}` }, body: TONE.subarray(start, end + 1) };
+}
+
 export interface Opened {
   events: AppEvent[];
 }
@@ -45,6 +80,11 @@ export async function mockApi(context: BrowserContext, opts: { loggedIn: boolean
     const req = route.request();
     const url = new URL(req.url());
     const json = (body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    // A song's 30 s preview (QWW-48): the route answers with a tone after a moment.
+    if (/^\/api\/preview\/\d+$/.test(url.pathname)) {
+      await new Promise((resolve) => setTimeout(resolve, PREVIEW_DELAY_MS));
+      return route.fulfill(previewAnswer(req.headers()['range']));
+    }
     switch (`${req.method()} ${url.pathname}`) {
       case 'GET /api/me':
         return opts.loggedIn ? json(ME) : json({ error: 'signed out' }, 401);

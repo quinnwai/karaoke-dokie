@@ -3,6 +3,7 @@
 //   R3   the rank number is back in the row's slot; hovering the row, or focusing its ▶ with the keyboard, swaps it for the ▶
 //        glyph alone (no ring or circle in any state); a ▶ that cannot play is the faded pink; a loading, playing or paused
 //        preview keeps its glyph without hover; on a touch screen, which cannot hover, the ▶ stands in the number's place
+//        (the last describes below run it again with QWW-48's real button: a song with a Deezer preview, and one without)
 //   R12  each title fills in once, left to right, when its row scrolls into view, and ends in its normal white; not again on
 //        scrolling back or on a re-rank; with reduced motion the titles simply show; each title's text is in the page once
 //   R13  a song that fits only an octave away says "Shifted down/up to fit range" first in its reason line, in place of "In your
@@ -671,3 +672,129 @@ for (const width of [360, 375, 390]) {
     for (const l of lines) expect(l.phraseRight, `${l.line}: the shift ends inside the line's box`).toBeLessThanOrEqual(l.boxRight + 0.5);
   });
 }
+
+// ============================================================================================================
+// R3 with QWW-48's real button (src/components/PreviewButton.tsx): a song with a Deezer preview, and one without
+// ============================================================================================================
+
+/** Two songs that lead the list under the defaults (easy, and the best known): one with a Deezer track, and one without. */
+const WITH_AND_WITHOUT: MockSong[] = [
+  { title: 'Can Play', artist: 'Has Preview', era: 's90', difficulty: 3, history: 50, popularity: 100, tempo: 50, deezerId: 4242 },
+  { title: 'No Preview', artist: 'Has None', era: 's90', difficulty: 4, history: 50, popularity: 99, tempo: 50 },
+];
+const PAUSE_PATH = 'M7 5h3.5v14H7zM13.5 5H17v14h-3.5z';
+const PLAY_PATH = 'M8 5.5v13l10.5-6.5z';
+const byTitle = (page: Page, title: string) => rows(page).filter({ hasText: title });
+/** The d of the glyph's path: the pause or the play. */
+const glyphPath = (row: Locator) => glyphOf(row).locator('path').getAttribute('d');
+
+test.describe('R3 with the real play button, with a pointer', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, ...POINTER });
+
+  test('R3. a song with a preview shows its number at rest and the bare ▶ in the full --pink-text on hover; one without shows the ▶ faded and disabled; no ring either way', async ({ page }) => {
+    await open(page, { extra: WITH_AND_WITHOUT });
+    const can = byTitle(page, 'Can Play');
+    const none = byTitle(page, 'No Preview');
+    // At rest: both show their rank numbers and no ▶, and the button's state is the player's.
+    for (const row of [can, none]) {
+      await expect(numberOf(row)).toBeVisible();
+      await expect(glyphOf(row)).toBeHidden();
+    }
+    await expect(playOf(can)).toBeEnabled();
+    await expect(playOf(can)).toHaveAttribute('data-preview', 'idle');
+    await expect(playOf(none)).toBeDisabled();
+    await expect(playOf(none)).toHaveAttribute('data-preview', 'unavailable');
+
+    // Hovered, the playable one swaps its number for the ▶ glyph, in the full pink.
+    await can.hover();
+    await expect(numberOf(can)).toBeHidden();
+    await expect(glyphOf(can)).toBeVisible();
+    expect(await glyphPath(can)).toBe(PLAY_PATH);
+    expect(await css(playOf(can), 'color')).toBe(PINK_TEXT);
+    expect(await css(can.locator('[data-play-slot] path'), 'fill')).toBe(PINK_TEXT);
+    expect(await css(playOf(can), 'opacity')).toBe('1');
+    // The one without a preview swaps the same way, in today's faded pink, and stays disabled.
+    await none.hover();
+    await expect(numberOf(none)).toBeHidden();
+    await expect(glyphOf(none)).toBeVisible();
+    expect(Number(await css(playOf(none), 'opacity'))).toBeCloseTo(0.4, 1);
+    expect(await css(playOf(none), 'color')).toBe(PINK_TEXT);
+    await expect(playOf(none)).toBeDisabled();
+
+    // No ring or circle, hovered or not: the button draws one (its first svg), and the slot does not.
+    for (const row of [can, none]) {
+      expect(await css(slotOf(row).locator('[data-preview] > svg').first(), 'display')).toBe('none');
+      expect(await ringsIn(row)).toEqual([]);
+    }
+    await away(page);
+    for (const row of [can, none]) expect(await ringsIn(row)).toEqual([]);
+  });
+
+  test('R3. tapping the ▶ plays it: pause stands in the number\'s place while it loads and while it plays, with the pointer away; the song page does not open; the other row keeps its number', async ({ page }) => {
+    await open(page, { extra: WITH_AND_WITHOUT });
+    const can = byTitle(page, 'Can Play');
+    const none = byTitle(page, 'No Preview');
+    await can.hover();
+    await playOf(can).click();
+    await expectNoSongPage(page);
+    await away(page);
+
+    // Loading (the preview route answers after a moment): the pause glyph where the number was.
+    await expect(playOf(can)).toHaveAttribute('data-preview', 'loading');
+    await expect(numberOf(can)).toBeHidden();
+    await expect(glyphOf(can)).toBeVisible();
+    expect(await glyphPath(can)).toBe(PAUSE_PATH);
+    expect(await ringsIn(can)).toEqual([]);
+    // Playing: still pause, in the full pink, with no ring, and the row that cannot play still shows its number.
+    await expect(playOf(can)).toHaveAttribute('data-preview', 'playing');
+    await expect(glyphOf(can)).toBeVisible();
+    expect(await glyphPath(can)).toBe(PAUSE_PATH);
+    expect(await css(playOf(can), 'color')).toBe(PINK_TEXT);
+    expect(await ringsIn(can)).toEqual([]);
+    await expect(numberOf(none)).toBeVisible();
+    await expect(glyphOf(none)).toBeHidden();
+
+    // A tap pauses it: the ▶ glyph stays where the number was, so the row that sounds still shows.
+    await playOf(can).click();
+    await expect(playOf(can)).toHaveAttribute('data-preview', 'paused');
+    await away(page);
+    await expect(numberOf(can)).toBeHidden();
+    await expect(glyphOf(can)).toBeVisible();
+    expect(await glyphPath(can)).toBe(PLAY_PATH);
+    await expectNoSongPage(page);
+    // The row's own button still opens the song page, which stops the preview.
+    await openButton(can).click();
+    await expect(page.getByRole('button', { name: 'Back to songs' })).toBeVisible();
+  });
+});
+
+test('R3. on a phone the ▶ always shows: the full pink when it can play, faded and disabled when it cannot; a tap plays it and shows pause; no ring; the song page does not open', async ({ page }) => {
+  await open(page, { extra: WITH_AND_WITHOUT });
+  expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
+  const can = byTitle(page, 'Can Play');
+  const none = byTitle(page, 'No Preview');
+  for (const row of [can, none]) {
+    await expect(numberOf(row)).toBeHidden();
+    await expect(glyphOf(row)).toBeVisible();
+    expect(await css(playOf(row), 'color')).toBe(PINK_TEXT);
+    expect(await ringsIn(row)).toEqual([]);
+  }
+  expect(await css(playOf(can), 'opacity')).toBe('1');
+  await expect(playOf(can)).toBeEnabled();
+  expect(Number(await css(playOf(none), 'opacity'))).toBeCloseTo(0.4, 1);
+  await expect(playOf(none)).toBeDisabled();
+  expect(await glyphPath(can)).toBe(PLAY_PATH);
+
+  await playOf(can).tap();
+  await expectNoSongPage(page);
+  await expect(playOf(can)).toHaveAttribute('data-preview', 'loading');
+  expect(await glyphPath(can)).toBe(PAUSE_PATH);
+  await expect(playOf(can)).toHaveAttribute('data-preview', 'playing');
+  expect(await glyphPath(can)).toBe(PAUSE_PATH);
+  expect(await css(playOf(can), 'color')).toBe(PINK_TEXT);
+  expect(await ringsIn(can)).toEqual([]);
+  // A tap on the one that cannot play opens nothing either.
+  const at = await centre(slotOf(none));
+  await page.touchscreen.tap(at.x, at.y);
+  await expectNoSongPage(page);
+});

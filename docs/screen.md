@@ -115,8 +115,8 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
      own label (what the song page shows); a Maybe song has none. Each title fills in once, left to right (about 0.6 s,
      `useFillIn`), as its row scrolls into view, and ends the normal white. It plays once per visit to the list: a row that
      scrolls out and back, or is re-ranked, does not replay it (R12; with reduced motion there is no fill). The ▶ is QWW-48's
-     play button (Play from the list, below), and a line above the first row shows Deezer's logo while a song on screen has a
-     preview; both scroll with the list, and the sheet's fit counts the line. Rows are in rank order in the DOM, and slide to their new place when
+     play button (Play from the list, below), and a line under the list, over the credits link, shows Deezer's logo while a song on
+     screen has a preview. Rows are in rank order in the DOM, and slide to their new place when
      the order changes (`flip.ts`; reduced motion turns it off). Tapping a row opens the song page; the ▶ does not.
      40 songs show at first, then "Load more". Songs with no year are in the list while Era is off and out of it
      while Era is on. When there are no songs the engine says why (`empty`): "Pick an era to see songs." (Era on,
@@ -139,8 +139,7 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
      every gear (rack 416 px); **mini** shows one gear and a tab bar (164 px). The grab handle switches by tap, Enter or
      Space, or by a vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live.
      **Which mode it opens in** (`src/lib/setlist/fit.ts`, measured in `useSheetFit`): mini when the expanded sheet
-     would leave fewer than 3 whole rows (every phone but a tall one; a 390×844 still opens expanded; what stands over
-     the first row counts, and Deezer's 22 px line is counted from the first measure, before the rows are there), and where the
+     would leave fewer than 3 whole rows (every phone but a tall one; a 390×844 still opens expanded), and where the
      expanded sheet cannot fit inside the screen at all (an iPhone SE with Safari's bars, a phone on its side) the handle
      keeps it mini. `?mini=1` always starts in mini mode.
    - **Type**: Inter 400, 500, 600 and 700, self-hosted (`@fontsource/inter`, SIL OFL 1.1), and Noto Sans JP 700
@@ -200,7 +199,7 @@ button and must stay on screen (spike QWW-44).
 - **The row.** The play button (in the slot) and the song button sit side by side, never one inside the other: the play
   button never opens the song page, and the rest of the row still does. Opening the song page (or a filter taking the song off
   the list) stops the preview.
-- **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly, so a line above the first row reads
+- **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly, so a line under the list reads
   "Previews from [logo] Deezer" whenever a song on it has a preview. It links to the credits page, which says the
   previews stream from Deezer for private, non-commercial listening and that no audio is kept, as the terms ask
   listeners to be told.
