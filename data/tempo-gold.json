@@ -1,214 +1,426 @@
 [
  {
   "key": "the beatles|hey jude",
-  "bpm": 74
+  "bpm": 74,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, Beginner Notes)",
+  "url": "https://www.musicnotes.com/sheetmusic/the-beatles/hey-jude/MN0128992",
+  "kind": "sheet-music",
+  "note": "Marked 'Rock Ballad', 4/4. Other Musicnotes Beatles editions disagree: Piano/Vocal/Guitar 'Slowly' q=69, big-note solo q=76, recorder duet q=78, piano solos q=80 and q=84."
  },
  {
   "key": "frank sinatra|fly me to the moon",
-  "bpm": 119
+  "bpm": 116,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, Frank Sinatra)",
+  "url": "https://www.musicnotes.com/sheetmusic/frank-sinatra/fly-me-to-the-moon/MN0191389",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderate Swing', 4/4. Other Sinatra editions on Musicnotes: 3/4 easy piano 'Moderately slow' q=108; Piano/Vocal/Guitar in 2/2 cut time notated half note = 112."
  },
  {
   "key": "louis armstrong|what a wonderful world",
-  "bpm": 72
+  "bpm": 66,
+  "source": "Musicnotes sheet music (Guitar/Vocal/Chords, Louis Armstrong)",
+  "url": "https://www.musicnotes.com/sheetmusic/louis-armstrong/what-a-wonderful-world/MN0114114",
+  "kind": "sheet-music",
+  "note": "Marked 'Slow', 4/4. Editions disagree: other Louis Armstrong Musicnotes pages are faster, Piano/Vocal/Chords 'Slowly' q=84 and q=86, piano solo q=88. Songscription, which transcribed the recording, says about 71."
  },
  {
   "key": "the rolling stones|paint it black",
-  "bpm": 160
+  "bpm": 156,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, Easy Piano, Dan Coates)",
+  "url": "https://www.musicnotes.com/sheetmusic/the-rolling-stones/paint-it-black/MN0146494",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately, with a steady beat', 4/4. Rolling Stones guitar TAB edition is marked 'Freely' at q=126 and the ukulele TAB 'Freely' at q=130. An audio-analysis page for the 1966 recording (cs.uwaterloo.ca) reads about 159."
  },
  {
   "key": "aretha franklin|respect",
-  "bpm": 115
+  "bpm": 115,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Aretha Franklin)",
+  "url": "https://www.musicnotes.com/sheetmusic/aretha-franklin/respect/MN0087166",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately fast', 4/4. Other Musicnotes Aretha editions: Beginner Notes q=120, Easy Piano 'Moderately' q=112."
  },
  {
   "key": "stevie wonder|superstition",
-  "bpm": 101
+  "bpm": 100,
+  "source": "Musicnotes sheet music (Lead sheet, Faber Music)",
+  "url": "https://www.musicnotes.com/sheetmusic/stevie-wonder/superstition/MN0143915",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderate Funk', 4/4. The Piano/Vocal/Guitar edition (Faber Music) also says q=100."
  },
  {
   "key": "queen|bohemian rhapsody",
-  "bpm": 72
+  "bpm": 72,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, EMI)",
+  "url": "https://www.musicnotes.com/sheetmusic/queen/bohemian-rhapsody/MN0064258",
+  "kind": "sheet-music",
+  "note": "Page lists a single metronome mark (q=72, 4/4); the song has several distinct sections, so this may describe only the opening. Guitar TAB edition ('Slowly freely') also q=72; easy piano 'Slowly, freely' q=78; piano solo 'Slowly' q=120."
  },
  {
   "key": "abba|dancing queen",
-  "bpm": 101
+  "bpm": 100,
+  "source": "Musicnotes sheet music (Piano/Vocal, Easy Piano, Universal Music Publishing Group)",
+  "url": "https://www.musicnotes.com/sheetmusic/abba/dancing-queen/MN0063848",
+  "kind": "sheet-music",
+  "note": "Marked 'Steady Rock beat', 4/4. Piano/Vocal/Guitar edition says 'Strong Rock' q=104; easy guitar TAB q=130; two easy-piano editions in 2/2 notate half note = 120 and half note = 100."
  },
  {
   "key": "michael jackson|billie jean",
-  "bpm": 117
+  "bpm": 120,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, Easy Piano, Sony/ATV)",
+  "url": "https://www.musicnotes.com/sheetmusic/michael-jackson/billie-jean/MN0112480",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately bright', 4/4. Lead sheet also q=120; bass TAB q=118; another easy piano edition in 2/2 notates half note = 112. Wikipedia says 117."
  },
  {
   "key": "whitney houston|i wanna dance with somebody",
-  "bpm": 119
+  "bpm": 120,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Universal Music Publishing Group)",
+  "url": "https://www.musicnotes.com/sheetmusic/whitney-houston/i-wanna-dance-with-somebody/MN0086898",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderate Rock', 4/4. The Singer Pro audition cut ('Disco/R&B') and a violin solo also say q=120. Wikipedia says 119."
  },
  {
   "key": "a-ha|take on me",
-  "bpm": 169
+  "bpm": 170,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Reservoir Media)",
+  "url": "https://api.musicnotes.com/sheetmusic/a-ha/take-on-me/MN0055341",
+  "kind": "sheet-music",
+  "note": "Marked 'Fast', 4/4. Easy piano ('Moderately fast') and Beginner Notes editions also say q=170. Wikipedia says 169."
  },
  {
   "key": "journey|don't stop believin'",
-  "bpm": 119
+  "bpm": 120,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Alfred)",
+  "url": "https://www.musicnotes.com/sheetmusic/MN0100427/",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderate Rock', 4/4. Easy piano edition also q=120; Hal Leonard piano solo q=118. Wikipedia says 118."
  },
  {
   "key": "bon jovi|livin' on a prayer",
-  "bpm": 123
+  "bpm": 120,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, Easy Piano, Sony/ATV)",
+  "url": "https://musicnotes.com/sheetmusic/bon-jovi/livin-on-a-prayer/MN0132139",
+  "kind": "sheet-music",
+  "note": "Marked 'Medium rock', 4/4. Sony/ATV alto sax solo also q=120. Editions disagree: the Piano/Vocal/Guitar edition (MN0058202) says 'Moderate Rock' q=132, Wikipedia says 122 (citing that same listing), a third-party guitar TAB says q=100."
  },
  {
   "key": "nirvana|smells like teen spirit",
-  "bpm": 117
+  "bpm": 116,
+  "source": "Musicnotes sheet music (Guitar TAB transcription, Hal Leonard)",
+  "url": "https://www.musicnotes.com/sheetmusic/nirvana/smells-like-teen-spirit/MN0079862",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately', 4/4. A piano solo and an easy piano edition also say q=116."
  },
  {
   "key": "oasis|wonderwall",
-  "bpm": 87
+  "bpm": 88,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Sony/ATV)",
+  "url": "https://api.musicnotes.com/sheetmusic/oasis/wonderwall/MN0053372",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately', 4/4. Guitar TAB edition q=87; lead sheet q=85."
  },
  {
   "key": "radiohead|creep",
-  "bpm": 95
+  "bpm": 96,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Warner Chappell)",
+  "url": "https://api.musicnotes.com/sheetmusic/radiohead/creep/MN0054939",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately', 4/4. Lead sheet also q=96."
  },
  {
   "key": "red hot chili peppers|californication",
-  "bpm": 96
+  "bpm": 96,
+  "source": "Musicnotes sheet music (Guitar TAB, Hal Leonard)",
+  "url": "https://www.musicnotes.com/sheetmusic/red-hot-chili-peppers/californication/MN0115824",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately', 4/4. Bass TAB ('Moderate Rock') also q=96."
  },
  {
   "key": "backstreet boys|i want it that way",
-  "bpm": 99
+  "bpm": 100,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Hal Leonard)",
+  "url": "https://www.musicnotes.com/sheetmusic/backstreet-boys/i-want-it-that-way/MN0028048",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately', 4/4, original key F# minor. Wikipedia says 99. Transposed Easy Piano ('Moderately slow', Bb major) and Beginner Notes (A minor) editions say q=116."
  },
  {
   "key": "britney spears|...baby one more time",
-  "bpm": 93
+  "bpm": 96,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Hal Leonard)",
+  "url": "https://www.musicnotes.com/sheetmusic/britney-spears/baby-one-more-time/MN0027207",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately', 4/4. A flute solo and an easy piano edition also say q=96. Wikipedia says 93."
  },
  {
   "key": "eminem|lose yourself",
-  "bpm": 85
+  "bpm": 86,
+  "source": "Wikipedia, Lose Yourself (citing the Hal Leonard score on Musicnotes)",
+  "url": "https://en.wikipedia.org/wiki/Lose_Yourself",
+  "kind": "encyclopedia",
+  "note": "Wikipedia: the sheet music is in D minor, common time, 'with a metronome of 66 before increasing to 86'. The Musicnotes page (MN0095247, Hal Leonard) lists only q=66, the opening tempo. A Sheet Music Direct arrangement page says the song st"
  },
  {
   "key": "outkast|hey ya!",
-  "bpm": 160
+  "bpm": 160,
+  "source": "Musicnotes sheet music (Lead sheet, BMG Rights Management)",
+  "url": "https://api.musicnotes.com/sheetmusic/outkast/hey-ya/MN0305872",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately fast', 4/4. Piano/Vocal/Guitar edition also q=160; easy guitar TAB q=162. Wikipedia says 159."
  },
  {
   "key": "beyonce|crazy in love",
-  "bpm": 99
+  "bpm": 100,
+  "source": "Musicnotes sheet music (Lead sheet, Warner Chappell)",
+  "url": "https://www.musicnotes.com/sheetmusic/beyonce/crazy-in-love/MN0152918",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately', 4/4. Piano/Vocal/Guitar edition also q=100. Wikipedia says around 100."
  },
  {
   "key": "usher|yeah!",
-  "bpm": 105
+  "bpm": 104,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, BMG Rights Management)",
+  "url": "https://www.musicnotes.com/sheetmusic/usher/yeah/MN0048784",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderate Groove', 4/4. Wikipedia says 105, 'moderately slow', citing a Musicnotes edition from Sony/ATV."
  },
  {
   "key": "coldplay|yellow",
-  "bpm": 87
+  "bpm": 88,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Universal Music Publishing Group)",
+  "url": "https://api.musicnotes.com/sheetmusic/coldplay/yellow/MN0043564",
+  "kind": "sheet-music",
+  "note": "No verbal marking, 4/4. Beginner Notes edition q=86; guitar TAB q=87. Wikipedia says 88."
  },
  {
   "key": "the killers|mr. brightside",
-  "bpm": 148
+  "bpm": 144,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Universal Music Publishing Group)",
+  "url": "https://api.musicnotes.com/sheetmusic/the-killers/mr-brightside/MN0072605",
+  "kind": "sheet-music",
+  "note": "Marked 'Moderately, with a beat', 4/4. Beginner Notes edition also q=144; guitar TAB q=148. Wikipedia says around 148."
  },
  {
   "key": "rihanna|umbrella",
-  "bpm": 87
+  "bpm": 90,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0058137)",
+  "url": "https://www.musicnotes.com/sheetmusic/rihanna/umbrella/MN0058137",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderate hip-hop, around 90 BPM'; quarter = 90, 4/4. Wikipedia says 87 BPM (citing sheet music)."
  },
  {
   "key": "adele|rolling in the deep",
-  "bpm": 105
+  "bpm": 104,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0089577)",
+  "url": "https://www.musicnotes.com/sheetmusic/adele/rolling-in-the-deep/MN0089577",
+  "kind": "sheet-music",
+  "note": "Page text: 'suggested tempo is around 104 BPM'; quarter = 104, 4/4. Musicnotes Piano/Vocal/Chords MN0092161 also says quarter = 104; Wikipedia says 105 BPM."
  },
  {
   "key": "lady gaga|poker face",
-  "bpm": 119
+  "bpm": 120,
+  "source": "Musicnotes sheet music (Piano Solo, MN0145936)",
+  "url": "https://www.musicnotes.com/sheetmusic/lady-gaga/poker-face/MN0145936",
+  "kind": "sheet-music",
+  "note": "Page text: 'bright funk, around 120 BPM'; quarter = 120, 4/4. Musicnotes guitar TAB MN0126980 also says quarter = 120; Wikipedia says 120 BPM."
  },
  {
   "key": "ed sheeran|shape of you",
-  "bpm": 96
+  "bpm": 96,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Singer Pro, MN0170745)",
+  "url": "https://www.musicnotes.com/sheetmusic/ed-sheeran/shape-of-you/MN0170745",
+  "kind": "sheet-music",
+  "note": "Page text: 'played at about 96 BPM'; the metronome mark is half note = 96 in 2/2 (the beat is counted in half notes). Wikipedia says 96 BPM in common time."
  },
  {
   "key": "taylor swift|shake it off",
-  "bpm": 160
+  "bpm": 160,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0138964)",
+  "url": "https://www.musicnotes.com/sheetmusic/taylor-swift/shake-it-off/MN0138964",
+  "kind": "sheet-music",
+  "note": "Page text: 'fast beat, around 160 BPM'; quarter = 160, 4/4. Musicnotes easy guitar TAB MN0139028 says 159; Wikipedia says 160 BPM."
  },
  {
   "key": "the weeknd|blinding lights",
-  "bpm": 171
+  "bpm": 170,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0205158)",
+  "url": "https://www.musicnotes.com/sheetmusic/the-weeknd/blinding-lights/MN0205158",
+  "kind": "sheet-music",
+  "note": "Page text: 'fast dance beat'; quarter = 170, 4/4. Musicnotes guitar TAB MN0219052 also says 170."
  },
  {
   "key": "dua lipa|levitating",
-  "bpm": 103
+  "bpm": 104,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Singer Pro, MN0219642)",
+  "url": "https://www.musicnotes.com/sheetmusic/dua-lipa-feat-dababy/levitating/MN0219642",
+  "kind": "sheet-music",
+  "note": "Page text: 'tempo is around 104 BPM'; quarter = 104, 4/4. Wikipedia says 103 BPM."
  },
  {
   "key": "harry styles|as it was",
-  "bpm": 174
+  "bpm": 174,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, MN0253558)",
+  "url": "https://www.musicnotes.com/sheetmusic/harry-styles/as-it-was/MN0253558",
+  "kind": "sheet-music",
+  "note": "Page text: 'Fast'; quarter = 174, 4/4."
  },
  {
   "key": "olivia rodrigo|drivers license",
-  "bpm": 144
+  "bpm": 72,
+  "source": "Musicnotes sheet music (Piano/Vocal, MN0234122)",
+  "url": "https://www.musicnotes.com/sheetmusic/olivia-rodrigo/drivers-license/MN0234122",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderately slow'; quarter = 72, which counts the slow pulse. Musicnotes solo edition MN0226526 says 144, and Wikipedia says 144 BPM (citing Tunebat; double-time drum pattern), so the same track reads as 72 or 144."
  },
  {
   "key": "billie eilish|bad guy",
-  "bpm": 135
+  "bpm": 135,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, MN0195111)",
+  "url": "https://www.musicnotes.com/sheetmusic/billie-eilish/bad-guy/MN0195111",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderately fast'; quarter = 135, 4/4. Wikipedia (citing this listing) says the first half is 135 BPM and the slower second half 120 BPM."
  },
  {
   "key": "sabrina carpenter|espresso",
-  "bpm": 104
+  "bpm": 104,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0288677)",
+  "url": "https://www.musicnotes.com/sheetmusic/sabrina-carpenter/espresso/MN0288677",
+  "kind": "sheet-music",
+  "note": "Page text: 'tempo is around 104 BPM'; quarter = 104, 4/4."
  },
  {
   "key": "lizzo|about damn time",
-  "bpm": 109
+  "bpm": 106,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, Singer Pro, MN0254185)",
+  "url": "https://www.musicnotes.com/sheetmusic/lizzo/about-damn-time/MN0254185",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderately fast, with impatience, at about 106 BPM'; quarter = 106, 4/4. Karaoke-Version states the original recording's tempo as 109 BPM."
  },
  {
   "key": "johnny cash|ring of fire",
-  "bpm": 105
+  "bpm": 100,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, MN0050522)",
+  "url": "https://www.musicnotes.com/sheetmusic/johnny-cash/ring-of-fire/MN0050522",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderately bright, at about 100 BPM'; notated half note = 100 in 2/2 (cut time, the beat is the half note). Musicnotes guitar/vocal TAB MN0051047 also says half = 100; guitar TAB MN0114183 says h = 105; audiokeychain.com lists t"
  },
  {
   "key": "dolly parton|jolene",
-  "bpm": 111
+  "bpm": 110,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0128782)",
+  "url": "https://www.musicnotes.com/sheetmusic/dolly-parton/jolene/MN0128782",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderately slow, at about 110 BPM'; quarter = 110, 4/4. Another Musicnotes Piano/Vocal/Guitar edition (MN0016056) says half note = 104 in 2/2 (cut time)."
  },
  {
   "key": "shania twain|man! i feel like a woman!",
-  "bpm": 124
+  "bpm": 126,
+  "source": "Musicnotes sheet music (Piano/Vocal/Chords, MN0112159)",
+  "url": "https://www.musicnotes.com/sheetmusic/shania-twain/man-i-feel-like-a-woman/MN0112159",
+  "kind": "sheet-music",
+  "note": "Page text: 'played at about 126 BPM'; quarter = 126, 4/4. Wikipedia also says 126 BPM (citing Musicnotes); Musicnotes guitar TAB MN0039939 says 120."
  },
  {
   "key": "garth brooks|friends in low places",
-  "bpm": 104
+  "bpm": 120,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0042945)",
+  "url": "https://www.musicnotes.com/sheetmusic/garth-brooks/friends-in-low-places/MN0042945",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderately, with a beat, at about 120 BPM'; quarter = 120, 4/4. Karaoke-Version states the original recording's tempo as 109.025 BPM."
  },
  {
   "key": "blondie|heart of glass",
-  "bpm": 115
+  "bpm": 116,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0099769)",
+  "url": "https://www.musicnotes.com/sheetmusic/blondie/heart-of-glass/MN0099769",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderately fast, at around 116 BPM'; quarter = 116, 4/4."
  },
  {
   "key": "cyndi lauper|girls just want to have fun",
-  "bpm": 120
+  "bpm": 120,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0053693)",
+  "url": "https://www.musicnotes.com/sheetmusic/cyndi-lauper/girls-just-want-to-have-fun/MN0053693",
+  "kind": "sheet-music",
+  "note": "Page text: 'bright rock, at around 120 BPM'; quarter = 120, 4/4. Musicnotes leadsheet MN0154396 also says 120."
  },
  {
   "key": "adele|someone like you",
-  "bpm": 135
+  "bpm": 67,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0100903)",
+  "url": "https://www.musicnotes.com/sheetmusic/adele/someone-like-you/MN0100903",
+  "kind": "sheet-music",
+  "note": "Page text: 'Piano Ballad'; quarter = 67, 4/4. Musicnotes guitar TAB MN0096986 and leadsheet MN0095407 also say 67; easy guitar TAB MN0104562 says 66; Wikipedia says 67.5 BPM (citing Musicnotes)."
  },
  {
   "key": "elvis presley|suspicious minds",
-  "bpm": 118
+  "bpm": 112,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0054263)",
+  "url": "https://www.musicnotes.com/sheetmusic/elvis-presley/suspicious-minds/MN0054263",
+  "kind": "sheet-music",
+  "note": "Page text: 'suggested tempo is around 112 BPM'; quarter = 112, 4/4. Musicnotes guitar TAB MN0054251 also says 112; ukulele leadsheet MN0102407 says 115. Per Wikipedia the bridge shifts from 4/4 to a slower 6/8, so the number applies to the "
  },
  {
   "key": "earth, wind & fire|september",
-  "bpm": 126
+  "bpm": 120,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Singer Pro, MN0015575)",
+  "url": "https://www.musicnotes.com/sheetmusic/earth-wind-fire/september/MN0015575",
+  "kind": "sheet-music",
+  "note": "Page text: 'dance rock, at about 120 BPM'; quarter = 120, 4/4. Other Musicnotes editions differ: 116 (easy piano MN0194644), 124 (SATB choir MN0132255)."
  },
  {
   "key": "guns n' roses|november rain",
-  "bpm": 80
+  "bpm": 76,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, Singer Pro, MN0087178)",
+  "url": "https://www.musicnotes.com/sheetmusic/guns-n-roses/november-rain/MN0087178",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderately slow, at about 76 BPM'; quarter = 76, 4/4. Other Musicnotes editions: 76 (piano solo MN0175038), 75 (guitar TAB MN0101447), 82 (Piano/Vocal/Guitar MN0148193 and Piano/Vocal/Chords MN0254551)."
  },
  {
   "key": "mark ronson|uptown funk",
-  "bpm": 115
+  "bpm": 120,
+  "source": "Musicnotes sheet music (Leadsheet, MN0145540)",
+  "url": "https://www.musicnotes.com/sheetmusic/bruno-mars/uptown-funk/MN0145540",
+  "kind": "sheet-music",
+  "note": "Page text: 'upbeat funk, around 120 BPM'; quarter = 120, 4/4. Musicnotes lists the song under Bruno Mars; piano solo MN0145798 and beginner MN0145541 also say 120. Wikipedia says 115 BPM."
  },
  {
   "key": "the temptations|my girl",
-  "bpm": 105
+  "bpm": 108,
+  "source": "Musicnotes sheet music (Easy Piano, Piano/Vocal/Chords, MN0163421)",
+  "url": "https://www.musicnotes.com/sheetmusic/the-temptations/my-girl/MN0163421",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderate rock, at about 108 BPM'; quarter = 108, 4/4. Musicnotes editions disagree: 108 (Singer Pro Piano/Vocal/Guitar MN0178218), 96 (Piano/Vocal/Guitar MN0068864), 103 (guitar TAB MN0064781), 120 (beginner MN0136536)."
  },
  {
   "key": "the police|every breath you take",
-  "bpm": 117
+  "bpm": 120,
+  "source": "Musicnotes sheet music (Piano/Vocal/Guitar, MN0064466)",
+  "url": "https://www.musicnotes.com/sheetmusic/the-police/every-breath-you-take/MN0064466",
+  "kind": "sheet-music",
+  "note": "Page text: 'moderate rock'; quarter = 120, 4/4. Other Musicnotes editions: 132 (piano solo MN0068306), 115 (ukulele leadsheet MN0117280)."
  },
  {
   "key": "eagles|hotel california",
-  "bpm": 74
+  "bpm": 74,
+  "source": "Musicnotes sheet music",
+  "url": "https://api.musicnotes.com/sheetmusic/the-eagles/hotel-california/MN0042265",
+  "kind": "sheet-music",
+  "note": "Page states Moderately slow, quarter = 74, 4/4, B minor. Guitar TAB edition MN0046035 also states quarter = 74. The Piano/Vocal/Chords (Singer Pro) edition MN0213274 instead notates 2/2 'Moderate Rock' with half note = 76, i.e. counted in h"
  },
  {
   "key": "bob marley & the wailers|three little birds",
-  "bpm": 74
+  "bpm": 74,
+  "source": "Musicnotes sheet music",
+  "url": "https://www.musicnotes.com/sheetmusic/bob-marley-the-wailers/three-little-birds/MN0126768",
+  "kind": "sheet-music",
+  "note": "Ukulele/Vocal/Chords leadsheet: Moderately slow, quarter = 74, 4/4, A major. The Piano/Vocal/Guitar edition MN0092983 (credited Bob Marley) says Moderately slow Reggae, quarter = 76."
  },
  {
   "key": "billy joel|piano man",
-  "bpm": 75
+  "bpm": 168,
+  "source": "Musicnotes sheet music",
+  "url": "https://api.musicnotes.com/sheetmusic/billy-joel/piano-man/MN0114011",
+  "kind": "sheet-music",
+  "note": "Leadsheet, 3/4, quarter = 168 (page says around 168 BPM). Other Musicnotes editions disagree: quarter = 170 (Signature Artist easy piano MN0197889), dotted half = 60 i.e. 180 quarters per minute (beginner MN0130239), quarter = 204 (easy pia"
  }
 ]

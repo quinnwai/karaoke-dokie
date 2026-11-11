@@ -12,7 +12,8 @@ import type {
 } from '../contracts';
 import type { SongPopularityRecord, SongRangeRecord, Store, UsdbIndexEntry } from './store';
 import { hasLittleSinging } from '../songs/resolve';
-import { tempoOf } from '../tempo/tempo';
+import { effectiveTempo } from '../tempo/feel';
+import { readSongFeels } from './songFeel';
 import { withKaraokePopularity, type KaraokePopularity } from '../songs/score';
 
 export interface ResolveResult {
@@ -249,7 +250,9 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
     );
 
     const keys = candidates.map((c) => c.key);
-    const [index, popularity, tempos] = all ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys), store.getSongTempos(keys)]) : [null, null, null];
+    const [index, popularity, tempos, feels] = all
+      ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys), store.getSongTempos(keys), readSongFeels(store, keys)])
+      : [null, null, null, null];
     const matches: Match[] = [];
     const logs = new Map<string, DataSourceLogEntry>();
     const keyOf = new Map<string, string>();
@@ -258,7 +261,7 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       const pop = popularity?.get(key);
       const m = deps.matchSong(track, index ? withKaraokePopularity(withIndexPopularity(range, row), pop) : range, userRange);
       if (!m) continue;
-      const tempo = tempoOf(tempos?.get(key), key);
+      const tempo = effectiveTempo({ key, record: tempos?.get(key), feel: feels?.get(key)?.feel })?.tempo;
       matches.push(index ? { ...m, ...songFacts(track, row, pop), ...(tempo !== undefined ? { tempo } : {}) } : m);
       logs.set(track.id, log);
       keyOf.set(track.id, key);

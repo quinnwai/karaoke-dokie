@@ -170,7 +170,7 @@ export function getAppContext(): AppContext {
       tracks: createTrackCache(),
       catalogue: createCatalogue(async () => {
         await seeded;
-        return loadCatalogue(store);
+        return loadCatalogue(store, undefined, { canonical: true });
       }, deps),
       problems: configProblems(config),
     };
