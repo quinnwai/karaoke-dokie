@@ -17,7 +17,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - run: npx playwright install --with-deps chromium
+      # The browser comes from Playwright's own download. Its system libraries come through apt, which stalled
+      # for every PR when an Ubuntu mirror was slow (11 Nov); the runner image already has Chrome's libraries,
+      # so apt is best effort and limited to 3 minutes.
+      - run: npx playwright install chromium
+      - run: timeout 180 npx playwright install-deps chromium || echo "Skipped apt dependencies, the runner image has Chrome's libraries."
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: always()
