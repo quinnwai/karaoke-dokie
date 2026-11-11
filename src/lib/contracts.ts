@@ -36,9 +36,11 @@ export interface SongRange {
   method?: string;
   /**
    * Set when a note file's octave was corrected after import (octave.ts): from this song's own
-   * recording, or from the artist's other recordings.
+   * recording, from the artist's other recordings, or, with neither, because a typical note this
+   * high is usually an octave too high ('pitch'). 'hand' is the artist's register as a person set
+   * it, not measured (data/octave-hand-checked.json).
    */
-  octaveFrom?: 'recording' | 'artist';
+  octaveFrom?: 'recording' | 'artist' | 'pitch' | 'hand';
   /** MusicBrainz recording id of a measured recording. */
   mbid?: string;
   /**

@@ -120,6 +120,25 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect((await s.listSongRangesByArtist('nobody')).size).toBe(0);
   });
 
+  it('walks every stored range in pages by song key, leaving out skips, and ends with an empty page', async () => {
+    const s = make();
+    const keys = ['abba|waterloo', 'queen|bohemian rhapsody', 'queen|somebody to love', 'zz top|legs', 'abba|mamma mia'];
+    for (const [i, k] of keys.entries()) await s.putSongRange(k, { range: { ...songRange, low: 40 + i }, log: logEntry(i) });
+    await s.putSongRange('abba|skipped', { range: null, log: logEntry(9, 'skipped') });
+    const seen: string[] = [];
+    let after = '';
+    for (;;) {
+      const page = await s.listSongRangesPage(after, 2);
+      if (page.size === 0) break;
+      expect(page.size).toBeLessThanOrEqual(2);
+      seen.push(...page.keys());
+      after = [...page.keys()].at(-1)!;
+    }
+    expect(seen).toEqual([...keys].sort());
+    expect((await s.listSongRangesPage('', 10)).get('queen|somebody to love')?.range).toMatchObject({ low: 42, source: 'note-file' });
+    expect((await s.listSongRangesPage('zz top|legs', 10)).size).toBe(0);
+  });
+
   it('keeps a USDB song index: upserts by id, finds the most-viewed per key, reports size and newest change', async () => {
     const s = make();
     expect(await s.usdbIndexStats()).toEqual({ count: 0, newestChange: null });
