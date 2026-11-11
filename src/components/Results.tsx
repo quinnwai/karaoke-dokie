@@ -159,7 +159,7 @@ export function Results(props: ResultsProps) {
       )}
       {props.signInFailed && (
         <p className={styles.libraryNote} role="status">
-          Couldn’t sign in to Spotify.
+          Couldn’t sign in. Spotify sign-in is for invited testers only right now.
         </p>
       )}
 
@@ -315,6 +315,7 @@ export function Results(props: ResultsProps) {
           <button type="button" className={styles.textButton} onClick={props.onConnect}>
             Connect to Spotify
           </button>
+          <p>Invited testers only for now.</p>
         </div>
       )}
       <a className={styles.credits} href="/credits" aria-label="Sources and credits" title="Sources and credits">

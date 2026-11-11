@@ -149,7 +149,17 @@ export async function callback(req: Request, ctx: AppContext): Promise<Response>
   const expected = parseCookies(req.headers.get('cookie'))[STATE_COOKIE];
   const state = url.searchParams.get('state');
   const code = url.searchParams.get('code');
-  if (url.searchParams.get('error')) return fail(url.searchParams.get('error')!);
+  const refused = url.searchParams.get('error');
+  if (refused) {
+    // Cancel is the singer's answer. Anything else is Spotify refusing on its own page (an account off the
+    // allowlist may land here or on a 403 at /me, QWW-53), and this line is the only record of which. Logged only
+    // for a sign-in we started (the state matches), so a stray request can't add lines.
+    const ours = !!expected && !!state && safeEqual(state, expected);
+    if (refused !== 'access_denied' && ours) {
+      console.error(`[auth] Spotify refused the sign-in on its own page: error=${JSON.stringify(refused.slice(0, 100))}`);
+    }
+    return fail(refused);
+  }
   if (!expected || !state || !safeEqual(state, expected)) return fail('state');
   if (!code) return fail('missing-code');
 
