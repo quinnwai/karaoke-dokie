@@ -112,7 +112,8 @@
   inset: -14px -4px;
 }
 
-.note {
+/* The 1 px dotted underline of a range note (6A §3.4). */
+.noteMark {
   border-bottom: 1px dotted #6b6776;
 }
 

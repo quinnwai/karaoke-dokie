@@ -135,11 +135,11 @@ export function SetlistScreen(props: SetlistScreenProps) {
           {/* The range and its redo sit together: redo is about the range. */}
           <span className={styles.rangeChip} role="group" aria-label={`Your range ${low} to ${high}`}>
             <button type="button" className={styles.rangeNote} onClick={() => props.onRedoEnd('low')} aria-label={`Redo your low note, ${low}`}>
-              <span className={styles.note}>{low}</span>
+              <span className={styles.noteMark}>{low}</span>
             </button>
             {' – '}
             <button type="button" className={styles.rangeNote} onClick={() => props.onRedoEnd('high')} aria-label={`Redo your high note, ${high}`}>
-              <span className={styles.note}>{high}</span>
+              <span className={styles.noteMark}>{high}</span>
             </button>
           </span>
           <button type="button" className={styles.redo} onClick={props.onRedo} aria-label="Redo the singing test">
