@@ -7,10 +7,11 @@
 // them (score.ts). Popularity comes from the song's USDB views and stars and from our karaoke
 // popularity (KaraFun views, Billboard Year-End rank), whatever measured its range.
 
-import type { DataSourceLogEntry, Match, RecommendationsResponse, SongRange, Track, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, Match, RecommendationsResponse, SetlistInput, SongRange, Track, VocalRange } from '../contracts';
 import { partRange } from '../songs/match';
 import { hasLittleSinging } from '../songs/resolve';
 import { withKaraokePopularity } from '../songs/score';
+import { prepareSetlist, rankPrepared, type PreparedSetlist, type RankedSetlist } from '../songs/setlist';
 import { tempoOf } from '../tempo/tempo';
 import { MAX_ALL_MATCHES, type SongDeps } from './songService';
 import type { CatalogueSong, SongPopularityRecord, Store, UsdbIndexEntry } from './store';
@@ -104,13 +105,16 @@ function withoutPitchShare(range: SongRange): SongRange {
   return rest;
 }
 
-/** Matches the whole catalogue against the visitor's range, ranks it, then returns all of it or one page. */
-export function recommendCatalogue(
+/**
+ * The catalogue songs that fit `userRange` (the hard range filter: `deps.matchSong` is null for a song that does
+ * not), as matches carrying their year, genre and tempo, and the log line of each by track id. Neither ranked nor
+ * cut, and the stored range, pitch histogram included, is kept.
+ */
+export function catalogueMatches(
   songs: CatalogueTrack[],
   userRange: VocalRange,
-  deps: CatalogueDeps,
-  page: CataloguePage,
-): RecommendationsResponse {
+  deps: Pick<CatalogueDeps, 'matchSong'>,
+): { matches: Match[]; logs: Map<string, DataSourceLogEntry> } {
   const matches: Match[] = [];
   const logs = new Map<string, DataSourceLogEntry>();
   for (const song of songs) {
@@ -134,6 +138,17 @@ export function recommendCatalogue(
     matches.push(m);
     logs.set(song.track.id, song.log);
   }
+  return { matches, logs };
+}
+
+/** Matches the whole catalogue against the visitor's range, ranks it, then returns all of it or one page. */
+export function recommendCatalogue(
+  songs: CatalogueTrack[],
+  userRange: VocalRange,
+  deps: CatalogueDeps,
+  page: CataloguePage,
+): RecommendationsResponse {
+  const { matches, logs } = catalogueMatches(songs, userRange, deps);
 
   // Ranked as a whole, then paged. The order is the same on every request while the cached
   // catalogue lasts, so pages never repeat or skip a song.
@@ -151,10 +166,43 @@ export function recommendCatalogue(
   return { matches: items, nextOffset, sources: sources(items) };
 }
 
+// ---------- the Setlist tuner (QWW-47) ----------
+
+/** One singer's catalogue songs, matched and with their place on every gear: made once per range, reused while a slider moves. */
+export interface CatalogueSetlist {
+  /** Every catalogue song that fits the range. */
+  matches: Match[];
+  logs: Map<string, DataSourceLogEntry>;
+  prepared: PreparedSetlist;
+}
+
+/** The hard range filter, then every song's place on every gear (songs/setlist.ts). */
+export function prepareCatalogue(
+  songs: CatalogueTrack[],
+  range: Pick<VocalRange, 'low' | 'high'>,
+  deps: Pick<CatalogueDeps, 'matchSong'>,
+): CatalogueSetlist {
+  const { matches, logs } = catalogueMatches(songs, { low: range.low, high: range.high, source: 'test' }, deps);
+  return { matches, logs, prepared: prepareSetlist(matches.map((match) => ({ match })), range) };
+}
+
+/**
+ * The engine over the catalogue, in one call: the songs of `songs` that fit `input.range`, ranked for the tuner's state.
+ * For a script or a test that holds the tracks; the server asks Catalogue.setlist, which keeps the first part.
+ */
+export function rankCatalogue(songs: CatalogueTrack[], input: SetlistInput, deps: Pick<CatalogueDeps, 'matchSong'>): RankedSetlist {
+  return rankPrepared(prepareCatalogue(songs, input.range, deps).prepared, input);
+}
+
+/** Ranges whose prepared songs a process keeps. Each is a few thousand matches, so only the ranges testers are using. */
+export const SETLIST_RANGES_KEPT = 6;
+
 export interface Catalogue {
   /** The catalogue as tracks: read from the store on first use, and again once the TTL has passed. */
   get(): Promise<CatalogueTrack[]>;
   recommend(userRange: VocalRange, page: CataloguePage): Promise<RecommendationsResponse>;
+  /** The tuner's songs for a range, kept for the next requests (the last SETLIST_RANGES_KEPT ranges), and dropped when the catalogue reloads. */
+  setlist(range: Pick<VocalRange, 'low' | 'high'>): Promise<CatalogueSetlist>;
 }
 
 /** The catalogue cached per process. `load` reads it from the store (loadCatalogue). */
@@ -176,10 +224,27 @@ export function createCatalogue(
     cached = entry;
     return entry.tracks;
   };
+  // Most recently used last. Made from one read of the catalogue: a reload (a new array) starts them again.
+  const lists = new Map<string, CatalogueSetlist>();
+  let listsFrom: CatalogueTrack[] | null = null;
   return {
     get,
     async recommend(userRange, page) {
       return recommendCatalogue(await get(), userRange, deps, page);
+    },
+    async setlist(range) {
+      const tracks = await get();
+      if (listsFrom !== tracks) {
+        lists.clear();
+        listsFrom = tracks;
+      }
+      const key = `${range.low}:${range.high}`;
+      const hit = lists.get(key);
+      const list = hit ?? prepareCatalogue(tracks, range, deps);
+      lists.delete(key);
+      lists.set(key, list);
+      if (lists.size > SETLIST_RANGES_KEPT) lists.delete(lists.keys().next().value!);
+      return list;
     },
   };
 }
