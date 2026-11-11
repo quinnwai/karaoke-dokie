@@ -5,8 +5,10 @@
 
    The colour a lit part is drawn in comes in through custom properties that the component sets on the strip, the Era panel
    and each tab (neonVars in src/lib/setlist/sheet.ts): --sl-gear, and that colour at the alphas the design uses,
-   --sl-gear-line, --sl-gear-glow and --sl-gear-inner. An off part (data-off) ignores them (README §7: a switched-off sign,
-   not a faded one; no opacity or grayscale anywhere, the art draws itself unlit). */
+   --sl-gear-glow and --sl-gear-inner (the selected tab's glow). An off part (data-off) ignores them (README §7: a switched-off
+   sign, not a faded one; no opacity or grayscale anywhere, the art draws itself unlit). A border is not drawn in the gear's
+   colour: a strip's and the Era panel's is the rail's grey in every state (QWW-57, R5), and a tab's only while it is the
+   selected one or, on a pointer device, hovered (R10). */
 
 /* ===== Bottom sheet ===== */
 
@@ -16,9 +18,10 @@
   box-sizing: border-box;
   padding: 0 12px 12px;
   background: linear-gradient(180deg, #1b1a21 0%, #131218 100%);
-  border-top: 1px solid rgba(255, 79, 160, 0.28);
+  /* A neutral 1 px edge and the dark shadow, no pink (QWW-57, R8): 6A drew a pink line and a pink glow along the top. */
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 16px 16px 0 0;
-  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.55), 0 -1px 14px rgba(255, 79, 160, 0.1);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.55);
   /* Dragging the handle or a slider must not select the labels or open iOS's long-press callout. */
   -webkit-user-select: none;
   user-select: none;
@@ -87,7 +90,8 @@
   gap: 6px;
 }
 
-/* The border is the gear's colour at 27% while it is on, the rail's grey while it is off (README §5, §7). */
+/* The border is the rail's grey in every state, on, off or disabled, expanded or mini (QWW-57, R5). 6A drew it in the gear's
+   colour at 27% while the gear was on (README §5, §7). */
 .strip {
   display: flex;
   flex-shrink: 0;
@@ -95,14 +99,10 @@
   box-sizing: border-box;
   padding: 0 10px 0 6px;
   background: var(--sl-panel);
-  border: 1px solid var(--sl-gear-line, var(--sl-rail));
+  border: 1px solid var(--sl-rail);
   border-radius: 10px;
   align-items: center;
   gap: 10px;
-}
-
-.strip[data-off] {
-  border-color: var(--sl-rail);
 }
 
 /* The art's own size and the box it sits in (README §5): 120×64, and 140×75 in the mini sheet. The art brings its colours,
@@ -132,6 +132,9 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* The gear's label sizes its type by this box's width, not the window's (see .stripBody .eyebrow): the box is 21 px narrower
+     in the mini sheet, and on a desktop the frame is 390 px wide whatever the window is. */
+  container-type: inline-size;
 }
 
 .gearHead {
@@ -160,8 +163,24 @@
   color: var(--sl-off);
 }
 
+/* The four gears' labels set their type by the strip body's width (QWW-57, R6), so "LISTENING HISTORY" is not cut off. In Inter
+   700 it is 132.5 px at 6A's 11 px with 0.12em tracking, and the reset button takes 44 px of the head row beside it, so 11 px
+   fits, with 3 px to spare, where the body is 180 px wide: an expanded strip at 390 px, 6A's own look. The body is 165 px at
+   375 px and 150 at 360, and 21 px narrower again in the mini sheet (its art is 140 px), so 159 at 390. Below 180 the type
+   tightens to keep that 3 px: the size first, 12.04 px of body per px of font size, down to 9.5 px (at a body of 161 px), then
+   the tracking, from 0.12em down to none (at a body of 142 px). The four labels share it, so the strips match. Narrower still,
+   a mini strip at 360 px with History on, the label wraps onto two lines (the strip is 94 px tall and the head 28) rather than
+   be cut off. A browser without container units drops the two declarations and keeps 6A's 11 px and 0.12em. */
+.stripBody .eyebrow {
+  white-space: normal;
+  font-size: clamp(9.5px, calc((100cqw - 47px) / 12.04), 11px);
+  letter-spacing: clamp(0px, calc((100cqw - 142px) / 17), 0.12em);
+}
+
 .offTag {
   color: var(--sl-off);
+  /* If the label wraps it breaks before the tag, not inside it. */
+  white-space: nowrap;
 }
 
 /* 44×26 touch area. The negative margins keep the head row 14 px tall, so the rack's height does not change, and put
@@ -349,14 +368,11 @@
   box-sizing: border-box;
   padding: 7px;
   background: var(--sl-panel);
-  border: 1px solid var(--sl-gear-line, var(--sl-rail));
+  /* The rail's grey in every state, like the strips' (QWW-57, R5). */
+  border: 1px solid var(--sl-rail);
   border-radius: 10px;
   flex-direction: column;
   gap: 4px;
-}
-
-.eraPanel[data-off] {
-  border-color: var(--sl-rail);
 }
 
 /* The count after "ERA": "· 1,204 songs", or "· OFF · all eras". */
@@ -411,6 +427,14 @@
   color: #a57891;
 }
 
+/* A pointer on an unpicked era button gives it the pink border, no glow (QWW-57, R10): the glow stays the lit button's. It is a
+   pointer thing only, so a tap on a phone leaves nothing behind. Keyboard focus has its outline already. */
+@media (hover: hover) {
+  .eraButton[aria-pressed='false']:hover {
+    border-color: var(--sl-pink);
+  }
+}
+
 .sheet[data-compact] .eraButton {
   height: 60px;
 }
@@ -449,6 +473,14 @@
   border-color: var(--sl-gear);
   box-shadow: 0 0 12px var(--sl-gear-glow), inset 0 0 8px var(--sl-gear-inner);
   color: var(--sl-text);
+}
+
+/* A pointer on an idle tab gives it a border in its gear's colour, no glow: the border and the glow stay the selected tab's
+   (QWW-57, R10). Pointer devices only, so nothing is left lit after a tap on a phone. */
+@media (hover: hover) {
+  .tab[aria-pressed='false']:hover {
+    border-color: var(--sl-gear);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

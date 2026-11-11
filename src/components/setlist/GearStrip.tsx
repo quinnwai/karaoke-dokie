@@ -76,7 +76,8 @@ export function GearStrip(props: GearStripProps) {
   };
 
   return (
-    // The strip carries the gear's lit colour for its label, border, fill and glow (an off strip ignores it, §7).
+    // The strip carries the gear's lit colour for its label, fill and glow (an off strip ignores it, §7). Its border is the
+    // rail's grey whatever the state (R5), so the colour does not reach it.
     <div
       className={styles.strip}
       data-strip=""
@@ -90,7 +91,8 @@ export function GearStrip(props: GearStripProps) {
         <div className={styles.gearHead}>
           <label className={styles.eyebrow} htmlFor={`slider-${gear}`}>
             {meta.eyebrow}
-            {off && (
+            {/* A gear that cannot be used at all says why under its track, so it does not say " · OFF" as well (R6). */}
+            {off && !unavailable && (
               <span className={styles.offTag} data-offtag="" aria-hidden="true">
                 {' · OFF'}
               </span>

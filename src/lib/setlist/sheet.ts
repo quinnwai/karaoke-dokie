@@ -52,19 +52,18 @@ export function modeAfterDrag(mini: boolean, dy: number): boolean {
 }
 
 /** The custom properties `neonVars` sets. The sheet's CSS reads them, and nothing else carries a lit colour to it. */
-export type NeonVars = Record<'--sl-gear' | '--sl-gear-line' | '--sl-gear-glow' | '--sl-gear-inner', string>;
+export type NeonVars = Record<'--sl-gear' | '--sl-gear-glow' | '--sl-gear-inner', string>;
 
 /**
  * A part's lit colour, and that colour at the alphas the design draws it at, as custom properties for the strip, the Era
- * panel or the tab to carry. They are decided here, once: `-line` (`44`, 27%) is the border of a strip or the panel,
- * `-glow` (`55`, 33%) and `-inner` (`22`, 13%) are the outer and inner glow of the selected tab. `color` is a `#rrggbb`
- * (the palette in art.ts), so a hex alpha can be appended to it. The CSS decides when they apply: an off part ignores
- * them and uses the rail's grey (§7).
+ * panel or the tab to carry. They are decided here, once: `-glow` (`55`, 33%) and `-inner` (`22`, 13%) are the outer and
+ * inner glow of the selected tab. `color` is a `#rrggbb` (the palette in art.ts), so a hex alpha can be appended to it. The
+ * CSS decides when they apply: an off part ignores them (§7). A strip's and the panel's border is not drawn in the gear's
+ * colour in any state (R5, QWW-57; 6A drew it at 27%): it is the rail's grey, so there is no `-line` any more.
  */
 export function neonVars(color: string): NeonVars {
   return {
     '--sl-gear': color,
-    '--sl-gear-line': `${color}44`,
     '--sl-gear-glow': `${color}55`,
     '--sl-gear-inner': `${color}22`,
   };

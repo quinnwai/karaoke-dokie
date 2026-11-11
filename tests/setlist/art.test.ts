@@ -16,7 +16,8 @@ import {
   UNLIT,
   VIOLET,
   gearColor,
-  itemOpacity,
+  itemArt,
+  itemLit,
   jukeboxArt,
   laneArt,
   laneColor,
@@ -126,21 +127,41 @@ describe('difficulty art (Round 6A §6)', () => {
   });
 });
 
-describe('history notes and popularity bolts (Round 6A §1, §6)', () => {
-  it('shows item i once the value reaches (i + 0.5) × 100 / 7', () => {
+describe('history notes and popularity bolts (Round 6A §1, §6; QWW-57, R7)', () => {
+  it('lights item i once the value reaches (i + 0.5) × 100 / 7', () => {
     expect(ITEM_COUNT).toBe(7);
-    const shown = (v: number) => [0, 1, 2, 3, 4, 5, 6].map((i) => itemOpacity(v, i));
-    expect(shown(0)).toEqual([0, 0, 0, 0, 0, 0, 0]);
-    expect(shown(7)).toEqual([0, 0, 0, 0, 0, 0, 0]); // threshold of the first is 7.14
-    expect(shown(8)).toEqual([1, 0, 0, 0, 0, 0, 0]);
-    expect(shown(50)).toEqual([1, 1, 1, 1, 0, 0, 0]);
-    expect(shown(100)).toEqual([1, 1, 1, 1, 1, 1, 1]);
+    const lit = (v: number) => [0, 1, 2, 3, 4, 5, 6].map((i) => itemLit(v, i));
+    expect(lit(0)).toEqual([false, false, false, false, false, false, false]);
+    expect(lit(7)).toEqual([false, false, false, false, false, false, false]); // threshold of the first is 7.14
+    expect(lit(8)).toEqual([true, false, false, false, false, false, false]);
+    expect(lit(50)).toEqual([true, true, true, true, false, false, false]);
+    expect(lit(100)).toEqual([true, true, true, true, true, true, true]);
   });
 
-  it('shows five notes at 65 and six bolts at 80, the README mock defaults (§6, test 26)', () => {
-    const shown = (v: number) => [0, 1, 2, 3, 4, 5, 6].filter((i) => itemOpacity(v, i) === 1).length;
-    expect(shown(65)).toBe(5);
-    expect(shown(80)).toBe(6);
+  it('lights five notes at 65 and six bolts at 80, the README mock defaults (§6, test 26)', () => {
+    const lit = (v: number) => [0, 1, 2, 3, 4, 5, 6].filter((i) => itemLit(v, i)).length;
+    expect(lit(65)).toBe(5);
+    expect(lit(80)).toBe(6);
+  });
+
+  it('draws an item the value does not reach unlit, at full strength, and one it reaches in its own colour (R7)', () => {
+    // Popularity at 30: the first two bolts are lit, the other five are the unlit tube's colour, not gone.
+    const bolts = [0, 1, 2, 3, 4, 5, 6].map((i) => itemArt(AMBER, 30, i, false));
+    expect(bolts.map((b) => b.lit)).toEqual([true, true, false, false, false, false, false]);
+    expect(bolts.map((b) => b.color)).toEqual([AMBER, AMBER, UNLIT, UNLIT, UNLIT, UNLIT, UNLIT]);
+    // History at 65: five notes lit, in their own colours (pink or cyan), and the last two unlit.
+    const notes = [0, 1, 2, 3, 4, 5, 6].map((i) => itemArt(noteColor(i), 65, i, false));
+    expect(notes.map((n) => n.lit)).toEqual([true, true, true, true, true, false, false]);
+    expect(notes.map((n) => n.color)).toEqual([CYAN, PINK, PINK, CYAN, CYAN, UNLIT, UNLIT]);
+  });
+
+  it('lights nothing of a gear that is off, whatever its value: it is all unlit, as every part of an off gear is (§7)', () => {
+    for (const value of [0, 30, 65, 100]) {
+      for (const i of [0, 1, 2, 3, 4, 5, 6]) expect(itemArt(CYAN, value, i, true), `item ${i} at ${value}`).toEqual({ lit: false, color: UNLIT });
+    }
+    // Its tubes are drawn exactly as every other part of an off gear is.
+    expect(itemArt(AMBER, 100, 0, true).color).toBe(tube(AMBER, true));
+    expect(itemArt(AMBER, 100, 0, false).color).toBe(tube(AMBER, false));
   });
 
   it("colours the notes pink or cyan in the reference's order: Round 5's red notes are pink and its dark notes cyan (§6)", () => {

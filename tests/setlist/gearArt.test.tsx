@@ -9,6 +9,10 @@
 //     itself, rather than lean on how jsdom writes styles);
 //   - ids, and the `url(#id)` that points at one: the component's filter ids are its own, one per instance;
 //   - what the parent owns, which the walk requires to be absent: a strip's width and height, the glow on an era icon;
+//   - the notes, bolts and rays the value does not reach (QWW-57, R7). The reference hides them (`style.opacity` 0, a binding the
+//     walk reads) and this build draws them unlit, in full opacity, marked `data-lit="false"`; the walk expects that wherever the
+//     reference's binding says hidden, and the lit colour and `data-lit="true"` wherever it says shown. It is the one place the
+//     art deliberately differs from the reference's drawing (docs/setlist-round6a/README.md);
 //   - the hooks the component adds for the browser tests (data-note, data-bolt, ...), asserted on their own below.
 // Both trees are parsed with jsdom's DOMParser, the engine this test already runs on; `new JSDOM` would need @types/jsdom.
 
@@ -167,6 +171,10 @@ function boundValue(vm: ViewModel, binding: Binding): string | null {
 const isStyleBinding = (b: Binding) => b.target.startsWith('style.');
 const isAttributeBinding = (b: Binding) =>
   !isStyleBinding(b) && !b.target.startsWith('class.') && b.target !== 'text' && b.target !== 'value';
+/** What shows a note, a bolt or a ray in the reference: `style.opacity` from art.oN (History) or art.qN (Popularity), 1 or 0. */
+const isShownBinding = (b: Binding) => b.target === 'style.opacity' && /^art\.[oq]\d$/.test(b.path);
+/** The colour of a note, a bolt or a ray in the reference: art.nN (History) or art.bN (Popularity). */
+const isItemColour = (b: Binding) => /^art\.[nb]\d$/.test(b.path);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Rendering
@@ -249,9 +257,11 @@ interface Context {
   variant: 'strip' | 'tab' | 'era-icon';
   /** The reference's filter ids mapped to the component's, filled in as the walk meets each filter. */
   ids: Map<string, string>;
+  /** The gear is off: none of its notes, bolts or rays is lit, whatever the value (README §7). */
+  off: boolean;
 }
 
-const contextFor = (vm: ViewModel, variant: Context['variant']): Context => ({ vm, variant, ids: new Map() });
+const contextFor = (vm: ViewModel, variant: Context['variant'], off = false): Context => ({ vm, variant, ids: new Map(), off });
 
 interface Pair {
   ref: Element;
@@ -262,13 +272,21 @@ interface Walk {
   pairs: Pair[];
 }
 
-function walk(ref: Element, got: Element, path: string, ctx: Context, out: Walk): void {
+/**
+ * `litAbove` is what the nearest note or bolt group above says (a note's colour is on its inner group, a bolt's on its path);
+ * null where there is none. A ray carries both its colour and its shown-or-hidden binding on its own path.
+ */
+function walk(ref: Element, got: Element, path: string, ctx: Context, out: Walk, litAbove: boolean | null = null): void {
   out.pairs.push({ ref, got });
   if (ref.localName !== got.localName) {
     out.problems.push(`${path}: <${ref.localName}> in the reference, <${got.localName}> in the component`);
     return;
   }
   const bindings = bindingsOf(ref);
+  // R7: where the reference hides a note, a bolt or a ray this build draws it unlit and says so with data-lit; where it shows
+  // one, it is lit, unless the gear is off. The tube's colour follows: UNLIT unless it is lit.
+  const shownBinding = bindings.find(isShownBinding);
+  const lit = shownBinding ? !ctx.off && boundValue(ctx.vm, shownBinding) === '1' : litAbove;
   // What the parent owns is on the root svg alone: the band inside a strip has a height of its own.
   const isRoot = !path.includes('>');
   const parentAttrs = isRoot && ctx.variant === 'strip' ? ['width', 'height'] : [];
@@ -281,10 +299,11 @@ function walk(ref: Element, got: Element, path: string, ctx: Context, out: Walk)
   }
   for (const binding of bindings.filter(isAttributeBinding)) {
     if (parentAttrs.includes(binding.target)) continue;
-    const value = boundValue(ctx.vm, binding);
+    const value = lit === false && isItemColour(binding) ? COLOR.unlit : boundValue(ctx.vm, binding);
     if (value === null) want.delete(binding.target);
     else want.set(binding.target, value);
   }
+  if (shownBinding) want.set('data-lit', String(lit));
 
   // A filter is found by id, and the component's ids are its own: the walk learns each one, then checks the url() that uses it.
   const refId = ref.getAttribute('id');
@@ -311,6 +330,8 @@ function walk(ref: Element, got: Element, path: string, ctx: Context, out: Walk)
   const wantStyle = styleOf(ref);
   delete wantStyle['transform-origin'];
   for (const binding of bindings.filter(isStyleBinding)) {
+    // The opacity is what R7 replaces: nothing is hidden by it any more.
+    if (binding === shownBinding) continue;
     const property = binding.target.slice('style.'.length);
     if (parentStyle.includes(property)) continue;
     const value = boundValue(ctx.vm, binding);
@@ -339,7 +360,7 @@ function walk(ref: Element, got: Element, path: string, ctx: Context, out: Walk)
   }
   refKids.forEach((kid, i) => {
     const other = gotKids[i];
-    if (other) walk(kid, other, `${path}>${kid.localName}[${i}]`, ctx, out);
+    if (other) walk(kid, other, `${path}>${kid.localName}[${i}]`, ctx, out, lit);
   });
 }
 
@@ -376,9 +397,10 @@ function drawn(part: Part, state: ReferenceState) {
       ref: referenceArt(gear, variant),
       got: artAsParentRenders(gear, variant, state[gear], off),
       variant,
+      off,
     };
   }
-  return { label: 'era tab', ref: referenceEraTab(), got: eraTab(state.eras, off), variant: 'tab' as const };
+  return { label: 'era tab', ref: referenceEraTab(), got: eraTab(state.eras, off), variant: 'tab' as const, off };
 }
 
 /** Draws `parts` for a state and compares each with the reference's art for that state. Returns every difference. */
@@ -387,8 +409,8 @@ function differences(patch: Partial<ReferenceState>, parts: readonly Part[]): st
   const vm = viewModelFor(patch);
   const problems: string[] = [];
   for (const part of parts) {
-    const { label, ref, got, variant } = drawn(part, state);
-    const walked = compare(ref, got, contextFor(vm, variant));
+    const { label, ref, got, variant, off } = drawn(part, state);
+    const walked = compare(ref, got, contextFor(vm, variant, off));
     problems.push(...walked.problems.map((problem) => `${label} at ${JSON.stringify(patch)}: ${problem}`));
     if (walked.pairs.length !== elementCount(ref)) problems.push(`${label} at ${JSON.stringify(patch)}: the walk missed elements`);
   }
@@ -602,57 +624,95 @@ describe('GearArt: difficulty follows the value (the pitch lane)', () => {
 });
 
 describe('GearArt: history notes and popularity bolts follow the value', () => {
-  // Item i is drawn once the value reaches (i + 0.5) x 100 / 7, so 50 draws the first four.
+  // Item i is lit once the value reaches (i + 0.5) x 100 / 7, so 50 lights the first four. The ones it does not reach are drawn
+  // unlit, in full opacity, not hidden (QWW-57, R7): the drawing keeps its whole shape and only the lit items glow.
   const ITEMS = [
-    { value: 0, opacity: ['0', '0', '0', '0', '0', '0', '0'] },
-    { value: 50, opacity: ['1', '1', '1', '1', '0', '0', '0'] },
-    { value: 100, opacity: ['1', '1', '1', '1', '1', '1', '1'] },
+    { value: 0, lit: [false, false, false, false, false, false, false] },
+    { value: 50, lit: [true, true, true, true, false, false, false] },
+    { value: 100, lit: [true, true, true, true, true, true, true] },
   ];
+  const NOTE_COLORS = [COLOR.cyan, COLOR.pink, COLOR.pink, COLOR.cyan, COLOR.cyan, COLOR.pink, COLOR.cyan];
+  const BOLT_COLORS = Array(7).fill(COLOR.amber) as string[];
+  /** What each item is drawn in: its colour while it is lit, the unlit tube's otherwise. */
+  const drawnIn = (lit: boolean[], colors: string[]) => lit.map((on, i) => (on ? colors[i] : COLOR.unlit));
 
-  for (const { value, opacity } of ITEMS) {
-    it(`history strip at ${value}: note opacities ${opacity.join(' ')}`, () => {
-      const notes = all(art('history', 'strip', value, false), '[data-note]');
+  for (const { value, lit } of ITEMS) {
+    const marks = lit.map((on) => (on ? 'lit' : 'unlit')).join(' ');
+
+    it(`history strip at ${value}: notes ${marks}`, () => {
+      const root = art('history', 'strip', value, false);
+      const notes = all(root, '[data-note]');
       expect(notes.map(attr('data-i'))).toEqual(INDEXES);
-      expect(notes.map(styleProp('opacity'))).toEqual(opacity);
+      expect(notes.map(attr('data-lit'))).toEqual(lit.map(String));
+      // A note's colour is on the group inside the one that carries the hook.
+      expect(all(root, '[data-note] > g').map(attr('fill'))).toEqual(drawnIn(lit, NOTE_COLORS));
     });
 
-    it(`popularity strip at ${value}: bolt opacities ${opacity.join(' ')}`, () => {
-      const bolts = all(art('popularity', 'strip', value, false), '[data-bolt]');
+    it(`popularity strip at ${value}: bolts ${marks}`, () => {
+      const root = art('popularity', 'strip', value, false);
+      const bolts = all(root, '[data-bolt]');
       expect(bolts.map(attr('data-i'))).toEqual(INDEXES);
-      expect(bolts.map(styleProp('opacity'))).toEqual(opacity);
+      expect(bolts.map(attr('data-lit'))).toEqual(lit.map(String));
+      expect(all(root, '[data-bolt] > path').map(attr('fill'))).toEqual(drawnIn(lit, BOLT_COLORS));
     });
 
-    for (const gear of ['history', 'popularity'] as const) {
-      it(`${gear} tab at ${value}: ray opacities ${opacity.join(' ')}`, () => {
+    for (const [gear, colors] of [
+      ['history', NOTE_COLORS],
+      ['popularity', BOLT_COLORS],
+    ] as const) {
+      it(`${gear} tab at ${value}: rays ${marks}`, () => {
         const rays = all(art(gear, 'tab', value, false), '[data-ray]');
         expect(rays.map(attr('data-i'))).toEqual(INDEXES);
-        expect(rays.map(styleProp('opacity'))).toEqual(opacity);
+        expect(rays.map(attr('data-lit'))).toEqual(lit.map(String));
+        expect(rays.map(attr('stroke'))).toEqual(drawnIn(lit, colors));
       });
     }
   }
 
-  it('shows five notes and six bolts at the mock defaults, 65 and 80, on the strip and as rays on the tab (README test 26)', () => {
-    const visible = (els: Element[]) => els.filter((el) => styleOf(el).opacity === '1').length;
-    expect(visible(all(art('history', 'strip', 65, false), '[data-note]'))).toBe(5);
-    expect(visible(all(art('popularity', 'strip', 80, false), '[data-bolt]'))).toBe(6);
-    expect(visible(all(art('history', 'tab', 65, false), '[data-ray]'))).toBe(5);
-    expect(visible(all(art('popularity', 'tab', 80, false), '[data-ray]'))).toBe(6);
+  const litCount = (els: Element[]) => els.filter((el) => el.getAttribute('data-lit') === 'true').length;
+
+  it('lights five notes at 65 and six bolts at 80, the mock defaults, on the strip and as rays on the tab, and draws the rest unlit (README test 26)', () => {
+    for (const [els, lit] of [
+      [all(art('history', 'strip', 65, false), '[data-note]'), 5],
+      [all(art('popularity', 'strip', 80, false), '[data-bolt]'), 6],
+      [all(art('history', 'tab', 65, false), '[data-ray]'), 5],
+      [all(art('popularity', 'tab', 80, false), '[data-ray]'), 6],
+    ] as const) {
+      expect(els).toHaveLength(7);
+      expect(litCount(els)).toBe(lit);
+    }
   });
 
-  it('keeps every note, bolt and ray in the drawing, hidden by opacity alone; the strip ones fade over 180 ms', () => {
-    const withoutOpacity = (el: Element) => el.outerHTML.replace(/opacity:[01]/, 'opacity:_');
+  it('Popularity on at 30 lights 2 bolts and 2 rays in amber and draws 5 of each in the unlit colour; History on at 65 lights 5 notes and leaves 2 unlit (R7)', () => {
+    const strip = art('popularity', 'strip', 30, false);
+    const tab = art('popularity', 'tab', 30, false);
+    expect(all(strip, '[data-bolt] > path').map(attr('fill'))).toEqual([COLOR.amber, COLOR.amber, ...Array(5).fill(COLOR.unlit)]);
+    expect(all(tab, '[data-ray]').map(attr('stroke'))).toEqual([COLOR.amber, COLOR.amber, ...Array(5).fill(COLOR.unlit)]);
+    const notes = all(art('history', 'strip', 65, false), '[data-note]');
+    expect(litCount(notes)).toBe(5);
+    expect(notes.filter((el) => el.getAttribute('data-lit') === 'false').map(attr('data-i'))).toEqual(['5', '6']);
+  });
+
+  it('draws every note, bolt and ray whatever the value, in full opacity: only data-lit and the colour change, and the strip ones keep the fade', () => {
+    // The markup of an item with its lit state and its colour taken out.
+    const sameShape = (el: Element) =>
+      el.outerHTML.replace(/data-lit="(true|false)"/g, 'data-lit="_"').replace(/(fill|stroke)="#[0-9A-Fa-f]{6}"/g, '$1="_"');
     for (const [gear, variant, hookSelector] of [
       ['history', 'strip', '[data-note]'],
       ['popularity', 'strip', '[data-bolt]'],
       ['history', 'tab', '[data-ray]'],
       ['popularity', 'tab', '[data-ray]'],
     ] as const) {
-      const hidden = all(art(gear, variant, 0, false), hookSelector);
-      const shown = all(art(gear, variant, 100, false), hookSelector);
-      expect(hidden, `${gear} ${variant}`).toHaveLength(7);
-      expect(hidden.map(withoutOpacity), `${gear} ${variant}`).toEqual(shown.map(withoutOpacity));
-      // Only the strip's notes and bolts have the fade; the reference's rays do not.
-      const classes = hidden.map((el) => classTokens(el).map(moduleName));
+      const unlit = all(art(gear, variant, 0, false), hookSelector);
+      const lit = all(art(gear, variant, 100, false), hookSelector);
+      expect(unlit, `${gear} ${variant}`).toHaveLength(7);
+      expect(unlit.map(sameShape), `${gear} ${variant}`).toEqual(lit.map(sameShape));
+      // Nothing is hidden: no opacity on the hook or anything inside it, lit or not.
+      for (const el of [...unlit, ...lit]) {
+        expect(el.outerHTML, `${gear} ${variant}`).not.toMatch(/opacity/);
+      }
+      // Only the strip's notes and bolts fade (the colour, over 180 ms, in the CSS); the reference's rays do not.
+      const classes = unlit.map((el) => classTokens(el).map(moduleName));
       expect(classes, `${gear} ${variant}`).toEqual(Array(7).fill(variant === 'strip' ? ['fade'] : []));
     }
   });
@@ -816,6 +876,22 @@ describe('GearArt: an off gear is a switched-off sign (README §7, test 25)', ()
     expect(paints(eraTab(['s90'], true))).toEqual([COLOR.lightOff, COLOR.unlit].sort());
   });
 
+  it('lights none of an off gear\'s notes, bolts and rays, whatever the value: all seven are drawn, unlit (R7)', () => {
+    for (const [gear, variant, selector] of [
+      ['history', 'strip', '[data-note]'],
+      ['popularity', 'strip', '[data-bolt]'],
+      ['history', 'tab', '[data-ray]'],
+      ['popularity', 'tab', '[data-ray]'],
+    ] as const) {
+      for (const value of [0, 50, 100]) {
+        const root = art(gear, variant, value, true);
+        const hooks = all(root, selector);
+        expect(hooks.map(attr('data-lit')), `${gear} ${variant} at ${value}`).toEqual(Array(7).fill('false'));
+        expect(paints(root), `${gear} ${variant} at ${value}`).toEqual([COLOR.unlit]);
+      }
+    }
+  });
+
   it('stills the metronome: a reset Tempo has unlit strokes and a pendulum with no animation, strip and tab', () => {
     for (const variant of VARIANTS) {
       const root = art('tempo', variant, 50, true);
@@ -970,16 +1046,17 @@ describe('GearArt: the hooks the browser tests use', () => {
     weights: all(root, '[data-weight]').length,
     jukebox: all(root, '[data-jukebox]').length,
     indexed: all(root, '[data-i]').length,
+    lit: all(root, '[data-lit]').length,
   });
-  const NONE = { notes: 0, bolts: 0, rays: 0, pendulums: 0, weights: 0, jukebox: 0, indexed: 0 };
+  const NONE = { notes: 0, bolts: 0, rays: 0, pendulums: 0, weights: 0, jukebox: 0, indexed: 0, lit: 0 };
 
   it('puts each hook on its own part and nowhere else', () => {
     expect(counts(art('difficulty', 'strip', 50, false))).toEqual(NONE);
     expect(counts(art('difficulty', 'tab', 50, false))).toEqual(NONE);
-    expect(counts(art('history', 'strip', 50, false))).toEqual({ ...NONE, notes: 7, indexed: 7 });
-    expect(counts(art('history', 'tab', 50, false))).toEqual({ ...NONE, rays: 7, indexed: 7 });
-    expect(counts(art('popularity', 'strip', 50, false))).toEqual({ ...NONE, bolts: 7, indexed: 7 });
-    expect(counts(art('popularity', 'tab', 50, false))).toEqual({ ...NONE, rays: 7, indexed: 7 });
+    expect(counts(art('history', 'strip', 50, false))).toEqual({ ...NONE, notes: 7, indexed: 7, lit: 7 });
+    expect(counts(art('history', 'tab', 50, false))).toEqual({ ...NONE, rays: 7, indexed: 7, lit: 7 });
+    expect(counts(art('popularity', 'strip', 50, false))).toEqual({ ...NONE, bolts: 7, indexed: 7, lit: 7 });
+    expect(counts(art('popularity', 'tab', 50, false))).toEqual({ ...NONE, rays: 7, indexed: 7, lit: 7 });
     for (const variant of VARIANTS) {
       expect(counts(art('tempo', variant, 50, false)), variant).toEqual({ ...NONE, pendulums: 1, weights: 1 });
     }
@@ -999,14 +1076,16 @@ describe('GearArt: the hooks the browser tests use', () => {
     }
   });
 
-  it('puts the opacity of a note, bolt or ray inline on the element that carries the hook', () => {
+  it('says on the element that carries the hook whether a note, bolt or ray is lit (data-lit), and puts no opacity on it (R7)', () => {
     for (const [gear, variant, selector] of [
       ['history', 'strip', '[data-note]'],
       ['popularity', 'strip', '[data-bolt]'],
       ['history', 'tab', '[data-ray]'],
       ['popularity', 'tab', '[data-ray]'],
     ] as const) {
-      for (const el of all(art(gear, variant, 50, false), selector)) expect(['0', '1']).toContain(styleOf(el).opacity);
+      const hooks = all(art(gear, variant, 50, false), selector);
+      expect(hooks.map(attr('data-lit')), `${gear} ${variant}`).toEqual(['true', 'true', 'true', 'true', 'false', 'false', 'false']);
+      for (const el of hooks) expect(styleOf(el).opacity, `${gear} ${variant}`).toBeUndefined();
     }
   });
 });
@@ -1154,11 +1233,34 @@ describe('the comparison itself', () => {
     one(nowhere, 'g[filter]').setAttribute('filter', 'url(#nothing)');
     expect(compare(ref, nowhere, ctx()).problems).toHaveLength(1);
 
-    const noOpacity = artAsParentRenders('history', 'strip', 65, false);
-    one(noOpacity, '[data-note]').removeAttribute('style');
-    const problems = compare(referenceArt('history', 'strip'), noOpacity, contextFor(vm, 'strip')).problems;
-    expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain('opacity');
+    // R7: at History 65 the first five notes are lit and the last two are drawn unlit. The walk notices a lit note marked or
+    // coloured as unlit, an unlit one marked or coloured as lit, and a hidden one (the reference's opacity).
+    const historyAt65 = () => artAsParentRenders('history', 'strip', 65, false);
+    const walkHistory = (root: Element) => compare(referenceArt('history', 'strip'), root, contextFor(vm, 'strip')).problems;
+    expect(walkHistory(historyAt65())).toEqual([]);
+
+    const markedUnlit = historyAt65();
+    one(markedUnlit, '[data-note]').setAttribute('data-lit', 'false');
+    expect(walkHistory(markedUnlit)).toHaveLength(1);
+    expect(walkHistory(markedUnlit)[0]).toContain('data-lit');
+
+    const markedLit = historyAt65();
+    all(markedLit, '[data-note]')[6]?.setAttribute('data-lit', 'true');
+    expect(walkHistory(markedLit)).toHaveLength(1);
+
+    const litButDark = historyAt65();
+    one(litButDark, '[data-note] > g').setAttribute('fill', COLOR.unlit);
+    expect(walkHistory(litButDark)).toHaveLength(1);
+    expect(walkHistory(litButDark)[0]).toContain('fill');
+
+    const unlitButBright = historyAt65();
+    all(unlitButBright, '[data-note] > g')[6]?.setAttribute('fill', COLOR.cyan);
+    expect(walkHistory(unlitButBright)).toHaveLength(1);
+
+    const hidden = historyAt65();
+    all(hidden, '[data-note]')[6]?.setAttribute('style', 'opacity:0');
+    expect(walkHistory(hidden)).toHaveLength(1);
+    expect(walkHistory(hidden)[0]).toContain('style');
   });
 });
 
@@ -1212,16 +1314,18 @@ describe('GearArt.module.css', () => {
     expect([...used].sort()).toEqual([...defined].sort());
   });
 
-  it('has the reference rules for the fade and the bob', () => {
+  it('has the reference rules for the bob, and the fade as the reference has it except that it is the colour that fades (R7)', () => {
     const same = [
-      ['.fade', '.fade'],
       ['@keyframes bob', '@keyframes bob'],
       ['.bob', '.bob'],
     ] as const;
     for (const [from, to] of same) expect(bodyOf(moduleCss, to), to).toBe(bodyOf(referenceCss, from));
-    // README §10: 2 px up, 1.1 s, alternate; the fade is 180 ms.
+    // README §10: 2 px up, 1.1 s, alternate; the fade is 180 ms. The reference fades the part's opacity (`.fade`, on the group
+    // that carries the hook) because it hides what the value does not reach. Here that is drawn unlit, so the tube's colour
+    // fades, and the `fill` is on the group's one child.
+    expect(bodyOf(referenceCss, '.fade')).toBe('transition:opacity 180ms;');
     expect(bodyOf(moduleCss, '.bob')).toBe('animation:bob 1.1s ease-in-out infinite alternate;');
-    expect(bodyOf(moduleCss, '.fade')).toBe('transition:opacity 180ms;');
+    expect(bodyOf(moduleCss, '.fade > *')).toBe('transition:fill 180ms;');
   });
 
   it('pivots the pendulum where the reference does: (75, 56) on the strip and (14, 15.5) on the tab', () => {
@@ -1239,14 +1343,15 @@ describe('GearArt.module.css', () => {
       '.pend': ['.pend', '.pendTab'],
       '.bob': ['.bob'],
       '.flick': ['.flick'],
-      '.fade': ['.fade'],
+      '.fade': ['.fade > *'],
     };
     const owned = rulesOf(bodyOf(referenceCss, REDUCED))
       .map(([selectors, body]): [string, string] => [selectors.split(',').flatMap((s) => OWN[s] ?? []).join(','), body])
       .filter(([selectors]) => selectors !== '');
     expect(owned).toEqual([
       ['.pend,.pendTab,.bob,.flick', 'animation:none !important;'],
-      ['.fade', 'transition:none !important;'],
+      // The reference's `.fade`; here the transition is on the group's child (see above).
+      ['.fade > *', 'transition:none !important;'],
     ]);
     expect(rulesOf(bodyOf(moduleCss, REDUCED))).toEqual(owned);
   });

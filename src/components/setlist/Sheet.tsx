@@ -1,10 +1,9 @@
 import { useRef, useState, type CSSProperties } from 'react';
 import { gearColor } from '../../lib/setlist/art';
 import { DRAG_START_PX, modeAfterDrag, neonVars, sheetLayout } from '../../lib/setlist/sheet';
-import { GEAR_META, ERA_META } from '../../lib/setlist/gears';
+import { GEAR_META, ERA_META, SHEET_GEARS, SHEET_PARTS } from '../../lib/setlist/gears';
 import { isOn, type TunerAction } from '../../lib/setlist/tuner';
 import type { GearId, TunerPart, TunerState } from '../../lib/setlist/types';
-import { GEAR_IDS, TUNER_PARTS } from '../../lib/setlist/types';
 import { EraPanel } from './EraPanel';
 import { EraTabArt, GearArt } from './GearArt';
 import { GearStrip } from './GearStrip';
@@ -104,7 +103,8 @@ export function Sheet({ tuner, historyAvailable, historyHint, songCount, canExpa
 
       <div id="rack" className={styles.rack} style={{ height: layout.rackHeight }} data-dragging={layout.dragging || undefined}>
         <div id="strips" className={styles.strips} hidden={compact && tuner.open === 'era'}>
-          {GEAR_IDS.map((g) => (
+          {/* Sheet order, not the contract's: Listening History goes last (R11). */}
+          {SHEET_GEARS.map((g) => (
             <GearStrip
               key={g}
               gear={g}
@@ -130,7 +130,7 @@ export function Sheet({ tuner, historyAvailable, historyHint, songCount, canExpa
         />
 
         <div id="tabs" className={styles.tabs} role="group" aria-label="Choose gear" hidden={!compact}>
-          {TUNER_PARTS.map((g) => {
+          {SHEET_PARTS.map((g) => {
             const tabOff = off(g);
             return (
               <button
@@ -141,7 +141,8 @@ export function Sheet({ tuner, historyAvailable, historyHint, songCount, canExpa
                 data-gear={g}
                 data-off={tabOff || undefined}
                 aria-pressed={tuner.open === g}
-                // The colour of the selected tab's border and glow. Difficulty's follows its tier, so it reads the value.
+                // The colour of the selected tab's border and glow, and of an idle tab's border while it is hovered (R10).
+                // Difficulty's follows its tier, so it reads the value.
                 style={neonVars(gearColor(g, tuner.difficulty)) as CSSProperties}
                 onClick={() => onTuner({ type: 'open', gear: g })}
               >

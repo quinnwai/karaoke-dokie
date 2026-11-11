@@ -2,9 +2,10 @@
 // jukebox, and the icon on each era button. The geometry is copied from docs/setlist-round6a/setlist-round6a.html, and
 // tests/setlist/gearArt.test.tsx checks it against that file, element by element.
 //
-// What moves with a value, what an off gear looks like and which jukebox lights are on come from src/lib/setlist/art.ts;
-// this file only applies it. Presentational: no state, no effects. The parent sizes the strip art and draws the box behind
-// it (the svg has no background, width or height of its own), and passes the gear's default as `value` while it is off.
+// What moves with a value, what an off gear looks like, which notes, bolts and rays are lit and which jukebox lights are on
+// come from src/lib/setlist/art.ts; this file only applies it. Presentational: no state, no effects. The parent sizes the
+// strip art and draws the box behind it (the svg has no background, width or height of its own), and passes the gear's
+// default as `value` while it is off.
 
 import { useId, type ReactElement, type ReactNode } from 'react';
 import {
@@ -12,7 +13,7 @@ import {
   CYAN,
   PINK,
   VIOLET,
-  itemOpacity,
+  itemArt,
   jukeboxArt,
   laneArt,
   metronome,
@@ -149,7 +150,7 @@ function DifficultyTab({ value, off, className }: ArtProps) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// History: headphones and seven notes. Note i is drawn once the value reaches its threshold (itemOpacity).
+// History: headphones and seven notes. Note i is lit once the value reaches its threshold, and drawn unlit until then (itemArt).
 
 interface Note {
   transform: string;
@@ -204,30 +205,22 @@ function HistoryStrip({ value, off, className }: ArtProps) {
         <g transform="rotate(7 101 60)" fill="none" stroke={headphones}>
           <rect x="93" y="46" width="16" height="28" rx="8" strokeWidth="2.4" />
         </g>
-        {NOTES.map((note, i) => (
-          <g
-            key={note.transform}
-            className={styles.fade}
-            data-note=""
-            data-i={i}
-            transform={note.transform}
-            style={{ opacity: itemOpacity(value, i) }}
-          >
-            <g
-              className={styles.bob}
-              fill={tube(noteColor(i), off)}
-              style={note.delay ? { animationDelay: note.delay } : undefined}
-            >
-              {note.beamed ? BEAMED : NOTE}
+        {NOTES.map((note, i) => {
+          const { lit, color } = itemArt(noteColor(i), value, i, off);
+          return (
+            <g key={note.transform} className={styles.fade} data-note="" data-i={i} data-lit={lit} transform={note.transform}>
+              <g className={styles.bob} fill={color} style={note.delay ? { animationDelay: note.delay } : undefined}>
+                {note.beamed ? BEAMED : NOTE}
+              </g>
             </g>
-          </g>
-        ))}
+          );
+        })}
       </g>
     </StripSvg>
   );
 }
 
-/** Where ray i sits around the headphones: ray i mirrors note i, in the note's colour and on the note's threshold. */
+/** Where ray i sits around the headphones: ray i mirrors note i, in the note's colour and lit on the note's threshold. */
 const HISTORY_RAYS = [
   'M6.1 9.3 L3.9 8.9',
   'M21.9 9 L24 8.6',
@@ -247,23 +240,17 @@ function HistoryTab({ value, off, className }: ArtProps) {
         <rect x="15.9" y="12.2" width="3.2" height="5.6" rx="1.6" transform="rotate(7 17.5 15)" />
       </g>
       <g strokeWidth="1.5">
-        {HISTORY_RAYS.map((d, i) => (
-          <path
-            key={d}
-            data-ray=""
-            data-i={i}
-            d={d}
-            stroke={tube(noteColor(i), off)}
-            style={{ opacity: itemOpacity(value, i) }}
-          />
-        ))}
+        {HISTORY_RAYS.map((d, i) => {
+          const { lit, color } = itemArt(noteColor(i), value, i, off);
+          return <path key={d} data-ray="" data-i={i} data-lit={lit} d={d} stroke={color} />;
+        })}
       </g>
     </svg>
   );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Popularity: a microphone and seven bolts, drawn on the same thresholds as the notes.
+// Popularity: a microphone and seven bolts, lit on the same thresholds as the notes.
 
 const BOLT_PATH = 'M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z';
 
@@ -285,7 +272,6 @@ const BOLTS: readonly Bolt[] = [
 
 function PopularityStrip({ value, off, className }: ArtProps) {
   const glow = useFilterId();
-  const bolt = tube(AMBER, off);
   return (
     <StripSvg off={off} className={className}>
       <Glow id={glow} y="-30%" height="160%" />
@@ -297,29 +283,20 @@ function PopularityStrip({ value, off, className }: ArtProps) {
           <path d="M-8 14 H8 L6 20 H-6 Z" />
           <path d="M-4.5 22 L-3 42 H3 L4.5 22" />
         </g>
-        {BOLTS.map((b, i) => (
-          <g
-            key={b.transform}
-            className={styles.fade}
-            data-bolt=""
-            data-i={i}
-            transform={b.transform}
-            style={{ opacity: itemOpacity(value, i) }}
-          >
-            <path
-              className={styles.bob}
-              style={b.delay ? { animationDelay: b.delay } : undefined}
-              d={BOLT_PATH}
-              fill={bolt}
-            />
-          </g>
-        ))}
+        {BOLTS.map((b, i) => {
+          const { lit, color } = itemArt(AMBER, value, i, off);
+          return (
+            <g key={b.transform} className={styles.fade} data-bolt="" data-i={i} data-lit={lit} transform={b.transform}>
+              <path className={styles.bob} style={b.delay ? { animationDelay: b.delay } : undefined} d={BOLT_PATH} fill={color} />
+            </g>
+          );
+        })}
       </g>
     </StripSvg>
   );
 }
 
-/** Where ray i sits around the mic: ray i mirrors bolt i, in amber and on the bolt's threshold. */
+/** Where ray i sits around the mic: ray i mirrors bolt i, in amber and lit on the bolt's threshold. */
 const POPULARITY_RAYS = [
   'M13.7 3.4 V1.3',
   'M17 4.3 L18.1 2.4',
@@ -339,16 +316,10 @@ function PopularityTab({ value, off, className }: ArtProps) {
         <path d="M11.9 14.4 H16.1 L15.4 21 H12.6 Z" />
       </g>
       <g strokeWidth="1.5">
-        {POPULARITY_RAYS.map((d, i) => (
-          <path
-            key={d}
-            data-ray=""
-            data-i={i}
-            d={d}
-            stroke={tube(AMBER, off)}
-            style={{ opacity: itemOpacity(value, i) }}
-          />
-        ))}
+        {POPULARITY_RAYS.map((d, i) => {
+          const { lit, color } = itemArt(AMBER, value, i, off);
+          return <path key={d} data-ray="" data-i={i} data-lit={lit} d={d} stroke={color} />;
+        })}
       </g>
     </svg>
   );

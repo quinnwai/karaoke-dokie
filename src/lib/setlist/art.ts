@@ -76,11 +76,28 @@ export function laneArt(difficulty: number, off = false): LaneArt {
 }
 
 /**
- * History notes and Popularity bolts: seven of each, item `i` shows once the value reaches (i + 0.5) × 100 / 7.
- * Returns the opacity to draw it at. The tab's rays are the same seven items and use the same rule.
+ * History notes and Popularity bolts: seven of each, item `i` lights once the value reaches (i + 0.5) × 100 / 7. The tab's
+ * rays are the same seven items and use the same rule.
  */
 export const ITEM_COUNT = 7;
-export const itemOpacity = (value: number, i: number): 0 | 1 => (value >= ((i + 0.5) * 100) / ITEM_COUNT ? 1 : 0);
+export const itemLit = (value: number, i: number): boolean => value >= ((i + 0.5) * 100) / ITEM_COUNT;
+
+export interface ItemArt {
+  /** Lit: its gear is on and the value reaches it. */
+  lit: boolean;
+  /** What it is drawn in: its colour while it is lit, UNLIT otherwise. */
+  color: string;
+}
+
+/**
+ * How a note, a bolt or a ray is drawn (QWW-57, R7): an item the value does not reach is drawn unlit, at full opacity, like a
+ * neon tube that is not turned on, instead of disappearing as the 6A reference has it. So the art keeps its whole shape and
+ * only the lit items glow. A gear that is off is all unlit, as every part of it is (§7). `color` is the item's lit colour.
+ */
+export function itemArt(color: string, value: number, i: number, off: boolean): ItemArt {
+  const lit = !off && itemLit(value, i);
+  return { lit, color: tube(color, !lit) };
+}
 
 /**
  * Which History notes are pink; the rest are cyan (Round 6A §6). Round 5's red notes are pink here and its dark notes cyan,

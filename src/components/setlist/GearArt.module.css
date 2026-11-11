@@ -2,9 +2,11 @@
    radius and the box behind it belong to the parent, which passes a className; the svg draws no background, and an off gear
    is dimmed by drawing it in unlit tubes (GearArt.tsx), not by CSS. */
 
-/* A note or a bolt fades in and out as the value crosses its threshold. */
-.fade {
-  transition: opacity 180ms;
+/* A note or a bolt lights and goes dark over 180 ms as the value crosses its threshold (README §10). The reference hides the
+   part with an opacity fade; here an item the value does not reach is drawn unlit instead (QWW-57, R7), so what fades is the
+   tube's colour, which is on the group's one child: a note's inner group, a bolt's path. The tab's rays have no fade. */
+.fade > * {
+  transition: fill 180ms;
 }
 
 @keyframes bob {
@@ -39,7 +41,7 @@
   .flick {
     animation: none !important;
   }
-  .fade {
+  .fade > * {
     transition: none !important;
   }
 }

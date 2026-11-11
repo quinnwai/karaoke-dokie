@@ -1,12 +1,15 @@
 // The tuner reducer against spec §4 and §4a, the sheet geometry against §3, and the request the tuner sends.
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { eraOf, ERA_LABEL } from '../../src/lib/setlist/eras';
+import { SHEET_GEARS, SHEET_PARTS } from '../../src/lib/setlist/gears';
 import { modeAfterDrag, neonVars, RACK_FULL, RACK_MINI, sheetLayout } from '../../src/lib/setlist/sheet';
 import { initialTuner, isOn, toRequest, tunerReducer } from '../../src/lib/setlist/tuner';
 import type { TunerAction } from '../../src/lib/setlist/tuner';
-import { GEAR_IDS, type EraId, type TunerState } from '../../src/lib/setlist/types';
+import { GEAR_IDS, TUNER_PARTS, type EraId, type TunerState } from '../../src/lib/setlist/types';
 
 const run = (s: TunerState, ...actions: TunerAction[]) => actions.reduce(tunerReducer, s);
 /** The tuner everyone starts from: it takes no sign-in state, the ranking engine decides what counts. */
@@ -319,15 +322,97 @@ describe('sheet geometry when the sheet cannot expand', () => {
 
 // Round 6A §5, §8, §9: how a part's lit colour reaches the sheet's CSS.
 describe('neonVars', () => {
-  it('is the colour, and the colour at 27% (border), 33% (glow) and 13% (inner glow), as hex alphas', () => {
+  it('is the colour, and the colour at 33% (glow) and 13% (inner glow) for the selected tab, as hex alphas', () => {
     expect(neonVars('#4FDDE8')).toEqual({
       '--sl-gear': '#4FDDE8',
-      '--sl-gear-line': '#4FDDE844',
       '--sl-gear-glow': '#4FDDE855',
       '--sl-gear-inner': '#4FDDE822',
     });
-    // 0x44 = 68/255, 0x55 = 85/255, 0x22 = 34/255.
-    expect([0x44, 0x55, 0x22].map((alpha) => Math.round((alpha / 255) * 100))).toEqual([27, 33, 13]);
+    // 0x55 = 85/255, 0x22 = 34/255.
+    expect([0x55, 0x22].map((alpha) => Math.round((alpha / 255) * 100))).toEqual([33, 13]);
+  });
+
+  it('has no colour for a border: a strip\'s and the Era panel\'s is the rail\'s grey in every state, not the gear\'s at 27% (QWW-57, R5)', () => {
+    expect(Object.keys(neonVars('#FFC24A'))).not.toContain('--sl-gear-line');
+    expect(Object.values(neonVars('#FFC24A')).some((value) => value === '#FFC24A44')).toBe(false);
+  });
+});
+
+// QWW-57, R11: the order the sheet draws the gears in is its own constant; the contract's order, which the server and the engine
+// read, is left alone.
+describe('the sheet\'s order of gears', () => {
+  it('is Difficulty, Popularity, Tempo, then Listening History, and the tabs add Era', () => {
+    expect(SHEET_GEARS).toEqual(['difficulty', 'popularity', 'tempo', 'history']);
+    expect(SHEET_PARTS).toEqual(['difficulty', 'popularity', 'tempo', 'history', 'era']);
+  });
+
+  it('holds the same four gears as the contract, once each, so no gear can drop off the sheet', () => {
+    expect(new Set(SHEET_GEARS).size).toBe(SHEET_GEARS.length);
+    expect([...SHEET_GEARS].sort()).toEqual([...GEAR_IDS].sort());
+    expect(new Set(SHEET_PARTS).size).toBe(SHEET_PARTS.length);
+    expect([...SHEET_PARTS].sort()).toEqual([...TUNER_PARTS].sort());
+  });
+
+  it('leaves the contract\'s order alone, and mini still opens on the sheet\'s first gear, Difficulty', () => {
+    expect([...GEAR_IDS]).toEqual(['difficulty', 'history', 'popularity', 'tempo']);
+    expect([...TUNER_PARTS]).toEqual(['difficulty', 'history', 'popularity', 'tempo', 'era']);
+    expect(DEFAULTS.open).toBe('difficulty');
+    expect(SHEET_GEARS[0]).toBe(DEFAULTS.open);
+    expect(SHEET_GEARS.at(-1)).toBe('history');
+  });
+});
+
+// The sheet's stylesheet, read as text: vitest does not apply CSS Modules, so what a browser draws is tests/e2e/setlist-sheet.spec.ts's.
+// These keep the decisions of the review of the 6A preview (QWW-57, 11 Nov) from being undone quietly.
+describe('sheet.module.css (QWW-57: R5, R6, R8, R10)', () => {
+  const css = readFileSync(join(__dirname, '../../src/components/setlist/sheet.module.css'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\s+/g, ' ');
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  /** The declarations of the rule with exactly this selector, at the top level or inside an at-rule. */
+  const rule = (selector: string) => new RegExp(`(?:^|[{}]) ?${escape(selector)} ?\\{([^{}]*)\\}`).exec(css)?.[1] ?? '';
+  /** What is inside each `@media (hover: hover)` block, joined, and the stylesheet without them. */
+  const hoverBlocks = [...css.matchAll(/@media \(hover: hover\) \{((?:[^{}]|\{[^{}]*\})*)\}/g)];
+  const inHover = hoverBlocks.map((m) => m[1]).join(' ');
+  const outsideHover = css.replace(/@media \(hover: hover\) \{(?:[^{}]|\{[^{}]*\})*\}/g, '');
+
+  it('has no pink in the top border or the shadow of the sheet, and keeps the dark shadow (R8)', () => {
+    const sheet = rule('.sheet');
+    expect(sheet).toContain('border-top: 1px solid rgba(255, 255, 255, 0.06);');
+    expect(sheet).toContain('box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.55);');
+    expect(sheet).not.toMatch(/255, ?79, ?160|ff4fa0/i);
+  });
+
+  it('draws a strip\'s and the Era panel\'s border in the rail\'s grey in every state, never in the gear\'s colour (R5)', () => {
+    expect(rule('.strip')).toContain('border: 1px solid var(--sl-rail);');
+    expect(rule('.eraPanel')).toContain('border: 1px solid var(--sl-rail);');
+    expect(css).not.toContain('--sl-gear-line');
+    // No state overrides it.
+    expect(css).not.toMatch(/\.(strip|eraPanel)\[data-off\] ?\{[^}]*border/);
+    // A tab's border is the rail's grey too, and only the selected one takes the gear's colour.
+    expect(rule('.tab')).toContain('border: 1px solid var(--sl-rail);');
+    expect(rule(".tab[aria-pressed='true']")).toContain('border-color: var(--sl-gear);');
+  });
+
+  it('gives an idle tab and an unpicked era button a hover border on pointer devices only, and no glow (R10)', () => {
+    expect(hoverBlocks).toHaveLength(2);
+    expect(inHover).toContain(".tab[aria-pressed='false']:hover { border-color: var(--sl-gear); }");
+    expect(inHover).toContain(".eraButton[aria-pressed='false']:hover { border-color: var(--sl-pink); }");
+    expect(inHover).not.toMatch(/shadow/);
+    // Nothing outside (hover: hover) sets a border on hover, so a tap on a phone leaves nothing behind.
+    expect(outsideHover).not.toMatch(/:hover ?\{[^}]*border/);
+  });
+
+  it('sets the four labels\' type by the strip body\'s width, from 6A\'s 11 px and 0.12em down to 9.5 px (R6)', () => {
+    expect(rule('.stripBody')).toContain('container-type: inline-size;');
+    // 6A's look is the base, and what a browser without container units keeps.
+    expect(rule('.eyebrow')).toContain('font-size: 11px;');
+    expect(rule('.eyebrow')).toContain('letter-spacing: 0.12em;');
+    const labels = rule('.stripBody .eyebrow');
+    expect(labels).toMatch(/font-size: clamp\(9\.5px, [^;]*100cqw[^;]*, 11px\);/);
+    expect(labels).toMatch(/letter-spacing: clamp\(0px, [^;]*100cqw[^;]*, 0\.12em\);/);
+    // The one case that cannot fit on a line wraps instead of being cut off.
+    expect(labels).toContain('white-space: normal;');
   });
 });
 
