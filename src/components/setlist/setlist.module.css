@@ -38,12 +38,10 @@
   --sl-hard: #ff5a8a; /* Difficulty, hard third */
   --sl-font: 'Inter', system-ui, sans-serif;
 
-  /* The screen's inside: 6A's padding 16 12 0 and 8 px between its parts. Wider than a phone it stays a phone-wide column,
-     centred in the TV. */
+  /* The screen's inside: 6A's padding 16 12 0 and 8 px between its parts. It fills the TV's screen, which is phone-shaped on
+     every screen (QWW-57, R2), so there is no column to cap. */
   width: 100%;
-  max-width: 480px;
   height: 100%;
-  margin: 0 auto;
   box-sizing: border-box;
   padding: 16px 12px 0;
   overflow: hidden;
@@ -76,6 +74,7 @@
 }
 
 .topbar {
+  position: relative;
   height: 28px;
   display: flex;
   align-items: center;
@@ -115,6 +114,7 @@
 /* The 1 px dotted underline of a range note (6A §3.4). */
 .noteMark {
   border-bottom: 1px dotted #6b6776;
+  transition: color 120ms ease, border-color 120ms ease;
 }
 
 /* Redo re-sings both ends. 28 px tall to look at, 44 px to tap (8 px more above and below). */
@@ -131,6 +131,7 @@
   font-weight: 400;
   color: var(--sl-text-2);
   cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
 }
 
 .redo::after {
@@ -139,34 +140,54 @@
   inset: -8px -2px;
 }
 
-/* The room between redo and the Spotify button. The sign is centred in it, which is not the row's own centre (at 375 px
-   that lands on redo). A container query hides the sign when the room is smaller than the sign (a long range such as
-   D#2 to D#5 on a 360 px phone): it goes before anything else shrinks. */
-.signSlot {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  justify-content: center;
-  container-type: inline-size;
+/* R9 (QWW-57): hover and keyboard focus turn the range notes (text and dotted underline) and redo (text and border) pink. Hover only
+   where there is a pointer to hover with, so nothing stays pink after a tap on a phone. */
+.rangeNote:focus-visible .noteMark {
+  color: var(--sl-pink-text);
+  border-bottom-color: var(--sl-pink-text);
 }
 
+.redo:focus-visible {
+  color: var(--sl-pink-text);
+  border-color: var(--sl-pink-text);
+}
+
+@media (hover: hover) {
+  .rangeNote:hover .noteMark {
+    color: var(--sl-pink-text);
+    border-bottom-color: var(--sl-pink-text);
+  }
+
+  .redo:hover {
+    color: var(--sl-pink-text);
+    border-color: var(--sl-pink-text);
+  }
+}
+
+/* The sign is centred on the header's own middle, not in the room between redo and the Spotify button (QWW-57, R1: the
+   room's middle sits right of the screen's). It is out of the row's flow, so it does not push anything, and a long range or a
+   narrow phone can run it into redo: useSignFit hides it (`data-hidden`, still laid out so it can be measured) when it would
+   come within 8 px of redo or the Spotify button. */
 .sign {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
   font-family: 'Noto Sans JP', sans-serif;
   font-size: 16px;
   line-height: 28px;
   font-weight: 700;
   letter-spacing: 0.08em;
   white-space: nowrap;
+  pointer-events: none;
   color: #ff5fa8;
   text-shadow: 0 0 6px rgba(255, 79, 160, 0.9), 0 0 16px rgba(255, 79, 160, 0.5);
   /* A slow buzz: the opacity dips to 0.55 for a moment every 3.2 s. */
   animation: buzz 3.2s linear infinite;
 }
 
-@container (max-width: 70px) {
-  .sign {
-    display: none;
-  }
+.sign[data-hidden] {
+  visibility: hidden;
 }
 
 @keyframes buzz {
@@ -185,6 +206,7 @@
 .spotify {
   flex-shrink: 0;
   display: flex;
+  margin-left: auto;
 }
 
 .title {

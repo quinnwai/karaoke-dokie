@@ -54,6 +54,33 @@ export function OctaveIcon({ octave, className, size = 18 }: IconProps & { octav
   );
 }
 
+/**
+ * The mark of a link that leaves the app: an arrow out of a box, as in the US web design system's link component
+ * (https://designsystem.digital.gov/components/link/). Drawn here, in the link's own colour, at 0.8 em, after the text
+ * (QWW-57, R4). Decorative: the link carries the name, so a screen reader says "Find on Spotify" as before.
+ */
+export function ExternalLinkIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="0.8em"
+      height="0.8em"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      className={className}
+    >
+      <path d="M10 5H7a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3h9a3 3 0 0 0 3-3v-3" />
+      <path d="M14.5 4H20v5.5" />
+      <path d="M20 4l-9 9" />
+    </svg>
+  );
+}
+
 /** The open book on the Sources and credits link. Decorative: the link carries the name. */
 export function BookIcon({ className, size = 18 }: IconProps) {
   return (

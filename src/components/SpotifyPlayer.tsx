@@ -1,5 +1,6 @@
 import type { Track } from '../lib/contracts';
 import { spotifyEmbedUrl } from '../lib/client/spotifyEmbed';
+import { ExternalLinkIcon } from './Icon';
 import styles from './screen.module.css';
 
 /**
@@ -23,6 +24,7 @@ export function SpotifyPlayer({ track, label = 'Open in Spotify', onOpen }: Spot
     return (
       <a className={styles.spotify} href={track.spotifyUrl} target="_blank" rel="noreferrer" onClick={onOpen}>
         {label}
+        <ExternalLinkIcon className={styles.externalIcon} />
       </a>
     );
   }

@@ -409,7 +409,7 @@ test('mic permission denied shows what to do, for this browser (more in mic-perm
   await context.close();
 });
 
-test('desktop layout', async ({ browser, baseURL }) => {
+test('desktop layout: the TV is phone-shaped, and the song page fits it', async ({ browser, baseURL }) => {
   const api = freshState();
   api.user = me({ low: 45, high: 72, source: 'test' });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, baseURL });
@@ -420,9 +420,15 @@ test('desktop layout', async ({ browser, baseURL }) => {
   await page.waitForTimeout(1000);
   await shot(page, '15-desktop-results');
   await page.getByRole('button', { name: /^Lemon/ }).click();
-  // On a wide screen the player stops at 460px instead of stretching across the TV.
+  // On a wide screen the TV is phone-shaped (R2, QWW-57: 390 px wide), so the player is the width it is on a phone: the 280
+  // px Spotify wants at least, and inside the frame.
   await expect(page.frameLocator('iframe[title^="Spotify player"]').getByText('track t1')).toBeVisible();
-  expect((await page.getByTitle('Spotify player: Lemon by Kenshi Yonezu').boundingBox())!.width).toBe(460);
+  const player = (await page.getByTitle('Spotify player: Lemon by Kenshi Yonezu').boundingBox())!;
+  const frame = (await page.getByRole('region', { name: 'Karaoke screen' }).boundingBox())!;
+  expect(frame.width).toBeCloseTo(390, 0);
+  expect(player.width).toBeGreaterThanOrEqual(280);
+  expect(player.x).toBeGreaterThanOrEqual(frame.x);
+  expect(player.x + player.width).toBeLessThanOrEqual(frame.x + frame.width);
   await shot(page, '16-desktop-detail');
   await context.close();
 });

@@ -39,3 +39,15 @@ export function expandedFit({ list, rack, overflow = 0 }: { list: number; rack: 
   const rows = Math.max(0, Math.floor(listHeight / ROW_HEIGHT));
   return { listHeight, rows, canExpand: listHeight >= 0, opensMini: rows < MIN_OPENING_ROWS };
 }
+
+/** How close the centred カラオケ sign may come to redo or the Spotify button before it goes (QWW-57, R1). */
+export const SIGN_GAP = 8;
+
+/**
+ * The sign is centred on the header's own middle (R1), not in the room between its neighbours, so a long range or a narrow phone
+ * can put it on top of redo. It then goes (before anything else shrinks): it is shown only when it keeps `gap` px clear of redo's
+ * right edge and of the Spotify button's left edge. All three are page coordinates of the same row.
+ */
+export function signFits(sign: { left: number; right: number }, redoRight: number, spotifyLeft: number, gap: number = SIGN_GAP): boolean {
+  return sign.left - redoRight >= gap && spotifyLeft - sign.right >= gap;
+}

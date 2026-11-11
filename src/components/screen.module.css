@@ -13,13 +13,15 @@
 }
 
 .tv {
-  width: min(100%, 880px);
+  /* Phone-shaped on every screen (QWW-57, R2; 6A's reference is a 390x844 device): 390 px wide, and as tall as 844 px or the
+     window. On a phone it is the whole page (below). */
+  width: min(100%, 390px);
   min-width: 0;
-  height: min(calc(100svh - 32px), 660px);
+  height: min(calc(100svh - 32px), 844px);
   display: flex;
   flex-direction: column;
-  padding: 12px 12px 0;
-  border-radius: 26px;
+  padding: 9px 9px 0;
+  border-radius: 30px;
   background: linear-gradient(160deg, #1c1a21, #0f0e13 60%);
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.05),
@@ -31,7 +33,7 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  border-radius: 16px;
+  border-radius: 22px;
   overflow: hidden;
   background: radial-gradient(ellipse at 50% 40%, #16121c 0%, #09080c 75%);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 0 60px rgba(0, 0, 0, 0.8);
@@ -77,10 +79,10 @@
   box-shadow: 0 0 8px var(--pink-glow);
 }
 
-/* On a phone the TV is the whole screen, and every step is on it (Round 6A §3.3, QWW-57): it takes 6A's numbers, page
-   padding 14 10 12, bezel padding 9 9 0, bezel radius 30, screen radius 22, chin 34 with the LED, and fills the viewport
-   with no height cap. That tightens the earlier steps by a few px, which is the point. The bottom padding clears the home
-   bar, and the sides the notch of a phone on its side. Wider than a phone it stays the TV above. */
+/* On a phone the TV is the whole screen, and every step is on it (Round 6A §3.3, QWW-57): page padding 14 10 12, and it fills
+   the viewport with no height cap. The bezel's numbers above (padding 9 9 0, radius 30 and 22, a 34 px chin with the LED) are
+   6A's on every screen. That tightens the earlier steps by a few px, which is the point. The bottom padding clears the home bar,
+   and the sides the notch of a phone on its side. */
 @media (max-width: 430px) {
   .stage {
     min-height: 0;
@@ -94,12 +96,6 @@
   .tv {
     width: 100%;
     height: 100%;
-    padding: 9px 9px 0;
-    border-radius: 30px;
-  }
-
-  .screen {
-    border-radius: 22px;
   }
 }
 
@@ -109,7 +105,7 @@
 .lyricSmall {
   margin: 0;
   max-width: 18ch;
-  font-size: clamp(28px, 7.4vw, 46px);
+  font-size: clamp(28px, calc(7.4 * var(--vw)), 46px);
   font-weight: 700;
   line-height: 1.15;
   letter-spacing: -0.02em;
@@ -119,7 +115,7 @@
 
 .lyricSmall {
   max-width: 22ch;
-  font-size: clamp(18px, 4.6vw, 24px);
+  font-size: clamp(18px, calc(4.6 * var(--vw)), 24px);
   font-weight: 600;
 }
 
@@ -178,7 +174,7 @@
 
 .sign {
   margin: 0;
-  font-size: clamp(40px, 12vw, 72px);
+  font-size: clamp(40px, calc(12 * var(--vw)), 72px);
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--pink);
@@ -585,7 +581,7 @@
   align-items: baseline;
   gap: 14px;
   margin: 0;
-  font-size: clamp(44px, 13vw, 76px);
+  font-size: clamp(44px, calc(13 * var(--vw)), 76px);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -629,7 +625,7 @@
 }
 
 .results > .lyric {
-  font-size: clamp(24px, 6.4vw, 36px);
+  font-size: clamp(24px, calc(6.4 * var(--vw)), 36px);
   margin-top: 6px;
 }
 
@@ -939,7 +935,7 @@
 
 .detailTitle {
   margin: 0;
-  font-size: clamp(28px, 7.6vw, 44px);
+  font-size: clamp(28px, calc(7.6 * var(--vw)), 44px);
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.1;
@@ -1118,6 +1114,9 @@
 }
 
 .spotify {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
   font-size: 15px;
   font-weight: 600;
   color: var(--ink);
@@ -1125,6 +1124,11 @@
   padding: 10px 20px;
   border-radius: 16px;
   border: 1px solid var(--faint);
+}
+
+/* The mark of a link out of the app (R4): after the text, in the link's own colour, about 0.8 em. */
+.externalIcon {
+  flex: none;
 }
 
 /*
@@ -1176,13 +1180,6 @@
   margin: 0;
   font-size: 15px;
   color: var(--pink);
-}
-
-@media (min-width: 700px) {
-  .tv {
-    padding: 16px 16px 0;
-    border-radius: 32px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1310,7 +1307,7 @@
   align-items: center;
   gap: 0 8px;
   width: max-content;
-  max-width: min(300px, 78vw);
+  max-width: min(300px, calc(78 * var(--vw)));
   padding: 4px 6px 4px 12px;
   border-radius: 10px;
   background: #1c1a21;

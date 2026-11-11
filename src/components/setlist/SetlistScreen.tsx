@@ -21,6 +21,7 @@ import screen from '../screen.module.css';
 import { Sheet } from './Sheet';
 import { SongRows } from './SongRows';
 import { useSheetFit } from './useSheetFit';
+import { useSignFit } from './useSignFit';
 import listStyles from './rows.module.css';
 import styles from './setlist.module.css';
 
@@ -82,6 +83,7 @@ export function SetlistScreen(props: SetlistScreenProps) {
   const low = midiToNoteName(range.low);
   const high = midiToNoteName(range.high);
   const root = useRef<HTMLDivElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
   // The rows read the Difficulty gear for their reason line ("In your sweet spot"), so they are made again when it moves.
@@ -115,6 +117,8 @@ export function SetlistScreen(props: SetlistScreenProps) {
     if (fit.opensMini && !tuner.mini) onTuner({ type: 'mini', mini: true });
   }, [fit]);
   const mini = tuner.mini || !canExpand;
+  // The sign is centred on the header (R1) and goes when a long range or a narrow phone would put it on redo or the logo.
+  useSignFit(bar, low, high, mode, props.libraryUnavailable);
 
   useTestHook(props, rows);
 
@@ -132,7 +136,7 @@ export function SetlistScreen(props: SetlistScreenProps) {
   return (
     <div ref={root} id="app" className={styles.app} data-mode={mini ? 'mini' : 'expanded'} data-open={tuner.open}>
       <header className={styles.head}>
-        <div className={styles.topbar}>
+        <div ref={bar} className={styles.topbar}>
           {/* The range and its redo sit together: redo is about the range. */}
           <span className={styles.rangeChip} role="group" aria-label={`Your range ${low} to ${high}`}>
             <button type="button" className={styles.rangeNote} onClick={() => props.onRedoEnd('low')} aria-label={`Redo your low note, ${low}`}>
@@ -143,17 +147,16 @@ export function SetlistScreen(props: SetlistScreenProps) {
               <span className={styles.noteMark}>{high}</span>
             </button>
           </span>
-          <button type="button" className={styles.redo} onClick={props.onRedo} aria-label="Redo the singing test">
+          <button type="button" className={styles.redo} onClick={props.onRedo} aria-label="Redo the singing test" data-sign-left="">
             redo
           </button>
-          {/* The sign sits in the middle of the room between redo and the Spotify button, and goes first when there is none. */}
-          <span className={styles.signSlot} aria-hidden="true">
-            <span className={styles.sign} lang="ja" aria-hidden="true">
-              カラオケ
-            </span>
+          {/* The sign is centred on the header's own middle (R1), which is where a sign on a screen reads as centred; it is
+              hidden when that would put it within 8 px of redo or the Spotify button (useSignFit). */}
+          <span className={styles.sign} data-sign="" lang="ja" aria-hidden="true">
+            カラオケ
           </span>
           {mode === 'catalogue' && !props.libraryUnavailable && (
-            <button type="button" className={`${screen.connect} ${styles.spotify}`} onClick={props.onConnect} aria-label="Connect to Spotify">
+            <button type="button" className={`${screen.connect} ${styles.spotify}`} onClick={props.onConnect} aria-label="Connect to Spotify" data-sign-right="">
               <SpotifyIcon />
               <span className={screen.connectTip} aria-hidden>
                 Connect to Spotify
@@ -161,7 +164,7 @@ export function SetlistScreen(props: SetlistScreenProps) {
             </button>
           )}
           {(mode === 'library' || props.libraryUnavailable) && (
-            <span className={styles.spotify}>
+            <span className={styles.spotify} data-sign-right="">
               <SpotifyAccount name={props.displayName} onLogout={props.onLogout} />
             </span>
           )}
