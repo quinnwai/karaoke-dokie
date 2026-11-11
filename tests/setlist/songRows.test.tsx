@@ -8,7 +8,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SetlistScreen } from '../../src/components/setlist/SetlistScreen';
-import { FILL_AT, FILL_STAGGER_MS, FILL_STAGGER_ROWS, staggerOf } from '../../src/components/setlist/useFillIn';
+import { FILL_AT, FILL_STAGGER_MS, FILL_STAGGER_ROWS, staggerOf, type FillMemory } from '../../src/components/setlist/useFillIn';
 import type { Match } from '../../src/lib/contracts';
 import type { SetlistSong } from '../../src/lib/setlist/types';
 import { all, el, RANGE, rankedSong, SEL, setlistProps } from '../helpers/setlist';
@@ -96,7 +96,7 @@ describe('a row', () => {
     expect(rows().map((r) => r.querySelector('[data-row-why]')?.textContent)).toEqual(['Crowd favourite', 'In your sweet spot · Deep cut', 'Gets the room moving']);
   });
 
-  it('says a shifted song fits an octave away in its reason line, in place of the sweet spot, and keeps its badge (R13)', () => {
+  it('says a shifted song fits an octave away in its reason line, and nothing else, in place of the sweet spot, and keeps its badge (R13)', () => {
     draw([
       rankedSong('d', { title: 'Down', octave: 'down', difficulty: 'hard' }, { difficulty: 3, popularity: 95 }),
       rankedSong('u', { title: 'Up', octave: 'up', difficulty: 'easy' }, { difficulty: 3 }),
@@ -104,14 +104,14 @@ describe('a row', () => {
     ]);
     // Difficulty is on at 0, so all three sit in the sweet spot; the two shifted ones do not say so, and the third does.
     expect(rows().map((r) => r.querySelector('[data-row-why]')?.textContent)).toEqual([
-      'Shifted down to fit range · Crowd favourite',
+      'Shifted down to fit range',
       'Shifted up to fit range',
       'In your sweet spot · Crowd favourite',
     ]);
     expect(rows().map((r) => r.querySelector('[data-badge]')?.textContent)).toEqual(['Hard', 'Easy', 'Easy']);
     // A screen reader hears it as the button's description, as it hears any reason line.
     const described = button(rows()[0]!).getAttribute('aria-describedby')!;
-    expect(document.getElementById(described)?.textContent).toBe('Shifted down to fit range · Crowd favourite');
+    expect(document.getElementById(described)?.textContent).toBe('Shifted down to fit range');
   });
 
   it('names the button "title by artist, era, difficulty" and describes it with the reason line, so both are read with the row', () => {
@@ -151,8 +151,8 @@ describe('a row', () => {
 });
 
 /** Draws the screen, and gives back a way to draw it again with other songs (a re-rank, a filter that takes a song away). */
-const drawable = (list: SetlistSong[]) => {
-  const props = setlistProps(RANGE, list, {});
+const drawable = (list: SetlistSong[], extra: Partial<Parameters<typeof setlistProps>[2]> = {}) => {
+  const props = setlistProps(RANGE, list, extra);
   const view = render(<SetlistScreen {...props} />);
   return { ...view, again: (next: SetlistSong[]) => view.rerender(<SetlistScreen {...props} songs={next} />) };
 };
@@ -347,6 +347,46 @@ describe('the title fill (R12)', () => {
     expect(rows().map((r) => r.dataset.id)).toEqual(['c', 'a', 'b']);
     expect(filled()).toEqual([true, false, false]);
     expect(Array.from(watching().watched)).toEqual([byId('a'), byId('b')]);
+  });
+
+  it('fills once per visit, not once per list: with the app\'s memory, a list that empties and fills, or a screen that goes and comes back, draws what filled as filled (R12)', () => {
+    const memory: FillMemory = new Map();
+    const first = drawable(songs, { fillMemory: memory });
+    watching().see([byId('c'), 1], [byId('a'), 1]);
+    expect(filled()).toEqual([true, true, false]);
+    // The list empties, as an untapped era leaves it (SongRows goes), and fills again: the rows that filled are drawn filled at once, and
+    // only the one that never did is watched.
+    first.again([]);
+    expect(rows()).toHaveLength(0);
+    first.again(songs);
+    expect(filled()).toEqual([true, true, false]);
+    expect(Array.from(watching().watched)).toEqual([byId('b')]);
+    expect(delayOf(byId('a'))).toBe('60ms');
+    // The whole screen goes (the song page opens) and comes back (Back): a new screen, the same memory.
+    first.unmount();
+    draw(songs, { fillMemory: memory });
+    expect(filled()).toEqual([true, true, false]);
+    expect(Array.from(watching().watched)).toEqual([byId('b')]);
+    expect(delayOf(byId('c'))).toBe('0ms');
+  });
+
+  it('fills them all again for a new visit: a new memory (the singer\'s range changed) starts none filled', () => {
+    const memory: FillMemory = new Map();
+    const first = drawable(songs, { fillMemory: memory });
+    watching().see([byId('c'), 1], [byId('a'), 1], [byId('b'), 1]);
+    expect(filled()).toEqual([true, true, true]);
+    first.unmount();
+    draw(songs, { fillMemory: new Map() });
+    expect(filled()).toEqual([false, false, false]);
+    expect(Array.from(watching().watched)).toEqual(rows());
+  });
+
+  it('without the app\'s memory a list that goes forgets what it filled, as one that is given none always did', () => {
+    const first = drawable(songs);
+    watching().see([byId('c'), 1]);
+    first.unmount();
+    draw(songs);
+    expect(filled()).toEqual([false, false, false]);
   });
 
   it('does not start a fill again, or change its wait, when the browser reports a filled row once more', () => {

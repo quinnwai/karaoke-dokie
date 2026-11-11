@@ -2,9 +2,10 @@
 // scrolls into view, and ends in its normal white. This hook decides WHICH rows have filled; the look is rows.module.css's.
 //
 // Three rules shape it:
-//  - A row fills once per visit to the list. A row that leaves and comes back (an era change takes it off the list and a
-//    later one puts it on again) is drawn filled, and so is every row after the list is re-ranked: the ids that have filled
-//    are kept in a ref for as long as SongRows is mounted.
+//  - A row fills once per visit. A row that leaves and comes back (an era change takes it off the list and a later one puts
+//    it on again; the list empties and fills; the song page opens and Back brings the list again) is drawn filled, and so is
+//    every row after the list is re-ranked. The ids that have filled are kept in a memory that outlives the list (KaraokeApp's,
+//    see `useFillMemory`): a visit lasts until the singer's range changes (redo) or the page is reloaded.
 //  - The fill is a CSS transition, not an animation, and it is switched on by an attribute (`data-filled`) that this hook's
 //    state puts on the row. React moves a row by moving its DOM node, which restarts or cancels a CSS animation, but a node
 //    that is moved and inserted again already holding the attribute is simply drawn in its last state, with no transition.
@@ -12,7 +13,7 @@
 //  - Where there is nothing to watch with (no IntersectionObserver, as in jsdom) or the singer asked for less motion, every
 //    row counts as filled from the start, so the titles simply show.
 
-import { useEffect, useReducer, useRef, useState, type RefObject } from 'react';
+import { useEffect, useReducer, useRef, useState, type MutableRefObject, type RefObject } from 'react';
 
 /**
  * How much of a row has to be inside the list's scroller before its title fills. The title is in the top 26 px of the 66 px
@@ -37,6 +38,20 @@ export const staggerOf = (k: number): number => Math.min(k, FILL_STAGGER_ROWS) *
 const canFill = (): boolean =>
   typeof IntersectionObserver === 'function' && !(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
+/** The ids whose fill has started this visit, with how long each waited, ms. */
+export type FillMemory = Map<string, number>;
+
+/**
+ * The memory of one visit (R12): the same Map for as long as `visit` stays the same, a new empty one when it changes. The owner
+ * of the screen keeps it, so it outlives the list: the list unmounts when an era untapped leaves it empty, and the whole
+ * tuner when a song page opens. `visit` is what a visit is made of, the singer's range, so a new range fills the titles again.
+ */
+export function useFillMemory(visit: string): FillMemory {
+  const kept = useRef<{ visit: string; memory: FillMemory }>({ visit, memory: new Map() });
+  if (kept.current.visit !== visit) kept.current = { visit, memory: new Map() };
+  return kept.current.memory;
+}
+
 export interface TitleFill {
   /** Whether this song's title is drawn filled: its fill has started this visit, or there is no fill to wait for. */
   filled(id: string): boolean;
@@ -47,14 +62,17 @@ export interface TitleFill {
 /**
  * Watches the rows of `list` (the `<ol>`; each `[data-row]` carries `data-id` and `data-rank`) in `scroller` (the box that
  * scrolls it), and hands back which titles have filled. `order` is the ids in rank order: when it changes, the rows that have
- * not filled yet are watched again (a new song may have come on screen).
+ * not filled yet are watched again (a new song may have come on screen). `memory` is the visit's (useFillMemory); a list given
+ * none keeps its own for as long as it is mounted.
  */
-export function useFillIn(list: RefObject<HTMLElement | null>, scroller: RefObject<HTMLElement | null>, order: string): TitleFill {
+export function useFillIn(list: RefObject<HTMLElement | null>, scroller: RefObject<HTMLElement | null>, order: string, memory?: FillMemory): TitleFill {
   // Decided once, when the list first draws, so a list never changes its mind about whether it fills.
   const [fills] = useState(canFill);
-  // The ids whose fill has started this visit, with how long each waited. A ref: the observer's callback must read the
+  // The ids whose fill has started this visit, with how long each waited. Read by the observer's callback, which must see the
   // latest, and a fill that has started is never undone; `redraw` is what puts a change on screen.
-  const started = useRef(new Map<string, number>());
+  const own = useRef(new Map<string, number>());
+  const started: MutableRefObject<FillMemory> = useRef(memory ?? own.current);
+  started.current = memory ?? own.current;
   const [, redraw] = useReducer((n: number) => n + 1, 0);
 
   useEffect(() => {

@@ -241,7 +241,7 @@ describe('whyOf: nothing else to say', () => {
   });
 });
 
-describe('whyOf: a song that fits an octave away says so (QWW-57 R13)', () => {
+describe('whyOf: a song that fits an octave away says so, and nothing else (QWW-57 R13)', () => {
   /** A returned song with exactly these places, sung as the artist sings it ('none') or an octave away. */
   const shifted = (octave: OctaveShift, places: Places = {}, label: Label = 'easy'): SetlistSong => ranked(song('s', { difficulty: label, octave }), { difficulty: null, ...places });
 
@@ -254,27 +254,19 @@ describe('whyOf: a song that fits an octave away says so (QWW-57 R13)', () => {
     expect(whyOf(shifted('up'), START)).toBe('Shifted up to fit range');
   });
 
-  it('is the only reason when nothing else holds: no tempo line follows it', () => {
-    expect(whyOf(shifted('down', { tempo: 99 }), START)).toBe('Shifted down to fit range');
-    expect(whyOf(shifted('up', { tempo: 1 }), START)).toBe('Shifted up to fit range');
-  });
-
-  it('goes first and keeps the other reasons: Crowd favourite, Deep cut, On repeat, Rediscover', () => {
-    expect(whyOf(shifted('down', { popularity: 95 }), START)).toBe('Shifted down to fit range · Crowd favourite');
-    expect(whyOf(shifted('up', { popularity: 10 }), START)).toBe('Shifted up to fit range · Deep cut');
-    expect(whyOf(shifted('down', { history: 95 }), START)).toBe('Shifted down to fit range · On repeat');
-    expect(whyOf(shifted('up', { history: 5 }), START)).toBe('Shifted up to fit range · Rediscover');
-  });
-
-  it('keeps the first two when more hold: the shift, then the first of the rest', () => {
-    expect(whyOf(shifted('down', { popularity: 95, history: 95 }), START)).toBe('Shifted down to fit range · Crowd favourite');
-    expect(whyOf(shifted('up', { popularity: 10, history: 5 }), START)).toBe('Shifted up to fit range · Deep cut');
+  it('is the whole line: no other reason is added, whatever else holds (a second reason was cut off on a phone)', () => {
+    expect(whyOf(shifted('down', { popularity: 95 }), START)).toBe('Shifted down to fit range');
+    expect(whyOf(shifted('up', { popularity: 10 }), START)).toBe('Shifted up to fit range');
+    expect(whyOf(shifted('down', { history: 95 }), START)).toBe('Shifted down to fit range');
+    expect(whyOf(shifted('up', { history: 5 }), START)).toBe('Shifted up to fit range');
+    expect(whyOf(shifted('down', { popularity: 95, history: 95, tempo: 99 }), START)).toBe('Shifted down to fit range');
+    expect(whyOf(shifted('up', { difficulty: 0, popularity: 10, history: 5, tempo: 1 }), sweetAt(0))).toBe('Shifted up to fit range');
   });
 
   it('never says "In your sweet spot", even where the song\'s place on Difficulty is exactly the slider', () => {
     for (const place of [0, 10, 15, 50]) {
       expect(whyOf(shifted('down', { difficulty: place }), sweetAt(place)), `place ${place}`).toBe('Shifted down to fit range');
-      expect(whyOf(shifted('up', { difficulty: place, popularity: 95 }), sweetAt(place)), `place ${place}, popular`).toBe('Shifted up to fit range · Crowd favourite');
+      expect(whyOf(shifted('up', { difficulty: place, popularity: 95 }), sweetAt(place)), `place ${place}, popular`).toBe('Shifted up to fit range');
     }
   });
 
@@ -293,7 +285,7 @@ describe('whyOf: a song that fits an octave away says so (QWW-57 R13)', () => {
 
   it('is what the row carries, and the badge and the button\'s name are the song\'s own, as for any song', () => {
     const row = toRow(ranked(song('s', { title: 'Torn', artist: 'Natalie Imbruglia', year: 1997, difficulty: 'hard', octave: 'down' }), { difficulty: null, popularity: 95 }), START);
-    expect(row.why).toBe('Shifted down to fit range · Crowd favourite');
+    expect(row.why).toBe('Shifted down to fit range');
     expect(row.badge).toBe('Hard');
     expect(row.label).toBe('Torn by Natalie Imbruglia, ’90s, Hard');
   });

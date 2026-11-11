@@ -2,7 +2,7 @@ import { useRef, type CSSProperties, type ReactNode, type RefObject } from 'reac
 import type { Match } from '../../lib/contracts';
 import type { SetlistRow } from '../../lib/setlist/rows';
 import { useFlip } from './flip';
-import { useFillIn } from './useFillIn';
+import { useFillIn, type FillMemory } from './useFillIn';
 import styles from './rows.module.css';
 
 interface SongRowsProps {
@@ -18,6 +18,8 @@ interface SongRowsProps {
    * it the slot shows an inert ▶.
    */
   renderPlay?(match: Match): ReactNode;
+  /** Which titles have filled this visit (R12). The screen's owner keeps it, so it outlives this list; without it the list keeps its own. */
+  fillMemory?: FillMemory;
 }
 
 /**
@@ -28,11 +30,11 @@ interface SongRowsProps {
  * already says each position; a row also keeps its place in `data-rank`. Rows stand in rank order, and slide into place when
  * it changes (useFlip). Each title fills in once as its row comes into view (R12, useFillIn). Tapping a row opens the song page.
  */
-export function SongRows({ rows, scroller, onOpen, renderPlay }: SongRowsProps) {
+export function SongRows({ rows, scroller, onOpen, renderPlay, fillMemory }: SongRowsProps) {
   const list = useRef<HTMLOListElement>(null);
   const order = rows.map((r) => r.id).join('\n');
   useFlip(list, scroller, order);
-  const fill = useFillIn(list, scroller, order);
+  const fill = useFillIn(list, scroller, order, fillMemory);
 
   return (
     <ol ref={list} id="list" className={styles.list} role="list" aria-label="Ranked songs">

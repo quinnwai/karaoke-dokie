@@ -6,8 +6,8 @@
 //        (the last describes below run it again with QWW-48's real button: a song with a Deezer preview, and one without)
 //   R12  each title fills in once, left to right, when its row scrolls into view, and ends in its normal white; not again on
 //        scrolling back or on a re-rank; with reduced motion the titles simply show; each title's text is in the page once
-//   R13  a song that fits only an octave away says "Shifted down/up to fit range" first in its reason line, in place of "In your
-//        sweet spot"; its other reasons and its badge stay (QWW-58's wording; the rule is `whyOf` in src/lib/setlist/rows.ts)
+//   R13  a song that fits only an octave away says "Shifted down/up to fit range" and nothing else in its reason line, in place of "In
+//        your sweet spot"; its badge stays (QWW-58's wording; the rule is `whyOf` in src/lib/setlist/rows.ts)
 // The tuner is reached the way tests/e2e/setlist.spec.ts reaches it (tests/helpers/tunerE2e.ts). The slot holds QWW-48's real play
 // button (src/components/PreviewButton.tsx, from #28); the fixture songs have no Deezer id, so it is the disabled one. Where a test
 // needs a button in a state the real player reaches only with audio (loading, playing, paused), or one that can play, it mounts a
@@ -19,7 +19,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { centre, css, DEFAULT_RANKING, eraButton, open, openButton, pressKey, resetButton, rgb, rows, TEXT_3, titles } from '../helpers/tunerE2e';
+import { launchWithMic, writeTone } from './fakeMic';
+import { centre, css, DEFAULT_RANKING, eraButton, mockApi, open, openButton, pressKey, resetButton, rgb, rows, TEXT_3, titles } from '../helpers/tunerE2e';
 import type { MockSong } from '../fixtures/setlist';
 
 const SCREENS = path.resolve('test-results/screens');
@@ -544,6 +545,94 @@ test.describe('R12, with motion allowed', () => {
     for (const [id, n] of before) expect(after.get(id), `after the era change: ${id}`).toBe(n);
   });
 
+  test('R12. a list that empties and fills again (an era picked, untapped and picked again) does not play any fill again: a visit lasts until the range changes', async ({ page }) => {
+    await watchFills(page);
+    await open(page);
+    await expect.poll(async () => (await fills(page)).length).toBeGreaterThanOrEqual(2);
+    // The 80s: four rows, which fill as they come into view (some had filled already).
+    await eraButton(page, 's80').click();
+    await expect(rows(page)).toHaveCount(4);
+    await expect(page.locator('[data-row]:has([data-filled])')).toHaveCount(4);
+    await page.waitForTimeout(1200); // whatever was going to play has played
+    const before = [...(await fillCounts(page)).entries()].sort();
+    expect(before.length).toBeGreaterThanOrEqual(4);
+
+    // Untapped, Era is on with nothing picked, so the list is empty and the rows go. Picked again, they come back.
+    await eraButton(page, 's80').click();
+    await expect(rows(page)).toHaveCount(0);
+    await eraButton(page, 's80').click();
+    await expect(rows(page)).toHaveCount(4);
+    // They are drawn filled, not played: every box has it at once, the titles are white, and no new fill runs.
+    await expect(page.locator('[data-row]:has([data-filled])')).toHaveCount(4);
+    for (const row of await rows(page).all()) expect(await css(titleOf(row), 'color')).toBe(TEXT);
+    await page.waitForTimeout(1500);
+    expect([...(await fillCounts(page)).entries()].sort()).toEqual(before);
+  });
+
+  test('R12. a song page and Back do not play any fill again', async ({ page }) => {
+    await watchFills(page);
+    await open(page);
+    await expect.poll(async () => (await fills(page)).length).toBeGreaterThanOrEqual(2);
+    await page.waitForTimeout(1200);
+    const before = [...(await fillCounts(page)).entries()].sort();
+    const filledBefore = await page.locator('[data-row]:has([data-filled])').evaluateAll((els) => els.map((el) => el.getAttribute('data-id')));
+    expect(filledBefore.length).toBeGreaterThanOrEqual(2);
+
+    await openButton(rows(page).first()).click();
+    await expect(page.getByRole('button', { name: 'Back to songs' })).toBeVisible();
+    await expect(page.locator('#app')).toHaveCount(0); // the whole tuner is gone, and its list with it
+    await page.getByRole('button', { name: 'Back to songs' }).click();
+    await expect(rows(page).first()).toBeVisible();
+    // What had filled is drawn filled at once, and nothing plays.
+    const filledAfter = await page.locator('[data-row]:has([data-filled])').evaluateAll((els) => els.map((el) => el.getAttribute('data-id')));
+    for (const id of filledBefore) expect(filledAfter, String(id)).toContain(id);
+    await page.waitForTimeout(1500);
+    expect([...(await fillCounts(page)).entries()].sort()).toEqual(before);
+  });
+
+  test('R12. a new range fills the titles again: a visit lasts until the range changes (re-singing the high note)', async ({ baseURL }) => {
+    test.setTimeout(90_000);
+    // A fake microphone that sings E4 (330 Hz), so the high note comes out lower than the C5 it was.
+    const browser = await launchWithMic(writeTone('r12-330.wav', 330));
+    try {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 }, baseURL, reducedMotion: 'no-preference' });
+      await mockApi(context, { loggedIn: false, events: [] });
+      await context.addInitScript(() => localStorage.setItem('kd.range', JSON.stringify({ low: 45, high: 72 })));
+      const page = await context.newPage();
+      await watchFills(page);
+      await page.goto('/');
+      await expect(rows(page).first()).toBeVisible({ timeout: 20_000 });
+      await expect.poll(async () => (await fills(page)).length).toBeGreaterThanOrEqual(2);
+      await page.waitForTimeout(1200);
+      const first = await fillCounts(page);
+      const filledIds = [...first.keys()];
+
+      // Re-sing the high note: the mic steps, then the tuner again with a new range.
+      await page.getByRole('button', { name: 'Redo your high note, C5' }).click();
+      const turnOn = page.getByRole('button', { name: 'Turn on microphone', exact: true });
+      const record = page.getByRole('button', { name: 'Hold to record your highest note' });
+      // Our own mic screen first, where the browser has not said yes to this page yet; the note step otherwise.
+      await expect(turnOn.or(record)).toBeVisible();
+      if (await turnOn.isVisible()) await turnOn.click();
+      await expect(record).toBeVisible();
+      const at = (await record.boundingBox())!;
+      await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(1600);
+      await page.mouse.up();
+      // "That's your range": A2 to E4. The arrow carries on to the list. It bounces for ever with motion allowed, so it is never "stable".
+      await page.getByRole('button', { name: 'Continue' }).click({ force: true });
+      await expect(rows(page).first()).toBeVisible({ timeout: 20_000 });
+      await expect(page.locator('#app header [role="group"]')).toContainText('E4');
+
+      // The new visit fills its titles again: the rows that were on screen before play a second time.
+      await expect.poll(async () => (await fillCounts(page)).get(filledIds[0]!) ?? 0, { timeout: 10_000 }).toBe((first.get(filledIds[0]!) ?? 0) + 1);
+      await context.close();
+    } finally {
+      await browser.close();
+    }
+  });
+
   test('R12. the rows on screen when the list loads fill in once, one after another: 60 ms apart down the list', async ({ page }) => {
     await watchFills(page);
     await open(page, { mini: true }); // seven rows in view
@@ -615,24 +704,26 @@ const OCTAVE_SONGS: MockSong[] = [
 const rowOf = (page: Page, title: string) => rows(page).filter({ hasText: title });
 const whyLine = (page: Page, title: string) => rowOf(page, title).locator('[data-row-why]');
 
-test('R13. a shifted row\'s reason line starts with the shift and never says "In your sweet spot"; a song sung as written still does; the badge stays', async ({ page }) => {
+test('R13. a shifted row\'s reason line is the shift reason and nothing else, never "In your sweet spot"; a song sung as written still says it; the badge stays', async ({ page }) => {
   await open(page, { extra: OCTAVE_SONGS });
-  await expect(whyLine(page, 'Low Road')).toHaveText('Shifted down to fit range · Crowd favourite');
-  await expect(whyLine(page, 'High Road')).toHaveText('Shifted up to fit range · Crowd favourite');
+  await expect(whyLine(page, 'Low Road')).toHaveText('Shifted down to fit range');
+  await expect(whyLine(page, 'High Road')).toHaveText('Shifted up to fit range');
   await expect(whyLine(page, 'Plain Road')).toHaveText('In your sweet spot · Crowd favourite');
   for (const title of ['Low Road', 'High Road']) {
     const line = (await whyLine(page, title).textContent()) ?? '';
     expect(line.startsWith('Shifted '), `${title} starts with the shift`).toBe(true);
+    expect(line, `${title} is the shift alone`).not.toContain(' · ');
     expect(line, `${title} does not claim a sweet spot`).not.toContain('In your sweet spot');
   }
   // Only the two shifted songs say it: the 25 songs sung as written do not.
   await expect(page.locator('[data-row-why]', { hasText: 'Shifted' })).toHaveCount(2);
   // The badge is the song's own label as for any song, and the reason line is the row button's description, as for any row.
   await expect(rowOf(page, 'Low Road').locator('[data-badge]')).toHaveText('Easy');
-  await expect(page.getByRole('button', { name: /^Low Road by Down Under/ })).toHaveAccessibleDescription('Shifted down to fit range · Crowd favourite');
+  await expect(page.getByRole('button', { name: /^Low Road by Down Under/ })).toHaveAccessibleDescription('Shifted down to fit range');
   // Nothing about the row's size changes: it is the 66 px row of any song.
   expect((await rowOf(page, 'Low Road').boundingBox())!.height).toBe(66);
-  // The row at 390 px, for the review: the three songs side by side.
+  // The row at 390 px, for the review. (The octave jumps follow every song sung as written, QWW-58, so scroll to them.)
+  await rowOf(page, 'High Road').scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(SCREENS, 'setlist-r13-shifted-rows.png') });
 });
 
@@ -641,8 +732,8 @@ test('R13. the shift stays on its song when the tuner moves, and the song sung a
   await expect(whyLine(page, 'Plain Road')).toContainText('In your sweet spot');
   await page.evaluate(() => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ difficulty: 100 }));
   await expect(whyLine(page, 'Plain Road')).not.toContainText('In your sweet spot');
-  await expect(whyLine(page, 'Low Road')).toContainText('Shifted down to fit range');
-  await expect(whyLine(page, 'High Road')).toContainText('Shifted up to fit range');
+  await expect(whyLine(page, 'Low Road')).toHaveText('Shifted down to fit range');
+  await expect(whyLine(page, 'High Road')).toHaveText('Shifted up to fit range');
   await expect(page.locator('[data-row-why]', { hasText: 'Shifted' })).toHaveCount(2);
 });
 
@@ -653,23 +744,19 @@ const WIDE_BADGES: MockSong[] = [
 ];
 
 for (const width of [360, 375, 390]) {
-  test(`R13. at ${width} px the shift itself is never cut off, beside an Easy, a Medium or a Hard badge (a second reason may be, with an ellipsis)`, async ({ page }) => {
+  test(`R13. at ${width} px a shifted row's reason line is the shift reason whole, uncut, beside an Easy, a Medium or a Hard badge`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await open(page, { extra: [...OCTAVE_SONGS, ...WIDE_BADGES] });
     const lines = await page.evaluate(() =>
-      [...document.querySelectorAll('[data-row-why]')]
-        .filter((w) => (w.textContent ?? '').startsWith('Shifted '))
-        .map((w) => {
-          const phrase = (w.textContent ?? '').split(' · ')[0]!;
-          const text = w.firstChild as Text;
-          const range = document.createRange();
-          range.setStart(text, 0);
-          range.setEnd(text, phrase.length);
-          return { line: w.textContent, phrase, phraseRight: range.getBoundingClientRect().right, boxRight: w.getBoundingClientRect().right };
-        }),
+      [...document.querySelectorAll('[data-row]')]
+        .map((row) => ({ row, why: row.querySelector('[data-row-why]') as HTMLElement, badge: row.querySelector('[data-badge]')?.textContent ?? null }))
+        .filter(({ why }) => (why.textContent ?? '').startsWith('Shifted '))
+        .map(({ why, badge }) => ({ text: why.textContent, badge, scroll: why.scrollWidth, client: why.clientWidth, ellipsis: getComputedStyle(why).textOverflow })),
     );
-    expect(lines.map((l) => l.phrase).sort()).toEqual(['Shifted down to fit range', 'Shifted down to fit range', 'Shifted up to fit range', 'Shifted up to fit range']);
-    for (const l of lines) expect(l.phraseRight, `${l.line}: the shift ends inside the line's box`).toBeLessThanOrEqual(l.boxRight + 0.5);
+    expect(lines.map((l) => l.text).sort()).toEqual(['Shifted down to fit range', 'Shifted down to fit range', 'Shifted up to fit range', 'Shifted up to fit range']);
+    expect(lines.map((l) => l.badge).sort()).toEqual(['Easy', 'Easy', 'Hard', 'Medium']);
+    // Whole: nothing of the line is clipped, so the ellipsis has nothing to hide.
+    for (const l of lines) expect(l.scroll, `${l.text} beside ${l.badge}: the line is not wider than its box`).toBeLessThanOrEqual(l.client);
   });
 }
 

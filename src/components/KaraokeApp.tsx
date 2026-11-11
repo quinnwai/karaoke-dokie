@@ -30,6 +30,7 @@ import { MicStep } from './MicStep';
 import { PickSongs } from './PickSongs';
 import { PreviewButton } from './PreviewButton';
 import { SetlistScreen } from './setlist/SetlistScreen';
+import { useFillMemory } from './setlist/useFillIn';
 import { SongDetail } from './SongDetail';
 import { Tv } from './Tv';
 import styles from './screen.module.css';
@@ -110,6 +111,9 @@ export function KaraokeApp({
   // The tuner's sheet has been sized once (QWW-57, decision 1): the first time the singer reaches it, a short phone opens it
   // in mini; after that it stays as they left it, through a song and back.
   const sheetSized = useRef(false);
+  // The titles that have filled in this visit (R12): a visit lasts until the singer's range changes (redo) or the page is reloaded,
+  // so the fill does not play again when the list empties and fills, or after a song and Back.
+  const fillMemory = useFillMemory(state.range ? `${state.range.low}-${state.range.high}` : '');
   // Spotify refused the sign-in the singer just tried: the server sends them back with ?authError=<reason> and nothing else.
   const [signInFailed, setSignInFailed] = useState(false);
   const recorder = useRef<MicRecorder | null>(null);
@@ -443,6 +447,7 @@ export function KaraokeApp({
           onConnect={connectSpotify}
           onLogout={logOut}
           renderPlay={renderPlay}
+          fillMemory={fillMemory}
         />
       </Tv>
     );

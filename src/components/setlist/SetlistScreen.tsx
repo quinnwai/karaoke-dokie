@@ -21,6 +21,7 @@ import screen from '../screen.module.css';
 import { Sheet } from './Sheet';
 import { DeezerCredit } from '../PreviewButton';
 import { SongRows } from './SongRows';
+import type { FillMemory } from './useFillIn';
 import { useSheetFit } from './useSheetFit';
 import { useSignFit } from './useSignFit';
 import listStyles from './rows.module.css';
@@ -77,6 +78,8 @@ export interface SetlistScreenProps {
   onLogout(): Promise<void>;
   /** The ▶ of a row (QWW-48). */
   renderPlay?(match: Match): ReactNode;
+  /** Which titles have filled this visit (R12); kept by the app, so a list that empties, or a song page and Back, does not fill them again. */
+  fillMemory?: FillMemory;
 }
 
 export function SetlistScreen(props: SetlistScreenProps) {
@@ -204,7 +207,7 @@ export function SetlistScreen(props: SetlistScreenProps) {
         )}
         {waiting && visible.length === 0 && <p className={listStyles.empty}>Loading…</p>}
 
-        {visible.length > 0 && <SongRows rows={visible} scroller={scroller} onOpen={props.onSelect} renderPlay={props.renderPlay} />}
+        {visible.length > 0 && <SongRows rows={visible} scroller={scroller} onOpen={props.onSelect} renderPlay={props.renderPlay} fillMemory={props.fillMemory} />}
         {/* A big library comes in pages: the rows that have arrived are shown, and what is still coming is said under them. */}
         {waiting && visible.length > 0 && <p className={listStyles.note}>Loading…</p>}
 
