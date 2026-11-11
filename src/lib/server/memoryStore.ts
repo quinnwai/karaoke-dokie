@@ -96,6 +96,10 @@ export function createMemoryStore(): Store {
       for (const [k, rec] of songs) if (k.startsWith(`${artistKey}|`) && rec.range) out.set(k, clone(rec));
       return out;
     },
+    async listSongRangesPage(afterKey, limit) {
+      const keys = [...songs.keys()].filter((k) => k > afterKey && songs.get(k)!.range).sort();
+      return new Map(keys.slice(0, limit).map((k) => [k, clone(songs.get(k)!)]));
+    },
     async putUsdbSongs(entries) {
       for (const e of entries) usdbSongs.set(e.id, clone(e));
     },

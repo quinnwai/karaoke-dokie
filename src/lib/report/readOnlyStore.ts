@@ -15,6 +15,7 @@ const ACCESS: Record<keyof Store, 'read' | 'write'> = {
   putSongRange: 'write',
   listMeasuredRangesByArtist: 'read',
   listSongRangesByArtist: 'read',
+  listSongRangesPage: 'read',
   putUsdbSongs: 'write',
   findUsdbSongs: 'read',
   listUsdbSongs: 'read',

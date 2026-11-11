@@ -631,6 +631,9 @@ test('the sheet does not cover the last row: scrolled to the end, it and the end
 test('a song row opens the song page; the play button does not; back keeps what was tuned', async ({ page }) => {
   await open(page);
   await pressKey(page, 'tempo', 'ArrowRight', 5);
+  // The list is re-ranked a moment after the last key press (the screen waits 120 ms for it). Read at once, `before` would be
+  // the default order, and Back would be compared with a list that was already out of date.
+  await expect.poll(async () => (await titles(page)).slice(0, 3)).not.toEqual(DEFAULT_RANKING.slice(0, 3));
   const before = await titles(page);
   // The play slot is beside the row's own button, and a tap on it opens nothing.
   const play = await centre(page.locator('[data-play-slot]').first());
