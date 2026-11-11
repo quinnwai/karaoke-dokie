@@ -110,18 +110,18 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
     case 'gearDone': {
       // One record per adjustment, when the thumb is let go; dragging itself records nothing.
       const gear = action.gear;
-      out.push({ name: 'gear_change', props: { gear, value: next.tuner[gear], on: isOn(next.tuner, gear), mode: next.mode } });
+      out.push({ name: EVENT.gearChange, props: { gear, value: next.tuner[gear], on: isOn(next.tuner, gear), mode: next.mode } });
       break;
     }
     case 'tuner': {
       const a = action.action;
       // Reset is a gear going off, at its default value.
       if (a.type === 'reset' && a.gear !== 'era') {
-        out.push({ name: 'gear_change', props: { gear: a.gear, value: next.tuner[a.gear], on: false, mode: next.mode } });
+        out.push({ name: EVENT.gearChange, props: { gear: a.gear, value: next.tuner[a.gear], on: false, mode: next.mode } });
       } else if (a.type === 'reset') {
-        out.push({ name: 'era_change', props: { era: null, picked: false, on: false, eras: next.tuner.eras.join(','), mode: next.mode } });
+        out.push({ name: EVENT.eraChange, props: { era: null, picked: false, on: false, eras: next.tuner.eras.join(','), mode: next.mode } });
       } else if (a.type === 'era') {
-        out.push({ name: 'era_change', props: { era: a.era, picked: next.tuner.eras.includes(a.era), on: isOn(next.tuner, 'era'), eras: next.tuner.eras.join(','), mode: next.mode } });
+        out.push({ name: EVENT.eraChange, props: { era: a.era, picked: next.tuner.eras.includes(a.era), on: isOn(next.tuner, 'era'), eras: next.tuner.eras.join(','), mode: next.mode } });
       }
       break;
     }

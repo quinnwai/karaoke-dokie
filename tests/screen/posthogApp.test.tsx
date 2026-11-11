@@ -8,9 +8,11 @@ import { KaraokeApp } from '../../src/components/KaraokeApp';
 import type { Api } from '../../src/lib/client/api';
 import type { Mic } from '../../src/lib/client/mic';
 import type { EventsRequest, Match, MeResponse, PostHogSettings, VocalRange } from '../../src/lib/contracts';
+import { EVENT, POSTHOG_PROPS } from '../../src/lib/eventNames';
+import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import type { SetlistEngine } from '../../src/lib/setlist/engine';
 import { allMatches, knownSongs, me, recommendationsPage } from '../fixtures/screen';
-import { ranked, response } from '../helpers/setlist';
+import { el, ranked, response, SEL } from '../helpers/setlist';
 
 const posthog = vi.hoisted(() => ({
   init: vi.fn(),
@@ -232,6 +234,54 @@ describe('a preview starting to play (row_play, QWW-48)', () => {
     fireEvent.click(buttons[0]!);
     await act(async () => {});
     expect(rowPlays()).toHaveLength(0);
+  });
+});
+
+describe('the tuner’s own events (QWW-46) under #29’s names', () => {
+  const tunerCaptures = () => posthog.capture.mock.calls.filter(([name]) => name === EVENT.gearChange || name === EVENT.eraChange);
+
+  it('reach PostHog as gear_change and era_change, with the tuner’s props, the environment tag, and no prop off the allowlist', async () => {
+    render(<KaraokeApp api={fakeApi(me({ low: 45, high: 72, source: 'test' }))} mic={mic} postHog={SETTINGS} setlistEngine={engineOf(allMatches().matches)} />);
+    await screen.findByText('Plastic Love');
+
+    // Letting go of a slider after a drag is one gear_change; picking an era is one era_change; a reset is a gear_change with the gear off.
+    const slider = el(SEL.slider('difficulty'));
+    fireEvent.input(slider, { target: { value: '35' } });
+    fireEvent.input(slider, { target: { value: '40' } });
+    fireEvent.pointerUp(slider);
+    fireEvent.change(slider);
+    fireEvent.click(el(SEL.era('s80')));
+    fireEvent.click(el(SEL.reset('difficulty')));
+    await waitFor(() => expect(tunerCaptures()).toHaveLength(3));
+
+    const calls = tunerCaptures();
+    // The names are #29's (eventNames.ts), literally and through the constants the funnel now takes them from.
+    expect(calls.map(([name]) => name)).toEqual(['gear_change', 'era_change', 'gear_change']);
+    expect(calls.map(([name]) => name)).toEqual([EVENT.gearChange, EVENT.eraChange, EVENT.gearChange]);
+    expect(calls.map(([, props]) => props)).toEqual([
+      { gear: 'difficulty', value: 40, on: true, mode: 'library' },
+      { era: 's80', picked: true, on: true, eras: 's80', mode: 'library' },
+      { gear: 'difficulty', value: DEFAULTS.difficulty, on: false, mode: 'library' },
+    ]);
+
+    // Nothing that PostHog may not have, and nothing that names a song or the singer.
+    for (const [, props] of calls) for (const key of Object.keys(props as object)) expect(POSTHOG_PROPS.has(key), key).toBe(true);
+    expect(JSON.stringify(calls)).not.toMatch(/Quinn|Plastic Love|Yoru/);
+
+    // The environment goes on every event as it leaves for PostHog (posthog-js runs before_send), these two included.
+    const beforeSend = posthog.init.mock.calls[0]![1].before_send as (e: { event: string; properties: Record<string, unknown> }) => { properties: Record<string, unknown> } | null;
+    for (const [name, props] of calls) expect(beforeSend({ event: name as string, properties: props as Record<string, unknown> })!.properties.environment).toBe('production');
+  });
+
+  it('reach PostHog for a singer who is signed out too, on the catalogue', async () => {
+    sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
+    render(<KaraokeApp api={fakeApi(null)} mic={mic} postHog={SETTINGS} setlistEngine={engineOf(allMatches().matches)} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }));
+    await screen.findByText('Plastic Love');
+
+    fireEvent.click(el(SEL.era('s90')));
+    await waitFor(() => expect(tunerCaptures()).toHaveLength(1));
+    expect(tunerCaptures()[0]).toEqual(['era_change', { era: 's90', picked: true, on: true, eras: 's90', mode: 'catalogue' }, expect.anything()]);
   });
 });
 
