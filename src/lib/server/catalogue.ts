@@ -8,6 +8,7 @@
 // popularity (KaraFun views, Billboard Year-End rank), whatever measured its range.
 
 import type { DataSourceLogEntry, Match, RecommendationsResponse, SetlistInput, SongRange, Track, VocalRange } from '../contracts';
+import { applyCanonical, type SongCanonical } from '../songs/canonical';
 import { partRange } from '../songs/match';
 import { hasLittleSinging } from '../songs/resolve';
 import { withKaraokePopularity } from '../songs/score';
@@ -38,24 +39,64 @@ export interface CatalogueTrack extends CatalogueEntry {
   track: Track;
 }
 
+/** A load that could not read the mapping it was asked to apply: the songs are right but not tidy, so the cache keeps it only briefly. */
+export type LoadedCatalogue = CatalogueEntry[] & { degraded?: true };
+/** How long a degraded load is served before the next request reads again. */
+export const DEGRADED_TTL_MS = 60_000;
+
+export interface LoadOptions {
+  /**
+   * Apply the stored one-song-one-row mapping (QWW-49: songs/canonical.ts applyCanonical): one row per song,
+   * with its clean title and artist line. The app and the live-data smoke test ask for it. Off, the catalogue is
+   * as stored, which is what reports that look songs up by key want (report:library, tempo:report).
+   */
+  canonical?: boolean;
+}
+
+/**
+ * The stored mapping for these keys, read twice at most. Empty when the build has not run, and also when it
+ * cannot be read: the list then shows the titles as stored, as it did before the build existed, instead of
+ * failing, and `failed` says so, so the cache does not keep that for long.
+ */
+async function readCanonical(
+  store: Partial<Pick<Store, 'getSongCanonical'>>,
+  keys: string[],
+): Promise<{ mapping: Map<string, SongCanonical>; failed: boolean }> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return { mapping: (await store.getSongCanonical?.(keys)) ?? new Map(), failed: false };
+    } catch (err) {
+      if (attempt < 2) continue;
+      console.warn(`[catalogue] could not read song_canonical; showing the titles as stored for a minute: ${err instanceof Error ? err.message : err}`);
+      return { mapping: new Map(), failed: true };
+    }
+  }
+}
+
 /**
  * Reads the catalogue, most popular first, and its songs' karaoke popularity, measured tempo and feel
  * labels in batched reads. The cache keeps all of it, so requests read none of it, and the one tempo of
  * each song is worked out here, once per cache fill (effectiveTempo), never per request. A store with no
- * feel labels, or one that cannot give them, leaves every song on its measured tempo.
+ * feel labels, or one that cannot give them, leaves every song on its measured tempo. With `canonical`, one
+ * row per song with its clean title and artist line, from the stored one-song-one-row mapping when there is one.
  */
 export async function loadCatalogue(
-  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'> & Partial<Pick<Store, 'getSongFeels'>>,
+  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'> & Partial<Pick<Store, 'getSongCanonical' | 'getSongFeels'>>,
   size: number = CATALOGUE_SIZE,
-): Promise<CatalogueEntry[]> {
-  const songs = await store.listCatalogue(size);
+  opts: LoadOptions = {},
+): Promise<LoadedCatalogue> {
+  const listed = await store.listCatalogue(size);
+  const read = opts.canonical ? await readCanonical(store, listed.map((s) => s.key)) : { mapping: new Map<string, SongCanonical>(), failed: false };
+  const songs = applyCanonical(listed, read.mapping);
   const keys = songs.map((s) => s.key);
   const [popularity, tempos, feels] = await Promise.all([store.getSongPopularity(keys), store.getSongTempos(keys), readSongFeels(store, keys)]);
-  return songs.map((s) => {
+  const entries: LoadedCatalogue = songs.map((s) => {
     const p = popularity.get(s.key);
     const t = effectiveTempo({ key: s.key, record: tempos.get(s.key), feel: feels.get(s.key)?.feel });
     return { ...s, ...(p ? { popularity: p } : {}), ...(t ? { tempo: t.tempo, tempoSource: t.source } : {}) };
   });
+  if (read.failed) entries.degraded = true;
+  return entries;
 }
 
 /** The song key in a catalogue track id ("cat:<songKey>"), or null for any other id. */
@@ -211,9 +252,9 @@ export interface Catalogue {
   setlist(range: Pick<VocalRange, 'low' | 'high'>): Promise<CatalogueSetlist>;
 }
 
-/** The catalogue cached per process. `load` reads it from the store (loadCatalogue). */
+/** The catalogue cached per process. `load` reads it from the store (loadCatalogue); a degraded load is kept for DEGRADED_TTL_MS only. */
 export function createCatalogue(
-  load: () => Promise<CatalogueEntry[]>,
+  load: () => Promise<LoadedCatalogue>,
   deps: CatalogueDeps,
   opts: { ttlMs?: number; now?: () => number } = {},
 ): Catalogue {
@@ -223,7 +264,13 @@ export function createCatalogue(
   let cached: { tracks: Promise<CatalogueTrack[]>; expires: number } | null = null;
   const get = (): Promise<CatalogueTrack[]> => {
     if (cached && cached.expires > now()) return cached.tracks;
-    const entry = { tracks: load().then(catalogueTracks), expires: now() + ttlMs };
+    const entry = {
+      tracks: load().then((entries) => {
+        if (entries.degraded) entry.expires = Math.min(entry.expires, now() + DEGRADED_TTL_MS);
+        return catalogueTracks(entries);
+      }),
+      expires: now() + ttlMs,
+    };
     entry.tracks.catch(() => {
       if (cached === entry) cached = null;
     });
