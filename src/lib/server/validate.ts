@@ -1,15 +1,22 @@
 import {
+  ERA_IDS,
+  GEAR_IDS,
   MOODS,
   SLIDER_IDS,
   type AppEvent,
   type Decade,
+  type EraId,
   type EventsRequest,
   type EventValue,
   type FeedbackRequest,
+  type GearValues,
   type ResultsView,
+  type SetlistRequest,
+  type TunerPart,
   type VocalRange,
 } from '../contracts';
 import { ANON_ID, EVENT_NAME, isEventValue, MAX_EVENTS_PER_REQUEST, MAX_PROP_STRING, MAX_PROPS, PROP_KEY } from '../eventRules';
+import { SETLIST_PAGE } from '../songs/setlistConfig';
 
 export const MIDI_MIN = 28;
 export const MIDI_MAX = 96;
@@ -36,6 +43,48 @@ export function validateVocalRange(body: unknown): Validated<VocalRange> {
   }
   if (!oneOf(source, ['test', 'songs'] as const)) return { ok: false, error: "source must be 'test' or 'songs'" };
   return { ok: true, value: { low: lo, high: hi, source } };
+}
+
+const TUNER_PARTS: readonly TunerPart[] = [...GEAR_IDS, 'era'];
+
+/**
+ * The Setlist tuner's state and range (QWW-47). The gears are whole numbers 0 to 100 as the sheet's sliders make
+ * them; `off` and `eras` hold only known ids, and a repeated id counts once. `offset` and `limit` are optional.
+ */
+export function validateSetlistRequest(body: unknown): Validated<SetlistRequest> {
+  if (!isObj(body)) return { ok: false, error: 'Body must be a JSON object' };
+  const range = validateVocalRange({ ...(isObj(body.range) ? body.range : {}), source: 'test' });
+  if (!range.ok) return { ok: false, error: `range: ${range.error}` };
+  if (!isObj(body.gears)) return { ok: false, error: 'gears must be an object' };
+  const gears = {} as GearValues;
+  for (const id of GEAR_IDS) {
+    const v = body.gears[id];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 100) return { ok: false, error: `gears.${id} must be a whole number from 0 to 100` };
+    gears[id] = v;
+  }
+  const ids = <T extends string>(raw: unknown, allowed: readonly T[], name: string): Validated<T[]> => {
+    if (!Array.isArray(raw) || raw.length > 20 || !raw.every((x) => oneOf(x, allowed))) {
+      return { ok: false, error: `${name} must be a list of ${allowed.join(', ')}` };
+    }
+    return { ok: true, value: [...new Set(raw as T[])] };
+  };
+  const off = ids(body.off, TUNER_PARTS, 'off');
+  if (!off.ok) return off;
+  const eras = ids(body.eras, ERA_IDS as readonly EraId[], 'eras');
+  if (!eras.ok) return eras;
+  const value: SetlistRequest = { range: { low: range.value.low, high: range.value.high }, gears, off: off.value, eras: eras.value };
+  const { offset, limit } = body;
+  if (offset !== undefined) {
+    if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0 || offset > 100_000) return { ok: false, error: 'offset must be a whole number from 0 to 100000' };
+    value.offset = offset;
+  }
+  if (limit !== undefined) {
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > SETLIST_PAGE.max) {
+      return { ok: false, error: `limit must be a whole number from 1 to ${SETLIST_PAGE.max}` };
+    }
+    value.limit = limit;
+  }
+  return { ok: true, value };
 }
 
 export function validateFeedback(body: unknown): Validated<FeedbackRequest> {

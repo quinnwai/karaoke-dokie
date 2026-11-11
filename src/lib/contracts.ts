@@ -36,9 +36,11 @@ export interface SongRange {
   method?: string;
   /**
    * Set when a note file's octave was corrected after import (octave.ts): from this song's own
-   * recording, or from the artist's other recordings.
+   * recording, from the artist's other recordings, or, with neither, because a typical note this
+   * high is usually an octave too high ('pitch'). 'hand' is the artist's register as a person set
+   * it, not measured (data/octave-hand-checked.json).
    */
-  octaveFrom?: 'recording' | 'artist';
+  octaveFrom?: 'recording' | 'artist' | 'pitch' | 'hand';
   /** MusicBrainz recording id of a measured recording. */
   mbid?: string;
   /**
@@ -160,7 +162,11 @@ export interface Match {
    */
   year?: number;
   yearSource?: 'usdb' | 'spotify' | 'chart';
-  /** Tempo in beats per minute, 70 to 180, from Deezer, a beat tracker or the note file (QWW-40). Unset when unknown. */
+  /**
+   * The song's place on the Tempo gear, in beats per minute: the one tempo the ranking uses (src/lib/tempo/feel.ts effectiveTempo),
+   * which only its rank matters for. With a feel label it is a measured tempo moved into the label's band; without one, a measured
+   * tempo (Deezer, a beat tracker or the note file, QWW-40) squeezed into 90 to 125. Not a plain bpm. Unset when unknown.
+   */
   tempo?: number;
   /** Genre as USDB lists it (free text, e.g. "Rock"). */
   genre?: string;
@@ -204,6 +210,91 @@ export interface ResultsView {
 
 /** Where the results come from: the signed-in user's Spotify library, or the catalogue (no Spotify). */
 export type ResultsMode = 'library' | 'catalogue';
+
+// ---------- Setlist tuner (QWW-46 draws it, QWW-47 ranks for it) ----------
+// The state object of the round 5 design (spec §2), as the ranking engine reads it. The engine is
+// src/lib/songs/setlist.ts; the defaults are src/lib/songs/setlistConfig.ts.
+
+/** The four sliders ("gears") of the tuner. */
+export type GearId = 'difficulty' | 'history' | 'popularity' | 'tempo';
+export const GEAR_IDS: GearId[] = ['difficulty', 'history', 'popularity', 'tempo'];
+
+/** Everything the tuner can switch off: the four gears and Era. */
+export type TunerPart = GearId | 'era';
+
+/** Era buttons, oldest first: 'pre' is before 1970, 's20' is 2020 on. */
+export type EraId = 'pre' | 's70' | 's80' | 's90' | 's00' | 's10' | 's20';
+export const ERA_IDS: EraId[] = ['pre', 's70', 's80', 's90', 's00', 's10', 's20'];
+
+/**
+ * A gear's value, or a song's place on it: 0 to 100. The ends of the tracks: Difficulty Light work to Locked in,
+ * History Rediscover to On repeat, Popularity Deep cuts to Pop hits, Tempo Slow jams to Upbeat tracks.
+ */
+export type GearValues = Record<GearId, number>;
+
+/** What the tuner is set to. `off` lists the parts that are reset and not factored in (spec §4a). */
+export interface SetlistState {
+  gears: GearValues;
+  off: TunerPart[];
+  /** The picked eras. Used only while 'era' is not in `off`; picked and empty then means no songs (spec §4a). */
+  eras: EraId[];
+}
+
+/** What the ranking engine takes (rankSetlist): the tuner's state, the singer's range, and whether history exists. */
+export interface SetlistInput extends SetlistState {
+  range: Pick<VocalRange, 'low' | 'high'>;
+  /** True when the singer is signed in and their library was read: only then does the History gear count. */
+  loggedIn: boolean;
+}
+
+/** One ranked song: the song as the song page reads it, its era, and its place on each gear. */
+export interface SetlistSong {
+  match: Match;
+  /** From `match.year`; null when the song has no year (it is then left out while Era is on). */
+  era: EraId | null;
+  /**
+   * The song's place on each gear, 0 to 100. Popularity, Tempo and History are by the song's rank among the songs
+   * that fit the singer (so every tenth of the track holds about a tenth of them). `difficulty` is by label, a third
+   * of the track each, and draws the row's mini lane: Easy songs are 0 to 33, Medium 33 to 67, Hard 67 to 100.
+   * null when we do not know: the song then sorts after the rest on that gear. `history` is null for any song that
+   * is not in the singer's Spotify library.
+   */
+  gears: Record<GearId, number | null>;
+}
+
+/** POST /api/setlist: the tuner's state, the singer's range, and the page wanted. */
+export interface SetlistRequest extends SetlistState {
+  range: { low: Midi; high: Midi };
+  /** Default 0. */
+  offset?: number;
+  /** 1 to 200, default 100. */
+  limit?: number;
+}
+
+export interface SetlistResponse {
+  /** The page asked for, best first. Row `i` is rank `offset + i + 1`. */
+  songs: SetlistSong[];
+  /** How many songs pass the range and the Era filter: what `songs` is a page of. */
+  total: number;
+  /** Offset of the next page, or null at the end. */
+  nextOffset: number | null;
+  /** Data-source lines for the songs on this page, keyed by track id (the song page's info button). */
+  sources: Record<string, DataSourceLogEntry>;
+  /** The parts that counted: not the ones in `off`, and not History unless the singer's library was read. */
+  applied: TunerPart[];
+  /**
+   * Why there are no songs: Era is on with no era picked ('no-era-picked', the design's "Pick an era to see songs."),
+   * no song of the picked eras fits the range, or nothing fits the range at all. Unset when there are songs.
+   */
+  empty?: 'no-era-picked' | 'no-songs-in-era' | 'no-songs-in-range';
+  /** True when the singer is signed in but their Spotify library could not be read: the list is the catalogue's. */
+  libraryUnavailable?: boolean;
+  /**
+   * True when the singer's library is only partly in the list: looking up its songs ran out of budget (a first visit
+   * to a big library) or one lookup failed. Ask again and the list carries on from where it got to.
+   */
+  libraryIncomplete?: boolean;
+}
 
 export type LogOutcome = RangeSource | 'skipped';
 
@@ -254,6 +345,8 @@ export interface FeedbackEntry {
 // No Spotify (QWW-2 Track B), no session needed:
 // GET  /api/catalogue/recommendations?low=&high=&all=1 (or &offset=&limit=) -> RecommendationsResponse
 // POST /api/catalogue/feedback body CatalogueFeedbackRequest -> { ok: true }
+// Setlist tuner (QWW-47), with or without a session: a signed-in singer's library adds the History gear:
+// POST /api/setlist    body SetlistRequest -> SetlistResponse (400 on a bad body)
 // Beta event log (QWW-16, QWW-20):
 // POST /api/events     body EventsRequest -> 204 (also 204 when collection is switched off)
 // GET  /api/admin/events (header x-admin-token) -> AdminEventsResponse

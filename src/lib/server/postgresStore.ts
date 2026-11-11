@@ -3,6 +3,7 @@
 import type { DataSourceLogEntry, FeedbackEntry, Mood, SongRange, VocalRange } from '../contracts';
 import { catalogueRank, pickCatalogue } from '../songs/score';
 import { isMeasured, MEASURED_RANK, SOURCE_RANK } from '../songs/sourceRank';
+import { isFeel } from '../tempo/feel';
 import { SCHEMA_SQL } from './schema';
 import {
   DEFAULT_EVENTS_LIMIT,
@@ -11,6 +12,7 @@ import {
   type CatalogueSong,
   type SongMoodsRecord,
   type SongDeezerRecord,
+  type SongFeelRecord,
   type SongTempoRecord,
   type SongPopularityRecord,
   type SongRangeRecord,
@@ -141,6 +143,14 @@ function toSongTempo(r: Row): SongTempoRecord {
   return t;
 }
 
+/** A song_feel row as a record; null for a feel this code does not know (the table has no CHECK, so it is checked here). */
+function toSongFeel(r: Row): SongFeelRecord | null {
+  if (!isFeel(r.feel)) return null;
+  const f: SongFeelRecord = { key: str(r.song_key), feel: r.feel, source: str(r.source) };
+  if (isSet(r.labeled_at)) f.labeledAt = str(r.labeled_at);
+  return f;
+}
+
 function toSongPopularity(r: Row): SongPopularityRecord {
   const p: SongPopularityRecord = { key: str(r.song_key), source: str(r.source) };
   if (isSet(r.karaoke_views)) p.karaokeViews = num(r.karaoke_views);
@@ -236,6 +246,22 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         const key = str(r.song_key);
         const rec = toSongRecord(r);
         if (key.startsWith(`${artistKey}|`) && rec.range) out.set(key, rec);
+      }
+      return out;
+    },
+    async listSongRangesPage(afterKey, limit) {
+      const rows = await query(
+        `SELECT * FROM song_ranges WHERE skipped = false AND range_json IS NOT NULL AND song_key > $1 ORDER BY song_key LIMIT $2`,
+        [afterKey, limit],
+      );
+      const out = new Map<string, SongRangeRecord>();
+      for (const r of rows) {
+        try {
+          const rec = toSongRecord(r);
+          if (rec.range) out.set(str(r.song_key), rec);
+        } catch (err) {
+          throw new Error(`song_ranges row ${JSON.stringify(str(r.song_key))} does not parse: ${err instanceof Error ? err.message : err}`);
+        }
       }
       return out;
     },
@@ -637,6 +663,44 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
     },
     async listSongTempos() {
       return new Map((await query('SELECT * FROM song_tempo')).map((r) => [str(r.song_key), toSongTempo(r)] as const));
+    },
+
+    // ---- feel labels (QWW-54) ----
+    async putSongFeel(entries) {
+      const unique = [...new Map(entries.map((e) => [e.key, e])).values()]; // one row per key: an upsert cannot touch a row twice
+      for (let i = 0; i < unique.length; i += 200) {
+        const params: unknown[] = [];
+        const rows = unique.slice(i, i + 200).map((e) => {
+          params.push(e.key, e.feel, e.source, e.labeledAt ?? null);
+          const n = params.length;
+          return `($${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(
+          `INSERT INTO song_feel (song_key, feel, source, labeled_at) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET feel = EXCLUDED.feel, source = EXCLUDED.source, labeled_at = EXCLUDED.labeled_at`,
+          params,
+        );
+      }
+    },
+    async getSongFeels(songKeys) {
+      const out = new Map<string, SongFeelRecord>();
+      for (let i = 0; i < songKeys.length; i += 1000) {
+        const chunk = songKeys.slice(i, i + 1000);
+        const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
+        for (const r of await query(`SELECT * FROM song_feel WHERE song_key IN (${placeholders})`, chunk)) {
+          const f = toSongFeel(r);
+          if (f) out.set(f.key, f);
+        }
+      }
+      return out;
+    },
+    async listSongFeels() {
+      const out = new Map<string, SongFeelRecord>();
+      for (const r of await query('SELECT * FROM song_feel')) {
+        const f = toSongFeel(r);
+        if (f) out.set(f.key, f);
+      }
+      return out;
     },
   };
 }

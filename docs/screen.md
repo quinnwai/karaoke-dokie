@@ -9,25 +9,75 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    server has `PICK_SONGS=on` (off by default, QWW-55: the first release has one onboarding flow). `app/page.tsx`
    reads it on every request and passes it to `KaraokeApp` as `pickSongs`; off, the link is not drawn and a
    pick left over in `sessionStorage` (`kd.wantsPick`) from an earlier visit is dropped. The pick screen's code stays.
-   The same switch also decides the link under the range (step 5).
+   The same switch also decides the link under the range (step 6).
 2. **Find a quiet spot**: lyric line, moves on by itself after ~2.6 s (or tap).
-3. **Lowest note**: press and hold the round button (Space/Enter also work). While held,
+3. **Microphone** (QWW-50). The browser's own question is a step we do not control, and older singers often miss,
+   close or block it, so this step comes first and none of its screens is a dead end. In order:
+   - **Inside another app** (Instagram, Facebook, Messenger, LinkedIn, TikTok, Snapchat, LINE, WeChat, or any
+     webview; read from the user agent in `src/lib/client/browser.ts`): "Open this in Safari" or "Chrome". On Android a
+     real "Open in Chrome" link (an `intent://` address that falls back to this page), on iPhone the menu route
+     (there is no way to open Safari from a page), a copy-link button, the address in a field to copy by hand, and
+     "Try here anyway", because a user agent is only a guess. "Try here anyway" is remembered for the visit, and a
+     refusal after it shows this screen again with "Try again", since that browser has no site settings to open.
+   - **Our own screen first**, "Set up your microphone": one line, "Your phone will ask to use the microphone. Tap
+     **Allow**." ("browser" on a computer), and one round button with a microphone on it. Nothing else: no picture, no
+     other words. The button has no text, so its name is "Turn on microphone" (`aria-label`); it is the record
+     button's own component (`RoundButton.tsx`: the same size, ring and glow). That tap itself calls `getUserMedia`
+     (iOS Safari wants a tap for audio). While the browser's question is up the button is lit and pulsing (`aria-busy`)
+     and does not take a second tap; screen readers get a hidden status line, "Waiting for your phone…". If the
+     question never comes, "Nothing happened? Reload this page" appears after 12 s: it is the only way out then. The screen is skipped when `navigator.permissions.query({ name: 'microphone' })`
+     already says *granted* (the microphone opens by itself) or *denied* (straight to the steps below). Where the
+     browser cannot say, or does not answer within 0.4 s, the screen shows.
+   - **Once the microphone is on, the step is over**: straight to the low (or high) note, whether the tap just allowed
+     it or the browser had already. There is no level meter and no "Continue". The same microphone carries on into the
+     two notes, so the browser is not asked again.
+   - **When the answer is no**, told apart by reason (blocked, question closed, Android's own switch for the browser,
+     no microphone, busy, unsupported): the steps for this browser (iPhone Safari: aA, Website Settings, Microphone;
+     Android Chrome: lock icon, Permissions; other iPhone browsers: the Settings app; Android's own switch: Settings,
+     Apps, the browser, Permissions), "Try again", "Reload this page" (on an iPhone, Safari asks again after a reload;
+     it is `reload` on the component, not `navigate`, which does nothing on an address with a `#fragment`), and that
+     Safari may ask again each visit. A second no says "Still not working". "Unsupported" tells a browser we do not
+     point to to open Safari or Chrome, and tells Safari or Chrome to try again.
+   - Type is 18 px or more and every button 48 px or more (the main one 56 px or more: the round button is 112 px). The
+     one thing to tap on each screen is sticky at the bottom of the scrolling screen, so a small phone, or one set to
+     larger text, never hides it. `mic-permission.spec.ts` checks the sizes, and that the main button is in view, on
+     375x553: an iPhone SE with Safari's toolbars showing. The button has a dark backdrop (to hide the words that scroll
+     under it) only while it is held up over them: `Main` in `MicStep.tsx` turns it on when the browser reports a sliver
+     of the button cut off at the bottom edge (it is set 2px below it), and off once everything fits or the screen is
+     scrolled to its end. A backdrop on a screen that fits would be a dark band across the glow of the screen.
+   - Events: `inapp_browser_detected`, `mic_prompt_shown`, `mic_granted`, `mic_denied` (any way the answer was no, with
+     a `reason`) and `mic_recovery_shown`, with only `browser`, `app`, `reason` and `via` (asked by a tap, or already
+     answered) as props. They come from the flow's own transitions (`funnel.ts`), through the usual tracker.
+     `mic_granted` is logged on the grant itself, once per grant: the grant leaves the mic step for the note, so there
+     is no screen it could be tied to, and an answer the flow ignores (a late one) logs nothing. A lost microphone
+     shows our screen again, so that pass logs `mic_prompt_shown` and a second `mic_granted` (`via: 'prompt'`) even when
+     the browser, already allowing it, shows no question: a funnel per visitor takes the first of each.
+
+   Every way into a note with no microphone open goes through this step: the first run, redoing the test or one end of
+   it, resuming a half-done test after a reload, and a microphone taken away during a note (`MicRecorder.live()`
+   false, or a hold that recorded only zeros, or audio that never started: a microphone the system muted is not a
+   quiet singer). After a microphone is lost, **our own screen shows even when the browser says allowed**
+   (`MicGate.lost`): an allowed but silent microphone would otherwise open by itself and drop the singer straight
+   back on the note with no word, and it is the tap on the round button that starts the audio again. A *quick tap* on
+   the record button is not a lost microphone: it says "hold a little longer" (a take shorter than
+   `MIN_MUTED_SAMPLES` from a running recorder).
+4. **Lowest note**: press and hold the round button (Space/Enter also work). While held,
    the mic records and a dot moves on a C2–C6 scale with the current note. On release,
    `detectHeldNote` runs on the recording. Too short a hold → "Try again…" lyric.
-4. **Highest note**: same button; the low note shows small in the corner. A high note at
+5. **Highest note**: same button; the low note shows small in the corner. A high note at
    or below the low one asks to go higher.
-5. **Range + arrow**: "That's your range A2 – C5" and a wordless arrow bouncing bottom-right
+6. **Range + arrow**: "That's your range A2 – C5" and a wordless arrow bouncing bottom-right
    (`aria-label="Continue"`). The arrow goes straight to catalogue results with no sign-in
    (QWW-2 Track B); the range is kept on the device (`localStorage` `kd.range`). "or use songs from your
    Spotify" under it shows only while `PICK_SONGS=on`, the switch of step 1 (QWW-55); it keeps the range in
    `sessionStorage` (`kd.test`) and goes to `/api/auth/login`. With the switch off, the Spotify logo on the
-   results (step 6) is the one way to sign in.
+   results (step 7) is the one way to sign in.
    A sign-in that fails (Spotify says wait, one of the sign-in's Spotify calls fails, the sign-in cookie is gone,
    ...) is sent back by the callback as `/?authError=<reason>`. The range was kept for the round trip, so
    it lands here: `?authError` is taken out of the address and one quiet line, "Couldn’t sign in to Spotify.",
    shows under the arrow, and again under the bar of the results the arrow leads to. `access_denied` is the
    singer pressing Cancel on Spotify's page, which is their answer, so nothing is said.
-6. **Results**: one request for every match (`/api/catalogue/recommendations?...&all=1` without
+7. **Results**: one request for every match (`/api/catalogue/recommendations?...&all=1` without
    Spotify, `/api/recommendations?all=1` with it), then the phone orders, filters and pages them
    (`src/lib/songs/browse.ts`), 5 at a time. Two panels sit above the list: **Tune** (pink), sliders
    that reorder and never remove a song, untouched until moved, with a circular-arrow Reset icon
@@ -49,7 +99,7 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    The list is then a catalogue list (no "Rediscover to On repeat" slider, no connect prompts) for a singer who stays
    signed in, with the green logo, Log out and one quiet line under the bar: "Couldn’t reach Spotify, showing
    popular songs." The next range save or redo asks the server again.
-7. **Song detail**: range bar (song in neon pink over the user's range, note names at the
+8. **Song detail**: range bar (song in neon pink over the user's range, note names at the
    ends; a song sung an octave away is drawn as sung, with the recording as a dashed outline;
    faint bars above it show where the song's singing time sits across your range, `Match.shape`,
    so an Easy song that spans most of your range reads as Easy: one bar for each twelfth of your range
@@ -58,9 +108,9 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    `rangeBar` in `display.ts` does the cutting)), difficulty (or a quiet "Maybe"), "Fast lyrics", an "i" button explaining where the
    data came from (for Maybe songs, also that the range is an estimate), Spotify's own player
    (see below), and "How'd it go?" thumbs that POST `/api/feedback`.
-8. **Returning user** with a saved range lands on results; "redo" restarts the test. Someone
+9. **Returning user** with a saved range lands on results; "redo" restarts the test. Someone
    without Spotify whose range is kept on the device lands on catalogue results.
-9. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
+10. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
    low and highest high become the range (`source: 'songs'`). Signed-out users sign in first.
 
 ## Play from the list (QWW-48)
@@ -141,16 +191,20 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 
 | File | What |
 | --- | --- |
-| `src/lib/client/flow.ts` | Pure reducer for the whole flow (steps, hold status, results, picks). |
+| `src/lib/client/flow.ts` | Pure reducer for the whole flow (steps, the mic step's screens, hold status, results, picks). |
 | `src/lib/client/display.ts` | Plain-word labels, octave wording, info tooltip text, range bar and pitch scale math. |
 | `src/lib/client/api.ts` | The only HTTP client (paths and shapes from `contracts.ts`). |
-| `src/lib/client/mic.ts` | `Mic`/`MicRecorder` interface; AudioWorklet with ScriptProcessor fallback. |
+| `src/lib/client/mic.ts` | `Mic`/`MicRecorder` interface (`permission()`, `open()`, `live()`, `resume()`); `MicError` and what each `getUserMedia` failure means (`classifyMicError`); AudioWorklet with ScriptProcessor fallback. `open()` never waits for the audio to start (a browser may hold it back until a tap, and a promise that never settles would leave a blank screen) and lets go of the microphone if anything after the question fails; the sample buffer keeps only the latest sound while nobody is recording. |
+| `src/lib/client/browser.ts` | The browser and OS from the user agent, and which app's built-in browser it is (`detectBrowser`); the Android Chrome intent link. |
+| `src/lib/audio/level.ts` | `isDigitalSilence`: a take of only zeros, which is a microphone the system muted, not a quiet singer; `MIN_MUTED_SAMPLES`, below which a take is a tap. |
 | `src/lib/client/storage.ts` | Guarded `sessionStorage` for test progress and the pick-songs intent; `localStorage` for a range kept on the device. |
 | `src/lib/songs/browse.ts` | Sliders, chips, counts and the "Saved, not played lately" divider, as pure functions over every match. |
 | `src/lib/client/funnel.ts`, `events.ts` | What each action records in the beta event log, and the batching tracker that sends it. |
 | `src/lib/client/spotifyEmbed.ts` | A song's `open.spotify.com/track/ID` link to the address of Spotify's player, or null. |
-| `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `quietMs` props for tests. |
+| `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `reload`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,Results,SongDetail,PickSongs}.tsx` | The screen pieces. |
+| `src/components/RoundButton.tsx` | The round pink-ringed button, shared by the record button (`HoldStep.tsx`, a dot in it) and "Turn on microphone" (`MicStep.tsx`, a microphone in it), so the two keep one look. |
+| `src/components/MicStep.tsx` | The mic step's screens. |
 | `src/components/SpotifyPlayer.tsx` | Spotify's player iframe, or the plain "Open in Spotify" link when there is no track to embed. |
 | `src/components/PreviewButton.tsx`, `src/lib/client/preview.ts` | The play button in each row, its hook and the one shared `<audio>` they drive (QWW-48); the Deezer logo line. |
 | `src/components/screen.module.css`, `app/globals.css` | Styles; `prefers-reduced-motion` stops all animation. |
@@ -166,6 +220,11 @@ E2E_PORT=3107 npx playwright test  # same, on another port (avoids reusing anoth
 The e2e spec generates a 110 Hz (A2) and a 523.25 Hz (C5) WAV and feeds them to
 Chromium's fake microphone. Chromium takes one file per launch, so the low note is sung
 in one browser and the high note in a second one that picks up the saved progress.
+`mic-permission.spec.ts` covers the mic step with Chromium's fake microphone and the user agents of iPhone Safari, Android
+Chrome and the in-app browsers: granted, refused (and closed without an answer), already allowed, already blocked, the
+browser's question left unanswered (and the reload after 12 s), a microphone taken away mid-note (our screen again
+though the browser says yes), a quick tap on the record button, and the sizes. What a real iPhone and Android phone do
+with those screens is checked by hand.
 Named screenshots land in `test-results/screens/`. The specs never load Spotify's player from
 Spotify: the screen spec answers `https://open.spotify.com/embed/**` with a stand-in page, and the
 full-stack spec (offline mock, search links only) shows the plain link.

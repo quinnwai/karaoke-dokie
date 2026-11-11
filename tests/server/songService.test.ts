@@ -365,6 +365,28 @@ describe('song service whole list (all)', () => {
     expect(page.matches.find((m) => m.track.id === 't2')!.parts).toMatchObject({ popularityKnown: false, popularity: UNKNOWN_POPULARITY });
   });
 
+  describe('tempo and feel labels (QWW-40, QWW-54)', () => {
+    it('puts each song\'s one tempo on the whole list, a labelled song moved into its label\'s band, and reads none for a page', async () => {
+      const store = createMemoryStore();
+      await store.putSongTempo([{ key: key(2), deezerBpm: 148 }, { key: key(4), deezerBpm: 100 }]);
+      await store.putSongFeel([{ key: key(2), feel: 'slow', source: 'test/v1' }]);
+      const getSongFeels = vi.spyOn(store, 'getSongFeels');
+      const svc = createSongService(store, fakeDeps({ resolveSongRange: everyone(range(56, 64)) }).deps);
+      const lib = [track(2), track(4), track(8)];
+
+      const all = await svc.recommend(lib, user, 0, 0, { all: true });
+      const tempoOf = (n: number) => all.matches.find((m) => m.track.id === track(n).id)!.tempo;
+      expect(tempoOf(2)).toBe(74); // Deezer's 148 halved: the label says slow
+      expect(tempoOf(4)).toBeCloseTo(99.41, 2); // no label: 100 bpm as measured, squeezed into the mid band (90 to 125)
+      expect(tempoOf(8)).toBeUndefined(); // nothing known
+      expect(getSongFeels).toHaveBeenCalledTimes(1);
+
+      const page = await svc.recommend(lib, user, 0, 5);
+      expect(page.matches.every((m) => m.tempo === undefined)).toBe(true);
+      expect(getSongFeels).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('karaoke popularity (QWW-6)', () => {
     const popular = (n: number, extra: { karaokeViews?: number; chartRank?: number; chartYear?: number }) => ({ key: key(n), source: 'test', ...extra });
 
@@ -460,5 +482,66 @@ describe('song service whole list (all)', () => {
     ]);
     expect(sent).toMatchObject({ low: 50, high: 70, duet: true });
     expect((await store.getSongRange(key(2)))!.range).toStrictEqual(duet);
+  });
+});
+
+describe('song service libraryMatches (QWW-47, the Setlist tuner)', () => {
+  const logFor = (t: Track): DataSourceLogEntry => ({ trackId: t.id, title: t.title, artist: t.artist, outcome: 'note-file', reason: 'USDB note file', at: '2026-01-01T00:00:00.000Z' });
+  const withHistogram: SongRange = { ...range(50, 70), pitchShare: [[55, 0.5], [65, 0.5]] };
+  const everyone = (r: SongRange) => async (t: Track) => ({ range: r, log: logFor(t) });
+
+  it('returns every library song that fits, uncut, with its pitch histogram and keys and log lines by track id', async () => {
+    const { deps } = fakeDeps({ resolveSongRange: everyone(withHistogram) });
+    const res = await createSongService(createMemoryStore(), deps).libraryMatches([track(2), track(4), track(6)], user);
+    expect(res.matches.map((m) => m.track.id)).toEqual(['t2', 't4', 't6']);
+    expect(res.matches[0]!.range.pitchShare).toEqual(withHistogram.pitchShare); // the tuner's strain needs it
+    expect(res.keys.get('t4')).toBe('artist 4|song 4');
+    expect(res.logs.get('t6')).toMatchObject({ trackId: 't6', outcome: 'note-file' });
+    expect(res.complete).toBe(true);
+  });
+
+  it('is not cut at MAX_ALL_MATCHES, as the whole-list response is', async () => {
+    const many = Array.from({ length: MAX_ALL_MATCHES + 50 }, (_, i) => track(i * 2 + 2));
+    const { deps } = fakeDeps({ resolveSongRange: everyone(range(50, 70)) });
+    const res = await createSongService(createMemoryStore(), deps, { maxResolvesPerRequest: 5000, concurrency: 100 }).libraryMatches(many, user);
+    expect(res.matches).toHaveLength(MAX_ALL_MATCHES + 50);
+    expect(res.complete).toBe(true);
+  });
+
+  it('lists a song once when the library has it under two Spotify ids, as the one played more', async () => {
+    const { deps } = fakeDeps();
+    const dup = { ...track(2), id: 'other-id', playRank: 99 };
+    const res = await createSongService(createMemoryStore(), deps).libraryMatches([dup, track(2)], user);
+    expect(res.matches.map((m) => m.track.id)).toEqual(['t2']);
+  });
+
+  it('says it is not complete when lookups ran out of budget, and carries on when asked again', async () => {
+    const store = createMemoryStore();
+    const { deps } = fakeDeps({ resolveSongRange: everyone(range(50, 70)) });
+    const svc = createSongService(store, deps, { maxResolvesPerRequest: 2, concurrency: 1 });
+    const four = [track(2), track(4), track(6), track(8)];
+    const first = await svc.libraryMatches(four, user);
+    expect(first).toMatchObject({ complete: false });
+    expect(first.matches.length).toBeLessThan(4);
+    const second = await svc.libraryMatches(four, user);
+    expect(second.matches.length).toBeGreaterThan(first.matches.length);
+    expect((await svc.libraryMatches(four, user)).complete).toBe(true);
+  });
+
+  it('says it is not complete when a lookup failed, though recommend (as before) still calls that list whole', async () => {
+    const resolve = vi.fn(async (t: Track) => {
+      if (t.id === 't4') throw new Error('USDB down');
+      return { range: range(50, 70), log: logFor(t) };
+    });
+    const { deps } = fakeDeps({ resolveSongRange: resolve });
+    const svc = createSongService(createMemoryStore(), deps);
+    const res = await svc.libraryMatches([track(2), track(4), track(6)], user);
+    expect(res.matches.map((m) => m.track.id)).toEqual(['t2', 't6']);
+    expect(res.complete).toBe(false);
+    // The failed lookup is tried again next time, and a list without it failing is complete.
+    resolve.mockImplementation(async (t: Track) => ({ range: range(50, 70), log: logFor(t) }));
+    expect(await svc.libraryMatches([track(2), track(4), track(6)], user)).toMatchObject({ complete: true });
+    const all = await svc.recommend([track(2), track(4), track(6)], user, 0, 0, { all: true });
+    expect(all.complete).toBe(true);
   });
 });

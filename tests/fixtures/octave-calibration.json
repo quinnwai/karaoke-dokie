@@ -1,0 +1,53 @@
+{
+ "about": "Note file octave error by typical note: for each one-semitone bin of the note file's typical note (MIDI, as stored), [songs, songs whose note file is an octave or more above the recording]. 4,760 songs with a note file and a recording that is not mostly rap, from scripts/octave-pairs.py and scripts/octave-measure.ts (10 Nov 2026). tests/songs/octave.test.ts keeps TYPICAL_HIGH between the bins.",
+ "bins": {
+  "60": [
+   393,
+   4
+  ],
+  "61": [
+   474,
+   11
+  ],
+  "62": [
+   509,
+   17
+  ],
+  "63": [
+   582,
+   28
+  ],
+  "64": [
+   563,
+   40
+  ],
+  "65": [
+   519,
+   52
+  ],
+  "66": [
+   437,
+   56
+  ],
+  "67": [
+   289,
+   67
+  ],
+  "68": [
+   206,
+   91
+  ],
+  "69": [
+   193,
+   141
+  ],
+  "70": [
+   204,
+   177
+  ],
+  "71": [
+   215,
+   198
+  ]
+ }
+}

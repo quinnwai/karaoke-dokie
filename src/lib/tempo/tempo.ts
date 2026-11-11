@@ -7,6 +7,7 @@
 // Every tempo is folded into the 70 to 180 range, since each source mistakes a song for double or
 // half its speed now and then and a singer feels a song's pulse in that range.
 // Spotify is not a source: its audio features are closed to new apps (Nov 2024).
+// The tempo the ranking uses is effectiveTempo in feel.ts: this file's rule, plus the song's feel label when it has one.
 
 import { reviewedBpm } from './reviewed';
 
@@ -97,16 +98,25 @@ const agree = (a: number, b: number) => Math.abs(a - b) / Math.max(a, b) <= AGRE
 export const DOUBLE_TIME_FROM = 130;
 
 /**
+ * A beat-tracker reading from here up is not used unless Deezer or UltraStar agrees with it (QWW-54). The tracker
+ * locks on to the subdivision of a slow song and reports double its felt tempo (Let Her Go, The A Team, Red Red
+ * Wine), and a song that is really this fast is nearly always on Deezer too.
+ */
+export const TRACKER_DISTRUST_FROM = 160;
+
+/**
  * The song's one tempo, with the source that supplied it. Deezer wins when it has one; the tracker
  * stands in when Deezer has none. UltraStar is the last resort, and also the tie-breaker: when
  * Deezer and the tracker disagree, the one UltraStar's tempo agrees with wins (the grid's double or
  * half is folded into range like every tempo, so 2:1 counts as agreeing; 4:3 does not); with no
- * UltraStar tempo, Deezer.
+ * UltraStar tempo, Deezer. A fast tracker reading that neither of them agrees with is left out
+ * (TRACKER_DISTRUST_FROM).
  */
 export function combineTempo(r: Pick<SongTempoRecord, 'deezerBpm' | 'trackerBpm' | 'ultrastarBpm'>): { tempo: number; source: TempoSource } | null {
   const deezer = foldBpm(r.deezerBpm);
-  const tracker = foldBpm(r.trackerBpm);
   const grid = ultrastarTempo(r.ultrastarBpm);
+  let tracker = foldBpm(r.trackerBpm);
+  if (tracker !== null && tracker >= TRACKER_DISTRUST_FROM && !(deezer !== null && agree(tracker, deezer)) && !(grid !== null && agree(tracker, grid))) tracker = null;
   if (deezer !== null && tracker !== null && !agree(deezer, tracker) && grid !== null) {
     if (agree(tracker, grid) && !agree(deezer, grid)) return { tempo: tracker, source: 'tracker' };
   }
@@ -125,8 +135,10 @@ export function combineTempo(r: Pick<SongTempoRecord, 'deezerBpm' | 'trackerBpm'
 }
 
 /**
- * The tempo to sort by, or undefined when no source has one. A tempo someone checked by ear
- * (reviewedBpm) stands ahead of the measured ones; pass the song's key to use it.
+ * The tempo the app ranked on before QWW-54, or undefined when no source has one: a tempo checked by ear
+ * (reviewedBpm) stands ahead of the measured ones, folded into range like them. Kept to compare with the old
+ * behaviour (npm run tempo:feel's dry run, the QWW-33 tests); the ranking reads effectiveTempo (feel.ts), which
+ * also takes the song's feel label.
  */
 export const tempoOf = (r: Pick<SongTempoRecord, 'deezerBpm' | 'trackerBpm' | 'ultrastarBpm'> | undefined, key?: string): number | undefined =>
   (key === undefined ? null : foldBpm(reviewedBpm(key))) ?? (r ? (combineTempo(r)?.tempo ?? undefined) : undefined);

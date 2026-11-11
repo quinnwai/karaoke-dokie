@@ -15,6 +15,7 @@ const ACCESS: Record<keyof Store, 'read' | 'write'> = {
   putSongRange: 'write',
   listMeasuredRangesByArtist: 'read',
   listSongRangesByArtist: 'read',
+  listSongRangesPage: 'read',
   putUsdbSongs: 'write',
   findUsdbSongs: 'read',
   listUsdbSongs: 'read',
@@ -49,6 +50,9 @@ const ACCESS: Record<keyof Store, 'read' | 'write'> = {
   putSongTempo: 'write',
   getSongTempos: 'read',
   listSongTempos: 'read',
+  putSongFeel: 'write',
+  getSongFeels: 'read',
+  listSongFeels: 'read',
 };
 
 export function readOnlyStore(store: Store): Store {

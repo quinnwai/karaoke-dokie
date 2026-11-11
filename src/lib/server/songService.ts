@@ -12,7 +12,8 @@ import type {
 } from '../contracts';
 import type { SongPopularityRecord, SongRangeRecord, Store, UsdbIndexEntry } from './store';
 import { hasLittleSinging } from '../songs/resolve';
-import { tempoOf } from '../tempo/tempo';
+import { effectiveTempo } from '../tempo/feel';
+import { readSongFeels } from './songFeel';
 import { withKaraokePopularity, type KaraokePopularity } from '../songs/score';
 
 export interface ResolveResult {
@@ -66,6 +67,23 @@ export interface SongService {
     opts?: { all?: boolean },
   ): Promise<RecommendationsResponse>;
   knownSongs(tracks: Track[]): Promise<KnownSongsResponse>;
+  /**
+   * Every library song that fits `userRange`, scored and with its year, genre, tempo and popularity, but not ranked, cut
+   * or stripped of its pitch histograms: the Setlist tuner ranks them itself (QWW-47). A song the library has twice under
+   * different Spotify ids is listed once, as its most played one.
+   */
+  libraryMatches(tracks: Track[], userRange: VocalRange): Promise<LibraryMatches>;
+}
+
+/** What libraryMatches returns. */
+export interface LibraryMatches {
+  matches: Match[];
+  /** Each match's song key, by track id (to tell a song the catalogue also has). */
+  keys: Map<string, string>;
+  /** The data-source line of each match, by track id. */
+  logs: Map<string, DataSourceLogEntry>;
+  /** False while lookups have run out of budget (a first visit to a very large library) or one failed: asking again carries on. */
+  complete: boolean;
 }
 
 interface Walked {
@@ -126,7 +144,7 @@ function withoutPitchShare<T extends { pitchShare?: [number, number][] }>(x: T):
  * The match as the whole-list response sends it: no pitch histograms, for the song or its duet
  * parts, and none of the karaoke popularity it was scored with.
  */
-function compact(m: Match): Match {
+export function compact(m: Match): Match {
   const scored: SongRange & KaraokePopularity = m.range;
   const { karaokeViews: _views, chartRank: _rank, deezerRank: _deezer, ...range } = withoutPitchShare(scored);
   if (range.parts) range.parts = range.parts.map(withoutPitchShare);
@@ -166,9 +184,10 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
   /**
    * Visits tracks in playRank order, using cached ranges and resolving uncached ones (at most
    * maxResolves per call), calling `visit` for each track that has a record. Stops early when
-   * visit returns true. Returns true only when every track was visited.
+   * visit returns true. Returns true when every track was visited, one whose lookup failed (and is skipped, to be
+   * retried next time) included: `stats.failed`, when given, says how many of those there were.
    */
-  async function walk(tracks: Track[], visit: (w: Walked) => boolean): Promise<boolean> {
+  async function walk(tracks: Track[], visit: (w: Walked) => boolean, stats?: { failed: number }): Promise<boolean> {
     const ordered = [...tracks].sort((a, b) => a.playRank - b.playRank);
     const keys = ordered.map((t) => deps.songKey(t.artist, t.title));
     const cache = await store.getSongRanges(keys);
@@ -186,7 +205,10 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         if (record && visit({ track, key, record: { ...record, log: { ...record.log, trackId: track.id } } })) return false;
       }
       if (i >= ordered.length) break;
-      if (resolves >= maxResolves) return false; // budget spent; the client can ask again
+      if (resolves >= maxResolves) {
+        if (stats) stats.failed = failed.size;
+        return false; // budget spent; the client can ask again
+      }
 
       // Look up the next few unknown songs in parallel (lookahead of `concurrency`).
       const batch: { track: Track; key: string }[] = [];
@@ -204,38 +226,53 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
         }),
       );
     }
+    if (stats) stats.failed = failed.size;
     return true;
   }
 
-  return {
-    async recommend(tracks, userRange, offset, limit, { all = false } = {}) {
-      const candidates: { track: Track; key: string; range: SongRange; log: DataSourceLogEntry }[] = [];
-      const exhausted = await walk(tracks, ({ track, key, record }) => {
+  /**
+   * The library's songs that fit `userRange`, in play order (the order `walk` visits them). With `all`, each carries
+   * song facts from our USDB index and is scored with our karaoke popularity (QWW-6) and tempo (QWW-40), each read once
+   * for every candidate. Pages leave both out, so they stay exactly as they were.
+   */
+  async function collect(tracks: Track[], userRange: VocalRange, all: boolean) {
+    const candidates: { track: Track; key: string; range: SongRange; log: DataSourceLogEntry }[] = [];
+    const stats = { failed: 0 };
+    const exhausted = await walk(
+      tracks,
+      ({ track, key, record }) => {
         if (!record.range) return false; // skipped songs never match
         if (hasLittleSinging(track.title)) return false; // a dub or instrumental shares the original's key
         candidates.push({ track, key, range: record.range, log: record.log });
         return false;
-      });
+      },
+      stats,
+    );
 
-      // The whole list also carries song facts from our USDB index and is scored with our karaoke
-      // popularity (QWW-6) and tempo (QWW-40), each read once for every candidate. Pages leave both out, so they stay
-      // exactly as they were.
-      const keys = candidates.map((c) => c.key);
-      const [index, popularity, tempos] = all ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys), store.getSongTempos(keys)]) : [null, null, null];
-      const matches: Match[] = [];
-      const logs = new Map<string, DataSourceLogEntry>();
-      const keyOf = new Map<string, string>();
-      for (const { track, key, range, log } of candidates) {
-        const row = index?.get(key);
-        const pop = popularity?.get(key);
-        const m = deps.matchSong(track, index ? withKaraokePopularity(withIndexPopularity(range, row), pop) : range, userRange);
-        if (!m) continue;
-        const tempo = tempoOf(tempos?.get(key), key);
-        const deezer = pop?.deezerId !== undefined ? { deezerId: pop.deezerId } : {};
-        matches.push(index ? { ...m, ...songFacts(track, row, pop), ...(tempo !== undefined ? { tempo } : {}), ...deezer } : m);
-        logs.set(track.id, log);
-        keyOf.set(track.id, key);
-      }
+    const keys = candidates.map((c) => c.key);
+    const [index, popularity, tempos, feels] = all
+      ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys), store.getSongTempos(keys), readSongFeels(store, keys)])
+      : [null, null, null, null];
+    const matches: Match[] = [];
+    const logs = new Map<string, DataSourceLogEntry>();
+    const keyOf = new Map<string, string>();
+    for (const { track, key, range, log } of candidates) {
+      const row = index?.get(key);
+      const pop = popularity?.get(key);
+      const m = deps.matchSong(track, index ? withKaraokePopularity(withIndexPopularity(range, row), pop) : range, userRange);
+      if (!m) continue;
+      const tempo = effectiveTempo({ key, record: tempos?.get(key), feel: feels?.get(key)?.feel })?.tempo;
+      const deezer = pop?.deezerId !== undefined ? { deezerId: pop.deezerId } : {};
+      matches.push(index ? { ...m, ...songFacts(track, row, pop), ...(tempo !== undefined ? { tempo } : {}), ...deezer } : m);
+      logs.set(track.id, log);
+      keyOf.set(track.id, key);
+    }
+    return { matches, logs, keyOf, exhausted, failed: stats.failed };
+  }
+
+  return {
+    async recommend(tracks, userRange, offset, limit, { all = false } = {}) {
+      const { matches, logs, keyOf, exhausted } = await collect(tracks, userRange, all);
       const sourcesOf = (items: Match[]) => {
         const sources: Record<string, DataSourceLogEntry> = {};
         for (const m of items) {
@@ -272,6 +309,20 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       // library): let the client ask again, which continues the lookups.
       const nextOffset = page.nextOffset ?? (exhausted ? null : offset + items.length);
       return { matches: items, nextOffset, sources: sourcesOf(items) };
+    },
+
+    async libraryMatches(tracks, userRange) {
+      const { matches, logs, keyOf, exhausted, failed } = await collect(tracks, userRange, true);
+      // Matches come in play order, so the first of a song under two Spotify ids is the one played more.
+      const seen = new Set<string>();
+      const unique = matches.filter((m) => {
+        const key = keyOf.get(m.track.id) ?? m.track.id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      // A song whose lookup failed is left out and tried again next time, so a list with one is not complete.
+      return { matches: unique, keys: keyOf, logs, complete: exhausted && failed === 0 };
     },
 
     async knownSongs(tracks) {

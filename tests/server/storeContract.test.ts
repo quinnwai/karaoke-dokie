@@ -120,6 +120,25 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect((await s.listSongRangesByArtist('nobody')).size).toBe(0);
   });
 
+  it('walks every stored range in pages by song key, leaving out skips, and ends with an empty page', async () => {
+    const s = make();
+    const keys = ['abba|waterloo', 'queen|bohemian rhapsody', 'queen|somebody to love', 'zz top|legs', 'abba|mamma mia'];
+    for (const [i, k] of keys.entries()) await s.putSongRange(k, { range: { ...songRange, low: 40 + i }, log: logEntry(i) });
+    await s.putSongRange('abba|skipped', { range: null, log: logEntry(9, 'skipped') });
+    const seen: string[] = [];
+    let after = '';
+    for (;;) {
+      const page = await s.listSongRangesPage(after, 2);
+      if (page.size === 0) break;
+      expect(page.size).toBeLessThanOrEqual(2);
+      seen.push(...page.keys());
+      after = [...page.keys()].at(-1)!;
+    }
+    expect(seen).toEqual([...keys].sort());
+    expect((await s.listSongRangesPage('', 10)).get('queen|somebody to love')?.range).toMatchObject({ low: 42, source: 'note-file' });
+    expect((await s.listSongRangesPage('zz top|legs', 10)).size).toBe(0);
+  });
+
   it('keeps a USDB song index: upserts by id, finds the most-viewed per key, reports size and newest change', async () => {
     const s = make();
     expect(await s.usdbIndexStats()).toEqual({ count: 0, newestChange: null });
@@ -449,6 +468,32 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     const many = Array.from({ length: 2_500 }, (_, i) => ({ key: `artist ${i}|song ${i}`, deezerBpm: 100 + (i % 50) }));
     await s.putSongTempo(many);
     expect((await s.getSongTempos(many.map((m) => m.key))).size).toBe(2_500);
+  });
+
+  it('keeps one feel label per song, the last write winning (QWW-54)', async () => {
+    const s = make();
+    await s.putSongFeel([
+      { key: 'a-ha|take on me', feel: 'upbeat', source: 'test/v1', labeledAt: '2026-11-10T00:00:00.000Z' },
+      { key: 'toto|africa', feel: 'mid', source: 'test/v1' },
+    ]);
+    // a relabel replaces the old row, source and time included
+    await s.putSongFeel([{ key: 'toto|africa', feel: 'slow', source: 'test/v2', labeledAt: '2026-11-10T01:00:00.000Z' }]);
+    // one key twice in one write: the last entry is the one kept
+    await s.putSongFeel([{ key: 'dup|song', feel: 'mid', source: 'first' }, { key: 'dup|song', feel: 'slow', source: 'second' }]);
+    const read = await s.getSongFeels(['toto|africa', 'a-ha|take on me', 'unknown|song', 'dup|song']);
+    expect([...read.keys()].sort()).toEqual(['a-ha|take on me', 'dup|song', 'toto|africa']);
+    expect(read.get('toto|africa')).toStrictEqual({ key: 'toto|africa', feel: 'slow', source: 'test/v2', labeledAt: '2026-11-10T01:00:00.000Z' });
+    expect(read.get('a-ha|take on me')).toStrictEqual({ key: 'a-ha|take on me', feel: 'upbeat', source: 'test/v1', labeledAt: '2026-11-10T00:00:00.000Z' });
+    expect(read.get('dup|song')).toStrictEqual({ key: 'dup|song', feel: 'slow', source: 'second' });
+    expect((await s.listSongFeels()).size).toBe(3);
+    expect(await s.getSongFeels([])).toEqual(new Map());
+    // more keys than one query carries
+    const feels = ['slow', 'mid', 'upbeat'] as const;
+    const many = Array.from({ length: 2_500 }, (_, i) => ({ key: `artist ${i}|song ${i}`, feel: feels[i % 3]!, source: 'test/v1' }));
+    await s.putSongFeel(many);
+    const back = await s.getSongFeels(many.map((m) => m.key));
+    expect(back.size).toBe(2_500);
+    expect(back.get('artist 4|song 4')!.feel).toBe('mid');
   });
 
   it('keeps one Spotify block for the whole app: a later time wins and an earlier one never shortens it (QWW-55)', async () => {

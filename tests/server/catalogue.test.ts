@@ -13,6 +13,7 @@ import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import type { CatalogueSong, SongPopularityRecord, UsdbIndexEntry } from '../../src/lib/server/store';
 import { MAX_ALL_MATCHES } from '../../src/lib/server/songService';
 import { productionSongDeps } from '../../src/lib/server/wiring';
+import { DEFAULT_VIEW, orderMatches } from '../../src/lib/songs/browse';
 import { CHART_FLOOR, UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
 
 const user: VocalRange = { low: 48, high: 72, source: 'test' }; // C3-C5, centre C4
@@ -230,15 +231,16 @@ describe('karaoke popularity (QWW-6)', () => {
     const b = song('B', 'NoTempo', range(57, 63));
     await store.putSongRange(a.key, { range: a.range, log: a.log });
     await store.putSongRange(b.key, { range: b.range, log: b.log });
-    // Deezer 60 folds to 120; a key with no song row never reaches the catalogue
+    // Deezer 60 folds to 120, which with no label to vouch for it is squeezed into the mid band (QWW-54: 105.68);
+    // a key with no song row never reaches the catalogue
     await store.putSongTempo([{ key: a.key, deezerBpm: 60 }, { key: 'nobody|else', trackerBpm: 99 }]);
     const getSongTempos = vi.spyOn(store, 'getSongTempos');
     const loaded = await loadCatalogue(store);
     expect(getSongTempos).toHaveBeenCalledTimes(1);
-    expect(loaded.find((s) => s.key === a.key)!.tempo).toBe(120);
+    expect(loaded.find((s) => s.key === a.key)!.tempo).toBeCloseTo(105.68, 2);
     expect(loaded.find((s) => s.key === b.key)).not.toHaveProperty('tempo');
     const all = recommendCatalogue(catalogueTracks(loaded), user, deps, { all: true });
-    expect(all.matches.find((m) => m.track.title === 'Fast')!.tempo).toBe(120);
+    expect(all.matches.find((m) => m.track.title === 'Fast')!.tempo).toBeCloseTo(105.68, 2);
     expect(all.matches.find((m) => m.track.title === 'NoTempo')).not.toHaveProperty('tempo');
   });
 
@@ -259,6 +261,101 @@ describe('karaoke popularity (QWW-6)', () => {
       expect(byTitle.Missed).not.toHaveProperty('deezerId');
       expect(byTitle['Never looked up']).not.toHaveProperty('deezerId');
     }
+  });
+
+  describe('feel labels (QWW-54)', () => {
+    /** Three songs: a really fast one, a ballad Deezer reads at double time, and one nobody labelled. */
+    async function withLabels(labels: 'none' | 'both') {
+      const store = createMemoryStore();
+      const fast = song('Fast', 'Really Fast', range(57, 63));
+      const ballad = song('Slow', 'Double Time Ballad', range(57, 63));
+      const plain = song('Plain', 'Unlabelled', range(57, 63));
+      for (const s of [fast, ballad, plain]) await store.putSongRange(s.key, { range: s.range, log: s.log });
+      await store.putSongTempo([
+        { key: fast.key, deezerBpm: 172 },
+        { key: ballad.key, deezerBpm: 170 },
+        { key: plain.key, deezerBpm: 100 },
+      ]);
+      if (labels === 'both') {
+        await store.putSongFeel([
+          { key: fast.key, feel: 'upbeat', source: 'test/v1' },
+          { key: ballad.key, feel: 'slow', source: 'test/v1' },
+        ]);
+      }
+      return { store, fast, ballad, plain };
+    }
+    const titles = (ms: { track: { title: string } }[]) => ms.map((m) => m.track.title);
+    const endOf = (loaded: Awaited<ReturnType<typeof loadCatalogue>>, tempo: 0 | 1) =>
+      titles(orderMatches(recommendCatalogue(catalogueTracks(loaded), user, deps, { all: true }).matches, { ...DEFAULT_VIEW, tempo }, user, 'catalogue'));
+
+    it('moves a labelled song into its label\'s band, says where its tempo came from, and leaves the others as measured', async () => {
+      const { store, fast, ballad, plain } = await withLabels('both');
+      const getSongFeels = vi.spyOn(store, 'getSongFeels');
+      const loaded = await loadCatalogue(store);
+      const by = (key: string) => loaded.find((s) => s.key === key)!;
+      expect(getSongFeels).toHaveBeenCalledTimes(1); // once for the whole catalogue
+      expect(by(fast.key)).toMatchObject({ tempo: 172, tempoSource: 'deezer' });
+      expect(by(ballad.key)).toMatchObject({ tempo: 85, tempoSource: 'deezer' }); // 170 halved
+      expect(by(plain.key)).toMatchObject({ tempoSource: 'deezer' });
+      expect(by(plain.key).tempo).toBeCloseTo(99.41, 2); // no label: 100 bpm squeezed into the mid band
+    });
+
+    it('keeps a double-time ballad off the upbeat end of the Tempo gear, and puts it first at the slow end', async () => {
+      const before = await loadCatalogue((await withLabels('none')).store);
+      // Without the labels the ballad is the second most upbeat song, above the song measured at 100.
+      expect(endOf(before, 1)).toEqual(['Really Fast', 'Double Time Ballad', 'Unlabelled']);
+      const after = await loadCatalogue((await withLabels('both')).store);
+      expect(endOf(after, 1)).toEqual(['Really Fast', 'Unlabelled', 'Double Time Ballad']);
+      expect(endOf(after, 0)).toEqual(['Double Time Ballad', 'Unlabelled', 'Really Fast']);
+    });
+
+    it('does no tempo work for a request: the tempos and labels are read once when the cache fills, and never again', async () => {
+      const { store } = await withLabels('both');
+      const getSongTempos = vi.spyOn(store, 'getSongTempos');
+      const getSongFeels = vi.spyOn(store, 'getSongFeels');
+      const catalogue = createCatalogue(() => loadCatalogue(store), deps);
+      for (const page of [{ all: true as const }, { all: true as const }, { offset: 0, limit: 2 }]) await catalogue.recommend(user, page);
+      expect(getSongTempos).toHaveBeenCalledTimes(1);
+      expect(getSongFeels).toHaveBeenCalledTimes(1);
+    });
+
+    it('carries the one tempo to the match and nothing else about it', async () => {
+      const loaded = await loadCatalogue((await withLabels('both')).store);
+      const m = recommendCatalogue(catalogueTracks(loaded), user, deps, { all: true }).matches.find((x) => x.track.title === 'Double Time Ballad')!;
+      expect(m.tempo).toBe(85);
+      expect(m).not.toHaveProperty('tempoSource');
+    });
+
+    it('works before the labels reach a database: a store with no feel methods, or no song_feel table, ranks on the measured tempo', async () => {
+      const { store, ballad } = await withLabels('both');
+      const { getSongFeels: _, ...withoutFeels } = store;
+      const measured = (await loadCatalogue(withoutFeels)).find((s) => s.key === ballad.key)!;
+      expect(measured.tempo).toBeCloseTo(121.36, 2); // 170 bpm, measured and unlabelled: squeezed into the mid band
+      expect(measured.tempo).toBeGreaterThanOrEqual(90); // never the 85 the label would give
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // Postgres' own words for it, with the code Neon sends, and pg-mem's wording without one
+      for (const err of [Object.assign(new Error('relation "song_feel" does not exist\nat somewhere'), { code: '42P01' }), new Error('relation "song_feel" does not exist')]) {
+        vi.spyOn(store, 'getSongFeels').mockRejectedValueOnce(err);
+        const loaded = await loadCatalogue(store);
+        expect(loaded.find((s) => s.key === ballad.key)).toMatchObject({ tempoSource: 'deezer' });
+        expect(loaded.find((s) => s.key === ballad.key)!.tempo).toBeCloseTo(121.36, 2);
+      }
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls[0]![0]).toContain('relation "song_feel" does not exist');
+      expect(warn.mock.calls[0]![0]).not.toContain('somewhere');
+      warn.mockRestore();
+    });
+
+    it('does not keep the measured tempos for a cache lifetime after a failed labels read: it fails like the other reads, and the next fill asks again', async () => {
+      const { store, ballad } = await withLabels('both');
+      vi.spyOn(store, 'getSongFeels').mockRejectedValueOnce(new Error('fetch failed (timeout)'));
+      let now = 0;
+      const catalogue = createCatalogue(() => loadCatalogue(store), deps, { now: () => now });
+      await expect(catalogue.get()).rejects.toThrow('fetch failed');
+      now += 1; // the failed fill was dropped, so this asks again and gets the labelled tempo
+      expect((await catalogue.get()).find((t) => t.key === ballad.key)!.tempo).toBe(85);
+    });
   });
 
   it('scores with it on every request, all=1 or a page, and returns the stored range', () => {

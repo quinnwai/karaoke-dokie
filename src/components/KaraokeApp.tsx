@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { detectPitch } from '../lib/audio/pitch';
 import { detectHeldNote } from '../lib/audio/heldNote';
+import { isDigitalSilence, MIN_MUTED_SAMPLES } from '../lib/audio/level';
 import { frequencyToMidi, midiToNoteName } from '../lib/audio/notes';
 import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
+import { detectBrowser } from '../lib/client/browser';
 import { createTracker, flushWhenHidden, loadAnonId, sendEvents, type Tracker } from '../lib/client/events';
 import { flowReducer, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
 import { eventsFor } from '../lib/client/funnel';
-import { browserMic, type Mic, type MicRecorder } from '../lib/client/mic';
+import { browserMic, classifyMicError, MicError, type Mic, type MicRecorder } from '../lib/client/mic';
 import {
   clearProgress,
   loadProgress,
@@ -20,6 +22,7 @@ import {
 } from '../lib/client/storage';
 import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';
+import { MicStep } from './MicStep';
 import { PickSongs } from './PickSongs';
 import { Results } from './Results';
 import { SongDetail } from './SongDetail';
@@ -33,6 +36,8 @@ export interface KaraokeAppProps {
   mic?: Mic;
   /** Leaves the page (Spotify sign-in). */
   navigate?: (url: string) => void;
+  /** Reloads the page ("Reload this page" on the mic step). Not `navigate(location.href)`: that does nothing when the address has a #fragment. */
+  reload?: () => void;
   /** How long "Find a quiet spot" stays up. */
   quietMs?: number;
   /**
@@ -45,11 +50,14 @@ export interface KaraokeAppProps {
 }
 
 const LIVE_FRAME = 2048;
+/** A press shorter than this is a tap. */
+const TAP_MS = 400;
 const LIVE_EVERY_MS = 50; // ~20 times a second
 
 const defaultNavigate = (url: string) => window.location.assign(url);
+const defaultReload = () => window.location.reload();
 
-export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, quietMs = 2600, pickSongs: canPick = false }: KaraokeAppProps) {
+export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = defaultNavigate, reload = defaultReload, quietMs = 2600, pickSongs: canPick = false }: KaraokeAppProps) {
   const [api] = useState(() => apiProp ?? createApi());
   const [state, rawDispatch] = useReducer(flowReducer, initialState);
 
@@ -75,6 +83,7 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
   const [signInFailed, setSignInFailed] = useState(false);
   const recorder = useRef<MicRecorder | null>(null);
   const holding = useRef(false);
+  const holdStarted = useRef(0);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Who is this? Signed in, mid-test, or brand new.
@@ -180,30 +189,84 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
     recorder.current = null;
   }, []);
 
+  // The microphone opened on the mic step stays open into the hold steps, so the browser is not asked again.
   useEffect(() => {
-    if (step !== 'low' && step !== 'high') releaseMic();
+    if (step !== 'mic' && step !== 'low' && step !== 'high') releaseMic();
   }, [step, releaseMic]);
   useEffect(() => releaseMic, [releaseMic]);
 
-  const holdStart = async () => {
-    if (holding.current) return;
-    holding.current = true;
-    setLive(null);
-    dispatch({ type: 'holdStart' });
-    let rec = recorder.current;
-    if (!rec) {
-      try {
-        rec = await mic.open();
-      } catch {
-        // Denied, or no microphone at all: either way we cannot hear the user.
-        holding.current = false;
-        dispatch({ type: 'micDenied' });
+  // ---- the mic step (QWW-50) ----
+  const gate = state.mic;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // Looks at the browser and asks it what it already knows about the microphone. This never shows a question.
+  useEffect(() => {
+    if (step !== 'mic' || gate.view !== 'checking') return;
+    let cancelled = false;
+    void mic.permission().then((permission) => {
+      if (cancelled) return;
+      const nav = navigator as Navigator & { standalone?: boolean };
+      const env = detectBrowser(nav.userAgent, { maxTouchPoints: nav.maxTouchPoints, standalone: nav.standalone });
+      dispatch({ type: 'micChecked', env, permission });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [step, gate.view, mic, dispatch]);
+
+  // Opens the microphone: the browser's own question after a tap, or a microphone it had already allowed.
+  const openMic = useCallback(async () => {
+    try {
+      const rec = await mic.open();
+      // Left the mic step (or the page), or the screen no longer waits for one, while the question was up: nobody
+      // wants this microphone any more.
+      const { step: at, mic: now } = stateRef.current;
+      if (!mounted.current || at !== 'mic' || (now.view !== 'asking' && now.view !== 'opening')) {
+        rec.close();
         return;
       }
+      recorder.current?.close();
       recorder.current = rec;
-      // Released while the permission prompt was up: nothing recorded yet.
-      if (!holding.current) return;
+      dispatch({ type: 'micGranted' });
+    } catch (err) {
+      if (mounted.current) dispatch({ type: 'micFailed', reason: err instanceof MicError ? err.reason : classifyMicError(err) });
     }
+  }, [mic, dispatch]);
+
+  useEffect(() => {
+    if (step === 'mic' && gate.view === 'opening') void openMic();
+  }, [step, gate.view, openMic]);
+
+  // The tap itself calls the microphone, so the browser sees a person asking (iOS Safari wants that for audio).
+  const askMic = () => {
+    // Only the screens that ask can: a second tap before the first answer must not ask the browser twice.
+    const { step: at, mic: now } = stateRef.current;
+    if (at !== 'mic' || (now.view !== 'prompt' && now.view !== 'recovery')) return;
+    dispatch({ type: 'micAsk' });
+    void openMic();
+  };
+
+  const holdStart = () => {
+    if (holding.current) return;
+    const rec = recorder.current;
+    if (!rec || !rec.live()) {
+      // The microphone went away since the mic step (another app took it, the permission was taken back):
+      // back to the mic step, which asks again, rather than a hold that records nothing.
+      releaseMic();
+      dispatch({ type: 'micLost' });
+      return;
+    }
+    holding.current = true;
+    holdStarted.current = Date.now();
+    setLive(null);
+    dispatch({ type: 'holdStart' });
+    rec.resume();
     rec.reset();
     stopTicker();
     ticker.current = setInterval(() => {
@@ -225,6 +288,17 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
       return;
     }
     const samples = rec.take();
+    // Muted, or audio that never started: only exact zeros for long enough, or no sound at all from a recorder that is
+    // not running (iOS after a call or the lock screen) or after a hold too long to be a tap. A quiet singer's
+    // microphone still wobbles, and a quick tap on a running recorder is just a short hold. "Hold the note a little
+    // longer" would be said for ever. Back to the mic step: it shows our own screen even when the browser says the
+    // microphone is allowed, and the tap on its button starts the audio again.
+    const longHold = Date.now() - holdStarted.current > TAP_MS;
+    if (isDigitalSilence(samples) || (samples.length < MIN_MUTED_SAMPLES && (!rec.running() || longHold))) {
+      releaseMic();
+      dispatch({ type: 'micLost' });
+      return;
+    }
     // Let the button repaint before the analysis runs.
     setTimeout(() => {
       const held = detectHeldNote(samples, rec.sampleRate);
@@ -315,13 +389,17 @@ export function KaraokeApp({ api: apiProp, track, mic = browserMic, navigate = d
         </button>
       )}
 
+      {step === 'mic' && (
+        <MicStep gate={gate} onAsk={askMic} onTryHere={() => dispatch({ type: 'micTryHere' })} onReload={reload} />
+      )}
+
       {(step === 'low' || step === 'high') && (
         <HoldStep
           kind={step}
           status={state.hold}
           live={live}
           lowNote={step === 'high' && state.low !== null ? midiToNoteName(state.low) : null}
-          onPress={() => void holdStart()}
+          onPress={holdStart}
           onRelease={holdEnd}
         />
       )}
