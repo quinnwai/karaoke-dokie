@@ -314,20 +314,28 @@
   letter-spacing: clamp(-0.03em, calc((100cqw - 144px) / 22), 0px);
 }
 
-/* What the strip says in the place of its end labels when the gear cannot be used (History without Spotify). Up to two
-   lines: the strip's height is fixed (76, 94 in the mini sheet), so a longer hint is cut off, not left to push the rack
-   out. (max-height is the fallback if a build drops the -webkit- clamp.) */
+/* What the strip says in the place of its end labels when the gear cannot be used (History without Spotify): all of it, on as many
+   lines as it takes (the adversarial review of #38 found it cut off). The strip is 76 px tall, 94 in the mini sheet, and the rack's height
+   is fixed with it, so the type is made to fit and the room is not made bigger: 11 px on 12 px lines, where 6A's 12 px on 14 px lines,
+   clamped to two, cut the rest off. In Inter 500 the longer hint, "Spotify could not be reached, so listening history is off", is 286 px
+   at 11 px: three lines in a strip body under about 155 px (an expanded strip at 360 px, a mini one at 360 and 375), two from 159 px. The
+   signed-out hint is 233 px: two lines in every body from 129 px. Three lines are 36 px and fit every strip (see the next rule). They
+   stay whole with a Linux browser's text, which is 2 to 4% wider than a Mac's, and with the type 15% bigger; a fourth line takes 20%. */
 .unavailable {
   margin: 0;
-  max-height: 28px;
-  overflow: hidden;
-  font-size: 12px;
-  line-height: 14px;
+  font-size: 11px;
+  line-height: 12px;
   font-weight: 500;
   color: var(--sl-text-3);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+}
+
+/* An expanded strip has 74 px inside its borders; the label (14) and the track (20) leave 40 of them for the hint and the two gaps. So
+   its body fills the strip, as the old two lines of 14 px did, and the gaps take what the hint leaves: 8 px each for two lines, 2 for
+   three (6A's were 6). The mini strip has 92 px: its body stays centred with the 6 px gaps, 82 px with three lines. */
+.sheet:not([data-compact]) .stripBody:has(> .unavailable) {
+  align-self: stretch;
+  justify-content: space-between;
+  gap: 2px;
 }
 
 /* The real <input type="range">, laid invisibly over the whole strip body. It starts 7 px before the track and ends 7 px
