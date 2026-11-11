@@ -1,7 +1,8 @@
 // Two more places where the sheet's text did not fit its box (QWW-57, the adversarial review of PR #38). Both are about sheet.module.css; the
 // label on the gear strips (finding 4) is checked with the other R6 checks, in setlist-sheet.spec.ts.
-//   7  every tab label has 3 px clear on each side inside its tab at 360, 375, 390 and 412 px: one size for the five labels, 11 px where
-//      the widest fits at it, and the largest that fits where it does not
+//   7  every tab label has 3 px clear on each side inside its tab at 360, 375, 390 and 412 px, and "Popularity" has them with 4% to spare
+//      over a Mac's width (Linux, in CI, sets it 2.3% wider): one size for the five labels, 11 px where the widest fits at it with that
+//      spare, and the largest that fits where it does not
 //   8  every era label fits its button, on a phone and in the desktop frame, and its size follows the panel it is in, not the window
 // A tab or an era button is a box in a grid whose width is the sheet's, so what fits is read from the page: the width of the label's text (a Range
 // over it) against the box. The tuner is reached the way tests/e2e/setlist.spec.ts reaches it (tests/helpers/tunerE2e.ts).
@@ -53,8 +54,19 @@ const tabLabels = (page: Page) =>
 const CLEAR = 6;
 
 /**
- * Checks the five tab labels at the width the page is at: each keeps 3 px clear on each side, they share one size between 9.5 and 11 px,
- * and it is 11 px (6A's) wherever the widest fits at 11 and no smaller than it must be where it does not.
+ * "Popularity", the widest label, is 4.9474 px per px of font size in Inter 600 as a Mac sets it. CI's Linux Chromium sets it about 2.3% wider
+ * (platform text layout and hinting: 49.00 px at 9.68 px where a Mac measures 47.89 px, in a 54 px tab), which a fit with nothing to spare did
+ * not allow for: it passed on a Mac and failed in CI. So the label is checked twice. As this platform measures it, it must fit. And as a Mac's
+ * width plus 4% it must fit too, which is what a run on a Mac checks to catch what CI would. The second is the Mac's width per px, not the
+ * measured width times 1.04: on Linux that is already 2.3% wider, and the two together ask for 6.4%, more than the size is given.
+ */
+const POPULARITY_PER_PX = 4.9474;
+const SLACK = 1.04;
+
+/**
+ * Checks the five tab labels at the width the page is at: each keeps 3 px clear on each side as measured here, they share one size between 9
+ * and 11 px, "Popularity" keeps them with 4% to spare over a Mac's width, and the size is 11 px (6A's) wherever that fits with the same
+ * spare and no smaller than it must be where it does not.
  */
 async function expectTabsFit(page: Page, width: number) {
   const labels = await tabLabels(page);
@@ -62,12 +74,13 @@ async function expectTabsFit(page: Page, width: number) {
   for (const l of labels) expect(l.text + CLEAR, `${width} px: ${l.name} is ${l.text.toFixed(2)} px wide in a ${l.client} px tab`).toBeLessThanOrEqual(l.client);
   const size = labels[0]!.size;
   expect(new Set(labels.map((l) => l.size)).size, `${width} px: the five labels' sizes ${labels.map((l) => l.size)}`).toBe(1);
-  expect(size, `${width} px`).toBeGreaterThanOrEqual(9.5);
+  expect(size, `${width} px`).toBeGreaterThanOrEqual(9);
   expect(size, `${width} px`).toBeLessThanOrEqual(11);
-  const widest = labels.reduce((a, b) => (b.text > a.text ? b : a));
-  const slack = widest.client - (widest.text + CLEAR);
-  if (((widest.text * 11) / size) + CLEAR <= widest.client) expect(size, `${width} px: ${widest.name} fits at 11 px`).toBe(11);
-  else expect(slack, `${width} px: ${widest.name} has ${slack.toFixed(2)} px more than it needs, at ${size}px`).toBeLessThan(1.5);
+  const popularity = labels.find((l) => l.name === 'Popularity')!;
+  const padded = POPULARITY_PER_PX * size * SLACK + CLEAR;
+  expect(padded, `${width} px: Popularity 4% wider than a Mac sets it, at ${size}px, is ${(padded - CLEAR).toFixed(2)} px wide in a ${popularity.client} px tab`).toBeLessThanOrEqual(popularity.client);
+  if (POPULARITY_PER_PX * 11 * SLACK + CLEAR <= popularity.client) expect(size, `${width} px: Popularity fits at 11 px with 4% to spare`).toBe(11);
+  else expect(popularity.client - padded, `${width} px: more room than the size needs, at ${size}px`).toBeLessThan(1.5);
   return size;
 }
 
@@ -80,7 +93,7 @@ test('7. every tab label has 3 px clear on each side inside its tab at 360, 375,
     await showMode(page, 'mini');
     sizes.push(await expectTabsFit(page, width));
   }
-  // "Popularity" is the widest, so the size shrinks with the width and not below 9.5 px, and 6A's 11 px is back by 412 px.
+  // "Popularity" is the widest, so the size shrinks with the width and not below 9 px, and 6A's 11 px is back by 412 px.
   expect([...sizes].sort((x, y) => x - y), `the sizes at ${PHONES}: ${sizes}`).toEqual(sizes);
   expect(sizes[0], '360 px').toBeLessThan(11);
   expect(sizes[1], '375 px').toBeLessThan(11);

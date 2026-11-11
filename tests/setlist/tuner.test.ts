@@ -494,17 +494,18 @@ describe('sheet.module.css (QWW-57: R5, R6, R8, R10; the review of #38: findings
     expect(length(size, 129)).toBeCloseTo(11.35, 2);
   });
 
-  it('sets the tab labels\' type by the tab bar\'s width: 3 px clear each side of "Popularity" from 360 px, 11 px where that fits (finding 7)', () => {
+  it('sets the tab labels\' type by the tab bar\'s width: 3 px clear each side of "Popularity" with 4% to spare, from 360 px, 11 px where that fits (finding 7)', () => {
     expect(rule('.tabs')).toContain('container-type: inline-size;');
     expect(rule('.tab')).toContain('font-size: 11px;'); // what a browser without container units keeps
     const size = declared('.tab', 'font-size');
-    expect(size).toMatch(/^clamp\(9\.5px, [^;]*100cqw[^;]*, 11px\)$/);
-    // Inter 600: "Popularity" is 4.9474 px per px of font size. A tab is a fifth of the bar less four gaps of 4 px, and clientWidth is the box inside its borders, rounded.
+    expect(size).toMatch(/^clamp\(9px, [^;]*100cqw[^;]*, 11px\)$/);
+    // Inter 600 on a Mac: "Popularity" is 4.9474 px per px of font size. Linux (CI) sets it about 2.3% wider (49.00 px against 47.89 px at 9.68 px), which a fit with
+    // nothing to spare failed, so the label is 4% wider here. A tab is a fifth of the bar less four gaps of 4 px, and clientWidth is the box inside its borders, rounded.
     for (let bar = 298; bar <= 400; bar += 0.5) {
       const s = length(size, bar);
       const client = Math.round((bar - 16) / 5 - 2);
-      expect(s, `a bar of ${bar} px`).toBeGreaterThanOrEqual(9.5);
-      expect(client - 4.9474 * s, `"Popularity" at ${s}px in a tab of ${client} px (a bar of ${bar} px)`).toBeGreaterThanOrEqual(6);
+      expect(s, `a bar of ${bar} px`).toBeGreaterThanOrEqual(9);
+      expect(client - 4.9474 * 1.04 * s, `"Popularity" 4% wider than on a Mac, at ${s}px, in a tab of ${client} px (a bar of ${bar} px)`).toBeGreaterThanOrEqual(6);
     }
     expect(length(size, 350)).toBe(11); // a 412 px phone
     expect(length(size, 348)).toBe(11); // the desktop frame

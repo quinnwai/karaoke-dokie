@@ -487,11 +487,13 @@
   font-family: inherit;
   font-size: 11px;
   /* The five labels share one size, set by the bar's width (QWW-57). "Popularity" is the widest, 4.95 px per px of font size in Inter
-     600 (54.4 px at 6A's 11 px), and a tab is (100cqw - 16px) / 5 wide inside its 1 px borders: 54.4 px at 360, 57.4 at 375 and 60.4
-     at 390, so the label touched the border at 360 and ran into the 2 px of padding at 375. The size is the largest that leaves 3 px
-     clear on each side of the label (and half a px for the rounding of clientWidth), up to 6A's 11 px: 9.7 px at 360, 10.3 at 375,
-     10.9 at 390 and 11 from about 393 px up, never under 9.5. A browser without container units drops this line and keeps 11 px. */
-  font-size: clamp(9.5px, calc((100cqw - 58.5px) / 24.74), 11px);
+     600 on a Mac (54.4 px at 6A's 11 px), and a tab is (100cqw - 16px) / 5 wide inside its 1 px borders: 54.4 px at 360, 57.4 at 375
+     and 60.4 at 390, so the label touched the border at 360 and ran into the 2 px of padding at 375. The size is the largest that
+     leaves 3 px clear on each side of a label 4.5% wider than that (and half a px for the rounding of clientWidth), up to 6A's 11 px:
+     9.3 px at 360, 9.8 at 375, 10.4 at 390 and 11 from about 405 px up, never under 9 px, the era labels' floor. The 4.5% is for Linux,
+     where Chromium sets the label about 2.3% wider than a Mac does (49.0 px against 47.9 px at 9.7 px, in CI): a fit with none to
+     spare passed on a Mac and failed there. A browser without container units drops this line and keeps 11 px. */
+  font-size: clamp(9px, calc((100cqw - 58.5px) / 25.85), 11px);
   line-height: 13px;
   font-weight: 600;
   cursor: pointer;
