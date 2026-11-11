@@ -77,7 +77,7 @@ export interface SetlistScreenProps {
   /** Library mode: ends the session. Rejects when it could not, which the logo's box then says. */
   onLogout(): Promise<void>;
   /** The ▶ of a row (QWW-48). */
-  renderPlay?(match: Match): ReactNode;
+  renderPlay?(match: Match, position: number): ReactNode;
   /** Which titles have filled this visit (R12); kept by the app, so a list that empties, or a song page and Back, does not fill them again. */
   fillMemory?: FillMemory;
 }

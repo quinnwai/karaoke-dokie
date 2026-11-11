@@ -1075,7 +1075,7 @@ describe('KaraokeApp', () => {
     fireEvent.input(slider, { target: { value: '40' } });
     fireEvent.pointerUp(slider);
     fireEvent.change(slider);
-    expect(tracked.map((e) => e.name)).toEqual(['results_viewed', 'song_opened', 'feedback_tapped', 'gear_change']);
+    expect(tracked.map((e) => e.name)).toEqual(['list_view', 'song_open', 'feedback_tapped', 'gear_change']);
     // History, Tempo and Era start off, so they are null (Era's picks are only sent while Era is on).
     expect(tracked[1]!.props).toEqual({
       mode: 'library',
@@ -1347,7 +1347,7 @@ describe('the Setlist tuner screen', () => {
       // Difficulty was reset, so it is not in the view; History and Tempo were moved on; Popularity is on at its default.
       const gears = { difficulty: null, familiarity: 0.8, popularity: DEFAULTS.popularity / 100, tempo: 0.35 };
       const view = { mode: 'library', ...gears, eras: 's80' };
-      expect(tracked.find((e) => e.name === 'song_opened')!.props).toEqual({ ...view, position: 2 });
+      expect(tracked.find((e) => e.name === 'song_open')!.props).toEqual({ ...view, position: 2 });
       expect(tracked.find((e) => e.name === 'feedback_tapped')!.props).toEqual({ ...view, thumbs: 'up' });
       // The feedback request keeps its older shape, which has no eras.
       expect(api.feedback).toHaveBeenCalledWith({
@@ -1555,7 +1555,7 @@ describe('the Setlist tuner screen', () => {
       expect(screen.getByRole('heading', { name: 'Mr. Brightside' })).toBeTruthy();
       expect(screen.getByText('Hard')).toBeTruthy();
       // It was the first row, so that is its position in the event log; the log never carries the song itself.
-      expect(tracked.find((e) => e.name === 'song_opened')!.props).toMatchObject({ position: 1 });
+      expect(tracked.find((e) => e.name === 'song_open')!.props).toMatchObject({ position: 1 });
       expect(JSON.stringify(tracked)).not.toMatch(/Brightside|Killers|t15/);
 
       fireEvent.click(screen.getByRole('button', { name: 'It went well' }));

@@ -17,7 +17,7 @@ interface SongRowsProps {
    * button here; it sits beside the row's own button, never inside it, so a tap on ▶ cannot also open the song page. Without
    * it the slot shows an inert ▶.
    */
-  renderPlay?(match: Match): ReactNode;
+  renderPlay?(match: Match, position: number): ReactNode;
   /** Which titles have filled this visit (R12). The screen's owner keeps it, so it outlives this list; without it the list keeps its own. */
   fillMemory?: FillMemory;
 }
@@ -46,7 +46,7 @@ export function SongRows({ rows, scroller, onOpen, renderPlay, fillMemory }: Son
               <span className={styles.rankNumber} data-rank-number="" aria-hidden="true">
                 {i + 1}
               </span>
-              {renderPlay ? renderPlay(row.match) : <PlayPlaceholder />}
+              {renderPlay ? renderPlay(row.match, i + 1) : <PlayPlaceholder />}
             </span>
             <button type="button" className={styles.rowOpen} onClick={() => onOpen(row.id, i + 1)} aria-label={row.label} aria-describedby={`why-${row.id}`}>
               <span className={styles.rowText} data-row-text="">

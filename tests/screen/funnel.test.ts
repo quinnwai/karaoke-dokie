@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { catalogueKey, eventsFor, feedbackView, viewProps } from '../../src/lib/client/funnel';
+import { catalogueKey, eventsFor, feedbackView, rowPlayEvent, viewProps } from '../../src/lib/client/funnel';
 import { flowReducer, initialState, SHOW_STEP, type FlowEvent, type FlowState } from '../../src/lib/client/flow';
+import { POSTHOG_PROPS } from '../../src/lib/eventNames';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { isOn, type TunerAction } from '../../src/lib/setlist/tuner';
 import { allMatches, me } from '../fixtures/screen';
@@ -15,17 +16,17 @@ const tune = (...actions: TunerAction[]): FlowEvent[] => actions.map(tuner);
 const gearDone = (gear: 'difficulty' | 'history' | 'popularity' | 'tempo'): FlowEvent => ({ type: 'gearDone', gear });
 
 describe('funnel events', () => {
-  it('follows the onboarding: landing, start, quiet spot, both notes, range', () => {
-    expect(names(initialState, signedOut)).toEqual(['landing_viewed']);
+  it('follows the onboarding: title, start, quiet spot, both notes, range', () => {
+    expect(names(initialState, signedOut)).toEqual(['title_view']);
     const landing = run([signedOut]);
     expect(names(landing, { type: 'start' })).toEqual(['start_pressed', 'quiet_shown']);
     const low = run([{ type: 'start' }, { type: 'quietDone' }, ...micOn], landing);
     expect(eventsFor(low, { type: 'holdEnd', midi: null })).toEqual([{ name: 'hold_too_short', props: { step: 'low' } }]);
-    expect(eventsFor(low, { type: 'holdEnd', midi: 45 })).toEqual([{ name: 'note_detected', props: { step: 'low', midi: 45 } }]);
+    expect(eventsFor(low, { type: 'holdEnd', midi: 45 })).toEqual([{ name: 'low_note_done', props: { midi: 45 } }]);
     const high = run([{ type: 'holdEnd', midi: 45 }], low);
     expect(names(high, { type: 'holdEnd', midi: 40 })).toEqual(['note_out_of_order']);
     expect(eventsFor(high, { type: 'holdEnd', midi: 72 })).toEqual([
-      { name: 'note_detected', props: { step: 'high', midi: 72 } },
+      { name: 'high_note_done', props: { midi: 72 } },
       { name: 'range_shown', props: { low: 45, high: 72, spanSemitones: 27 } },
     ]);
   });
@@ -135,10 +136,10 @@ describe('funnel events', () => {
   it('records results, and the songs opened and rated with the tuner they were found in', () => {
     const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
     expect(eventsFor(atResults, { type: 'allLoaded', page: allMatches() })).toEqual([
-      { name: 'results_viewed', props: { mode: 'library', matchCount: 8, maybeCount: 2 } },
+      { name: 'list_view', props: { mode: 'library', matchCount: 8, maybeCount: 2 } },
     ]);
     const empty = { ...allMatches(0) };
-    expect(names(atResults, { type: 'allLoaded', page: empty })).toEqual(['results_viewed', 'results_empty']);
+    expect(names(atResults, { type: 'allLoaded', page: empty })).toEqual(['list_view', 'results_empty']);
     const loaded = run([{ type: 'allLoaded', page: allMatches() }], atResults);
     // An untouched tuner, signed in or not: Difficulty and Popularity on at their defaults; History, Tempo and Era start off.
     const untouched = {
@@ -149,7 +150,7 @@ describe('funnel events', () => {
       tempo: null,
       eras: null,
     };
-    expect(eventsFor(loaded, { type: 'select', trackId: 't3', position: 4 })).toEqual([{ name: 'song_opened', props: { ...untouched, position: 4 } }]);
+    expect(eventsFor(loaded, { type: 'select', trackId: 't3', position: 4 })).toEqual([{ name: 'song_open', props: { ...untouched, position: 4 } }]);
     expect(eventsFor(loaded, { type: 'feedback', trackId: 't3', thumbs: 'down' })).toEqual([{ name: 'feedback_tapped', props: { thumbs: 'down', ...untouched } }]);
     expect(eventsFor(loaded, { type: 'loadMore' })).toEqual([{ name: 'generate_more_pressed', props: { shown: SHOW_STEP, ...untouched } }]);
   });
@@ -158,10 +159,10 @@ describe('funnel events', () => {
     const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
     const page = { ...allMatches(), libraryUnavailable: true };
     expect(eventsFor(atResults, { type: 'allLoaded', page })).toEqual([
-      { name: 'results_viewed', props: { mode: 'catalogue', matchCount: 8, maybeCount: 2, libraryUnavailable: true } },
+      { name: 'list_view', props: { mode: 'catalogue', matchCount: 8, maybeCount: 2, libraryUnavailable: true } },
     ]);
     expect(eventsFor(atResults, { type: 'allLoaded', page: { ...allMatches(0), libraryUnavailable: true } })).toEqual([
-      { name: 'results_viewed', props: { mode: 'catalogue', matchCount: 0, maybeCount: 0, libraryUnavailable: true } },
+      { name: 'list_view', props: { mode: 'catalogue', matchCount: 0, maybeCount: 0, libraryUnavailable: true } },
       { name: 'results_empty', props: { mode: 'catalogue' } },
     ]);
   });
@@ -179,6 +180,65 @@ describe('funnel events', () => {
     const atResults = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }]);
     const partial = run([{ type: 'allLoaded', page: { ...allMatches(3), complete: false } }], atResults);
     expect(names(partial, { type: 'allLoaded', page: allMatches() })).toEqual([]);
+  });
+
+  it("records a preview that started playing with its place in the list, and a catalogue song's key only (QWW-48)", () => {
+    expect(rowPlayEvent('cat:queen|bohemian rhapsody', 3)).toEqual({ name: 'row_play', props: { position: 3, songKey: 'queen|bohemian rhapsody' } });
+    // A library song carries only its place: nothing that names it.
+    const library = rowPlayEvent('4uLU6hMCjMI75M1A2tKUQC', 5);
+    expect(library).toEqual({ name: 'row_play', props: { position: 5 } });
+    expect(JSON.stringify(library)).not.toContain('4uLU6h');
+    expect(rowPlayEvent('t1')).toEqual({ name: 'row_play', props: { position: null } });
+    for (const e of [rowPlayEvent('cat:a|b', 1), rowPlayEvent('t1', 2)]) {
+      for (const key of Object.keys(e.props!)) expect(POSTHOG_PROPS.has(key), key).toBe(true);
+    }
+  });
+
+  it('records only props that PostHog may have (POSTHOG_PROPS), so a new prop is a conscious choice', () => {
+    const seen = new Set<string>();
+    let state = initialState;
+    const walk: FlowEvent[] = [
+      signedOut,
+      { type: 'start' },
+      { type: 'quietDone' },
+      // The mic step: inside another app's browser, tried anyway, refused, then allowed (QWW-50).
+      { type: 'micChecked', env: INSTAGRAM, permission: 'prompt' },
+      { type: 'micTryHere' },
+      { type: 'micAsk' },
+      { type: 'micFailed', reason: 'denied' },
+      { type: 'micAsk' },
+      { type: 'micGranted' },
+      { type: 'holdStart' },
+      { type: 'holdEnd', midi: null },
+      { type: 'holdEnd', midi: 45 },
+      { type: 'holdEnd', midi: 40 },
+      { type: 'holdEnd', midi: 72 },
+      { type: 'showCatalogue' },
+      { type: 'loadFailed' },
+      { type: 'retryLoad' },
+      { type: 'allLoaded', page: { ...allMatches(), libraryUnavailable: true } },
+      { type: 'loadMore' },
+      tuner({ type: 'input', gear: 'difficulty', value: 30 }),
+      gearDone('difficulty'),
+      tuner({ type: 'reset', gear: 'difficulty' }),
+      tuner({ type: 'era', era: 's80' }),
+      tuner({ type: 'reset', gear: 'era' }),
+      { type: 'select', trackId: 'cat:queen|bohemian rhapsody', position: 2 },
+      { type: 'feedback', trackId: 'cat:queen|bohemian rhapsody', thumbs: 'up' },
+      { type: 'deselect' },
+      { type: 'redoEnd', end: 'low' },
+      { type: 'redo' },
+      { type: 'pickStart' },
+    ];
+    for (const action of walk) {
+      for (const e of eventsFor(state, action)) for (const key of Object.keys(e.props ?? {})) seen.add(key);
+      state = flowReducer(state, action);
+    }
+    expect([...seen].filter((key) => !POSTHOG_PROPS.has(key))).toEqual([]);
+    // The walk reached the events that carry props, so the check above means something.
+    for (const key of ['step', 'midi', 'low', 'high', 'spanSemitones', 'mode', 'matchCount', 'libraryUnavailable', 'shown', 'gear', 'value', 'on', 'era', 'picked', 'eras', 'position', 'songKey', 'thumbs', 'end', 'from', 'signedIn', 'browser', 'via', 'reason', 'app']) {
+      expect(seen.has(key), key).toBe(true);
+    }
   });
 });
 
@@ -280,7 +340,7 @@ describe('the Setlist tuner events', () => {
     });
   });
 
-  describe('the tuner on song_opened, feedback_tapped and generate_more_pressed', () => {
+  describe('the tuner on song_open, feedback_tapped and generate_more_pressed', () => {
     const tuned = run(
       tune(
         { type: 'input', gear: 'difficulty', value: 33 },
@@ -300,7 +360,7 @@ describe('the Setlist tuner events', () => {
     });
 
     it('all three carry it', () => {
-      expect(eventsFor(tuned, { type: 'select', trackId: 't2', position: 3 })).toEqual([{ name: 'song_opened', props: { ...props, position: 3 } }]);
+      expect(eventsFor(tuned, { type: 'select', trackId: 't2', position: 3 })).toEqual([{ name: 'song_open', props: { ...props, position: 3 } }]);
       expect(eventsFor(tuned, { type: 'feedback', trackId: 't2', thumbs: 'up' })).toEqual([{ name: 'feedback_tapped', props: { thumbs: 'up', ...props } }]);
       expect(eventsFor(tuned, { type: 'loadMore' })).toEqual([{ name: 'generate_more_pressed', props: { shown: SHOW_STEP, ...props } }]);
     });

@@ -10,8 +10,9 @@ import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
 import { detectBrowser } from '../lib/client/browser';
 import { createTracker, flushWhenHidden, loadAnonId, sendEvents, type Tracker } from '../lib/client/events';
 import { flowReducer, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
-import { eventsFor, feedbackView, viewProps } from '../lib/client/funnel';
+import { eventsFor, feedbackView, rowPlayEvent, viewProps } from '../lib/client/funnel';
 import { browserMic, classifyMicError, MicError, type Mic, type MicRecorder } from '../lib/client/mic';
+import { createPostHogSink } from '../lib/client/posthog';
 import {
   clearProgress,
   loadProgress,
@@ -21,6 +22,8 @@ import {
   setWantsPick,
   takeWantsPick,
 } from '../lib/client/storage';
+import type { PostHogSettings } from '../lib/contracts';
+import { EVENT } from '../lib/eventNames';
 import { useRankedSetlist } from '../lib/client/useRankedSetlist';
 import { createNetworkEngine, type SetlistEngine } from '../lib/setlist/engine';
 import { toRequest } from '../lib/setlist/tuner';
@@ -28,7 +31,7 @@ import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';
 import { MicStep } from './MicStep';
 import { PickSongs } from './PickSongs';
-import { PreviewButton } from './PreviewButton';
+import { listenForRowPlay, PreviewButton } from './PreviewButton';
 import { SetlistScreen } from './setlist/SetlistScreen';
 import { useFillMemory } from './setlist/useFillIn';
 import { SongDetail } from './SongDetail';
@@ -59,11 +62,18 @@ export interface KaraokeAppProps {
    */
   setlistEngine?: SetlistEngine;
   /** The ▶ of a list row. Default: the song's 30 s Deezer preview (QWW-48, PreviewButton); a test can pass its own. */
-  renderPlay?(match: Match): ReactNode;
+  renderPlay?(match: Match, position: number): ReactNode;
+  /**
+   * PostHog as the event log's second sink (QWW-51; app/page.tsx reads it from the environment). Null or absent, or with a
+   * `track` of your own, events go to our own log alone.
+   */
+  postHog?: PostHogSettings | null;
 }
 
-/** The ▶ in a row's slot: plays the song's Deezer preview, or is disabled when the song has none. */
-const previewPlay = (m: Match): ReactNode => <PreviewButton id={m.track.id} deezerId={m.deezerId} title={m.track.title} artist={m.track.artist} />;
+/** The ▶ in a row's slot: plays the song's Deezer preview, or is disabled when the song has none. `position` is the row's 1-based place on screen, which the event log's row_play carries (QWW-51). */
+const previewPlay = (m: Match, position: number): ReactNode => (
+  <PreviewButton id={m.track.id} deezerId={m.deezerId} title={m.track.title} artist={m.track.artist} position={position} />
+);
 
 const LIVE_FRAME = 2048;
 /** A press shorter than this is a tap. */
@@ -86,14 +96,26 @@ export function KaraokeApp({
   pickSongs: canPick = false,
   setlistEngine,
   renderPlay = previewPlay,
+  postHog = null,
 }: KaraokeAppProps) {
   const [api] = useState(() => apiProp ?? createApi());
   const [state, rawDispatch] = useReducer(flowReducer, initialState);
 
   // Beta event log (QWW-16, QWW-20): every action passes through here, and funnel.ts decides what
-  // it records. The server drops everything unless collection is switched on.
-  const [tracker] = useState(() => track ?? createTracker({ anonId: loadAnonId(), send: sendEvents }));
+  // it records. The server drops everything unless collection is switched on. PostHog is the tracker's
+  // second sink (QWW-51), when the environment has a key for it.
+  const [posthog] = useState(() => (track || !postHog ? null : createPostHogSink(postHog, loadAnonId())));
+  const [tracker] = useState(() => track ?? createTracker({ anonId: loadAnonId(), send: sendEvents, mirror: posthog ?? undefined }));
   useEffect(() => (typeof window === 'undefined' ? undefined : flushWhenHidden(tracker)), [tracker]);
+  // The page's one preview player (QWW-48) tells the event log when a preview starts playing (QWW-51).
+  useEffect(
+    () =>
+      listenForRowPlay((trackId, position) => {
+        const e = rowPlayEvent(trackId, position);
+        tracker.track(e.name, e.props);
+      }),
+    [tracker],
+  );
   const stateRef = useRef<FlowState>(state);
   useEffect(() => {
     stateRef.current = state;
@@ -107,6 +129,10 @@ export function KaraokeApp({
     },
     [tracker],
   );
+  // Session replay records only a visitor known to be signed out: a signed-in screen shows their Spotify name and
+  // songs from their library, which must not reach PostHog.
+  const replayAllowed = state.step !== 'boot' && !state.signedIn;
+  useEffect(() => posthog?.setReplay(replayAllowed), [posthog, replayAllowed]);
   const [live, setLive] = useState<number | null>(null);
   // The tuner's sheet has been sized once (QWW-57, decision 1): the first time the singer reaches it, a short phone opens it
   // in mini; after that it stays as they left it, through a song and back.
@@ -398,7 +424,7 @@ export function KaraokeApp({
 
   // Spotify as the upgrade: keep the range across the sign-in round trip, then it is saved to the account.
   const connectSpotify = () => {
-    tracker.track('spotify_connect_pressed', { from: state.step, mode: state.mode });
+    tracker.track(EVENT.spotifyConnect, { from: state.step, mode: state.mode });
     tracker.flush();
     if (state.range) saveProgress({ low: state.range.low, high: state.range.high });
     navigate(LOGIN_PATH);

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createPreviewPlayer, previewSrc, RELOAD_AFTER_PAUSE_MS, type PreviewCheck } from '../../src/lib/client/preview';
 import { FakeAudio, settle } from '../helpers/fakeAudio';
 
-function setup(check: PreviewCheck = async () => 'retry') {
+function setup(check: PreviewCheck = async () => 'retry', onStart?: (key: string, position: number | undefined) => void) {
   const audio = new FakeAudio();
   let made = 0;
   let clock = 1_000_000;
@@ -15,13 +15,14 @@ function setup(check: PreviewCheck = async () => 'retry') {
     },
     check: checks,
     now: () => clock,
+    onStart,
   });
   const state = () => {
     const s = player.snapshot();
     return { key: s.key, status: s.status };
   };
-  /** A tap on row t<n>, whose Deezer track is n (unless given). */
-  const tap = (n: number, deezerId = n) => player.toggle(`t${n}`, deezerId);
+  /** A tap on row t<n>, whose Deezer track is n (unless given), sitting at `position` in the list. */
+  const tap = (n: number, deezerId = n, position?: number) => player.toggle(`t${n}`, deezerId, position);
   const wait = (ms: number) => {
     clock += ms;
   };
@@ -305,5 +306,151 @@ describe('preview player', () => {
     audio.start(30);
     audio.currentTime = 15;
     expect(player.progress()).toBe(0.5);
+  });
+});
+
+// QWW-51: the event log's row_play is told when a preview a tap started makes its first sound.
+describe('preview player: onStart', () => {
+  it('reports a preview at its first sound, with the row and its place, and not at the tap', async () => {
+    const onStart = vi.fn();
+    const { audio, tap } = setup(undefined, onStart);
+    tap(3, 3, 7);
+    expect(onStart).not.toHaveBeenCalled(); // loading: nothing has played yet
+    audio.start();
+    await settle();
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith('t3', 7);
+  });
+
+  it('passes no place when the tap had none', async () => {
+    const onStart = vi.fn();
+    const { audio, tap } = setup(undefined, onStart);
+    tap(3);
+    audio.start();
+    await settle();
+    expect(onStart).toHaveBeenCalledWith('t3', undefined);
+  });
+
+  it('reports a pause and a resume of the same preview as nothing new', async () => {
+    const onStart = vi.fn();
+    const { audio, tap } = setup(undefined, onStart);
+    tap(1, 1, 2);
+    audio.start();
+    await settle();
+    tap(1, 1, 2); // pause
+    tap(1, 1, 2); // resume where it stopped
+    audio.start();
+    await settle();
+    audio.resumeFromOutside(); // the lock screen or headphones
+    await settle();
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report a resume from a fresh link after a long pause', async () => {
+    const onStart = vi.fn();
+    const { audio, tap, wait } = setup(undefined, onStart);
+    tap(1, 1, 2);
+    audio.start();
+    await settle();
+    audio.currentTime = 9;
+    tap(1, 1, 2); // pause
+    wait(RELOAD_AFTER_PAUSE_MS + 1);
+    tap(1, 1, 2); // the link may have run out: it loads again, at the same spot
+    audio.start();
+    await settle();
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports each row once as the singer moves between rows, and only a quick tap that was heard', async () => {
+    const onStart = vi.fn();
+    const { audio, tap } = setup(undefined, onStart);
+    for (const [i, n] of [11, 22, 33, 44, 55].entries()) {
+      tap(n, n, n);
+      if (i < 2) audio.start(); // the first two get as far as a sound; the next three are cut short by a newer tap
+      await settle();
+    }
+    audio.start();
+    await settle();
+    expect(onStart.mock.calls).toEqual([
+      ['t11', 11],
+      ['t22', 22],
+      ['t55', 55],
+    ]);
+  });
+
+  it('reports a row again when it is tapped after it played to its end', async () => {
+    const onStart = vi.fn();
+    const { audio, tap } = setup(undefined, onStart);
+    tap(1, 1, 4);
+    audio.start();
+    await settle();
+    audio.finish();
+    await settle();
+    tap(1, 1, 4);
+    audio.start();
+    await settle();
+    expect(onStart).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not report a preview that never sounds, then reports the one that does', async () => {
+    const onStart = vi.fn();
+    const { audio, tap } = setup(async () => 'retry', onStart);
+    tap(1, 1, 1);
+    audio.fail(); // Deezer is down: nothing played
+    await settle();
+    expect(onStart).not.toHaveBeenCalled();
+    tap(1, 1, 1); // another tap, and this time it plays
+    audio.start();
+    await settle();
+    expect(onStart).toHaveBeenCalledTimes(1);
+
+    tap(2, 2, 2);
+    audio.refuse(); // the browser did not count the tap
+    await settle();
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports once when a pause before the first sound is resumed and then plays', async () => {
+    const onStart = vi.fn();
+    const { audio, tap } = setup(undefined, onStart);
+    tap(1, 1, 3);
+    tap(1, 1, 3); // paused while still loading
+    await settle();
+    expect(onStart).not.toHaveBeenCalled();
+    tap(1, 1, 3); // resumed
+    audio.start();
+    await settle();
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith('t1', 3);
+  });
+
+  it('does not report a row that went away before its first sound', async () => {
+    const onStart = vi.fn();
+    const { audio, player, tap } = setup(undefined, onStart);
+    tap(1, 1, 3);
+    player.release('t1');
+    audio.start();
+    await settle();
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it('keeps playing when the listener throws', async () => {
+    const onStart = vi.fn(() => {
+      throw new Error('the log is down');
+    });
+    const { audio, state, tap } = setup(undefined, onStart);
+    tap(1, 1, 3);
+    audio.start();
+    await settle();
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(state()).toEqual({ key: 't1', status: 'playing' });
+  });
+
+  it('works with no listener at all', async () => {
+    const { audio, state, tap } = setup();
+    tap(1, 1, 3);
+    audio.start();
+    await settle();
+    expect(state()).toEqual({ key: 't1', status: 'playing' });
   });
 });

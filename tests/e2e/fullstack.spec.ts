@@ -153,7 +153,7 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
       const ev = await (await page.request.get('/api/admin/events', { headers: { 'x-admin-token': 'e2e-admin' } })).json();
       return Object.fromEntries(ev.funnel.map((f: { name: string; devices: number }) => [f.name, f.devices]));
     })
-    .toMatchObject({ results_viewed: 1, song_opened: 1, spotify_connect_pressed: 1 });
+    .toMatchObject({ list_view: 1, song_open: 1, spotify_connect: 1 });
   const ev = await (await page.request.get('/api/admin/events', { headers: { 'x-admin-token': 'e2e-admin' } })).json();
   const stored = JSON.stringify(ev.sessions);
   expect(stored).not.toMatch(/mock-\d+-/);

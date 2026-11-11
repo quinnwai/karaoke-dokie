@@ -6,6 +6,7 @@
 // songs (no Spotify) may carry their catalogue key; library songs carry only their position.
 
 import type { EventValue, ResultsView } from '../contracts';
+import { EVENT } from '../eventNames';
 import { browserLabel } from './browser';
 import { isOn } from '../setlist/tuner';
 import type { GearId } from '../setlist/types';
@@ -58,6 +59,17 @@ export function catalogueKey(trackId: string): string | null {
   return trackId.startsWith('cat:') ? trackId.slice(4) : null;
 }
 
+/**
+ * A row's preview started playing (QWW-48's ▶, reported by the preview player): the row's place in the list, and a
+ * catalogue song's key (a library song carries only its place).
+ */
+export function rowPlayEvent(trackId: string, position?: number): FunnelEvent {
+  const props: Record<string, EventValue> = { position: position ?? null };
+  const key = catalogueKey(trackId);
+  if (key) props.songKey = key;
+  return { name: EVENT.rowPlay, props };
+}
+
 /** Events for one action, given the state before it. */
 export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
   const next = flowReducer(prev, action);
@@ -71,7 +83,7 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
       if (step !== 'low' && step !== 'high') break;
       if (action.midi === null) out.push({ name: 'hold_too_short', props: { step } });
       else if (next.hold === 'order') out.push({ name: 'note_out_of_order', props: { step, midi: action.midi } });
-      else out.push({ name: 'note_detected', props: { step, midi: action.midi } });
+      else out.push({ name: step === 'low' ? EVENT.lowNoteDone : EVENT.highNoteDone, props: { midi: action.midi } });
       break;
     }
     case 'showCatalogue':
@@ -85,7 +97,7 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
       // A library the server could not read comes back as catalogue songs, whatever the screen asked for (QWW-55).
       const unavailable = action.page.libraryUnavailable === true;
       const mode = unavailable ? 'catalogue' : prev.mode;
-      out.push({ name: 'results_viewed', props: { mode, matchCount, maybeCount, ...(unavailable ? { libraryUnavailable: true } : {}) } });
+      out.push({ name: EVENT.listView, props: { mode, matchCount, maybeCount, ...(unavailable ? { libraryUnavailable: true } : {}) } });
       if (action.page.matches.length === 0) out.push({ name: 'results_empty', props: { mode } });
       break;
     }
@@ -117,7 +129,7 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
       const props: Record<string, EventValue> = { ...viewProps(prev), position: action.position ?? null };
       const key = catalogueKey(action.trackId);
       if (key) props.songKey = key;
-      out.push({ name: 'song_opened', props });
+      out.push({ name: EVENT.songOpen, props });
       break;
     }
     case 'feedback':
@@ -154,17 +166,17 @@ function micEvents(prev: FlowState, next: FlowState, action: FlowEvent): FunnelE
   const browser = env ? browserLabel(env) : 'other';
   const via = prev.mic.view === 'asking' ? 'prompt' : 'already';
   // The flow takes a grant only on a screen that waits for one, and then leaves the mic step.
-  if (action.type === 'micGranted') return next.step === 'mic' ? [] : [{ name: 'mic_granted', props: { via, browser } }];
+  if (action.type === 'micGranted') return next.step === 'mic' ? [] : [{ name: EVENT.micGranted, props: { via, browser } }];
   if (next.mic.view === prev.mic.view) return [];
   switch (next.mic.view) {
     case 'inapp':
-      return [{ name: 'inapp_browser_detected', props: { app: env?.inApp ?? 'webview', browser } }];
+      return [{ name: EVENT.inappBrowserDetected, props: { app: env?.inApp ?? 'webview', browser } }];
     case 'prompt':
-      return [{ name: 'mic_prompt_shown', props: { browser } }];
+      return [{ name: EVENT.micPromptShown, props: { browser } }];
     case 'recovery':
       return [
-        { name: 'mic_denied', props: { reason: problem ?? 'denied', via, browser } },
-        { name: 'mic_recovery_shown', props: { reason: problem ?? 'denied', browser } },
+        { name: EVENT.micDenied, props: { reason: problem ?? 'denied', via, browser } },
+        { name: EVENT.micRecoveryShown, props: { reason: problem ?? 'denied', browser } },
       ];
     default:
       return [];
@@ -175,7 +187,7 @@ function micEvents(prev: FlowState, next: FlowState, action: FlowEvent): FunnelE
 export function stepEvents(step: Step, s: FlowState): FunnelEvent[] {
   switch (step) {
     case 'landing':
-      return [{ name: 'landing_viewed' }];
+      return [{ name: EVENT.titleView }];
     case 'quiet':
       return [{ name: 'quiet_shown' }];
     case 'signin':
