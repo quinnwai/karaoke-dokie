@@ -131,15 +131,18 @@ test('a signed-in singer whose Spotify library could not be read sees catalogue 
   await expect(page.getByText('Couldn’t load songs.')).toHaveCount(0);
   // A catalogue list has no listening history: the gear is off and says why, whatever Spotify was before.
   await expect(page.locator('#slider-history')).toBeDisabled();
-  await expect(page.getByText('Spotify could not be reached, so listening history is off')).toBeVisible();
   await expect(page.locator('#slider-difficulty')).toBeVisible();
-  // The note is one line on the narrowest phone, above the list and inside the screen.
+  // The hint stands where History's end labels would. A phone this short opens the sheet in mini (QWW-57), so open History's tab.
+  await page.locator('[data-tab][data-gear="history"]').click();
+  await expect(page.getByText('Spotify could not be reached, so listening history is off')).toBeVisible();
+  // The note is a few words, above the list and inside the screen. Round 6A's quiet voice is 15/500 (it was 14 px), so on the
+  // narrowest phone it takes two lines at most.
   const lines = await note.evaluate((el) => {
     const range = document.createRange();
     range.selectNodeContents(el);
     return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
   });
-  expect(lines).toBe(1);
+  expect(lines).toBeLessThanOrEqual(2);
   const box = (await note.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(375);

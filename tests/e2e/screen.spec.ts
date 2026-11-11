@@ -246,10 +246,10 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   expect(api.recommendationCalls).toEqual(['catalogue ?low=45&high=72&all=1']);
   expect(api.savedRanges).toEqual([]);
   expect(await page.evaluate(() => localStorage.getItem('kd.range'))).toBe(JSON.stringify({ low: 45, high: 72 }));
-  // The results are the Setlist tuner, full screen, with no TV around it. Catalogue songs are nobody's library, so
+  // The results are the Setlist tuner, on the one TV every step is on. Catalogue songs are nobody's library, so
   // there is no listening history to tune by.
   await expect(page.getByRole('heading', { name: 'Tune your setlist' })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Karaoke screen' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Karaoke screen' })).toHaveCount(1);
   await expect(page.locator('#slider-history')).toBeDisabled();
   await page.waitForTimeout(800);
   await shot(page, '07-catalogue-results');
@@ -342,7 +342,8 @@ test("on a 360px phone Spotify's player gets the 280px it wants and the TV stays
   expect((await player.boundingBox())!.width).toBeGreaterThanOrEqual(280);
   // A player that is too wide for its screen pushes the whole TV past the page edge.
   const tv = (await page.getByRole('region', { name: 'Karaoke screen' }).boundingBox())!;
-  expect(tv.x + tv.width).toBeLessThanOrEqual(360 - 16 + 1);
+  // On a phone the TV has the page's 10 px of padding (Round 6A §3.3), so it ends at 350.
+  expect(tv.x + tv.width).toBeLessThanOrEqual(360 - 10 + 1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
   await player.scrollIntoViewIfNeeded();
   await shot(page, '13-player-360px');
@@ -489,10 +490,13 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
     const page = await context.newPage();
     await page.goto('/');
     await expect(page.locator('[data-row]')).toHaveCount(40);
+    // Both of these open the sheet in mini (the expanded sheet leaves fewer than 3 rows, QWW-57); this walk needs every gear.
+    if ((await page.locator('#app').getAttribute('data-mode')) === 'mini') await page.locator('#handle').click();
+    await expect(page.locator('#app')).toHaveAttribute('data-mode', 'expanded');
 
     const titles = () => page.locator('[data-row-title]').allTextContents();
-    // A row's button ends its name with the song's label: "..., Easy".
-    const leadLabel = async () => ((await page.locator('[data-row] button').first().getAttribute('aria-label')) ?? '').split(', ').at(-1);
+    // A row's button ends its name with the song's label: "..., Easy". (The ▶ in the slot beside it is not that button.)
+    const leadLabel = async () => ((await page.locator('[data-row] > button').first().getAttribute('aria-label')) ?? '').split(', ').at(-1);
     // The list is re-ranked a moment after the thumb moves: read it once it has stopped changing.
     const settled = async () => {
       let before = JSON.stringify(await titles());
@@ -662,8 +666,9 @@ async function walkLogo(browser: Browser, baseURL: string | undefined, { size, f
   // A finger taps; a mouse points at the logo and clicks.
   const open = () => (finger ? logo.tap() : logo.hover());
   const press = (target: typeof logo) => (finger ? target.tap() : target.click());
-  // Somewhere neutral: a tap on the heading, or the pointer over the sheet near the bottom.
-  const away = () => (finger ? page.getByRole('heading', { name: 'Tune your setlist' }).tap() : page.mouse.move(w / 2, size.height - 40));
+  // Somewhere neutral: a tap on the page's padding below the TV (the open box covers the heading now that it sits under the
+  // row of the logo), or the pointer over the sheet near the bottom.
+  const away = () => (finger ? page.touchscreen.tap(w / 2, size.height - 5) : page.mouse.move(w / 2, size.height - 40));
 
   await page.goto('/');
   await expect(page.locator('[data-row]')).toHaveCount(10);

@@ -1,0 +1,38 @@
+# Round 6A design: where production differs on purpose
+
+`setlist-round6a-README.md` and `setlist-round6a.html` are the design as it was handed over (QWW-57). They are kept as they
+were. Round 6A reskins the Round 5 tuner (`docs/setlist-round5/`, which this follows for anything 6A does not mention) into the
+app's "night out" look. The screen is `src/components/setlist/`; this lists where it differs from them, and why. The Round 5
+list still applies to the rows it names (the engine, rank order in the DOM, the song page, the test hook).
+
+Quinn-Wai answered the open questions on 11 Nov (QWW-46 and QWW-57); the decisions are numbered as in QWW-57.
+
+| 6A says | Production does | Why |
+|---|---|---|
+| §3.3: a device frame, 390×844 as a mock, filling the viewport at 430 px wide or less | The tuner renders inside `Tv` (`src/components/Tv.tsx`), the TV the title and mic steps use: one frame for every step, no second bezel. On a phone (up to 430 px) `Tv` takes 6A's numbers (page padding 14 10 12, bezel padding 9 9 0, radii 30 and 22, a 34 px chin with the LED) and fills the viewport; the bottom padding clears the home bar. Wider, it is today's TV with the tuner column capped at 480 px and centred | Decision 2 (it reverses the PR #4 note that took the frame away). That tightens the earlier steps by a few px on phones, which is the point. `Tv` already draws the scanlines and the inner shadow, so the tuner draws neither |
+| §3.1: the tokens | The same values, scoped to the tuner as `--sl-*` custom properties; the earlier steps keep theirs. The bezel and screen colours stay the TV's own | Round 5 scoped its own tokens the same way |
+| §3.1, §7, §11: off label `#6E6A78`, off end labels `#5E5A68` (3.7:1 and 2.9:1) | An off gear's label (the four gears and Era), its " · OFF" tag and its off end labels are `#8E8A99`, 4.8:1 on the strip | Decision 5 (§13 left it to a fix or a sign-off) |
+| §3.2: fonts from Google Fonts | Inter 400, 500, 600, 700 from `@fontsource/inter`, and a 2 KB Noto Sans JP 700 subset of the four characters of the sign in `src/components/setlist/fonts/`, both served from this site. Barlow is gone | §13: self-host for production. The earlier steps keep the system font |
+| §3.2: era button labels 10.5 px | Smaller, so "Pre-’70s" (43 px wide in Inter) fits its 37 px button at 360 px wide without wrapping | The README did not check the narrowest phones |
+| §3.4, §13: the range and redo are static placeholders; the sign is right-aligned | The range is the singer's own: tap a note to re-sing that end; redo re-sings both ends. Both are 44 px tall to tap and look as 6A draws them. The Spotify logo (Connect, or the signed-in account with the name and Log out) is at the far right; the sign sits in the room between redo and the logo, and is hidden when that room is smaller than the sign (a long range on a 360 px phone), before anything else shrinks | Round 5 had already wired them; decision 4 |
+| §4: rank column, 18 px wide, before the text | The ▶ slot (44 px) replaces it: ▶ · text · badge, 10 px apart. The rank lives in `data-rank` and in the list being an `<ol>`; tests that read the visible rank number read `data-rank` | Decision 3 |
+| §4: filtered rows fade in place at the bottom of the list; rows sit in catalogue order | Rows are in rank order in the DOM (FLIP slides them); a row that leaves is removed | Round 5's `docs/setlist-round5/README.md`: a screen reader must read rank order |
+| §4: the reason rules on mock scores | The same rules on the engine's places (percentiles among the songs that fit the singer): a null place skips its rule, so signed out "On repeat" and "Rediscover" never show; a song with no tempo falls through to "Solid pick"; "In your sweet spot" needs Difficulty on. `whyOf` is a pure function beside `toRow` (`src/lib/setlist/rows.ts`) | QWW-57. The rules themselves are not tuned (§13) |
+| §4: the badge from a 34 / 67 cut on the song's Difficulty place | The badge is the song's own label (`match.difficulty`, the word the song page shows). A Maybe song (an estimated range) gets none | Medium places start at 33.3, so the cut would call some Medium songs Easy |
+| §8: the Era count is the number of ranked songs | It is `SetlistResponse.total`: every song that fits the range and the picked eras, not the loaded page. "ERA · 1,204 songs", "ERA · 1 song" | QWW-57 |
+| §2, §4, §12: the mock defaults (30 / 65 / 80 / 45, Era 90s, 00s, 10s) and their fixtures | The app's real defaults (`src/lib/setlist/defaults.ts`, QWW-47): Difficulty 0 and Popularity 100 on; History, Tempo and Era off; Era has no default picks. The §4 top-4 fixture and tests 16, 23, 24, 26 and 27 are rewritten for them and for the engine's real ranking of the 25 mock songs | The same as Round 5's first row |
+| §1, §3.3: the sheet opens expanded unless `?mini=1` | A screen that would be left with fewer than 3 whole rows opens in mini (a 390×664, 412×780 and 375×553; a 390×844 still opens expanded), and where the expanded sheet cannot fit inside the screen at all (a 375×553, a phone on its side) the handle keeps it mini. Expanded stays one drag up (`src/lib/setlist/fit.ts`, measured by `useSheetFit`) | Decision 1 |
+| §13: row taps do nothing | Tapping a row opens the song page; the ▶ never does | The same as Round 5's row, and Quinn-Wai's PR #4 note |
+| Not in 6A: History signed out, or Spotify unreachable | Drawn as an off gear (unlit art, dark knob, no reset button), with the Round 5 hint ("Connect Spotify to use your listening history", or the unreachable one) in place of the end labels, in `--text-3`. It stays disabled | QWW-57 |
+| Not in 6A: the other states of the list | Loading, "Couldn’t load songs." with Try again, no songs in the picked eras, nothing in range, the library notes, Load more, the Connect note at the end and the credits icon are restyled in 6A's tokens like the empty state (15/500, `--text-3`) | QWW-57 |
+| §2: `window.setlist` also has `viewModel()` | It has `getState`, `setState`, `ranking` and `songs`, as in Round 5, and only in the e2e build (`NEXT_PUBLIC_SETLIST_TEST_HOOK=1`) | The reference's `viewModel` is its view layer, which this build does not have |
+| Reference: the invisible `<input type="range">` spans the strip body | It also starts 7 px before the track and ends 7 px after it, with a 14 px thumb (the fader cap) | So the native thumb's centre travels exactly the drawn track: a tap lands on the value the knob shows. Round 5 did the same with 9 px and 18 |
+| Reference: tab icons for History and Popularity are drawn on every render | The art follows the same rules, in `src/components/setlist/GearArt.tsx`, with the geometry copied from the reference and checked against it element by element in `tests/setlist/gearArt.test.tsx` | |
+
+Also changed on the way (QWW-57, from the review of #34): History follows the engine's `libraryUnavailable` as well as the mode;
+the list says "That’s every song that fits, for now." only when the engine's `nextOffset` is null; and the screen's defaults and
+page size are imported from `src/lib/songs/setlistConfig.ts` instead of repeated.
+
+Acceptance tests: `tests/e2e/setlist.spec.ts` runs README §12, Round 5's tests 1 to 21 with 6A's adjustments and the new tests
+22 to 32, at 390×844, plus a run of the mode rule at 390×664, 412×780 and 375×553. Where a test names a mock default, it is
+rewritten for the real one; the header of that file says how.

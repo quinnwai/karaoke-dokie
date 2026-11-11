@@ -1,8 +1,10 @@
-// The Setlist tuner's acceptance tests: spec section 9, tests 1 to 21 (docs/setlist-round5/setlist-round5-spec.md), at
-// 390x844, plus the ticket's other criteria: a drag on the handle does not scroll the page, the sheet does not cover
-// the list's last row, the row opens the song page and the play button does not, short phones, long titles.
+// The Setlist tuner's acceptance tests: Round 6A's README §12 (docs/setlist-round6a/setlist-round6a-README.md) at 390x844 --
+// Round 5's tests 1 to 21 (docs/setlist-round5/setlist-round5-spec.md §9) with 6A's adjustments, and the new tests 22 to 32 --
+// plus the ticket's other criteria: a drag on the handle does not scroll the page, the sheet does not cover the list's last
+// row, the row opens the song page and the play button does not, the TV frame, which mode a phone opens in (QWW-57, decision 1)
+// at 390x664, 375x553 and 412x780, long titles, the header.
 //
-// The spec's expectations are for its mock defaults (Difficulty 30, History 65, Popularity 80, Tempo 45, everything on,
+// The README's expectations are for its mock defaults (Difficulty 30, History 65, Popularity 80, Tempo 45, everything on,
 // Era 90s/00s/10s picked). The real defaults (src/lib/setlist/defaults.ts, QWW-47's decision) differ: Difficulty 0 and
 // Popularity 100 on (Popularity weighs double), History, Tempo and Era off, and Era has no default picks. So the expected
 // rankings below are for those, for the 25 mock songs of the spec (tests/fixtures/setlist.ts) as QWW-47's engine
@@ -17,7 +19,8 @@
 // Selector map from the spec's reference to this build: `.strip[data-gear]` is `[data-strip][data-gear]`, `.tab` is
 // `[data-tab]`, `.era-btn[data-era]` is `button[data-era]` (the Era tab's dots carry data-era too), `.reset-btn[data-reset]`
 // is `button[data-reset]`, `.row[data-rank]` is `[data-row][data-rank]`, `.is-off` is `[data-off]`, `.is-parked` is
-// `[data-parked]`, `#app.is-compact` is `#sheet[data-compact]`.
+// `[data-parked]`, `#app.is-compact` is `#sheet[data-compact]`. Wherever 6A reads a row's visible rank number, these read
+// `data-rank`: the ▶ took the number's place (decision 3).
 
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
@@ -110,6 +113,8 @@ async function open(page: Page, opts: { loggedIn?: boolean; mini?: boolean; extr
 // ---- small readers ----
 
 const rows = (page: Page) => page.locator('[data-row]');
+/** The button that opens a row's song: a direct child of the row (the ▶ is in the slot beside it). */
+const openButton = (row: ReturnType<Page['locator']>) => row.locator(':scope > button');
 const titles = (page: Page) => page.locator('[data-row-title]').allTextContents();
 const strip = (page: Page, gear: GearId) => page.locator(`[data-strip][data-gear="${gear}"]`);
 const tab = (page: Page, gear: TunerPart) => page.locator(`[data-tab][data-gear="${gear}"]`);
@@ -121,10 +126,10 @@ const tuner = (page: Page) => page.evaluate(() => (window as unknown as { setlis
 const rack = (page: Page) => page.locator('#rack').evaluate((el) => ({ height: el.clientHeight, scroll: el.scrollHeight }));
 const value = async (page: Page, gear: GearId) => Number(await slider(page, gear).inputValue());
 
-/** Where on a gear's track a fraction (0 to 1) is, in page pixels. The invisible slider starts 9 px before the track and ends 9 px after it. */
+/** Where on a gear's track a fraction (0 to 1) is, in page pixels. The invisible slider starts 7 px before the track and ends 7 px after it (its thumb is the 14 px fader cap). */
 async function onTrack(page: Page, gear: GearId, fraction: number) {
   const box = (await slider(page, gear).boundingBox())!;
-  return { x: box.x + 9 + (box.width - 18) * fraction, y: box.y + box.height / 2 };
+  return { x: box.x + 7 + (box.width - 14) * fraction, y: box.y + box.height / 2 };
 }
 
 async function pressKey(page: Page, gear: GearId, key: string, times = 1) {
@@ -331,16 +336,16 @@ test.describe('12. the metronome', () => {
     expect(animations).toContainEqual({ name: 'swing14', duration: 450, paused: false });
   });
 
-  test('a gear that is off holds its art still', async ({ page }) => {
+  test('a gear that is off holds its art still: the metronome has no animation at all (6A §7: a switched-off sign)', async ({ page }) => {
     await open(page);
+    // Tempo starts off. 6A draws the off state as unlit tubes and sets the pendulum to `animation: none`, rather than pausing it.
     const animations = await strip(page, 'tempo').evaluate((el) =>
       el
         .getAnimations({ subtree: true })
         .filter((a): a is CSSAnimation => a instanceof CSSAnimation)
-        .map((a) => a.playState),
+        .map((a) => a.animationName),
     );
-    expect(animations.length).toBeGreaterThan(0);
-    expect(animations.every((s) => s === 'paused')).toBe(true);
+    expect(animations).toEqual([]);
   });
 });
 
@@ -513,16 +518,94 @@ test('signed out, Listening history is off and disabled with its hint, and Conne
   await expect(tab(page, 'history')).toHaveAttribute('data-off', 'true');
 });
 
-test('the screen fills the viewport: no TV frame, no footer label, and the page itself never scrolls', async ({ page }) => {
+// ---- the TV frame (6A §3.3; QWW-57, decision 2: the tuner is always in the frame) ----
+
+/** The pieces of the frame, from the tuner outwards: the tuner's root, the TV screen's inner box, the screen, the TV and the page. */
+const frame = (page: Page) =>
+  page.evaluate(() => {
+    const app = document.getElementById('app')!;
+    const inner = app.parentElement!;
+    const screenEl = inner.parentElement!;
+    const tv = screenEl.parentElement!;
+    const stage = tv.parentElement!;
+    const chin = tv.lastElementChild as HTMLElement;
+    const box = (e: Element) => {
+      const b = e.getBoundingClientRect();
+      return { x: Math.round(b.x * 10) / 10, y: Math.round(b.y * 10) / 10, w: Math.round(b.width * 10) / 10, h: Math.round(b.height * 10) / 10 };
+    };
+    const cs = (e: Element) => getComputedStyle(e);
+    return {
+      frames: document.querySelectorAll('section[aria-label="Karaoke screen"]').length,
+      stage: { ...box(stage), padding: cs(stage).padding },
+      tv: { ...box(tv), padding: cs(tv).padding, radius: cs(tv).borderTopLeftRadius },
+      screen: { ...box(screenEl), radius: cs(screenEl).borderTopLeftRadius },
+      inner: { ...box(inner), scrolls: inner.scrollHeight > inner.clientHeight },
+      app: { ...box(app), padding: cs(app).padding, background: cs(app).backgroundColor },
+      chin: { ...box(chin), text: chin.textContent ?? '', led: chin.lastElementChild ? box(chin.lastElementChild) : null },
+      docH: document.documentElement.scrollHeight,
+      innerH: innerHeight,
+      text: document.body.innerText,
+    };
+  });
+
+test('the tuner is in the TV frame on a phone, with 6A\'s numbers: page padding 14 10 12, bezel 9 9 0, radii 30 and 22, a 34 px chin with the LED', async ({ page }) => {
+  await open(page);
+  const f = await frame(page);
+  expect(f.frames, 'one frame, no second bezel').toBe(1);
+  expect(f.stage.padding).toBe('14px 10px 12px');
+  expect(f.stage.h).toBe(844);
+  expect([f.tv.x, f.tv.y, f.tv.w, f.tv.h]).toEqual([10, 14, 370, 818]);
+  expect(f.tv.padding).toBe('9px 9px 0px');
+  expect(f.tv.radius).toBe('30px');
+  expect(f.screen.radius).toBe('22px');
+  expect(f.chin.h).toBe(34);
+  expect(f.chin.text.toLowerCase()).toContain('karaoke-dokie');
+  expect(f.chin.led).not.toBeNull();
+  // The TV fills the viewport: no height cap on a phone.
+  expect(f.tv.y + f.tv.h).toBe(844 - 12);
+  await page.screenshot({ path: path.join(SCREENS, 'setlist-frame.png') });
+});
+
+test('the tuner fills the TV screen and nothing scrolls as a whole: the list scrolls, the sheet stays put, the page never moves', async ({ page }) => {
+  await open(page);
+  const f = await frame(page);
+  expect(f.app.h).toBe(f.inner.h);
+  expect(f.app.w).toBe(f.inner.w);
+  expect(f.inner.scrolls).toBe(false);
+  expect(f.docH).toBe(f.innerH);
+  // The tuner draws no background or second bezel of its own: the TV's screen is what shows.
+  expect(f.app.background).toBe('rgba(0, 0, 0, 0)');
+  // 6A's screen padding, 16 12 0.
+  expect(f.app.padding).toBe('16px 12px 0px');
+  expect(await page.evaluate(() => document.getElementById('list-scroll')!.scrollHeight > document.getElementById('list-scroll')!.clientHeight)).toBe(true);
+});
+
+test('the sheet bleeds to the TV screen\'s edges and rests on its bottom: the chin is clear below it', async ({ page }) => {
   await open(page);
   const m = await page.evaluate(() => {
-    const app = document.getElementById('app')!.getBoundingClientRect();
-    return { w: Math.round(app.width), h: Math.round(app.height), docH: document.documentElement.scrollHeight, innerH: innerHeight, text: document.body.innerText };
+    const sheet = document.getElementById('sheet')!.getBoundingClientRect();
+    const inner = document.getElementById('app')!.parentElement!.getBoundingClientRect();
+    return { left: sheet.left - inner.left, right: inner.right - sheet.right, bottom: inner.bottom - sheet.bottom };
   });
-  expect(m.w).toBe(390);
-  expect(m.h).toBe(844);
-  expect(m.docH).toBe(m.innerH);
-  expect(m.text.toLowerCase()).not.toContain('karaoke-dokie');
+  expect(m).toEqual({ left: 0, right: 0, bottom: 0 });
+});
+
+test.describe('on a desktop', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false, isMobile: false });
+
+  test('the tuner is in today\'s TV, as a column of at most 480 px, centred', async ({ page }) => {
+    await open(page);
+    const f = await frame(page);
+    expect(f.frames).toBe(1);
+    expect(f.tv.w).toBe(880);
+    expect(f.tv.h).toBe(660);
+    // Not the phone's numbers: the TV of before (padding 16 16 0 and radius 32 from 700 px up).
+    expect(f.tv.padding).toBe('16px 16px 0px');
+    expect(f.tv.radius).toBe('32px');
+    expect(f.app.w).toBeLessThanOrEqual(480);
+    expect(Math.abs(f.app.x + f.app.w / 2 - (f.tv.x + f.tv.w / 2))).toBeLessThanOrEqual(1);
+    expect(f.inner.scrolls).toBe(false);
+  });
 });
 
 test('the sheet does not cover the last row: scrolled to the end, it and the end of the list are clear of the sheet and its handle', async ({ page }) => {
@@ -555,7 +638,7 @@ test('a song row opens the song page; the play button does not; back keeps what 
   await expect(page.locator('#app')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Back to songs' })).toHaveCount(0);
 
-  await rows(page).first().getByRole('button').first().click();
+  await openButton(rows(page).first()).click();
   await expect(page.getByRole('button', { name: 'Back to songs' })).toBeVisible();
   await expect(page.locator('#app')).toHaveCount(0);
   await page.getByRole('button', { name: 'Back to songs' }).click();
@@ -566,9 +649,10 @@ test('a song row opens the song page; the play button does not; back keeps what 
 
 test('the list is in rank order in the DOM, with ranks 1 to n, however it was re-ranked', async ({ page }) => {
   await open(page);
+  // The ▶ took the rank number's place (6A decision 3), so a row's position is data-rank; the <ol> says it to a screen reader.
   const check = async () => {
-    const ranks = await rows(page).evaluateAll((els) => els.map((el) => [el.getAttribute('data-rank'), el.querySelector('[aria-hidden]')?.textContent]));
-    expect(ranks).toEqual(ranks.map((_, i) => [String(i + 1), String(i + 1)]));
+    const ranks = await rows(page).evaluateAll((els) => els.map((el) => el.getAttribute('data-rank')));
+    expect(ranks).toEqual(ranks.map((_, i) => String(i + 1)));
   };
   await check();
   await pressKey(page, 'tempo', 'ArrowRight', 7);
@@ -665,7 +749,7 @@ test.describe('rows move with the list', () => {
         const start = Number(/translateY\((-?[\d.]+)px\)/.exec(String((effect.getKeyframes()[0] as { transform?: string }).transform))![1]);
         const startsAt = base + el.offsetTop + start; // where the row is on screen when its new slide begins
         const was = seen.get(el.dataset.id!);
-        if (was !== undefined && was >= view.top - 58 && was <= view.bottom) off.push(Math.abs(startsAt - was));
+        if (was !== undefined && was >= view.top - 66 && was <= view.bottom) off.push(Math.abs(startsAt - was));
       }
       return { reRanked: order() !== orderBefore, slides: off.length, off: Math.max(0, ...off) };
     });
@@ -676,7 +760,7 @@ test.describe('rows move with the list', () => {
   });
 });
 
-test('a long title is cut with an ellipsis and never pushes the lane or the play button out of the row', async ({ page }) => {
+test('a long title is cut with an ellipsis and never pushes the badge or the ▶ out of the row', async ({ page }) => {
   const extra: MockSong[] = [
     { title: 'Girls Just Want to Have Fun (2022 Remastered Deluxe Anniversary Edition)', artist: 'Cyndi Lauper and Her Very Long Named Friends', era: 's80', difficulty: 20, history: 50, popularity: 100, tempo: 50 },
   ];
@@ -686,15 +770,51 @@ test('a long title is cut with an ellipsis and never pushes the lane or the play
   const m = await long.evaluate((li) => {
     const row = li.getBoundingClientRect();
     const title = li.querySelector('[data-row-title]') as HTMLElement;
+    const text = li.querySelector('[data-row-text]')!.getBoundingClientRect();
     const play = li.querySelector('[data-play-slot]')!.getBoundingClientRect();
-    return { rowRight: row.right, rowW: li.clientWidth, rowScroll: li.scrollWidth, titleCut: title.scrollWidth > title.clientWidth, playRight: play.right, playW: play.width };
+    const badge = li.querySelector('[data-badge]')!.getBoundingClientRect();
+    return {
+      rowLeft: row.left,
+      rowRight: row.right,
+      rowW: li.clientWidth,
+      rowScroll: li.scrollWidth,
+      titleCut: title.scrollWidth > title.clientWidth,
+      play: { left: play.left, right: play.right, w: play.width },
+      text: { left: text.left, right: text.right },
+      badge: { left: badge.left, right: badge.right },
+    };
   });
   expect(m.titleCut).toBe(true);
   expect(m.rowScroll).toBeLessThanOrEqual(m.rowW);
-  expect(m.playRight).toBeLessThanOrEqual(m.rowRight + 0.5);
-  expect(m.playW).toBe(44);
+  // ▶ · text · badge, 10 px apart, the ▶ at the row's start and the badge at its end.
+  expect(m.play.left).toBeCloseTo(m.rowLeft, 0);
+  expect(m.play.w).toBe(44);
+  expect(m.text.left).toBeCloseTo(m.play.right + 10, 0);
+  expect(m.badge.left).toBeCloseTo(m.text.right + 10, 0);
+  expect(m.badge.right).toBeLessThanOrEqual(m.rowRight + 0.5);
   await long.scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(SCREENS, 'setlist-long-title.png') });
+});
+
+test('there is room for "Can\'t Help Falling in Love" beside a Medium badge at 390 px: about 197 px for a 195 px title', async ({ page }) => {
+  // The README measured 197 px of title room next to a Medium badge with the ▶ in the rank's place, and the title at 195 px.
+  const extra: MockSong[] = [{ title: 'A Medium Song', artist: 'Someone', era: 's90', difficulty: 50, history: 50, popularity: 100, tempo: 50 }];
+  await open(page, { extra });
+  const m = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const medium = [...document.querySelectorAll('[data-row]')].find((r) => r.querySelector('[data-badge]')?.textContent === 'Medium')!;
+    const room = (medium.querySelector('[data-row-title]') as HTMLElement).getBoundingClientRect().width;
+    const probe = document.createElement('span');
+    probe.textContent = "Can't Help Falling in Love";
+    probe.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:600 16px ${getComputedStyle(medium).fontFamily}`;
+    document.body.appendChild(probe);
+    const title = probe.getBoundingClientRect().width;
+    probe.remove();
+    return { room, title };
+  });
+  expect(m.room).toBeGreaterThanOrEqual(195);
+  expect(m.room).toBeLessThanOrEqual(199);
+  expect(m.title).toBeLessThanOrEqual(m.room);
 });
 
 test('events: a gear and an era are recorded when they change, with the gear and its value', async ({ page }) => {
@@ -760,55 +880,686 @@ test('touch: dragging along a slider moves its thumb without moving the sheet or
   expect(await page.evaluate(() => scrollY)).toBe(0);
 });
 
-// ---- short phones (the review guide asks for these numbers) ----
+// ---- which mode a phone opens in (QWW-57, Quinn-Wai's decision 1) ----
+//
+// Mini whenever the expanded sheet would leave fewer than 3 whole rows; 390x844 still opens expanded. Where the expanded
+// sheet cannot fit inside the screen at all (a 375x553, an iPhone SE with Safari's bars), the handle keeps it mini. The list
+// heights are chief-keef's measurements of the reference with the real defaults (11 Nov): the TV frame's numbers have to add
+// up to them, so they are asserted exactly (one pixel of slack).
 
-test.describe('a short phone, 375x667', () => {
-  test.use({ viewport: { width: 375, height: 667 } });
+/** The list's height and how many whole rows fit in it at the top, and whether any part of the sheet is cut off. */
+const listBox = (page: Page) =>
+  page.evaluate(() => {
+    const list = document.getElementById('list-scroll')!.getBoundingClientRect();
+    const rowEls = [...document.querySelectorAll('[data-row]')];
+    const whole = rowEls.filter((r) => {
+      const b = r.getBoundingClientRect();
+      return b.top >= list.top - 0.5 && b.bottom <= list.bottom + 0.5;
+    }).length;
+    const inner = document.getElementById('app')!.parentElement!.getBoundingClientRect();
+    const sheet = document.getElementById('sheet')!.getBoundingClientRect();
+    const rackEl = document.getElementById('rack')!;
+    return {
+      list: Math.round(list.height),
+      whole,
+      sheetClipped: Math.max(0, Math.round(sheet.bottom - inner.bottom)),
+      rackClipped: rackEl.scrollHeight > rackEl.clientHeight,
+    };
+  });
 
-  test('the sheet fits in both modes and the rows that are fully visible are counted', async ({ page }) => {
-    await open(page);
-    const visibleRows = () =>
-      page.evaluate(() => {
-        const box = document.getElementById('list-scroll')!.getBoundingClientRect();
-        const whole = [...document.querySelectorAll('[data-row]')].filter((r) => {
-          const b = r.getBoundingClientRect();
-          return b.top >= box.top - 0.5 && b.bottom <= box.bottom + 0.5;
-        }).length;
-        return { listHeight: Math.round(box.height), whole };
+type ListBox = Awaited<ReturnType<typeof listBox>>;
+
+const PHONES = [
+  { w: 390, h: 844, opens: 'expanded', expanded: 226, expandedRows: 3, mini: 478, miniRows: 7 },
+  { w: 390, h: 664, opens: 'mini', expanded: 46, expandedRows: 0, mini: 298, miniRows: 4 },
+  { w: 412, h: 780, opens: 'mini', expanded: 162, expandedRows: 2, mini: 414, miniRows: 6 },
+] as const;
+
+for (const phone of PHONES) {
+  test.describe(`a ${phone.w}x${phone.h} phone`, () => {
+    test.use({ viewport: { width: phone.w, height: phone.h } });
+
+    test(`opens in ${phone.opens}; the list is ${phone.expanded} px with the sheet expanded and ${phone.mini} px in mini, and nothing of the sheet is cut off`, async ({ page }) => {
+      await open(page);
+      await expect(page.locator('#app')).toHaveAttribute('data-mode', phone.opens);
+      const first = await listBox(page);
+      expect(first.sheetClipped, 'nothing of the sheet is clipped at first load').toBe(0);
+      expect(first.rackClipped).toBe(false);
+      const other = phone.opens === 'expanded' ? 'mini' : 'expanded';
+      // The list in each mode, measured by switching the sheet with the handle.
+      const measured: Partial<Record<'expanded' | 'mini', ListBox>> = { [phone.opens]: first };
+      await page.screenshot({ path: path.join(SCREENS, `setlist-${phone.w}x${phone.h}-${phone.opens}.png`) });
+      await handle(page).click();
+      await expect(page.locator('#app')).toHaveAttribute('data-mode', other);
+      await expect.poll(async () => (await rack(page)).height).toBe(other === 'mini' ? 164 : 416);
+      measured[other] = await listBox(page);
+      expect(Math.abs(measured.expanded!.list - phone.expanded), `expanded list ${measured.expanded!.list}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(measured.mini!.list - phone.mini), `mini list ${measured.mini!.list}`).toBeLessThanOrEqual(1);
+      expect(measured.expanded!.whole).toBe(phone.expandedRows);
+      expect(measured.mini!.whole).toBe(phone.miniRows);
+      expect(measured.expanded!.sheetClipped, 'the expanded sheet fits').toBe(0);
+      expect(measured.mini!.sheetClipped).toBe(0);
+      await page.screenshot({ path: path.join(SCREENS, `setlist-${phone.w}x${phone.h}-${other}.png`) });
+    });
+
+    if (phone.opens === 'mini') {
+      test('shows at least 4 whole rows at first load, which is what mini is for', async ({ page }) => {
+        await open(page);
+        expect((await listBox(page)).whole).toBeGreaterThanOrEqual(4);
       });
-    expect(await rack(page)).toEqual({ height: 416, scroll: 416 });
-    const expanded = await visibleRows();
-    await page.screenshot({ path: path.join(SCREENS, 'setlist-375x667-expanded.png') });
-    await handle(page).click();
-    expect(await rack(page)).toEqual({ height: 164, scroll: 164 });
-    const mini = await visibleRows();
-    await page.screenshot({ path: path.join(SCREENS, 'setlist-375x667-mini.png') });
-    console.log(`375x667: expanded leaves ${expanded.listHeight} px, ${expanded.whole} whole rows; mini leaves ${mini.listHeight} px, ${mini.whole} whole rows`);
-    expect(mini.whole).toBeGreaterThan(expanded.whole);
-    expect(mini.whole).toBeGreaterThanOrEqual(6);
-    // The page itself never scrolls.
-    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(667);
+    }
+
+    test('expanded is one drag up, and stays as the singer left it through a song and back', async ({ page }) => {
+      await open(page);
+      await dragHandle(page, -80);
+      await expect(page.locator('#app')).toHaveAttribute('data-mode', 'expanded');
+      expect((await rack(page)).height).toBe(416);
+      await openButton(rows(page).first()).click();
+      await expect(page.getByRole('button', { name: 'Back to songs' })).toBeVisible();
+      await page.getByRole('button', { name: 'Back to songs' }).click();
+      await expect(page.locator('#app')).toHaveAttribute('data-mode', 'expanded');
+    });
+  });
+}
+
+test.describe("a 375x553 phone (an iPhone SE with Safari's bars)", () => {
+  test.use({ viewport: { width: 375, height: 553 } });
+
+  test('opens in mini, the expanded sheet does not fit, and the handle keeps it in mini', async ({ page }) => {
+    await open(page);
+    await expect(page.locator('#app')).toHaveAttribute('data-mode', 'mini');
+    const m = await listBox(page);
+    expect(Math.abs(m.list - 187)).toBeLessThanOrEqual(1);
+    expect(m.whole).toBe(2);
+    expect(m.sheetClipped).toBe(0);
+    expect(m.rackClipped).toBe(false);
+    await expect(handle(page)).toHaveAttribute('aria-disabled', 'true');
+    await expect(handle(page)).toHaveAttribute('aria-expanded', 'false');
+    // A tap, Enter and a drag up all leave it in mini. (aria-disabled is a state Playwright will not click through, so force it.)
+    await handle(page).click({ force: true });
+    await expect(page.locator('#app')).toHaveAttribute('data-mode', 'mini');
+    await handle(page).focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Space');
+    await expect(page.locator('#app')).toHaveAttribute('data-mode', 'mini');
+    await dragHandle(page, -120, async () => {
+      expect((await page.locator('#rack').boundingBox())!.height).toBeLessThanOrEqual(164);
+    });
+    await expect(page.locator('#app')).toHaveAttribute('data-mode', 'mini');
+    expect((await rack(page)).height).toBe(164);
+    expect((await listBox(page)).sheetClipped).toBe(0);
+    await page.screenshot({ path: path.join(SCREENS, 'setlist-375x553-mini.png') });
+  });
+
+  test('still has every tab, and each gear can be tuned from the mini sheet', async ({ page }) => {
+    await open(page);
+    for (const g of ['difficulty', 'history', 'popularity', 'tempo', 'era'] as TunerPart[]) await expect(tab(page, g)).toBeVisible();
+    await tab(page, 'popularity').click();
+    await expect(strip(page, 'popularity')).toBeVisible();
+    expect((await listBox(page)).sheetClipped).toBe(0);
   });
 });
 
-// ---- narrow phones ----
+test.describe('a phone turned on its side, 844x390', () => {
+  test.use({ viewport: { width: 844, height: 390 } });
 
-// The heading is the spec's 28 px from 375 px wide (an iPhone SE) up, and 24 px below that, where the range, "redo" and
-// the Connect button beside it would cut it. A range of sharps (D#2 to D#5) has the longest note names.
-for (const [width, size] of [
-  [360, '24px'],
-  [375, '28px'],
-  [390, '28px'],
-] as const) {
-  test(`${width} px wide: the heading is ${size} and is not cut, even with a range of sharps`, async ({ page }) => {
+  test('keeps the sheet in mini: the expanded sheet cannot fit', async ({ page }) => {
+    await open(page);
+    await expect(page.locator('#app')).toHaveAttribute('data-mode', 'mini');
+    await expect(handle(page)).toHaveAttribute('aria-disabled', 'true');
+    expect((await listBox(page)).sheetClipped).toBe(0);
+  });
+});
+
+test('turning a phone on its side while the sheet is expanded keeps it from being cut off: it is shown in mini', async ({ page }) => {
+  await open(page);
+  await expect(page.locator('#app')).toHaveAttribute('data-mode', 'expanded');
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect(page.locator('#app')).toHaveAttribute('data-mode', 'mini');
+  expect((await listBox(page)).sheetClipped).toBe(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  // Back upright, the sheet can expand again, and the singer's own choice (expanded) is what they find.
+  await expect(handle(page)).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(page.locator('#app')).toHaveAttribute('data-mode', 'expanded');
+});
+
+// ---- the header (6A §3.4; QWW-57, decisions 4 and the hit areas) ----
+
+/** The header row's parts, in page pixels; the sign is null when it is hidden. */
+const headerBox = (page: Page) =>
+  page.evaluate(() => {
+    const bar = document.querySelector('#app header > div') as HTMLElement;
+    const box = (e: Element | null) => {
+      if (!e) return null;
+      const b = e.getBoundingClientRect();
+      return { x: b.x, y: b.y, w: b.width, h: b.height, r: b.right, b: b.bottom };
+    };
+    const sign = bar.querySelector('[lang="ja"]') as HTMLElement;
+    const heading = document.querySelector('#app header h1') as HTMLElement;
+    return {
+      bar: box(bar),
+      range: box(bar.querySelector('[role="group"]')),
+      redo: box(bar.querySelector('button[aria-label="Redo the singing test"]')),
+      sign: getComputedStyle(sign).display === 'none' ? null : box(sign),
+      spotify: box(bar.querySelector('button[aria-label="Connect to Spotify"], button[aria-label="Spotify account"]')),
+      heading: { ...box(heading)!, cut: heading.scrollWidth > heading.clientWidth, fontSize: getComputedStyle(heading).fontSize },
+    };
+  });
+
+// The heading is 24/30 700 at every width now (6A §3.2), and it sits below the 28 px row, so no range can cut it. A range of
+// sharps (D#2 to D#5) has the longest note names.
+for (const width of [360, 375, 390]) {
+  test(`${width} px wide: the header row is 28 px with the range, redo, the sign and the Spotify logo in it, and the heading below is 24 px and not cut`, async ({ page }) => {
     await page.setViewportSize({ width, height: 740 });
     await open(page, { range: { low: 39, high: 75 } });
     await expect(page.locator('#app header')).toContainText('D#2');
-    const title = page.getByRole('heading', { name: 'Tune your setlist' });
-    const { cut, fontSize } = await title.evaluate((el) => ({ cut: el.scrollWidth > el.clientWidth, fontSize: getComputedStyle(el).fontSize }));
-    expect({ cut, fontSize }).toEqual({ cut: false, fontSize: size });
+    const h = await headerBox(page);
+    expect(h.bar!.h).toBe(28);
+    expect(h.heading.fontSize).toBe('24px');
+    expect(h.heading.cut).toBe(false);
+    expect(h.heading.y).toBeGreaterThanOrEqual(h.bar!.b + 8 - 0.5);
+    // Range, redo and the logo are whole, in order, and inside the row, whether or not the sign fits.
+    expect(h.range!.r).toBeLessThanOrEqual(h.redo!.x);
+    expect(h.redo!.r).toBeLessThanOrEqual(h.spotify!.x);
+    expect(h.spotify!.r).toBeLessThanOrEqual(h.bar!.r + 0.5);
+    expect(h.redo!.h).toBe(28);
   });
 }
+
+test('the Spotify logo is at the far right of the row, and the カラオケ sign is centred in the room between redo and the logo, not on the row\'s own middle', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 740 });
+  await open(page, { range: { low: 41, high: 69 } }); // F2 to A4: not the shortest range
+  const h = await headerBox(page);
+  expect(h.sign).not.toBeNull();
+  expect(h.spotify!.r).toBeGreaterThan(h.bar!.r - 6);
+  // The room is between redo's right edge and the logo's left edge.
+  const room = (h.redo!.r + h.spotify!.x) / 2;
+  expect(Math.abs(h.sign!.x + h.sign!.w / 2 - room)).toBeLessThanOrEqual(1);
+  expect(h.sign!.x).toBeGreaterThanOrEqual(h.redo!.r + 8);
+  expect(h.sign!.r).toBeLessThanOrEqual(h.spotify!.x - 8);
+  // Which is not where the row's exact middle is.
+  const middle = h.bar!.x + h.bar!.w / 2;
+  expect(Math.abs(room - middle)).toBeGreaterThan(8);
+});
+
+test('when the row is too tight, the sign goes first: it is hidden once the room between redo and the logo is smaller than the sign, and nothing else shrinks', async ({ page }) => {
+  // The longest range, D#2 to D#5, on a 360 px phone: there is still room (about 126 px for a 69 px sign), so it stays.
+  await page.setViewportSize({ width: 360, height: 740 });
+  await open(page, { range: { low: 39, high: 75 } });
+  const fits = await headerBox(page);
+  expect(fits.sign).not.toBeNull();
+  const wide = { redo: fits.redo!.w, range: fits.range!.w, spotify: fits.spotify!.w };
+  // Narrower than any phone, the room runs out (under 70 px): the sign is hidden, and redo, the range and the logo are what they were.
+  await page.setViewportSize({ width: 300, height: 740 });
+  await expect.poll(async () => (await headerBox(page)).sign).toBeNull();
+  const tight = await headerBox(page);
+  expect({ redo: tight.redo!.w, range: tight.range!.w, spotify: tight.spotify!.w }).toEqual(wide);
+  expect(tight.bar!.h).toBe(28);
+  expect(tight.range!.r).toBeLessThanOrEqual(tight.redo!.x);
+  expect(tight.redo!.r).toBeLessThanOrEqual(tight.spotify!.x);
+  // Roomier again: the sign is back.
+  await page.setViewportSize({ width: 360, height: 740 });
+  await expect.poll(async () => (await headerBox(page)).sign !== null).toBe(true);
+});
+
+test('the range notes and redo look as they did and are 44 px tall to tap', async ({ page }) => {
+  await open(page);
+  const targets = [
+    page.getByRole('button', { name: 'Redo your low note, A2' }),
+    page.getByRole('button', { name: 'Redo your high note, C5' }),
+    page.getByRole('button', { name: 'Redo the singing test' }),
+  ];
+  for (const target of targets) {
+    const b = (await target.boundingBox())!;
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    // 20 px above and below the centre still lands on the button: a 44 px target (22 px each way).
+    const hits = await page.evaluate(
+      ({ x, y }) => [-20, 20].map((dy) => document.elementFromPoint(x, y + dy)?.closest('button')?.getAttribute('aria-label') ?? null),
+      { x: cx, y: cy },
+    );
+    const name = await target.getAttribute('aria-label');
+    expect(hits, String(name)).toEqual([name, name]);
+  }
+  // Their look: redo is 28 px tall with a 1 px outline; the notes have a 1 px dotted underline and no box.
+  expect((await targets[2]!.boundingBox())!.height).toBe(28);
+  const note = page.locator('#app header [role="group"] button').first().locator('span');
+  expect(await note.evaluate((el) => getComputedStyle(el).borderBottomStyle)).toBe('dotted');
+});
+
+test('signed in, the Spotify account sits where Connect does: far right, with the name and Log out', async ({ page }) => {
+  await open(page, { loggedIn: true });
+  const h = await headerBox(page);
+  expect(h.spotify!.r).toBeGreaterThan(h.bar!.r - 6);
+  await page.getByRole('button', { name: 'Spotify account' }).click();
+  await expect(page.getByText('Logged in as Quinn')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();
+});
+
+// ============================================================================================================
+// Round 6A: README §12, new tests 22 to 32, for the real defaults and the real data
+// ============================================================================================================
+
+/** A computed colour as the browser writes it. */
+const rgb = (hex: string) => {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`;
+};
+const UNLIT = rgb('#34313D');
+const PINK = rgb('#FF4FA0');
+const AMBER = rgb('#FFC24A');
+const VIOLET = rgb('#B583FF');
+const OFF_TEXT = rgb('#8E8A99'); // decision 5: raised from 6A's #6E6A78 and #5E5A68
+const TEXT_3 = rgb('#9E99AA');
+
+/** What the reference's viewModel() would draw for the real defaults, signed out: the top 4 of the 25 mock songs. */
+const TOP_ROWS = [
+  { title: 'Mr. Brightside', why: 'Gets the room moving', badge: 'Medium' },
+  { title: "Don't Stop Believin'", why: 'Crowd favourite', badge: 'Hard' },
+  { title: 'Dancing Queen', why: 'Solid pick', badge: 'Medium' },
+  { title: 'Bohemian Rhapsody', why: 'Crowd favourite', badge: 'Hard' },
+];
+
+const css = (loc: ReturnType<Page['locator']>, prop: string) => loc.first().evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
+const art = (page: Page, gear: GearId) => strip(page, gear).locator('svg').first();
+const tabArt = (page: Page, gear: TunerPart) => tab(page, gear).locator('svg').first();
+
+test('22. row geometry: ranks 1, 2, 3 at top 0, 66, 132; every row 66 px tall; the list as tall as its rows', async ({ page }) => {
+  await open(page);
+  const m = await page.evaluate(() => {
+    const list = document.getElementById('list')!;
+    const rowEls = [...list.querySelectorAll<HTMLElement>('[data-row]')];
+    return {
+      tops: rowEls.slice(0, 3).map((r) => [r.dataset.rank, r.offsetTop]),
+      heights: [...new Set(rowEls.map((r) => r.getBoundingClientRect().height))],
+      count: rowEls.length,
+      list: list.getBoundingClientRect().height,
+    };
+  });
+  expect(m.tops).toEqual([['1', 0], ['2', 66], ['3', 132]]);
+  expect(m.heights).toEqual([66]);
+  expect(m.list).toBe(m.count * 66);
+  // Filtering removes rows (they do not fade out in place): the list is as tall as the rows that are left.
+  await eraButton(page, 's80').click();
+  await expect(rows(page)).toHaveCount(4);
+  expect(await page.locator('#list').evaluate((el) => el.getBoundingClientRect().height)).toBe(4 * 66);
+});
+
+test('23. the default rows: title, reason line and badge of the top 4 for the real defaults, and only rank 1 has the lyric wipe', async ({ page }) => {
+  await open(page);
+  await expect.poll(async () => (await titles(page)).slice(0, 4)).toEqual(TOP_ROWS.map((r) => r.title));
+  const top = await rows(page).evaluateAll((els) =>
+    els.slice(0, 4).map((el) => ({
+      title: el.querySelector('[data-row-title]')?.textContent,
+      why: el.querySelector('[data-row-why]')?.textContent,
+      badge: el.querySelector('[data-badge]')?.textContent,
+    })),
+  );
+  expect(top).toEqual(TOP_ROWS);
+  const wipes = await rows(page).evaluateAll((els) => els.map((el, i) => (el.querySelector('[data-wipe]') ? i + 1 : 0)).filter(Boolean));
+  expect(wipes).toEqual([1]);
+  // The pink copy is drawn from data-wipe by CSS, so the title is in the page once: it is read, found and copied once.
+  expect(await page.locator('[data-wipe]').getAttribute('data-wipe')).toBe(TOP_ROWS[0]!.title);
+  await expect(page.getByText(TOP_ROWS[0]!.title, { exact: true })).toHaveCount(1);
+  expect(await page.locator('[data-wipe]').evaluate((el) => getComputedStyle(el, '::after').content)).toContain(TOP_ROWS[0]!.title);
+  await page.screenshot({ path: path.join(SCREENS, 'setlist-23-rows.png') });
+});
+
+test('23b. the lyric wipe follows the #1 spot when the ranking changes', async ({ page }) => {
+  await open(page);
+  const first = async () => rows(page).first().locator('[data-row-title]').textContent();
+  expect(await first()).toBe('Mr. Brightside');
+  await expect(page.locator('[data-wipe]')).toHaveCount(1);
+  await pressKey(page, 'tempo', 'ArrowLeft', 40); // Tempo on, toward Slow jams: another song comes first
+  await expect.poll(first).not.toBe('Mr. Brightside');
+  await expect(page.locator('[data-wipe]')).toHaveCount(1);
+  expect(await rows(page).first().locator('[data-wipe]').count()).toBe(1);
+});
+
+test('24. the Era header counts the songs that fit: "OFF · all eras" with Era off, and the total, with a thousands comma, with it on', async ({ page }) => {
+  // 1,200 more songs in the 90s, so the total (1,204 with the four mock ones) is far past the 200 the screen asks for.
+  const extra: MockSong[] = Array.from({ length: 1200 }, (_, i) => ({
+    title: `Extra song ${i}`,
+    artist: `Extra artist ${i % 17}`,
+    era: 's90',
+    difficulty: i % 101,
+    history: (i * 7) % 101,
+    popularity: (i * 13) % 101,
+    tempo: (i * 29) % 101,
+  }));
+  await open(page, { extra });
+  await expect(page.locator('#era-label')).toContainText('· OFF · all eras');
+  await eraButton(page, 's90').click();
+  await expect(page.locator('#era-label')).toContainText('· 1,204 songs');
+  // The list holds what was asked for, a page of 200; the header is the total, not the page.
+  await expect.poll(() => rows(page).count()).toBeLessThanOrEqual(200);
+  expect(await rows(page).count()).toBeLessThan(1204);
+  await resetButton(page, 'era').click();
+  await expect(page.locator('#era-label')).toContainText('· OFF · all eras');
+  await expect(page.locator('#era-label')).not.toContainText('songs');
+});
+
+test('24b. one song says "1 song"', async ({ page }) => {
+  // For a range from 61 up only one 2020s song fits: good 4 u.
+  await open(page, { range: { low: 61, high: 72 } });
+  await eraButton(page, 's20').click();
+  await expect(page.locator('#era-label')).toContainText('· 1 song');
+  await expect(page.locator('#era-label')).not.toContainText('songs');
+  await expect(rows(page)).toHaveCount(1);
+});
+
+test('25. Tempo, reset: its label is the raised grey, its metronome strokes are unlit, its pendulum is still; on, it is violet and swings', async ({ page }) => {
+  await open(page);
+  // Tempo starts off with the real defaults, so this is the reset state.
+  const label = strip(page, 'tempo').locator('label');
+  expect(await css(label, 'color')).toBe(OFF_TEXT);
+  expect(await css(strip(page, 'tempo').locator('[data-offtag]'), 'color')).toBe(OFF_TEXT);
+  expect(await css(strip(page, 'tempo').locator('svg path').first(), 'stroke')).toBe(UNLIT);
+  expect(await css(strip(page, 'tempo').locator('[data-pendulum]'), 'animation-name')).toBe('none');
+  // Not dimmed with opacity or a filter: an off gear looks like a switched-off sign, not a faded one.
+  expect(await css(art(page, 'tempo'), 'opacity')).toBe('1');
+  expect(await css(art(page, 'tempo'), 'filter')).toBe('none');
+  // Turned on, it takes its colour.
+  await pressKey(page, 'tempo', 'ArrowRight');
+  expect(await css(label, 'color')).toBe(VIOLET);
+  expect(await css(strip(page, 'tempo').locator('svg path').first(), 'stroke')).toBe(VIOLET);
+  // And reset again, it goes grey again.
+  await resetButton(page, 'tempo').click();
+  expect(await css(label, 'color')).toBe(OFF_TEXT);
+  expect(await css(strip(page, 'tempo').locator('svg path').first(), 'stroke')).toBe(UNLIT);
+});
+
+test('25b. an off gear\'s end labels are the raised grey too, and a gear that is on has its own colours', async ({ page }) => {
+  await open(page);
+  const ends = (gear: GearId) => strip(page, gear).locator('[data-ends]');
+  expect(await css(ends('tempo'), 'color')).toBe(OFF_TEXT);
+  expect(await css(ends('difficulty'), 'color')).toBe(TEXT_3);
+  // Era: "ERA" itself is grey while it is off and pink on.
+  expect(await css(page.locator('#era-label'), 'color')).toBe(OFF_TEXT);
+  await eraButton(page, 's80').click();
+  expect(await css(page.locator('#era-label'), 'color')).toBe(PINK);
+});
+
+test('26. the notes and bolts show by the thresholds: at History 65 five notes, at Popularity 80 six bolts; at the real defaults all seven of each', async ({ page }) => {
+  await open(page, { loggedIn: true });
+  const shown = (sel: string) => page.locator(sel).evaluateAll((els) => els.filter((el) => getComputedStyle(el).opacity === '1').length);
+  // The real defaults are History 100 and Popularity 100: every note and bolt is drawn (History is off, so unlit).
+  expect(await shown('[data-strip][data-gear="history"] [data-note]')).toBe(7);
+  expect(await shown('[data-strip][data-gear="popularity"] [data-bolt]')).toBe(7);
+  await page.evaluate(() => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ history: 65, popularity: 80 }));
+  await expect.poll(() => shown('[data-strip][data-gear="history"] [data-note]')).toBe(5);
+  expect(await shown('[data-strip][data-gear="popularity"] [data-bolt]')).toBe(6);
+});
+
+test('27. the Era tab\'s jukebox: Era off is an unlit body with both lights dark; one era lights the left; two or more light both; none picked is dark again', async ({ page }) => {
+  await open(page, { mini: true });
+  const body = tabArt(page, 'era').locator('[data-jukebox="body"]');
+  const light = (i: number) => tabArt(page, 'era').locator(`[data-jukebox="button"][data-i="${i}"]`);
+  const DARK = rgb('#3A2A33');
+  // Every gear reset (the real defaults: Era off): the body is unlit, both buttons dark.
+  expect(await css(body, 'stroke')).toBe(UNLIT);
+  expect([await css(light(0), 'fill'), await css(light(1), 'fill')]).toEqual([DARK, DARK]);
+  // One era: the body is pink, the left button amber.
+  await tab(page, 'era').click();
+  await eraButton(page, 's80').click();
+  expect(await css(body, 'stroke')).toBe(PINK);
+  expect([await css(light(0), 'fill'), await css(light(1), 'fill')]).toEqual([AMBER, DARK]);
+  // Two: both amber.
+  await eraButton(page, 's90').click();
+  expect([await css(light(0), 'fill'), await css(light(1), 'fill')]).toEqual([AMBER, AMBER]);
+  // Era on with none picked: pink body, both dark.
+  await eraButton(page, 's80').click();
+  await eraButton(page, 's90').click();
+  expect(await css(body, 'stroke')).toBe(PINK);
+  expect([await css(light(0), 'fill'), await css(light(1), 'fill')]).toEqual([DARK, DARK]);
+  // Reset: back to unlit.
+  await resetButton(page, 'era').click();
+  expect(await css(body, 'stroke')).toBe(UNLIT);
+});
+
+test.describe('motion', () => {
+  test.use({ contextOptions: { reducedMotion: 'no-preference' } });
+
+  test('28. Tempo 55: the tab\'s pendulum swings like the strip\'s (swing14, 0.45 s) and its weight is at y 9.9', async ({ page }) => {
+    await open(page, { mini: true });
+    await tab(page, 'tempo').click();
+    await pressKey(page, 'tempo', 'ArrowRight', 5);
+    expect(await value(page, 'tempo')).toBe(55);
+    const stripPend = strip(page, 'tempo').locator('[data-pendulum]');
+    const tabPend = tabArt(page, 'tempo').locator('[data-pendulum]');
+    for (const pend of [stripPend, tabPend]) {
+      expect(await css(pend, 'animation-name')).toBe('swing14');
+      expect(await css(pend, 'animation-duration')).toBe('0.45s');
+      expect(await css(pend, 'animation-iteration-count')).toBe('infinite');
+      expect(await css(pend, 'animation-direction')).toBe('alternate');
+    }
+    expect(await tabArt(page, 'tempo').locator('[data-weight]').getAttribute('y')).toBe('9.9');
+  });
+
+  test('29. turning a reset gear back on (ArrowRight) plays the neon flicker once: neonOn, 0.7 s', async ({ page }) => {
+    await open(page);
+    // At first load the gears that are on flicker once; Tempo is off, so it does not.
+    expect(await css(art(page, 'tempo'), 'animation-name')).toBe('none');
+    expect(await css(art(page, 'difficulty'), 'animation-name')).toBe('neonOn');
+    await pressKey(page, 'tempo', 'ArrowRight');
+    expect(await css(art(page, 'tempo'), 'animation-name')).toBe('neonOn');
+    expect(await css(art(page, 'tempo'), 'animation-duration')).toBe('0.7s');
+    expect(await css(art(page, 'tempo'), 'animation-iteration-count')).toBe('1');
+    // Reset puts the sign out: no animation on the art.
+    await resetButton(page, 'tempo').click();
+    expect(await css(art(page, 'tempo'), 'animation-name')).toBe('none');
+  });
+
+  test('29b. the flicker plays when a gear turns on, not on every nudge of a gear that is already on', async ({ page }) => {
+    await open(page);
+    await pressKey(page, 'tempo', 'ArrowRight');
+    const animation = () => art(page, 'tempo').evaluate((el) => el.getAnimations().find((a) => (a as CSSAnimation).animationName === 'neonOn')?.currentTime ?? null);
+    await page.waitForTimeout(800); // longer than the flicker: it is over
+    expect(await animation()).toBeNull();
+    await pressKey(page, 'tempo', 'ArrowRight', 3);
+    // Nudging a gear that is on starts nothing.
+    expect(await animation()).toBeNull();
+  });
+
+  test('the sign buzzes and the #1 title\'s wipe sweeps, when motion is allowed', async ({ page }) => {
+    await open(page);
+    expect(await css(page.locator('[lang="ja"]'), 'animation-name')).not.toBe('none');
+    const wipe = (prop: string) => page.locator('[data-wipe]').evaluate((el, p) => getComputedStyle(el, '::after').getPropertyValue(p), prop);
+    expect(await wipe('animation-name')).not.toBe('none');
+    expect(await wipe('animation-duration')).toBe('3.4s');
+    expect(await css(page.locator('[lang="ja"]'), 'animation-duration')).toBe('3.2s');
+    // The notes and bolts bob.
+    expect(await css(strip(page, 'popularity').locator('[data-bolt] > *').first(), 'animation-name')).not.toBe('none');
+  });
+});
+
+test('30. with reduced motion, the pendulum, the bob, the sign\'s buzz, the wipe and the art\'s flicker are all off', async ({ page }) => {
+  await open(page);
+  await pressKey(page, 'tempo', 'ArrowRight', 3); // so the pendulum would swing, and the flicker would play
+  const names = {
+    pendulum: await css(strip(page, 'tempo').locator('[data-pendulum]'), 'animation-name'),
+    flicker: await css(art(page, 'tempo'), 'animation-name'),
+    flickerDifficulty: await css(art(page, 'difficulty'), 'animation-name'),
+    bob: await css(strip(page, 'popularity').locator('[data-bolt] > *').first(), 'animation-name'),
+    noteBob: await css(strip(page, 'history').locator('[data-note] > *').first(), 'animation-name'),
+    sign: await css(page.locator('[lang="ja"]'), 'animation-name'),
+    wipe: await page.locator('[data-wipe]').evaluate((el) => getComputedStyle(el, '::after').animationName),
+  };
+  expect(names).toEqual({ pendulum: 'none', flicker: 'none', flickerDifficulty: 'none', bob: 'none', noteBob: 'none', sign: 'none', wipe: 'none' });
+  // The #1 title shows fully pink: no sweep.
+  expect(await page.locator('[data-wipe]').evaluate((el) => getComputedStyle(el, '::after').clipPath)).toBe('inset(0px)');
+  expect(await page.locator('[data-wipe]').evaluate((el) => getComputedStyle(el, '::after').color)).toBe(rgb('#FF6FB1'));
+  const running = await page.locator('#app').evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length);
+  expect(running).toBe(0);
+});
+
+test('31. the strip art is 120x64, and 140x75 in the mini sheet', async ({ page }) => {
+  await open(page);
+  const size = async (gear: GearId) => (await art(page, gear).boundingBox().then((b) => [Math.round(b!.width), Math.round(b!.height)]));
+  for (const g of ['difficulty', 'history', 'popularity', 'tempo'] as GearId[]) expect(await size(g), `${g} expanded`).toEqual([120, 64]);
+  await handle(page).click();
+  await expect(page.locator('#app')).toHaveAttribute('data-mode', 'mini');
+  expect(await size('difficulty')).toEqual([140, 75]);
+  for (const g of ['history', 'popularity', 'tempo'] as GearId[]) {
+    await tab(page, g).click();
+    expect(await size(g), `${g} in mini`).toEqual([140, 75]);
+  }
+});
+
+test('31b. the same, opened with ?mini=1', async ({ page }) => {
+  await open(page, { mini: true });
+  const b = (await art(page, 'difficulty').boundingBox())!;
+  expect([Math.round(b.width), Math.round(b.height)]).toEqual([140, 75]);
+});
+
+test('32. no tab label has Japanese in it, and the カラオケ sign is decoration', async ({ page }) => {
+  await open(page, { mini: true });
+  const labels = await page.locator('[data-tab]').allTextContents();
+  expect(labels).toEqual(['Difficulty', 'History', 'Popularity', 'Tempo', 'Era']);
+  for (const label of labels) expect(label).not.toMatch(/[぀-ヿ一-鿿]/);
+  const sign = page.locator('[lang="ja"]');
+  await expect(sign).toHaveText('カラオケ');
+  await expect(sign).toHaveAttribute('aria-hidden', 'true');
+  // One sign, and the heading is what a screen reader hears.
+  await expect(page.getByText('カラオケ')).toHaveCount(1);
+  expect(await page.getByRole('heading', { name: 'Tune your setlist' }).count()).toBe(1);
+});
+
+// "Pre-’70s" is 43 px wide in Inter at 6A's 10.5 px and its button is 37 to 41 px wide on a 360 to 390 px phone, so the labels
+// are sized to fit (sheet.module.css): the largest size that does, 9 px at 360 and 6A's own 10.5 px from about 405 px up.
+test('the era labels fit their buttons without wrapping on every phone from 360 px, "Pre-’70s" included, as large as will fit', async ({ page }) => {
+  await open(page); // 390x844 opens expanded, so the Era panel is on screen at every width below
+  const sizes: number[] = [];
+  for (const width of [360, 375, 390, 412, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(page.locator('#era-panel')).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const fits = await page.locator('button[data-era]').evaluateAll((buttons) =>
+      buttons
+        .filter((b) => b.closest('#era-panel'))
+        .map((b) => {
+          const label = b.querySelector('span') as HTMLElement;
+          const range = document.createRange();
+          range.selectNodeContents(label);
+          const text = range.getBoundingClientRect();
+          const box = b.getBoundingClientRect();
+          // Inside the button's 1 px borders, not just inside the box.
+          const room = box.width - 2;
+          return {
+            name: label.textContent,
+            lines: Math.round(text.height / parseFloat(getComputedStyle(label).lineHeight)),
+            room: Math.round(room * 10) / 10,
+            text: Math.round(text.width * 10) / 10,
+            size: Number.parseFloat(getComputedStyle(label).fontSize),
+            spills: text.left < box.left + 1 - 0.5 || text.right > box.right - 1 + 0.5,
+          };
+        }),
+    );
+    expect(fits, `${width} px`).toHaveLength(7);
+    for (const f of fits) {
+      expect(f.lines, `${width} px: ${f.name} wraps`).toBe(1);
+      expect(f.spills, `${width} px: ${f.name}: ${f.text} px of text at ${f.size}px in a ${f.room} px button`).toBe(false);
+    }
+    sizes.push(fits[0]!.size);
+  }
+  // Never below 9 px, growing with the room, and 6A's own size where it fits.
+  expect(sizes[0]).toBeGreaterThanOrEqual(9);
+  expect([...sizes].sort((x, y) => x - y)).toEqual(sizes);
+  expect(sizes.at(-1)).toBe(10.5);
+});
+
+test('the ▶ stands where the rank number was: first in the row, and the number is gone', async ({ page }) => {
+  await open(page);
+  const m = await rows(page).first().evaluate((li) => {
+    const row = li.getBoundingClientRect();
+    const slot = li.querySelector('[data-play-slot]')!.getBoundingClientRect();
+    const text = li.querySelector('[data-row-text]')!.getBoundingClientRect();
+    return { slotLeft: slot.left - row.left, slotW: slot.width, slotH: slot.height, gap: text.left - slot.right, firstChild: (li.firstElementChild as HTMLElement).hasAttribute('data-play-slot'), digits: /^\s*1\b/.test(li.textContent ?? '') };
+  });
+  expect(m.firstChild).toBe(true);
+  expect(m.slotLeft).toBeCloseTo(0, 0);
+  expect([m.slotW, m.slotH]).toEqual([44, 44]);
+  expect(m.gap).toBeCloseTo(10, 0);
+  expect(m.digits).toBe(false);
+  // The ▶ is a ring button in --pink-line with a --pink-text glyph (the placeholder until the play button is mounted).
+  const ring = await rows(page).first().locator('[data-play-slot] svg').first().evaluate((el) => getComputedStyle(el.querySelector('circle')!).stroke);
+  expect(ring).toBe(rgb('#F0509A'));
+});
+
+test('the badge is the song\'s own label, pink for all three, and a Maybe song has none', async ({ page }) => {
+  await open(page);
+  const badges = await page.locator('[data-badge]').evaluateAll((els) => els.map((el) => ({ text: el.textContent, color: getComputedStyle(el).color, border: getComputedStyle(el).borderTopColor, radius: getComputedStyle(el).borderTopLeftRadius, borderWidth: getComputedStyle(el).borderTopWidth })));
+  expect(new Set(badges.map((b) => b.text))).toEqual(new Set(['Easy', 'Medium', 'Hard']));
+  for (const b of badges) {
+    expect(b).toMatchObject({ color: rgb('#FF6FB1'), border: rgb('#F0509A'), radius: '8px' });
+    // 1.5 px in the stylesheet; a browser draws it in whole device pixels (1 px at 1x, 1.33 px at 3x).
+    expect(Number.parseFloat(b.borderWidth)).toBeGreaterThanOrEqual(1);
+    expect(Number.parseFloat(b.borderWidth)).toBeLessThanOrEqual(1.5);
+  }
+});
+
+test('signed out, History is drawn as an off gear: unlit, no reset button, and its hint stands where the end labels would, in --text-3', async ({ page }) => {
+  await open(page);
+  const h = strip(page, 'history');
+  await expect(h).toContainText('Connect Spotify to use your listening history');
+  await expect(h).not.toContainText('Rediscover');
+  await expect(h).not.toContainText('On repeat');
+  await expect(resetButton(page, 'history')).toBeHidden();
+  expect(await css(h.locator('[data-ends]'), 'color')).toBe(TEXT_3);
+  expect(await css(h.locator('label'), 'color')).toBe(OFF_TEXT);
+  expect(await css(h.locator('svg path').first(), 'stroke')).toBe(UNLIT);
+  expect(await css(h.locator('[data-knob]'), 'background-color')).toBe(rgb('#1E1D24'));
+  // The strip keeps its height with a two-line hint, and the rack does not overflow.
+  expect(Math.round((await h.boundingBox())!.height)).toBe(76);
+  expect(await rack(page)).toEqual({ height: 416, scroll: 416 });
+});
+
+test('the unreachable hint is the same: Spotify could not be reached, so listening history is off', async ({ page }) => {
+  const events: AppEvent[] = [];
+  await mockApi(page.context(), { loggedIn: true, events });
+  // The library cannot be read: the server answers the setlist with catalogue songs and says so.
+  await page.context().route('**/api/setlist', async (route) => {
+    const body = setlistAnswer(mockPage({ idPrefix: 'cat:' }), route.request().postDataJSON() as SetlistRequest, false, { libraryUnavailable: true });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.goto('/');
+  await expect(page.locator('#app [data-row]').first()).toBeVisible({ timeout: 20_000 });
+  const h = strip(page, 'history');
+  await expect(h).toContainText('Spotify could not be reached, so listening history is off');
+  await expect(slider(page, 'history')).toBeDisabled();
+  await expect(page.getByText('Couldn’t reach Spotify, showing popular songs.')).toBeVisible();
+});
+
+test('the other states of the list speak in 6A\'s quiet voice: 15/500 in --text-3', async ({ page }) => {
+  await open(page);
+  await eraButton(page, 's80').click();
+  await eraButton(page, 's80').click(); // Era on, nothing picked
+  const empty = page.locator('#empty');
+  await expect(empty).toHaveText('Pick an era to see songs.');
+  const style = await empty.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { size: cs.fontSize, weight: cs.fontWeight, color: cs.color, padding: `${cs.paddingTop} ${cs.paddingBottom}`, family: cs.fontFamily };
+  });
+  expect(style).toMatchObject({ size: '15px', weight: '500', color: TEXT_3, padding: '20px 20px' });
+  expect(style.family).toContain('Inter');
+});
+
+test('the tuner is set in Inter, self-hosted, and the sign in Noto Sans JP', async ({ page }) => {
+  await open(page);
+  const fonts = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const loaded = [...document.fonts].filter((f) => f.status === 'loaded').map((f) => `${f.family.replace(/"/g, '')} ${f.weight}`);
+    return { loaded, body: getComputedStyle(document.getElementById('app')!).fontFamily, sign: getComputedStyle(document.querySelector('[lang="ja"]')!).fontFamily };
+  });
+  expect(fonts.body).toMatch(/^Inter/);
+  expect(fonts.sign).toMatch(/Noto Sans JP/);
+  expect(fonts.loaded.some((f) => f.startsWith('Inter'))).toBe(true);
+  expect(fonts.loaded).toContain('Noto Sans JP 700');
+  expect(fonts.loaded.some((f) => /barlow/i.test(f))).toBe(false);
+  // Nothing is fetched from Google: every font is served by this origin.
+  const external = await page.evaluate(() => performance.getEntriesByType('resource').map((e) => e.name).filter((n) => /googleapis|gstatic/.test(n)));
+  expect(external).toEqual([]);
+});
 
 test('screenshots of the sheet in mini with the first gears off, for the review', async ({ page }) => {
   await open(page, { mini: true });
@@ -817,3 +1568,4 @@ test('screenshots of the sheet in mini with the first gears off, for the review'
   await resetButton(page, 'popularity').click();
   await page.screenshot({ path: path.join(SCREENS, 'setlist-mini-popularity-off.png') });
 });
+

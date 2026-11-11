@@ -3,6 +3,10 @@
 The whole app is one karaoke TV centered on a dark page. Every step happens on its
 screen, with instructions sung in like karaoke lyrics. One accent color: hot pink.
 
+On a phone (up to 430 px wide) the TV is the whole screen (Round 6A §3.3, QWW-57): page padding 14 10 12 (or the
+safe-area insets, if larger), bezel padding 9 9 0, bezel radius 30, screen radius 22, a 34 px chin with the LED, no height
+cap. Wider than that it is the TV of before, 880 px at most and 660 px tall at most.
+
 ## Flow
 
 1. **Landing**: カラオケ sign and a round Start button. "or pick songs you sing well" shows only while the
@@ -77,8 +81,10 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    it lands here: `?authError` is taken out of the address and one quiet line, "Couldn’t sign in to Spotify.",
    shows under the arrow, and again under the bar of the results the arrow leads to. `access_denied` is the
    singer pressing Cancel on Spotify's page, which is their answer, so nothing is said.
-7. **Results: the Setlist tuner** (QWW-46, the round 5 design; spec and reference in `docs/setlist-round5/`).
-   It fills the screen: no TV around it (the other steps and the song page stay on the TV). One request for every
+7. **Results: the Setlist tuner** (QWW-46, the round 5 design, spec and reference in `docs/setlist-round5/`; reskinned in
+   QWW-57 as Round 6A, "neon signs", in `docs/setlist-round6a/`, which also lists where production differs from it).
+   It is on the TV like every other step, with no second bezel; it fills the TV's screen and only its list scrolls. On a
+   phone (up to 430 px wide) the TV takes 6A's numbers and fills the viewport (see step 1). One request for every
    match (`/api/catalogue/recommendations?...&all=1` without Spotify, `/api/recommendations?all=1` with it); then
    the screen sends what is set on the sheet to the ranking engine (`src/lib/setlist/engine.ts`, asked through
    `useRankedSetlist`) and draws the ranked list it gets back (`SetlistResponse`, the shape of QWW-47's
@@ -86,22 +92,39 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    (QWW-47, `src/lib/songs/setlist.ts`) ranks, and `createNetworkEngine` asks it with the request (`limit` 200, the most one
    request may ask for; the screen shows 40 at a time). A slider drag asks once the thumb has rested 120 ms, and a request
    a newer one replaced is aborted. The list keeps the last answer until its own arrives. `libraryUnavailable` comes in the answer.
-   - **The list**: a row is its rank, the title over "Artist · Era" (`’90s`), a 44×30 difficulty lane, and a ▶ slot
-     that QWW-48 fills (until then a disabled ▶). Rows are in rank order in the DOM, and slide to their new place when
+   - **The header**: a 28 px row with the singer's range (each note re-sings that end), **redo** (re-sings both), the
+     カラオケ sign and the Spotify logo at the far right; the sign sits in the room between redo and the logo, and is
+     hidden when that room is too small for it. The notes and redo are 44 px tall to tap. The heading is below the row.
+   - **The list**: a row (66 px) is the ▶ slot where the rank number was (the rank lives in `data-rank` and the `<ol>`), the
+     title over "Artist · Era" (`’90s`) over a **reason line**, and a **difficulty badge**. The reason line is
+     `whyOf` in `src/lib/setlist/rows.ts`: the first two of "In your sweet spot" (Difficulty on, the song's place within 15
+     of it), "Crowd favourite" or "Deep cut" (place on Popularity at least 85, or at most 35), "On repeat" or "Rediscover"
+     (History at least 85, or at most 20), and when none holds "Gets the room moving" / "Slow burner" / "Solid pick"
+     (Tempo at least 70, at most 25, or unknown). The places are the engine's, percentiles among the songs that fit the
+     singer; a place that is null skips its rule, so a signed-out singer never sees the History ones. The badge is the song's
+     own label (what the song page shows); a Maybe song has none. The #1 title carries a pink lyric wipe. The ▶ slot is
+     filled by QWW-48 (until then a disabled ▶). Rows are in rank order in the DOM, and slide to their new place when
      the order changes (`flip.ts`; reduced motion turns it off). Tapping a row opens the song page; the ▶ does not.
      40 songs show at first, then "Load more". Songs with no year are in the list while Era is off and out of it
      while Era is on. When there are no songs the engine says why (`empty`): "Pick an era to see songs." (Era on,
      nothing picked), or a line saying none of the picked eras fit the range.
    - **The sheet**: four gears (Difficulty, Listening history, Popularity, Tempo) and a multi-select Era. **Reset** on
      a gear puts it back to its default (`src/lib/setlist/defaults.ts`, the one place) and turns it **off**: it
-     counts for nothing, its art dims, and touching it again turns it on from the default. Era off means every era.
+     counts for nothing, its art goes dark (unlit neon tubes; no dimming), and touching it again turns it on from the
+     default, with a short neon flicker. Era off means every era. The Era panel's header counts the songs that fit
+     (`SetlistResponse.total`, every song that fits the range and the picked eras, not the loaded page): "ERA · 1,204 songs".
      **Defaults** (QWW-47's decision): Popularity 100 and Difficulty 0 on; History 100, Tempo 50 and Era off, and Era
      has no default picks (the first tap on an era picks just that era). Signed out, History is also disabled and says
-     "Connect Spotify to use your listening history"; signed in, it can be switched on. **Expanded** shows every gear (rack 416 px);
-     **mini** shows one gear and a tab bar (164 px). The grab handle switches by tap, Enter or Space, or by a
-     vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live. `?mini=1`
-     starts in mini mode.
-   - **Type**: Barlow Semi Condensed 500 and 700, self-hosted (`@fontsource/barlow-semi-condensed`, SIL OFL 1.1).
+     "Connect Spotify to use your listening history" (or the unreachable line, when the engine says the library could
+     not be read), drawn as an off gear in place of its end labels; signed in, it can be switched on. **Expanded** shows
+     every gear (rack 416 px); **mini** shows one gear and a tab bar (164 px). The grab handle switches by tap, Enter or
+     Space, or by a vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live.
+     **Which mode it opens in** (`src/lib/setlist/fit.ts`, measured in `useSheetFit`): mini when the expanded sheet
+     would leave fewer than 3 whole rows (every phone but a tall one; a 390×844 still opens expanded), and where the
+     expanded sheet cannot fit inside the screen at all (an iPhone SE with Safari's bars, a phone on its side) the handle
+     keeps it mini. `?mini=1` always starts in mini mode.
+   - **Type**: Inter 400, 500, 600 and 700, self-hosted (`@fontsource/inter`, SIL OFL 1.1), and Noto Sans JP 700
+     subset to the four characters of the sign (`src/components/setlist/fonts/`). The earlier steps keep the system font.
    - **Events**: `gear_change` (gear, value, on) when a thumb is let go or a gear is reset, `era_change` (era, picked,
      on, eras) on an era tap or reset. `song_opened` and the like carry each gear's target (null when off).
    - **Tests**: `window.setlist` (`getState`, `setState`, `ranking`, `songs`) exists only in a build made with

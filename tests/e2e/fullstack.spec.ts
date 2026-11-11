@@ -63,6 +63,8 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
   // Era is a multi-select on real data: with it off every song counts, and the first tap picks just the 80s (Era has no
   // default picks), which leaves only their songs.
   const era = (id: string) => page.locator(`button[data-era="${id}"]`);
+  // A phone this short opens the tuner's sheet in mini (QWW-57), which shows the Era panel from its tab.
+  await page.locator('[data-tab][data-gear="era"]').click();
   await era('s80').click();
   await expect(era('s80')).toHaveAttribute('aria-pressed', 'true');
   await expect(songs.first()).toBeVisible();
@@ -73,7 +75,7 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
   await expect(songs).toHaveCount(Math.min(catAll.matches.length, 40));
 
   // Feedback without an account goes to the catalogue route with this device's id.
-  await songs.first().getByRole('button').first().click();
+  await songs.first().locator(':scope > button').click();
   await expect(page.getByRole('link', { name: 'Find on Spotify' })).toBeVisible();
   const catFeedback = page.waitForResponse((r) => r.url().includes('/api/catalogue/feedback'));
   await page.getByRole('button', { name: 'It went well' }).click();
@@ -101,7 +103,7 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
 
   // Open the first song of the singer's own library (the list also holds catalogue songs, whose id starts with cat:), check
   // the info line, leave feedback.
-  await page.locator('[data-row]:not([data-id^="cat:"])').first().getByRole('button').first().click();
+  await page.locator('[data-row]:not([data-id^="cat:"])').first().locator(':scope > button').click();
   // Spotify's player stands where the button was. The mock gives most songs a real track id; the few
   // without one keep the plain link.
   await expect(page.locator('iframe[src^="https://open.spotify.com/embed/track/"], a:has-text("Open in Spotify")')).toHaveCount(1);

@@ -73,13 +73,15 @@ test('switch off: the results screen shows no duet or mood anywhere, and no duet
   // paged through: the duet is still in it, and no row says "Duet". Opened, the song carries no duet line and no mood
   // pill either.
   const era = (id: string) => page.locator(`button[data-era="${id}"]`);
+  // A phone this short opens the tuner's sheet in mini (QWW-57), which shows the Era panel from its tab.
+  await page.locator('[data-tab][data-gear="era"]').click();
   await era('s80').click();
   const more = page.getByRole('button', { name: 'Load more songs' });
   for (let i = 0; i < 10 && (await more.count()) > 0; i++) await more.click();
   const duet = songs.filter({ hasText: 'Islands in the Stream' });
   await expect(duet).toHaveCount(1);
   await expect(page.getByText(/Duet/)).toHaveCount(0);
-  await duet.getByRole('button').first().click();
+  await duet.locator(':scope > button').click();
   await expect(page.getByRole('heading', { name: 'Islands in the Stream' })).toBeVisible();
   await expect(page.getByText(/Duet|Upbeat|Heartfelt/)).toHaveCount(0);
   await page.screenshot({ path: path.join(SCREENS, 'duets-moods-off-02-song.png') });
