@@ -102,8 +102,9 @@ finds the screen, the tuner and a running mic step as they were. A tablet (talle
    - **The header**: a 28 px row with the singer's range (each note re-sings that end), **redo** (re-sings both), the
      カラオケ sign and the Spotify logo at the far right. The sign is centred on the row's own middle (R1: the row's
      centre, to a pixel, not the room between redo and the logo). It shrinks from 16 px down to 13 px to keep 8 px clear of
-     redo and the logo, and is hidden, not moved, only when 13 px does not fit (`signSize` in `fit.ts`, measured by
-     `useSignFit`; the longest range on a 360 px phone). The notes
+     redo and the logo, and is hidden, not moved, only when 13 px does not fit (`signSize` in `fit.ts` is the first guess,
+     and `useSignFit` checks the laid-out sign and steps down 0.2 px until the gap holds, so a browser whose text is not
+     exactly proportional to its size still keeps it; the longest range on a 360 px phone). The notes
      and redo are 44 px tall to tap, and turn pink on hover and on keyboard focus (R9). The heading is below the row.
    - **The list**: a row (66 px) is the slot (44 px) with the rank number, the title over "Artist · Era" (`’90s`) over a
      **reason line**, and a **difficulty badge**. The slot holds the rank number and the ▶ on top of each other (R3): on a
