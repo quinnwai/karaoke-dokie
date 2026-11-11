@@ -90,7 +90,6 @@ export const POSTHOG_PROPS: ReadonlySet<string> = new Set([
   'era',
   'picked',
   'eras',
-  'off',
   // The rest of the funnel.
   'from',
   'signedIn',
