@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CANONICAL_METHOD, MAX_RANGE_GAP, applyCanonical, buildCanonical, type CanonicalInput, type SongCanonical } from '../../src/lib/songs/canonical';
+import { CANONICAL_METHOD, MAX_RANGE_GAP, OCTAVE_TOLERANCE, applyCanonical, buildCanonical, type CanonicalInput, type SongCanonical } from '../../src/lib/songs/canonical';
 
 let n = 0;
 /** A measured song, F2 to C5 unless the test says otherwise; every row gets a unique key unless the test gives one. */
@@ -10,6 +10,7 @@ const row = (artist: string, title: string, rank = 0.5, extra: Partial<Canonical
   rank,
   low: 41,
   high: 72,
+  trust: 0,
   ...extra,
 });
 /** A fixed shuffle, so a failure can be run again. */
@@ -173,11 +174,13 @@ describe('buildCanonical: which rows are one song', () => {
         if (k % 2 === 0) rows.push(row(`Artist ${a}`, `Song ${k} (Live)`, r(2)));
         if (k % 3 === 0) rows.push(row(`Artist ${a}`, `Song ${k} [DUET]`, r(3)));
         if (k % 5 === 0) rows.push(row(`The Artist ${a}`, `Song ${k}!`, r(1), { low: 41 + (k % 10), high: 72 }));
+        if (k % 4 === 1) rows.push(row(`Artist ${a}`, `Song ${k} `, r(2), { low: 53, high: 84, trust: ((a + k) % 3) as 0 | 1 | 2 }));
       }
     }
     const forward = buildCanonical(rows);
     expect(forward.groups.length).toBeGreaterThan(20);
     expect(forward.apart.length).toBeGreaterThan(0);
+    expect(forward.groups.some((g) => g.octave)).toBe(true);
     for (const seed of [1, 2, 3]) expect(buildCanonical(shuffle(rows, seed))).toEqual(forward);
     expect(buildCanonical([...rows].reverse())).toEqual(forward);
   });
@@ -224,6 +227,95 @@ describe('buildCanonical: rows of one name whose ranges disagree stay two rows',
     const r = byKey(buildCanonical([far, a2, a]));
     expect(r.get(a2.key)!.canonicalKey).toBe(a.key);
     expect(r.get(far.key)!.canonicalKey).toBe(far.key);
+  });
+});
+
+describe('buildCanonical: rows an octave apart', () => {
+  it('folds a recording and a note file an octave apart into the recording, however popular the note file is', () => {
+    // Plain White T's, Hey There Delilah, as measured: a recording at 52 to 62 and a note file at 64 to 74
+    const recording = row("Plain White T's", 'Hey There Delilah', 0.5, { low: 52, high: 62, trust: 2 });
+    const noteFile = row('Plain White T’s', 'Hey There Delilah', 0.9, { low: 64, high: 74, trust: 0 });
+    const build = buildCanonical([noteFile, recording]);
+    expect(build.apart).toEqual([]);
+    expect(byKey(build).get(noteFile.key)).toMatchObject({ canonicalKey: recording.key, reason: 'folded' });
+    expect(byKey(build).get(recording.key)).toMatchObject({ canonicalKey: recording.key });
+    expect(build.groups[0]).toMatchObject({ canonicalKey: recording.key, octave: true });
+    expect(build.groups[0]!.members.map((m) => [m.low, m.high, m.trust])).toEqual([[64, 74, 0], [52, 62, 2]]);
+  });
+
+  it('shows the note file corrected from evidence over the one as written', () => {
+    // ABBA, Money Money Money: one spelling was corrected from its recording, the other still has the file's octave
+    const corrected = row('ABBA', 'Money, Money, Money', 0.4, { low: 52, high: 65, trust: 1 });
+    const written = row('ABBA', 'Money Money Money', 0.8, { low: 64, high: 77, trust: 0 });
+    const build = buildCanonical([written, corrected]);
+    expect(byKey(build).get(written.key)!.canonicalKey).toBe(corrected.key);
+    expect(build.apart).toEqual([]);
+    // and a recording beats a corrected note file
+    const recording = row('ABBA', 'Money Money Money ', 0.1, { low: 52, high: 65, trust: 2 });
+    expect(byKey(buildCanonical([written, corrected, recording])).get(corrected.key)!.canonicalKey).toBe(recording.key);
+  });
+
+  it('keeps two rows an octave apart when neither is better evidenced: there is nothing to say which is right', () => {
+    for (const trust of [0, 1, 2] as const) {
+      const a = row('A', 'Song', 0.5, { low: 40, high: 64, trust });
+      const b = row('A', 'Song ', 0.4, { low: 52, high: 76, trust });
+      const build = buildCanonical([a, b]);
+      expect(build.groups).toEqual([]);
+      expect(build.apart).toHaveLength(1);
+      expect(byKey(build).get(b.key)!.canonicalKey).toBe(b.key);
+    }
+  });
+
+  it('keeps rows apart that disagree by anything but an octave, evidence or not', () => {
+    const base = row('A', 'Song', 0.5, { low: 40, high: 64, trust: 2 });
+    for (const [low, high] of [[47, 71], [43, 67 + 6], [52, 64], [40, 76], [52, 70]] as const) {
+      const other = row('A', 'Song ', 0.4, { low, high, trust: 0 });
+      expect(buildCanonical([base, other]).groups).toEqual([]);
+    }
+  });
+
+  it('allows OCTAVE_TOLERANCE semitones off the octave at each end, and not more', () => {
+    expect(OCTAVE_TOLERANCE).toBe(2);
+    const base = row('A', 'Song', 0.5, { low: 40, high: 64, trust: 2 });
+    const within = row('A', 'Song ', 0.4, { low: 52 + 2, high: 76 - 2, trust: 0 });
+    expect(byKey(buildCanonical([base, within])).get(within.key)!.canonicalKey).toBe(base.key);
+    const past = row('A', 'Song  ', 0.4, { low: 52 + 3, high: 76, trust: 0 });
+    expect(byKey(buildCanonical([base, past])).get(past.key)!.canonicalKey).toBe(past.key);
+  });
+
+  it('folds two octaves apart, either way round', () => {
+    const base = row('A', 'Song', 0.5, { low: 52, high: 64, trust: 2 });
+    for (const shift of [24, -24, -12]) {
+      const other = row('A', 'Song ', 0.4, { low: 52 + shift, high: 64 + shift, trust: 0 });
+      expect(byKey(buildCanonical([base, other])).get(other.key)!.canonicalKey).toBe(base.key);
+    }
+  });
+
+  it('chooses among the best evidenced rows by the usual rules: a plain title first, then popularity', () => {
+    const taggedRecording = row('A', 'Song (Live)', 0.35, { low: 52, high: 62, trust: 2 });
+    const plainRecording = row('A', 'Song', 0.3, { low: 53, high: 62, trust: 2 });
+    const noteFile = row('A', 'Song ', 0.95, { low: 64, high: 74, trust: 0 });
+    const r = byKey(buildCanonical([noteFile, taggedRecording, plainRecording]));
+    for (const x of [noteFile, taggedRecording, plainRecording]) expect(r.get(x.key)!.canonicalKey).toBe(plainRecording.key);
+  });
+
+  it('uses no evidence inside rows whose ranges agree: the plain title and popularity decide as before', () => {
+    const recording = row('A', 'Song [DUET]', 0.55, { low: 41, high: 72, trust: 2 });
+    const noteFile = row('A', 'Song', 0.5, { low: 43, high: 70, trust: 0 });
+    const build = buildCanonical([recording, noteFile]);
+    expect(byKey(build).get(recording.key)!.canonicalKey).toBe(noteFile.key);
+    expect(build.groups[0]).toMatchObject({ octave: false });
+  });
+
+  it('still keeps a name apart that has both kinds of disagreement, and folds the rows that can be folded', () => {
+    const a = row('A', 'Song', 0.9, { low: 40, high: 64, trust: 2 });
+    const octave = row('A', 'Song ', 0.8, { low: 52, high: 76, trust: 0 });
+    const fifth = row('A', 'Song  ', 0.7, { low: 47, high: 71, trust: 0 });
+    const build = buildCanonical([a, octave, fifth]);
+    const r = byKey(build);
+    expect(r.get(octave.key)!.canonicalKey).toBe(a.key);
+    expect(r.get(fifth.key)!.canonicalKey).toBe(fifth.key);
+    expect(build.apart).toHaveLength(1);
   });
 });
 

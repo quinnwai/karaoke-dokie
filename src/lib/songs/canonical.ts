@@ -9,8 +9,11 @@
 //    other punctuation are set aside. A featured artist or a further credit does not make another song:
 //    "Calvin Harris" and "Calvin Harris & Dua Lipa" sing "One Kiss" once, as the release eval harness counts it.
 //  - And only when their measured ranges agree (MAX_RANGE_GAP). Two rows with the same name and ranges a
-//    fifth or an octave apart do not say the same thing about the song: folding would pick one
-//    measurement for everyone and hide the other from the singers it fits. They stay two rows.
+//    fifth apart do not say the same thing about the song: folding would pick one measurement for everyone
+//    and hide the other from the singers it fits. They stay two rows. The exception is a pair an octave apart
+//    with one row better evidenced (a recording, or a note file corrected from one): that is one measurement
+//    written in two octaves, the matcher already tries a song an octave up and down, and the better evidenced row
+//    is shown. An octave apart with nothing to choose by stays two rows.
 //  - The row shown is the main version: the one whose title carries no version tag, the most popular
 //    of those. An alternate is shown instead only when it is clearly more popular (see below).
 //  - Instrumental, karaoke and dub rows are never folded or shown as a song (hasLittleSinging hides them).
@@ -36,6 +39,12 @@ export const ALTERNATE_MARGIN = 0.15;
  */
 export const MAX_RANGE_GAP = 4;
 
+/**
+ * Rows count as an octave apart (or two) when both ends differ by 12 (or 24) semitones, give or take this many, the
+ * same way round. The first build had 28 groups at exactly 12, the wrong-octave problem of QWW-31.
+ */
+export const OCTAVE_TOLERANCE = 2;
+
 /** What the build reads about one measured song. */
 export interface CanonicalInput {
   key: string;
@@ -47,6 +56,11 @@ export interface CanonicalInput {
   /** The stored range, lowest and highest note (midi). */
   low: number;
   high: number;
+  /**
+   * How far the range can be trusted for its octave: 2 measured from a recording, 1 a note file whose octave was
+   * corrected from evidence (a recording, the artist's other songs, a pitch check, a hand check), 0 a note file as written.
+   */
+  trust: 0 | 1 | 2;
 }
 
 /** Why a row is as it is: shown as written, shown with a cleaned title or artist line, or folded into another row. */
@@ -76,7 +90,9 @@ export interface FoldGroup {
   canonicalKey: string;
   /** True when an alternate was shown instead of the main version. */
   alternate: boolean;
-  members: { key: string; artist: string; title: string; rank: number }[];
+  /** True when some rows are an octave from the rest and the better evidenced rows are the ones shown. */
+  octave: boolean;
+  members: { key: string; artist: string; title: string; rank: number; low: number; high: number; trust: 0 | 1 | 2 }[];
 }
 
 /** Rows of one name kept apart because their ranges disagree, for the dry run's report. */
@@ -107,6 +123,12 @@ interface Prepared {
 
 const byRank = (a: Prepared, b: Prepared) => b.input.rank - a.input.rank || (a.input.key < b.input.key ? -1 : a.input.key > b.input.key ? 1 : 0);
 const gapOf = (a: CanonicalInput, b: CanonicalInput) => Math.max(Math.abs(a.low - b.low), Math.abs(a.high - b.high));
+/** True when both ends of `a` sit about one (or two) octaves above, or both below, those of `b`. */
+function octaveApart(a: CanonicalInput, b: CanonicalInput): boolean {
+  const lowDiff = a.low - b.low;
+  const highDiff = a.high - b.high;
+  return [12, 24].some((k) => [k, -k].some((shift) => Math.abs(lowDiff - shift) <= OCTAVE_TOLERANCE && Math.abs(highDiff - shift) <= OCTAVE_TOLERANCE));
+}
 
 function prepare(input: CanonicalInput): Prepared {
   if (hasLittleSinging(input.title)) return { input, title: input.title, artist: input.artist, plain: false, fold: null };
@@ -121,14 +143,15 @@ function clearlyMorePopular(alt: CanonicalInput, main: CanonicalInput): boolean 
 }
 
 /**
- * Splits rows of one name into the parts whose ranges agree: each row joins the first part (most popular
- * first) whose head it is within MAX_RANGE_GAP of at both ends, else starts a part. Comparing with the
- * head only, never chaining, keeps a part from drifting a few semitones at a time.
+ * Splits rows of one name into the parts that are one song: each row joins the first part (most popular
+ * first) whose head it is within MAX_RANGE_GAP of at both ends, or an octave from with a different trust (one of
+ * the two is better evidenced), else starts a part. Comparing with the head only, never chaining, keeps a part
+ * from drifting a few semitones at a time.
  */
 function agreeingParts(members: Prepared[]): Prepared[][] {
   const parts: Prepared[][] = [];
   for (const m of [...members].sort(byRank)) {
-    const part = parts.find((p) => gapOf(p[0]!.input, m.input) <= MAX_RANGE_GAP);
+    const part = parts.find((p) => gapOf(p[0]!.input, m.input) <= MAX_RANGE_GAP || (octaveApart(p[0]!.input, m.input) && p[0]!.input.trust !== m.input.trust));
     if (part) part.push(m);
     else parts.push([m]);
   }
@@ -177,7 +200,12 @@ export function buildCanonical(inputs: CanonicalInput[]): CanonicalBuild {
         records.set(part[0]!.input.key, single(part[0]!));
         continue;
       }
-      const ranked = [...part].sort(byRank);
+      // A part with rows an octave apart shows one of its best evidenced rows, whatever the titles and popularity say: the
+      // others are the same melody written in another octave.
+      const octave = part.some((m) => gapOf(part[0]!.input, m.input) > MAX_RANGE_GAP);
+      const trusted = Math.max(...part.map((m) => m.input.trust));
+      const pool = octave ? part.filter((m) => m.input.trust === trusted) : part;
+      const ranked = [...pool].sort(byRank);
       const best = ranked[0]!;
       const main = ranked.find((m) => m.plain) ?? best;
       // Without a plain row the most popular is shown. With one, an alternate (a row with a tag on its title) that is
@@ -196,7 +224,8 @@ export function buildCanonical(inputs: CanonicalInput[]): CanonicalBuild {
       groups.push({
         canonicalKey: shown.input.key,
         alternate: challenger !== undefined,
-        members: ranked.map((m) => ({ key: m.input.key, artist: m.input.artist, title: m.input.title, rank: m.input.rank })),
+        octave,
+        members: [...part].sort(byRank).map((m) => ({ key: m.input.key, artist: m.input.artist, title: m.input.title, rank: m.input.rank, low: m.input.low, high: m.input.high, trust: m.input.trust })),
       });
     }
   }

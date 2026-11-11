@@ -274,6 +274,12 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
       expect(inputs.find((i) => i.key === 'abba|waterloo')).toMatchObject({ low: songRange.low, high: songRange.high });
       expect(inputs.find((i) => i.key === 'nobody|skipped')).toBeUndefined();
       expect(await make().listCanonicalInputs()).toEqual([]);
+      // how far each range's octave can be trusted: a recording, a note file corrected from evidence, a note file as written
+      await s.putSongRange('queen|corrected', row('Queen', 'Corrected', { ...songRange, octaveFrom: 'recording' }));
+      await s.putSongRange('queen|checked by hand', row('Queen', 'Checked By Hand', { ...songRange, octaveFrom: 'hand' }));
+      const again = await s.listCanonicalInputs();
+      const trust = (key: string) => again.find((i) => i.key === key)?.trust;
+      expect([trust('abba|sos'), trust('queen|corrected'), trust('queen|checked by hand'), trust('abba|waterloo')]).toEqual([2, 1, 1, 0]);
     });
   });
 

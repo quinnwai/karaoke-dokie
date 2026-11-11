@@ -584,6 +584,7 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       const rows = await query(
         `SELECT s.song_key, s.log_json::json ->> 'artist' AS artist, s.log_json::json ->> 'title' AS title,
            s.range_json::json ->> 'usdbViews' AS range_views, s.range_json::json ->> 'low' AS low, s.range_json::json ->> 'high' AS high,
+           s.range_json::json ->> 'source' AS source, s.range_json::json ->> 'octaveFrom' AS octave_from,
            b.views, p.karaoke_views, p.chart_rank, d.rank AS deezer_rank
          FROM song_ranges s
          LEFT JOIN (SELECT DISTINCT ON (song_key) song_key, id, views FROM usdb_songs ORDER BY song_key, COALESCE(views, 0) DESC, id) b
@@ -605,6 +606,7 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         ),
         low: num(r.low),
         high: num(r.high),
+        trust: str(r.source) === 'audio-full' ? 2 : isSet(r.octave_from) ? 1 : 0,
       }));
     },
 

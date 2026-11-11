@@ -331,8 +331,11 @@ language versions ("(German Version)", "(Spanish Radio Edit)": the lyrics differ
   the cleaned titles. A featured artist or a further credit is set aside: "Calvin Harris" and "Calvin Harris & Dua
   Lipa" are one song (the release eval harness counts duplicates by lead artist too); "A" and "B" are not, and
   neither are "A & B" and "B & A";
-- their ranges agree at both ends within 4 semitones (`MAX_RANGE_GAP`). A popular row measured an octave off would
-  otherwise hide the row that fits the singer; those pairs stay two rows and the dry run lists them;
+- their ranges agree at both ends within 4 semitones (`MAX_RANGE_GAP`), or they are an octave apart (both ends 12 or 24
+  semitones off, give or take 2) and one row is better evidenced: measured from a recording, or a note file corrected
+  from one (`trust`). That is one melody written in two octaves, the matcher already tries a song an octave up and down,
+  and the better evidenced row is shown. Any other disagreement (a fifth apart, an octave with nothing to choose by)
+  keeps two rows, because folding would pick one measurement for everyone; the dry run lists them;
 - neither is an instrumental, karaoke or dub row.
 
 The row shown is the main version, the one with no tag on its title (the most popular such row), unless an alternate

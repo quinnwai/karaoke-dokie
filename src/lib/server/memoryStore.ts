@@ -237,7 +237,7 @@ export function createMemoryStore(): Store {
       for (const [key, { range, log }] of songs) {
         if (!range || !isMeasured(range)) continue;
         const popularity = popularityOf(key);
-        out.push({ key, artist: log.artist, title: log.title, rank: catalogueRank(range, best.get(key), popularity), low: range.low, high: range.high });
+        out.push({ key, artist: log.artist, title: log.title, rank: catalogueRank(range, best.get(key), popularity), low: range.low, high: range.high, trust: range.source === 'audio-full' ? 2 : range.octaveFrom ? 1 : 0 });
       }
       return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     },
