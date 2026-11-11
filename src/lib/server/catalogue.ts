@@ -181,6 +181,7 @@ export function catalogueMatches(
     }
     if (song.usdb?.genre) m.genre = song.usdb.genre;
     if (song.tempo !== undefined) m.tempo = song.tempo;
+    if (song.popularity?.deezerId !== undefined) m.deezerId = song.popularity.deezerId;
     matches.push(m);
     logs.set(song.track.id, song.log);
   }

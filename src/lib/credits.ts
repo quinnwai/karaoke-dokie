@@ -69,4 +69,9 @@ export const CREDITS: Credit[] = [
     url: 'https://developer.spotify.com/',
     what: 'Your saved songs, top tracks and recent plays, and the song player (it loads from Spotify, which sets its own cookies).',
   },
+  {
+    name: 'Deezer',
+    url: 'https://www.deezer.com/',
+    what: 'The 30-second previews behind the play button on each song, streamed from Deezer for your own private, non-commercial listening. We never keep the audio. Deezer’s track ranks are also one of the signs of how well known a song is.',
+  },
 ];
