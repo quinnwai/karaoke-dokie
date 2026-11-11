@@ -5,13 +5,18 @@
 // it, so that nobody loosens the query without a test failing. Where the browser shows it, that it covers the viewport and fits,
 // and that turning the phone back finds the page as it was, is tests/e2e/landscape.spec.ts.
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, renderHook, screen } from '@testing-library/react';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Tv } from '../../src/components/Tv';
+import { isSideways, ROTATE_QUERY, useSideways } from '../../src/lib/client/useSideways';
+import { phone, unphone } from '../helpers/phone';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  unphone();
+});
 
 const WORDS = 'Turn your phone upright';
 
@@ -114,6 +119,13 @@ describe('the stylesheet that shows it', () => {
       .map((c) => c.trim())
       .sort();
     expect(conditions).toEqual(['(hover: none)', '(max-height: 500px)', '(orientation: landscape)', '(pointer: coarse)']);
+    // The same query, asked from script (useSideways) to make the page under the message inert: one text for both, or the message would
+    // cover a page that is still usable, or lock one that is not covered.
+    expect(
+      ROTATE_QUERY.split(/\s+and\s+/)
+        .map((c) => c.trim())
+        .sort(),
+    ).toEqual(conditions);
     const inner = blocks(body).filter(([p]) => p === '.rotateNotice');
     expect(inner).toHaveLength(1);
     expect(decl(inner[0]![1], 'display')).toBe('flex');
@@ -131,5 +143,125 @@ describe('the stylesheet that shows it', () => {
     const everyLayer = files.flatMap((f) => zIndexes(readFileSync(join(SRC, f), 'utf8')));
     expect(own).toBeGreaterThan(2);
     expect(everyLayer.filter((z) => z >= own)).toEqual([own]);
+  });
+});
+
+// ---- the page under it ----
+
+describe('useSideways', () => {
+  it('is false where nobody can be asked (no media queries, as on a server and in jsdom)', () => {
+    expect(isSideways()).toBe(false);
+    expect(renderHook(() => useSideways()).result.current).toBe(false);
+  });
+
+  it('follows the phone as it is turned, asks the one query, and lets go of it when the page goes', () => {
+    const turned = phone();
+    const ask = vi.spyOn(window, 'matchMedia');
+    const { result, unmount } = renderHook(() => useSideways());
+    expect(result.current).toBe(false);
+    expect(ask.mock.calls.every(([q]) => q === ROTATE_QUERY)).toBe(true);
+    expect(turned.listeners.size).toBe(1);
+    turned.turn(true);
+    expect(result.current).toBe(true);
+    expect(isSideways()).toBe(true);
+    turned.turn(false);
+    expect(result.current).toBe(false);
+    unmount();
+    expect(turned.listeners.size).toBe(0);
+  });
+
+  it('is true from the first render of a page opened on its side', () => {
+    phone(true);
+    expect(renderHook(() => useSideways()).result.current).toBe(true);
+  });
+});
+
+describe('with the phone on its side, the page under the message is not usable (a second pass at finding 1)', () => {
+  const tvOf = () => screen.getByRole('region', { name: 'Karaoke screen', hidden: true });
+  const dialogOf = () => screen.getByRole('dialog', { name: WORDS });
+  const draw = () =>
+    render(
+      <Tv>
+        <button type="button">Start</button>
+        <input type="range" aria-label="Tempo" />
+      </Tv>,
+    );
+
+  it('upright: the TV is not inert and the message has no focus', () => {
+    phone();
+    draw();
+    expect(tvOf().hasAttribute('inert')).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('on its side from the start: the TV is inert and the message has the focus, as a dialog does', () => {
+    phone(true);
+    draw();
+    expect(tvOf().hasAttribute('inert')).toBe(true);
+    expect(dialogOf().tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(dialogOf());
+    // The message is not inside what is inert, or it would be inert too.
+    expect(tvOf().contains(dialogOf())).toBe(false);
+  });
+
+  it('turned to its side with a control focused: the TV goes inert, the focus goes to the message, and turned back it returns to the control', () => {
+    const turned = phone();
+    draw();
+    const slider = screen.getByRole('slider', { name: 'Tempo' });
+    slider.focus();
+    expect(document.activeElement).toBe(slider);
+
+    turned.turn(true);
+    expect(tvOf().hasAttribute('inert')).toBe(true);
+    expect(document.activeElement).toBe(dialogOf());
+
+    turned.turn(false);
+    expect(tvOf().hasAttribute('inert')).toBe(false);
+    expect(document.activeElement).toBe(slider);
+  });
+
+  it('turned to its side and back with nothing focused: nothing is focused afterwards either', () => {
+    const turned = phone();
+    draw();
+    turned.turn(true);
+    expect(document.activeElement).toBe(dialogOf());
+    turned.turn(false);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('does not take the focus back from where the singer put it since, nor from a control that is gone', () => {
+    const turned = phone();
+    const { rerender } = draw();
+    const outside = document.body.appendChild(document.createElement('input'));
+    screen.getByRole('button', { name: 'Start' }).focus();
+    turned.turn(true);
+    outside.focus();
+    turned.turn(false);
+    expect(document.activeElement).toBe(outside);
+
+    turned.turn(true);
+    screen.getByRole('button', { name: 'Start', hidden: true });
+    rerender(
+      <Tv>
+        <p>the next step</p>
+      </Tv>,
+    );
+    expect(() => turned.turn(false)).not.toThrow();
+    outside.remove();
+  });
+
+  it('is turned again and again: each turn puts the same things back', () => {
+    const turned = phone();
+    draw();
+    const start = screen.getByRole('button', { name: 'Start' });
+    for (let i = 0; i < 3; i++) {
+      start.focus();
+      turned.turn(true);
+      expect(tvOf().hasAttribute('inert')).toBe(true);
+      expect(document.activeElement).toBe(dialogOf());
+      turned.turn(false);
+      expect(tvOf().hasAttribute('inert')).toBe(false);
+      expect(document.activeElement).toBe(start);
+    }
   });
 });

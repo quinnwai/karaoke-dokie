@@ -1882,6 +1882,8 @@
    page instead, on every step. It is only drawn over the page: nothing underneath is unmounted or changed, so turning the phone
    back finds it as it was. A tablet (taller than 500 px) and anything with a pointer that hovers never see it. */
 .rotateNotice {
+  /* It takes focus when it comes up (RotateNotice.tsx), as a dialog does, but it is not a control: no ring. */
+  outline: none;
   display: none;
   position: fixed;
   inset: 0;
