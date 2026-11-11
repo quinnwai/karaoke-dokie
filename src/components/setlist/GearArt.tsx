@@ -12,6 +12,7 @@ import {
   AMBER,
   CYAN,
   PINK,
+  TAB_GLOW_DEVIATION,
   VIOLET,
   itemArt,
   jukeboxArt,
@@ -94,6 +95,73 @@ function StripSvg({ off, className, children }: { off: boolean; className?: stri
 
 /** What every tab icon shares: 34x27 on screen, drawn on a 28x22 grid (§9). */
 const TAB = { width: '34', height: '27', viewBox: '0 0 28 22', fill: 'none', 'aria-hidden': 'true' } as const;
+
+/**
+ * The glow of a History or Popularity tab icon (§7, §9; QWW-57, R7): the gear's colour, blurred by the same 3 px as the other
+ * tabs' CSS glow, behind the group that names this filter and merged with it. A CSS filter on the svg would light the unlit rays
+ * too, and WebKit does not draw one on an svg child reliably. It works in sRGB, as CSS filters do. Its region is in the grid's
+ * units, the grid and 8 round it (three standard deviations is 7.4): a region taken from the group's own box would be empty for a
+ * lone straight ray and would change as rays light.
+ */
+function TabGlow({ id, color }: { id: string; color: string }) {
+  return (
+    <defs>
+      <filter id={id} x="-8" y="-8" width="44" height="38" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+        <feGaussianBlur in="SourceAlpha" stdDeviation={TAB_GLOW_DEVIATION} result="b" />
+        <feFlood floodColor={color} />
+        <feComposite in2="b" operator="in" result="glow" />
+        <feMerge>
+          <feMergeNode in="glow" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    </defs>
+  );
+}
+
+interface TabRay {
+  d: string;
+  /** Its place among the seven: ray i mirrors note or bolt i. */
+  i: number;
+  lit: boolean;
+  /** Its colour while it is lit, UNLIT otherwise (itemArt). */
+  color: string;
+}
+
+/**
+ * A History or Popularity tab icon: a body (the headphones, the mic) and seven rays. The glow reaches only what is lit: the body
+ * while the gear is on and the rays the value reaches are in the one group that names the glow filter, the unlit rays come after
+ * it with no filter on them or above them, and an off gear has no filter at all. A ray's threshold rises with its index, so the lit
+ * ones are the first ones and the rays stay in index order in the document, as they are in the reference.
+ */
+function RayTab({
+  off,
+  className,
+  glow,
+  body,
+  rays,
+}: {
+  off: boolean;
+  className?: string;
+  /** The gear's colour, which is the glow's whatever the colour of the part it surrounds. */
+  glow: string;
+  body: ReactNode;
+  rays: readonly TabRay[];
+}) {
+  const id = useFilterId();
+  const ray = ({ d, i, lit, color }: TabRay) => <path key={d} data-ray="" data-i={i} data-lit={lit} d={d} stroke={color} />;
+  return (
+    // `overflow`: the glow reaches past the 34x27 box, as the CSS filter on this svg did; the box would clip a filter inside it.
+    <svg {...TAB} overflow="visible" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {!off && <TabGlow id={id} color={glow} />}
+      <g filter={off ? undefined : `url(#${id})`}>
+        {body}
+        <g strokeWidth="1.5">{rays.filter((r) => r.lit).map(ray)}</g>
+      </g>
+      <g strokeWidth="1.5">{rays.filter((r) => !r.lit).map(ray)}</g>
+    </svg>
+  );
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Difficulty: a pitch lane. The band and the dashes take their height, position and colour from laneArt(value, off).
@@ -233,19 +301,19 @@ const HISTORY_RAYS = [
 
 function HistoryTab({ value, off, className }: ArtProps) {
   return (
-    <svg {...TAB} strokeLinecap="round" strokeLinejoin="round" className={className} style={{ filter: tabGlow(CYAN, off) }}>
-      <g strokeWidth="1.5" stroke={tube(CYAN, off)}>
-        <path d="M10.2 12.2 V10 A3.8 3.8 0 0 1 17.8 10 V12.2" />
-        <rect x="8.9" y="12.2" width="3.2" height="5.6" rx="1.6" transform="rotate(-7 10.5 15)" />
-        <rect x="15.9" y="12.2" width="3.2" height="5.6" rx="1.6" transform="rotate(7 17.5 15)" />
-      </g>
-      <g strokeWidth="1.5">
-        {HISTORY_RAYS.map((d, i) => {
-          const { lit, color } = itemArt(noteColor(i), value, i, off);
-          return <path key={d} data-ray="" data-i={i} data-lit={lit} d={d} stroke={color} />;
-        })}
-      </g>
-    </svg>
+    <RayTab
+      off={off}
+      className={className}
+      glow={CYAN}
+      body={
+        <g strokeWidth="1.5" stroke={tube(CYAN, off)}>
+          <path d="M10.2 12.2 V10 A3.8 3.8 0 0 1 17.8 10 V12.2" />
+          <rect x="8.9" y="12.2" width="3.2" height="5.6" rx="1.6" transform="rotate(-7 10.5 15)" />
+          <rect x="15.9" y="12.2" width="3.2" height="5.6" rx="1.6" transform="rotate(7 17.5 15)" />
+        </g>
+      }
+      rays={HISTORY_RAYS.map((d, i) => ({ d, i, ...itemArt(noteColor(i), value, i, off) }))}
+    />
   );
 }
 
@@ -309,19 +377,19 @@ const POPULARITY_RAYS = [
 
 function PopularityTab({ value, off, className }: ArtProps) {
   return (
-    <svg {...TAB} strokeLinecap="round" strokeLinejoin="round" className={className} style={{ filter: tabGlow(AMBER, off) }}>
-      <g transform="rotate(-16 14 11)" strokeWidth="1.4" stroke={tube(PINK, off)}>
-        <circle cx="14" cy="10" r="3.4" />
-        <path d="M10.6 10 H17.4" strokeWidth="1" />
-        <path d="M11.9 14.4 H16.1 L15.4 21 H12.6 Z" />
-      </g>
-      <g strokeWidth="1.5">
-        {POPULARITY_RAYS.map((d, i) => {
-          const { lit, color } = itemArt(AMBER, value, i, off);
-          return <path key={d} data-ray="" data-i={i} data-lit={lit} d={d} stroke={color} />;
-        })}
-      </g>
-    </svg>
+    <RayTab
+      off={off}
+      className={className}
+      glow={AMBER}
+      body={
+        <g transform="rotate(-16 14 11)" strokeWidth="1.4" stroke={tube(PINK, off)}>
+          <circle cx="14" cy="10" r="3.4" />
+          <path d="M10.6 10 H17.4" strokeWidth="1" />
+          <path d="M11.9 14.4 H16.1 L15.4 21 H12.6 Z" />
+        </g>
+      }
+      rays={POPULARITY_RAYS.map((d, i) => ({ d, i, ...itemArt(AMBER, value, i, off) }))}
+    />
   );
 }
 

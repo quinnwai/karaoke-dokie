@@ -13,6 +13,9 @@ import {
   MID,
   NOTE_PINK,
   PINK,
+  TAB_GLOW_DEVIATION,
+  TAB_GLOW_PX,
+  TAB_PX_PER_UNIT,
   UNLIT,
   VIOLET,
   gearColor,
@@ -252,5 +255,14 @@ describe('the turn-on flicker and the tab glow (Round 6A §7, §9)', () => {
   it('glows a tab icon with a 3 px drop-shadow in its colour while on, and not at all while off', () => {
     expect(tabGlow(CYAN, false)).toBe('drop-shadow(0 0 3px #4FDDE8)');
     expect(tabGlow(CYAN, true)).toBe('none');
+  });
+
+  // QWW-57, R7: the History and Popularity tab icons glow only what is lit, with an SVG filter inside the icon, which counts in the
+  // grid's units. The same 3 px blur is 3 divided by the px a unit takes on screen: the icon is 34 px wide on a 28 unit grid.
+  it('has the tab glow\'s 3 px blur as 2.47 grid units for an SVG filter: a unit is 34 / 28 px on screen', () => {
+    expect(TAB_GLOW_PX).toBe(3);
+    expect(TAB_PX_PER_UNIT).toBeCloseTo(1.2143, 4);
+    expect(TAB_GLOW_DEVIATION).toBeCloseTo(2.4706, 4);
+    expect(TAB_GLOW_DEVIATION * TAB_PX_PER_UNIT).toBeCloseTo(3, 10);
   });
 });

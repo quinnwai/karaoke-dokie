@@ -283,10 +283,13 @@ describe('the tab bar', () => {
   // its art whether its gear is off, History before Spotify is connected and the Era tab included.
   it('tells each tab\'s art whether its gear is off: an off tab\'s icon has no glow', () => {
     mini({ off: ['tempo', 'era'] }, { mode: 'catalogue' });
-    const glow = (part: (typeof TUNER_PARTS)[number]) => el('svg', el(SEL.tab(part))).style.filter;
+    // A lit tab glows: a 3 px drop-shadow on its svg (Difficulty, Tempo, Era), or a filter on a group inside it (History and Popularity,
+    // which glow only what is lit, QWW-57 R7). An off tab has neither.
+    const svg = (part: (typeof TUNER_PARTS)[number]) => el('svg', el(SEL.tab(part)));
+    const glows = (part: (typeof TUNER_PARTS)[number]) =>
+      /^drop-shadow\(0 0 3px #[0-9A-F]{6}\)$/.test(svg(part).style.filter) || svg(part).querySelector('g[filter]') !== null;
     expect(offTabs()).toEqual(['history', 'tempo', 'era']);
-    expect(TUNER_PARTS.filter((part) => glow(part) === 'none')).toEqual(offTabs());
-    for (const part of TUNER_PARTS.filter((p) => !offTabs().includes(p))) expect(glow(part), part).toMatch(/^drop-shadow\(0 0 3px #[0-9A-F]{6}\)$/);
+    expect(TUNER_PARTS.filter((part) => !glows(part))).toEqual(offTabs());
   });
 
   it('keeps an off tab\'s colour too: a selected tab shows its gear\'s colour on or off, and only the icon goes unlit (§7)', () => {

@@ -170,5 +170,21 @@ export function jukeboxArt(picked: number, off: boolean): JukeboxArt {
  */
 export const neonFlicker = (off: boolean): string => (off ? 'none' : 'neonOn 0.7s linear 1');
 
-/** The glow around a tab icon (Round 6A §7, §9): a 3 px drop-shadow in the gear's colour while it is on, none while it is off. */
-export const tabGlow = (color: string, off: boolean): string => (off ? 'none' : `drop-shadow(0 0 3px ${color})`);
+/** A tab icon is drawn 34 px wide on a 28 unit grid (GearArt.tsx, TAB). */
+export const TAB_PX_PER_UNIT = 34 / 28;
+
+/** The blur of the glow around a tab icon (Round 6A §7, §9), in screen px. */
+export const TAB_GLOW_PX = 3;
+
+/**
+ * The glow around a tab icon (Round 6A §7, §9): a 3 px drop-shadow in the gear's colour while it is on, none while it is off. It is a
+ * CSS filter on the icon's root, so it reaches every part of the icon. Difficulty, Tempo and Era have no unlit ray and keep it;
+ * History and Popularity have, and glow only what is lit with `TAB_GLOW_DEVIATION` (QWW-57, R7).
+ */
+export const tabGlow = (color: string, off: boolean): string => (off ? 'none' : `drop-shadow(0 0 ${TAB_GLOW_PX}px ${color})`);
+
+/**
+ * The same 3 px as the `stdDeviation` of an SVG blur inside the icon. CSS `drop-shadow(0 0 3px c)` blurs with a standard deviation
+ * of 3 screen px (measured in Chromium, pixel for pixel), and a filter inside the svg counts in grid units of 34 / 28 px.
+ */
+export const TAB_GLOW_DEVIATION = TAB_GLOW_PX / TAB_PX_PER_UNIT;

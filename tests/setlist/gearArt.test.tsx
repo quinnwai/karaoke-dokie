@@ -13,6 +13,11 @@
 //     walk reads) and this build draws them unlit, in full opacity, marked `data-lit="false"`; the walk expects that wherever the
 //     reference's binding says hidden, and the lit colour and `data-lit="true"` wherever it says shown. It is the one place the
 //     art deliberately differs from the reference's drawing (docs/setlist-round6a/README.md);
+//   - the glow of the History and Popularity tab icons (QWW-57, R7). The reference puts a CSS drop-shadow on the whole svg, which lights
+//     the unlit rays too; this build puts an SVG filter on one group of the body and the lit rays. Before it compares, the walk takes
+//     out of the component's tree what that adds (the filter's `defs`, the group that names it, the rays split into lit and unlit),
+//     expects `overflow="visible"` on the root (the glow reaches past the icon's box) and no filter in the root's style. What the glow
+//     is and what it reaches are asserted on their own below;
 //   - the hooks the component adds for the browser tests (data-note, data-bolt, ...), asserted on their own below.
 // Both trees are parsed with jsdom's DOMParser, the engine this test already runs on; `new JSDOM` would need @types/jsdom.
 
@@ -23,7 +28,7 @@ import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EraIcon, EraTabArt, GearArt, type GearArtVariant } from '../../src/components/setlist/GearArt';
-import { metronome, neonFlicker } from '../../src/lib/setlist/art';
+import { TAB_PX_PER_UNIT, metronome, neonFlicker } from '../../src/lib/setlist/art';
 import { ERA_IDS, GEAR_IDS, type EraId, type GearId } from '../../src/lib/setlist/types';
 
 const REFERENCE = join(__dirname, '../../docs/setlist-round6a/setlist-round6a.html');
@@ -175,6 +180,11 @@ const isAttributeBinding = (b: Binding) =>
 const isShownBinding = (b: Binding) => b.target === 'style.opacity' && /^art\.[oq]\d$/.test(b.path);
 /** The colour of a note, a bolt or a ray in the reference: art.nN (History) or art.bN (Popularity). */
 const isItemColour = (b: Binding) => /^art\.[nb]\d$/.test(b.path);
+/**
+ * The glow of a History or Popularity tab in the reference: `style.filter` on the root svg. R7 moves it onto the lit parts, so the
+ * walk expects no filter on that root, and the `overflow="visible"` that lets the glow reach past the icon's box.
+ */
+const isMovedGlow = (b: Binding) => b.target === 'style.filter' && /^tabs\.(history|popularity)\.glow$/.test(b.path);
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Rendering
@@ -304,6 +314,7 @@ function walk(ref: Element, got: Element, path: string, ctx: Context, out: Walk,
     else want.set(binding.target, value);
   }
   if (shownBinding) want.set('data-lit', String(lit));
+  if (bindings.some(isMovedGlow)) want.set('overflow', 'visible');
 
   // A filter is found by id, and the component's ids are its own: the walk learns each one, then checks the url() that uses it.
   const refId = ref.getAttribute('id');
@@ -332,6 +343,8 @@ function walk(ref: Element, got: Element, path: string, ctx: Context, out: Walk,
   for (const binding of bindings.filter(isStyleBinding)) {
     // The opacity is what R7 replaces: nothing is hidden by it any more.
     if (binding === shownBinding) continue;
+    // So is the root's glow, on the two icons that have unlit rays: it is on the lit parts, and the root has no filter.
+    if (isMovedGlow(binding)) continue;
     const property = binding.target.slice('style.'.length);
     if (parentStyle.includes(property)) continue;
     const value = boundValue(ctx.vm, binding);
@@ -364,9 +377,32 @@ function walk(ref: Element, got: Element, path: string, ctx: Context, out: Walk,
   });
 }
 
+/**
+ * A tab icon as the reference draws it (QWW-57, R7): a copy without the glow's `defs`, without the group that names the filter (a
+ * group with no attribute but that one, which an off gear leaves bare), and with the lit rays and the unlit rays back in one group.
+ * The History and Popularity icons are built differently on purpose, and the tests on their glow say how. Any other icon comes
+ * back as it is: the reference's tab icons have no group of that kind (checked with the reference, above).
+ */
+function withoutTabGlow(root: Element): Element {
+  const copy = root.cloneNode(true) as Element;
+  for (const defs of copy.querySelectorAll('defs')) defs.remove();
+  for (const group of copy.querySelectorAll('g')) {
+    if (group.getAttributeNames().every((name) => name === 'filter')) group.replaceWith(...group.childNodes);
+  }
+  if (copy.querySelector('[data-ray]')) {
+    // What is left is the body, the lit rays and the unlit rays.
+    const [, first, ...more] = copy.children;
+    for (const group of more) {
+      first?.append(...group.childNodes);
+      group.remove();
+    }
+  }
+  return copy;
+}
+
 function compare(ref: Element, got: Element, ctx: Context): Walk {
   const out: Walk = { problems: [], pairs: [] };
-  walk(ref, got, ref.localName, ctx, out);
+  walk(ref, ctx.variant === 'tab' ? withoutTabGlow(got) : got, ref.localName, ctx, out);
   return out;
 }
 
@@ -423,6 +459,11 @@ const attrs = (el: Element, names: string[]) => Object.fromEntries(names.map((na
 const all = (root: Element, selector: string) => [...root.querySelectorAll(selector)];
 const one = (root: Element, selector: string) => must(root.querySelector(selector), selector);
 
+/** Whether an element draws or defines a filter: it is a `<filter>`, or has a `filter` attribute or a style that is not `none`. */
+const carriesFilter = (el: Element) => el.localName === 'filter' || el.hasAttribute('filter') || (styleOf(el).filter ?? 'none') !== 'none';
+/** Everything in an art that carries a filter, the root included. */
+const filtersIn = (root: Element) => [root, ...root.querySelectorAll('*')].filter(carriesFilter);
+
 /** The colours an art is drawn in: every stroke and fill, and a tab's `color`, apart from the faint grid behind the strip. */
 function paints(root: Element): string[] {
   const found = new Set<string>();
@@ -446,6 +487,12 @@ describe('the reference this test reads', () => {
     expect(reference.querySelectorAll('.tab > svg')).toHaveLength(5);
     expect(reference.querySelectorAll('.era-btn > svg')).toHaveLength(7);
     expect([...reference.querySelectorAll('.era-btn')].map(attr('data-era'))).toEqual([...ERA_IDS]);
+  });
+
+  it('draws no group without an attribute in its tab icons, so a bare group in the component is the glow\'s (withoutTabGlow)', () => {
+    for (const svg of reference.querySelectorAll('.tab > svg')) {
+      for (const group of svg.querySelectorAll('g')) expect(group.getAttributeNames().length).toBeGreaterThan(0);
+    }
   });
 
   it('leaves the parts that follow a state to its bindings, which is why the walk reads them', () => {
@@ -525,10 +572,15 @@ describe('GearArt: the markup is the reference markup', () => {
   });
 
   it('keeps the structure whatever the value, and whether the gear is on or off', () => {
-    const shape = (root: Element) => [root, ...root.querySelectorAll('*')].map((el) => el.localName).join(' ');
+    // A tab's glow is its own matter (QWW-57, R7): which rays are in the filtered group follows the value, and the filter is there
+    // only while the gear is on. `withoutTabGlow` is the tab drawn without that, which is the part that must not change.
+    const shape = (root: Element, variant: GearArtVariant) => {
+      const flat = variant === 'tab' ? withoutTabGlow(root) : root;
+      return [flat, ...flat.querySelectorAll('*')].map((el) => el.localName).join(' ');
+    };
     for (const gear of GEAR_IDS) {
       for (const variant of VARIANTS) {
-        const shapes = new Set(VALUES.flatMap((value) => [false, true].map((off) => shape(art(gear, variant, value, off)))));
+        const shapes = new Set(VALUES.flatMap((value) => [false, true].map((off) => shape(art(gear, variant, value, off), variant))));
         expect(shapes.size, `${gear} ${variant}`).toBe(1);
       }
     }
@@ -904,7 +956,9 @@ describe('GearArt: an off gear is a switched-off sign (README §7, test 25)', ()
 
   it('puts no glow on an off tab icon and no flicker on an off strip', () => {
     for (const gear of GEAR_IDS) {
-      expect(styleOf(art(gear, 'tab', 50, true)).filter, gear).toBe('none');
+      // Difficulty and Tempo say `none` on the root; History and Popularity have no filter at all (R7: see the tab glow tests).
+      expect(styleOf(art(gear, 'tab', 50, true)).filter, gear).toBe(gear === 'history' || gear === 'popularity' ? undefined : 'none');
+      expect(filtersIn(art(gear, 'tab', 50, true)), gear).toEqual([]);
       expect(styleOf(art(gear, 'strip', 50, true)).animation, gear).toBe('none');
     }
     expect(styleOf(eraTab(['s90'], true)).filter).toBe('none');
@@ -941,7 +995,8 @@ describe('GearArt: a lit gear is drawn in its colours (README §3.1, §6, §9)',
     expect(paints(strip)).toEqual([cyan, pink].sort());
 
     const tab = art('history', 'tab', 100, false);
-    expect(one(tab, 'g').getAttribute('stroke')).toBe(cyan);
+    // The first group with a stroke is the headphones: the group around them, which names the glow, has none.
+    expect(one(tab, 'g[stroke]').getAttribute('stroke')).toBe(cyan);
     expect(all(tab, '[data-ray]').map(attr('stroke'))).toEqual(order);
     expect(paints(tab)).toEqual([cyan, pink].sort());
   });
@@ -967,13 +1022,12 @@ describe('GearArt: a lit gear is drawn in its colours (README §3.1, §6, §9)',
     expect(paints(eraTab(['s90', 's00'], false))).toEqual([COLOR.pink, COLOR.amber].sort());
   });
 
-  it('glows a lit tab icon with a 3 px drop-shadow in its gear colour (README §7, §9)', () => {
+  it('glows a lit Difficulty, Tempo or Era tab icon with a 3 px drop-shadow in its gear colour on its root (README §7, §9)', () => {
+    // History's and Popularity's glow is not on the root: it reaches only what is lit (R7, the tab glow tests below).
     const glow = (root: Element) => styleOf(root).filter;
     expect(glow(art('difficulty', 'tab', 20, false))).toBe(`drop-shadow(0 0 3px ${COLOR.easy})`);
     expect(glow(art('difficulty', 'tab', 50, false))).toBe(`drop-shadow(0 0 3px ${COLOR.amber})`);
     expect(glow(art('difficulty', 'tab', 90, false))).toBe(`drop-shadow(0 0 3px ${COLOR.hard})`);
-    expect(glow(art('history', 'tab', 50, false))).toBe(`drop-shadow(0 0 3px ${COLOR.cyan})`);
-    expect(glow(art('popularity', 'tab', 50, false))).toBe(`drop-shadow(0 0 3px ${COLOR.amber})`);
     expect(glow(art('tempo', 'tab', 50, false))).toBe(`drop-shadow(0 0 3px ${COLOR.violet})`);
     expect(glow(eraTab(['s90'], false))).toBe(`drop-shadow(0 0 3px ${COLOR.pink})`);
   });
@@ -991,10 +1045,11 @@ describe('GearArt: the turn-on flicker (README §7, test 29)', () => {
     expect(neonFlicker(false)).toBe('neonOn 0.7s linear 1');
   });
 
-  it('is not on a tab icon: its root carries a glow, and for Difficulty a colour, and no animation', () => {
+  it('is not on a tab icon: its root carries a glow (not History\'s or Popularity\'s, R7), and for Difficulty a colour, and no animation', () => {
+    const styled: Record<GearId, string[]> = { difficulty: ['color', 'filter'], history: [], popularity: [], tempo: ['filter'] };
     for (const gear of GEAR_IDS) {
       const style = styleOf(art(gear, 'tab', 50, false));
-      expect(Object.keys(style).sort(), gear).toEqual(gear === 'difficulty' ? ['color', 'filter'] : ['filter']);
+      expect(Object.keys(style).sort(), gear).toEqual(styled[gear]);
     }
     expect(Object.keys(styleOf(eraTab(['s90'], false)))).toEqual(['filter']);
   });
@@ -1122,14 +1177,15 @@ describe('GearArt: what the parent owns', () => {
 // Decorative, and the glow filter
 
 describe('every root svg is decorative', () => {
-  it("has aria-hidden, no role, title or text, and no id except a strip's glow filter", () => {
+  it("has aria-hidden, no role, title or text, and no id except a strip's glow filter and a lit History or Popularity tab's", () => {
     const roots = everyRoot();
     expect(roots).toHaveLength(GEAR_IDS.length * VARIANTS.length + 1 + ERA_IDS.length);
     for (const [name, root] of roots) {
       expect(root.getAttribute('aria-hidden'), name).toBe('true');
       expect(root.hasAttribute('id') || root.hasAttribute('role'), name).toBe(false);
       expect(root.querySelectorAll('[role], title, desc'), name).toHaveLength(0);
-      expect(root.querySelectorAll('[id]'), name).toHaveLength(name.endsWith('strip') ? 1 : 0);
+      const filtered = name.endsWith('strip') || name === 'history tab' || name === 'popularity tab';
+      expect(root.querySelectorAll('[id]'), name).toHaveLength(filtered ? 1 : 0);
       expect(root.textContent, name).toBe('');
     }
   });
@@ -1153,12 +1209,12 @@ describe('the glow filter on the strips (README §6)', () => {
     }
   });
 
-  it('is drawn once per strip, on one group, and the tab icons have none', () => {
+  it('is drawn once per strip, on one group, and the Difficulty and Tempo tab icons have none (their glow is a CSS filter on the root)', () => {
     for (const gear of GEAR_IDS) {
       const strip = art(gear, 'strip', 50, false);
       expect(all(strip, 'filter'), gear).toHaveLength(1);
       expect(all(strip, '[filter]'), gear).toHaveLength(1);
-      expect(all(art(gear, 'tab', 50, false), 'filter, [filter]'), gear).toHaveLength(0);
+      if (gear === 'difficulty' || gear === 'tempo') expect(all(art(gear, 'tab', 50, false), 'filter, [filter]'), gear).toHaveLength(0);
     }
   });
 
@@ -1181,6 +1237,136 @@ describe('the glow filter on the strips (README §6)', () => {
       expect(ids[i]).toMatch(PLAIN_ID);
       expect(one(svg, '[filter]').getAttribute('filter')).toBe(`url(#${ids[i]})`);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The glow of the History and Popularity tab icons
+
+describe('the glow of the History and Popularity tab icons reaches only what is lit (QWW-57, R7)', () => {
+  // Both have a body and seven rays, and the rays the value does not reach are drawn unlit. A CSS filter on the root lit those too,
+  // in the gear's colour. Here one group holds the body and the lit rays and names an SVG filter, and nothing else is filtered.
+  const GLOWING = [
+    { gear: 'history', color: COLOR.cyan, body: (tab: Element) => one(tab, 'g[stroke]') },
+    { gear: 'popularity', color: COLOR.amber, body: (tab: Element) => one(tab, 'g[transform^="rotate(-16"]') },
+  ] as const;
+
+  /** `el`, then each element above it, up to and including the root svg. */
+  function upToRoot(el: Element): Element[] {
+    const chain: Element[] = [];
+    for (let at: Element | null = el; at; at = at.parentElement) {
+      chain.push(at);
+      if (at.localName === 'svg') break;
+    }
+    return chain;
+  }
+
+  for (const { gear, color, body } of GLOWING) {
+    it(`${gear}: the body and every lit ray are in the one filtered group, and no unlit ray has a filter on it or above it, at every value`, () => {
+      const seen = { lit: 0, unlit: 0 };
+      for (const value of VALUES) {
+        const where = `${gear} at ${value}`;
+        const tab = art(gear, 'tab', value, false);
+        expect(all(tab, '[filter]'), where).toHaveLength(1);
+        const group = one(tab, '[filter]');
+        expect(group.localName, where).toBe('g');
+        expect(group.contains(body(tab)), `${where}: the body`).toBe(true);
+        // Moving rays between the groups must not move them in the document: they stay in index order.
+        expect(all(tab, '[data-ray]').map(attr('data-i')), where).toEqual(INDEXES);
+        for (const ray of all(tab, '[data-ray]')) {
+          const lit = ray.getAttribute('data-lit') === 'true';
+          const above = upToRoot(ray).filter(carriesFilter);
+          expect(above.length, `${where}: ray ${ray.getAttribute('data-i')}`).toBe(lit ? 1 : 0);
+          if (lit) expect(above[0], `${where}: ray ${ray.getAttribute('data-i')}`).toBe(group);
+          seen[lit ? 'lit' : 'unlit']++;
+        }
+      }
+      // The loop would pass for any filter if it never met one kind of ray.
+      expect(seen.lit).toBeGreaterThan(0);
+      expect(seen.unlit).toBeGreaterThan(0);
+    });
+
+    it(`${gear}: a gear that is off has no filter anywhere in its icon, at every value`, () => {
+      for (const value of VALUES) expect(filtersIn(art(gear, 'tab', value, true)), `${gear} at ${value}`).toEqual([]);
+    });
+
+    it(`${gear}: the group names the one filter this svg defines, in the gear's colour whatever the colour of the parts, blurred by the 3 px of the glow it replaces`, () => {
+      const tab = art(gear, 'tab', 50, false);
+      const id = /^url\(#(.+)\)$/.exec(one(tab, '[filter]').getAttribute('filter') ?? '')?.[1];
+      expect(id).toMatch(PLAIN_ID);
+      expect(all(tab, 'filter').map((el) => el.id)).toEqual([id]);
+      expect(all(tab, 'defs > filter')).toHaveLength(1);
+
+      const filter = one(tab, 'filter');
+      expect(attrs(filter, ['filterUnits', 'color-interpolation-filters'])).toEqual({
+        filterUnits: 'userSpaceOnUse',
+        'color-interpolation-filters': 'sRGB',
+      });
+      expect(all(filter, '*').map((el) => el.localName)).toEqual(['feGaussianBlur', 'feFlood', 'feComposite', 'feMerge', 'feMergeNode', 'feMergeNode']);
+      // The shadow is the alpha of the group, blurred, painted in the gear's colour, and merged under the group itself.
+      const blur = one(filter, 'feGaussianBlur');
+      expect(attrs(blur, ['in', 'result'])).toEqual({ in: 'SourceAlpha', result: 'b' });
+      // CSS drop-shadow(0 0 3px) blurs with a standard deviation of 3 screen px; the icon draws 34 / 28 screen px to a grid unit.
+      expect(Number(blur.getAttribute('stdDeviation'))).toBeCloseTo(3 / (34 / 28), 10);
+      expect(one(filter, 'feFlood').getAttribute('flood-color')).toBe(color);
+      expect(attrs(one(filter, 'feComposite'), ['in2', 'operator'])).toEqual({ in2: 'b', operator: 'in' });
+      expect(all(filter, 'feMergeNode').map(attr('in'))).toEqual(['glow', 'SourceGraphic']);
+      expect(one(filter, 'feComposite').getAttribute('result')).toBe('glow');
+    });
+
+    it(`${gear}: the filter's region is the 28x22 grid and three standard deviations all round it, so none of the glow is cut`, () => {
+      const filter = one(art(gear, 'tab', 50, false), 'filter');
+      const [x, y, width, height] = ['x', 'y', 'width', 'height'].map((name) => Number(filter.getAttribute(name)));
+      const reach = 3 * (3 / (34 / 28));
+      expect(x, 'x').toBeLessThanOrEqual(-reach);
+      expect(y, 'y').toBeLessThanOrEqual(-reach);
+      expect((x ?? NaN) + (width ?? NaN), 'right').toBeGreaterThanOrEqual(28 + reach);
+      expect((y ?? NaN) + (height ?? NaN), 'bottom').toBeGreaterThanOrEqual(22 + reach);
+    });
+
+    it(`${gear}: lets the glow past the icon's box, and the root has no filter and no style of its own`, () => {
+      const tab = art(gear, 'tab', 50, false);
+      expect(tab.getAttribute('overflow')).toBe('visible');
+      expect(tab.hasAttribute('style')).toBe(false);
+    });
+  }
+
+  it('has a filter of its own in each instance, so every tab on a screen uses its own', () => {
+    const doc = parse(
+      `<!doctype html><body>${renderToStaticMarkup(
+        <>
+          {[0, 1].flatMap((copy) =>
+            GLOWING.map(({ gear }) => <GearArt key={`${copy}${gear}`} gear={gear} variant="tab" value={50} off={false} />),
+          )}
+        </>,
+      )}`,
+    );
+    const svgs = [...doc.querySelectorAll('svg')];
+    expect(svgs).toHaveLength(4);
+    const ids = svgs.map((svg) => one(svg, 'filter').id);
+    expect(new Set(ids).size).toBe(4);
+    svgs.forEach((svg, i) => {
+      expect(ids[i]).toMatch(PLAIN_ID);
+      expect(one(svg, '[filter]').getAttribute('filter')).toBe(`url(#${ids[i]})`);
+    });
+    // A tab and a strip of the same gear do not share an id either.
+    const withStrip = parse(
+      `<!doctype html><body>${renderToStaticMarkup(
+        <>
+          <GearArt gear="history" variant="strip" value={50} off={false} />
+          <GearArt gear="history" variant="tab" value={50} off={false} />
+        </>,
+      )}`,
+    );
+    expect(new Set([...withStrip.querySelectorAll('filter')].map((el) => el.id)).size).toBe(2);
+  });
+
+  it('is drawn at the scale the blur was converted by: 34 px for 28 grid units', () => {
+    for (const { gear } of GLOWING) {
+      const tab = art(gear, 'tab', 50, false);
+      const gridWidth = Number((tab.getAttribute('viewBox') ?? '').split(' ')[2]);
+      expect(Number(tab.getAttribute('width')) / gridWidth, gear).toBeCloseTo(TAB_PX_PER_UNIT, 10);
+    }
   });
 });
 
@@ -1261,6 +1447,26 @@ describe('the comparison itself', () => {
     all(hidden, '[data-note]')[6]?.setAttribute('style', 'opacity:0');
     expect(walkHistory(hidden)).toHaveLength(1);
     expect(walkHistory(hidden)[0]).toContain('style');
+
+    // The tab glow (R7): the walk takes the filter's structure out of the tab before it compares, but expects the root to carry no
+    // filter and to let the glow past its box, and still sees a ray that is not where the reference has it.
+    const historyTab = () => art('history', 'tab', 65, false);
+    const walkTab = (root: Element) => compare(referenceArt('history', 'tab'), root, contextFor(vm, 'tab')).problems;
+    expect(walkTab(historyTab())).toEqual([]);
+
+    const glowOnRoot = historyTab();
+    glowOnRoot.setAttribute('style', `filter:drop-shadow(0 0 3px ${COLOR.cyan})`);
+    expect(walkTab(glowOnRoot)).toHaveLength(1);
+    expect(walkTab(glowOnRoot)[0]).toContain('style');
+
+    const clipped = historyTab();
+    clipped.removeAttribute('overflow');
+    expect(walkTab(clipped)).toEqual(['svg: overflow is "visible" in the reference, missing in the component']);
+
+    const bent = historyTab();
+    one(bent, '[data-ray]').setAttribute('d', 'M0 0 L1 1');
+    expect(walkTab(bent)).toHaveLength(1);
+    expect(walkTab(bent)[0]).toContain('d is');
   });
 });
 
