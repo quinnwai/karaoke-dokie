@@ -19,6 +19,8 @@ export interface MockSong {
   octave?: OctaveShift;
   /** The song's Deezer track, which its play button plays (QWW-48). Default: none, so the button is disabled. */
   deezerId?: number;
+  /** The track id exactly, for a test that needs the shape production has: a catalogue id has spaces ("cat:michael jackson|beat it"). Default: the prefix and the title's slug. */
+  id?: string;
 }
 
 const s = (title: string, artist: string, era: EraId, difficulty: number, history: number, popularity: number, tempo: number): MockSong => ({
@@ -84,7 +86,7 @@ export function mockMatch(song: MockSong, i: number, idPrefix = 'cat:'): Match {
   };
   return {
     track: {
-      id: `${idPrefix}${slug(song.title)}`,
+      id: song.id ?? `${idPrefix}${slug(song.title)}`,
       title: song.title,
       artist: song.artist,
       artistId: '',

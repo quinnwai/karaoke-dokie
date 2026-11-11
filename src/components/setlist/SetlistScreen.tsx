@@ -233,7 +233,8 @@ export function SetlistScreen(props: SetlistScreenProps) {
         {/* Deezer's API terms ask for its logo where its previews are (QWW-48): one quiet line under the list, over the credits link,
             which tells listeners the rest. Only while a row on screen has a preview to play. */}
         {props.renderPlay && visible.some((r) => r.match.deezerId !== undefined) && <DeezerCredit className={listStyles.deezer} />}
-        <a className={listStyles.credits} href="/credits" aria-label="Sources and credits" title="Sources and credits">
+        {/* In a new tab, like the Deezer line's link: leaving the page would drop the singer's tuning (QWW-57). */}
+        <a className={listStyles.credits} href="/credits" target="_blank" rel="noopener noreferrer" aria-label="Sources and credits" title="Sources and credits">
           <BookIcon />
         </a>
       </div>

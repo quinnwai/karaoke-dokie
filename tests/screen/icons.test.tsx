@@ -102,6 +102,9 @@ describe('sources', () => {
     render(<SetlistScreen {...setlistProps(range, [ranked(match(0))])} />);
     const credits = screen.getByRole('link', { name: 'Sources and credits' });
     expect(credits.getAttribute('href')).toBe('/credits');
+    // In a new tab, so reading it does not cost the singer their range and tuning (QWW-57).
+    expect(credits.getAttribute('target')).toBe('_blank');
+    expect(credits.getAttribute('rel')).toBe('noopener noreferrer');
     // Just the book icon: no words on screen.
     expect(credits.textContent).toBe('');
     expect(credits.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');

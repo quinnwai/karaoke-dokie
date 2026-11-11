@@ -20,7 +20,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { launchWithMic, writeTone } from './fakeMic';
-import { centre, css, DEFAULT_RANKING, eraButton, mockApi, open, openButton, pressKey, resetButton, rgb, rows, TEXT_3, titles } from '../helpers/tunerE2e';
+import { centre, css, DEFAULT_RANKING, eraButton, mockApi, open, openButton, pressKey, resetButton, rgb, rows, TEXT_3, titles, tuner } from '../helpers/tunerE2e';
 import type { MockSong } from '../fixtures/setlist';
 
 const SCREENS = path.resolve('test-results/screens');
@@ -884,4 +884,51 @@ test('R3. on a phone the ▶ always shows: the full pink when it can play, faded
   const at = await centre(slotOf(none));
   await page.touchscreen.tap(at.x, at.y);
   await expectNoSongPage(page);
+});
+
+// ============================================================================================================
+// The second adversarial review of PR #38 (QWW-57): a screen reader reads each row's reason line, and the credits open in a new tab
+// ============================================================================================================
+
+test('a row button is described by its own reason line, also when the track ids have spaces, as catalogue ids do', async ({ page }) => {
+  // aria-describedby is a list of ids split at spaces: an id made from "cat:michael jackson|beat it" named three ids that do not exist.
+  const spaced = (id: string, title: string, artist: string, difficulty: number): MockSong => ({ id, title, artist, era: 's80', difficulty, history: 40, popularity: 90, tempo: 50 });
+  await open(page, {
+    extra: [spaced('cat:michael jackson|beat it', 'Beat It', 'Michael Jackson', 30), spaced('cat:a ha|take on me', 'Take On Me', 'a-ha', 55), spaced('cat:the beatles|let it be', 'Let It Be', 'The Beatles', 10)],
+  });
+  const ids = await rows(page).evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.id ?? ''));
+  expect(ids.filter((id) => id.includes(' ')).length, 'the ids with spaces are on the page').toBe(3);
+  const n = await rows(page).count();
+  expect(n).toBeGreaterThanOrEqual(25);
+  for (let i = 0; i < n; i++) {
+    const row = rows(page).nth(i);
+    const why = (await row.locator('[data-row-why]').textContent())!;
+    expect(why.length).toBeGreaterThan(0);
+    // The browser's own accessible description: what a screen reader reads after the row's name.
+    await expect(openButton(row)).toHaveAccessibleDescription(why);
+  }
+});
+
+test('the Deezer line and the book icon open /credits in a new tab, and the tuner is as it was', async ({ page, context }) => {
+  await open(page, { extra: WITH_AND_WITHOUT });
+  const before = await tuner(page);
+  const deezer = page.getByRole('link', { name: /^Previews from Deezer/ });
+  const book = page.getByRole('link', { name: 'Sources and credits', exact: true });
+  for (const [what, link] of [['the Deezer line', deezer], ['the book icon', book]] as const) {
+    await link.scrollIntoViewIfNeeded();
+    await expect(link, what).toHaveAttribute('href', '/credits');
+    await expect(link, what).toHaveAttribute('target', '_blank');
+    await expect(link, what).toHaveAttribute('rel', 'noopener noreferrer');
+    const opened = context.waitForEvent('page');
+    await link.tap();
+    const tab = await opened;
+    await tab.waitForLoadState();
+    expect(new URL(tab.url()).pathname, what).toBe('/credits');
+    await expect(tab.getByRole('heading', { name: 'Sources and credits' })).toBeVisible();
+    await tab.close();
+    // This tab never moved: the tuner, and its list, are as they were.
+    expect(new URL(page.url()).pathname, what).toBe('/');
+    expect(await tuner(page), what).toEqual(before);
+    await expect(rows(page).first()).toBeVisible();
+  }
 });

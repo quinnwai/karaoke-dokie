@@ -1,4 +1,4 @@
-import { useRef, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { useId, useRef, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import type { Match } from '../../lib/contracts';
 import type { SetlistRow } from '../../lib/setlist/rows';
 import { useFlip } from './flip';
@@ -35,11 +35,15 @@ export function SongRows({ rows, scroller, onOpen, renderPlay, fillMemory }: Son
   const order = rows.map((r) => r.id).join('\n');
   useFlip(list, scroller, order);
   const fill = useFillIn(list, scroller, order, fillMemory);
+  // The reason line's id is made from the row's place, not its track id: aria-describedby is a list of ids split at spaces, and a
+  // catalogue id has them ("cat:michael jackson|beat it"), which pointed the button at ids that do not exist.
+  const uid = useId();
 
   return (
     <ol ref={list} id="list" className={styles.list} role="list" aria-label="Ranked songs">
       {rows.map((row, i) => {
         const delay = fill.delay(row.id);
+        const whyId = `${uid}-why-${i + 1}`;
         return (
           <li key={row.id} className={styles.row} data-row="" data-id={row.id} data-rank={i + 1}>
             <span className={styles.playSlot} data-play-slot="">
@@ -48,7 +52,7 @@ export function SongRows({ rows, scroller, onOpen, renderPlay, fillMemory }: Son
               </span>
               {renderPlay ? renderPlay(row.match, i + 1) : <PlayPlaceholder />}
             </span>
-            <button type="button" className={styles.rowOpen} onClick={() => onOpen(row.id, i + 1)} aria-label={row.label} aria-describedby={`why-${row.id}`}>
+            <button type="button" className={styles.rowOpen} onClick={() => onOpen(row.id, i + 1)} aria-label={row.label} aria-describedby={whyId}>
               <span className={styles.rowText} data-row-text="">
                 {/* The title's karaoke fill: a white copy laid over the dim title and revealed left to right, once, when the row
                     first comes into view. CSS draws the copy from `data-fill-text` (the ::after of this box), not as a second piece
@@ -65,7 +69,7 @@ export function SongRows({ rows, scroller, onOpen, renderPlay, fillMemory }: Son
                   </span>
                 </span>
                 <span className={styles.rowSub}>{row.sub}</span>
-                <span className={styles.rowWhy} id={`why-${row.id}`} data-row-why="">
+                <span className={styles.rowWhy} id={whyId} data-row-why="">
                   {row.why}
                 </span>
               </span>

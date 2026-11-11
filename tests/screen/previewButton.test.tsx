@@ -225,6 +225,9 @@ describe('play button in the tuner rows', () => {
     render(<DeezerCredit />);
     const link = screen.getByRole('link', { name: 'Previews from Deezer, for private listening. Sources and credits' });
     expect(link.getAttribute('href')).toBe('/credits');
+    // It opens in a new tab, so reading the credits does not cost the singer their range and tuning (QWW-57).
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
     expect(link.textContent).toBe('Previews fromDeezer');
   });
 });

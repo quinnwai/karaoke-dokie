@@ -129,6 +129,30 @@ describe('a row', () => {
     ]);
   });
 
+  it('describes each button with its own reason line when the track ids have spaces, as a catalogue id does', () => {
+    // aria-describedby is a list of ids split at spaces, so an id made from "cat:michael jackson|beat it" named three ids that do not exist.
+    const spaced = [
+      rankedSong('cat:michael jackson|beat it', { title: 'Beat It', artist: 'Michael Jackson', year: 1983, difficulty: 'easy' }, { difficulty: 5, popularity: 95 }),
+      rankedSong('cat:a ha|take on me', { title: 'Take On Me', artist: 'a-ha', year: 1985, difficulty: 'hard' }, { difficulty: 80, popularity: 20 }),
+      rankedSong('cat:the beatles|let it be', { title: 'Let It Be', artist: 'The Beatles', year: 1970, difficulty: 'easy' }, { difficulty: 10, popularity: 50 }),
+    ];
+    draw(spaced);
+    // What a screen reader makes of it: the text of each element the space-separated ids name.
+    const description = (b: HTMLElement) =>
+      (b.getAttribute('aria-describedby') ?? '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((id) => document.getElementById(id)?.textContent ?? '')
+        .join(' ');
+    expect(rows().map((r) => r.dataset.id)).toEqual(spaced.map((s) => s.match.track.id)); // the spaces are really on the page
+    const ids = rows().map((r) => button(r).getAttribute('aria-describedby')!);
+    for (const id of ids) expect(id).not.toMatch(/\s/);
+    expect(new Set(ids).size).toBe(ids.length);
+    const why = rows().map((r) => r.querySelector('[data-row-why]')!.textContent);
+    expect(why.every((w) => !!w)).toBe(true);
+    expect(rows().map((r) => description(button(r)))).toEqual(why);
+  });
+
   it('opens the song from the button with its 1-based place, and the ▶ slot opens nothing', () => {
     const { onSelect } = draw(songs);
     fireEvent.click(button(rows()[1]!));
