@@ -1,30 +1,52 @@
 // @vitest-environment jsdom
-// The gear art against the reference (spec §6). docs/setlist-round5/setlist-round5.html is parsed without running its
-// script, so it is the markup as authored. Each component is rendered to static markup and parsed the same way, and the
-// two trees are walked together: at every position the tag and every attribute must be identical, except
+// The gear art against the reference (Round 6A §6 to §9). docs/setlist-round6a/setlist-round6a.html is parsed as the markup
+// as authored, and its script is run once, in a document of its own, only to ask its viewModel() what it draws for a state
+// (README §2). Each component is rendered to static markup and parsed the same way, and the two trees are walked together:
+// at every position the tag and every attribute must be identical, except
 //   - `class`, which CSS Modules renames, so the class names are compared instead;
-//   - the parts that follow the art value. The reference's script draws those, so the reference has them blank here.
-//     The walk leaves them out (and requires the component to set them), and they are asserted on their own below, with
-//     the values the reference's own render() draws (its script was run once in jsdom to get them).
+//   - `data-b` and `data-on`, the reference's own bindings. They say which attributes and inline styles its script draws
+//     from a state, so the walk reads them and expects what the view model gives for that state (it applies the bindings
+//     itself, rather than lean on how jsdom writes styles);
+//   - ids, and the `url(#id)` that points at one: the component's filter ids are its own, one per instance;
+//   - what the parent owns, which the walk requires to be absent: a strip's width and height, the glow on an era icon;
+//   - the hooks the component adds for the browser tests (data-note, data-bolt, ...), asserted on their own below.
 // Both trees are parsed with jsdom's DOMParser, the engine this test already runs on; `new JSDOM` would need @types/jsdom.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { cleanup, render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { EraIcon, EraTabArt, GearArt, type GearArtVariant } from '../../src/components/setlist/GearArt';
-import { metronome } from '../../src/lib/setlist/art';
+import { metronome, neonFlicker } from '../../src/lib/setlist/art';
 import { ERA_IDS, GEAR_IDS, type EraId, type GearId } from '../../src/lib/setlist/types';
 
-const REFERENCE = join(__dirname, '../../docs/setlist-round5/setlist-round5.html');
+const REFERENCE = join(__dirname, '../../docs/setlist-round6a/setlist-round6a.html');
 const MODULE_CSS = join(__dirname, '../../src/components/setlist/GearArt.module.css');
 const GLOBAL_CSS = join(__dirname, '../../src/components/setlist/setlist-global.css');
 
 const VARIANTS: readonly GearArtVariant[] = ['strip', 'tab'];
+const INDEXES = ['0', '1', '2', '3', '4', '5', '6'];
+const VALUES = Array.from({ length: 101 }, (_, value) => value);
+
+// The README's colours, written out (§3.1, §9), so a wrong value in art.ts cannot agree with itself here.
+const COLOR = {
+  unlit: '#34313D',
+  pink: '#FF4FA0',
+  cyan: '#4FDDE8',
+  amber: '#FFC24A',
+  violet: '#B583FF',
+  easy: '#4DE89A',
+  hard: '#FF5A8A',
+  lightOff: '#3A2A33',
+  grid: '#1F1D26',
+};
+
+afterEach(cleanup);
 
 // ---------------------------------------------------------------------------------------------------------------------
-// The two trees
+// The reference, and what its view model draws
 
 const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html');
 const reference = parse(readFileSync(REFERENCE, 'utf8'));
@@ -45,6 +67,110 @@ const referenceEraTab = () => must(reference.querySelector('.tab[data-gear="era"
 const referenceEraIcon = (era: EraId) =>
   must(reference.querySelector(`.era-btn[data-era="${era}"] > svg`), `the ${era} icon`);
 
+type ViewModel = Record<string, unknown>;
+
+/** What the reference's script exposes as `window.setlist` (README §2). */
+interface ReferenceHook {
+  setState(patch: object): void;
+  viewModel(): ViewModel;
+}
+
+interface ReferenceState {
+  difficulty: number;
+  history: number;
+  popularity: number;
+  tempo: number;
+  eras: EraId[];
+  /** The gears that were reset, and 'era'. */
+  off: Array<GearId | 'era'>;
+}
+
+/** The reference's own mock defaults (README §1), nothing off. Every state this test asks for is this plus a patch. */
+const BASELINE: ReferenceState & { open: string; mini: boolean; dragY: null } = {
+  difficulty: 30,
+  history: 65,
+  popularity: 80,
+  tempo: 45,
+  eras: ['s90', 's00', 's10'],
+  off: [],
+  open: 'history',
+  mini: false,
+  dragY: null,
+};
+
+/**
+ * The app's real defaults (QWW-57), which replace the README's mock ones: Difficulty 0 on, History 100 off, Popularity 100
+ * on, Tempo 50 off, Era off with no picks.
+ */
+const APP_DEFAULTS: Partial<ReferenceState> = {
+  difficulty: 0,
+  history: 100,
+  popularity: 100,
+  tempo: 50,
+  eras: [],
+  off: ['history', 'tempo', 'era'],
+};
+
+/** Runs the reference's script in a document of its own, so nothing it does reaches this test's document. */
+function runReference(): ReferenceHook {
+  const script = must(reference.querySelector('script'), 'the reference script').textContent ?? '';
+  const doc = document.implementation.createHTMLDocument('reference');
+  doc.body.innerHTML = reference.body.innerHTML;
+  const fakeWindow: { setlist?: ReferenceHook } = {};
+  new Function('document', 'window', 'location', script)(doc, fakeWindow, { search: '' });
+  return must(fakeWindow.setlist, 'the reference script\'s window.setlist hook');
+}
+const hook = runReference();
+
+/** The reference's view model for a state: the baseline with `patch` applied. */
+function viewModelFor(patch: Partial<ReferenceState> = {}): ViewModel {
+  hook.setState({ ...BASELINE, ...patch });
+  return hook.viewModel();
+}
+
+/** The reference state a patch makes, for reading the values the components are given. */
+const stateOf = (patch: Partial<ReferenceState>): ReferenceState => ({ ...BASELINE, ...patch });
+
+interface Binding {
+  target: string;
+  path: string;
+  suffix: string;
+}
+
+/** The reference's `data-b="target:path|suffix; ..."` (README §2). */
+function bindingsOf(el: Element): Binding[] {
+  const out: Binding[] = [];
+  for (const spec of (el.getAttribute('data-b') ?? '').split(';')) {
+    const text = spec.trim();
+    if (!text) continue;
+    const cut = text.indexOf(':');
+    const [path = '', suffix = ''] = text
+      .slice(cut + 1)
+      .trim()
+      .split('|');
+    out.push({ target: text.slice(0, cut).trim(), path, suffix });
+  }
+  return out;
+}
+
+const lookup = (vm: ViewModel, path: string): unknown =>
+  path
+    .split('.')
+    .reduce<unknown>((o, key) => (o === null || o === undefined ? undefined : (o as Record<string, unknown>)[key]), vm);
+
+/** What the reference's binder would write for a binding, or null when it would remove the attribute. */
+function boundValue(vm: ViewModel, binding: Binding): string | null {
+  const raw = lookup(vm, binding.path);
+  return raw === undefined || raw === null ? null : String(raw) + binding.suffix;
+}
+
+const isStyleBinding = (b: Binding) => b.target.startsWith('style.');
+const isAttributeBinding = (b: Binding) =>
+  !isStyleBinding(b) && !b.target.startsWith('class.') && b.target !== 'text' && b.target !== 'value';
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Rendering
+
 /** Renders to static markup, parses it back and returns the one root element. */
 function rendered(element: ReactElement): Element {
   const doc = parse(`<!doctype html><body>${renderToStaticMarkup(element)}`);
@@ -52,70 +178,58 @@ function rendered(element: ReactElement): Element {
   return must(doc.body.firstElementChild, 'the rendered root');
 }
 
-/** The reference's strip svg also carries `gear-art`, which is the parent's class (it sets the size). */
+/** The reference's strip svg also carries `gear-art`, which is the parent's class (it sets the size and the box). */
 const PARENT_CLASS = 'gear-art';
 
-const art = (gear: GearId, variant: GearArtVariant, value: number, className?: string) =>
-  rendered(<GearArt gear={gear} variant={variant} value={value} className={className} />);
+const art = (gear: GearId, variant: GearArtVariant, value: number, off: boolean, className?: string) =>
+  rendered(<GearArt gear={gear} variant={variant} value={value} off={off} className={className} />);
 
 /** The strip as its parent renders it, with the parent's class; the tab has none. */
-const artAsParentRenders = (gear: GearId, variant: GearArtVariant, value: number) =>
-  art(gear, variant, value, variant === 'strip' ? PARENT_CLASS : undefined);
+const artAsParentRenders = (gear: GearId, variant: GearArtVariant, value: number, off: boolean) =>
+  art(gear, variant, value, off, variant === 'strip' ? PARENT_CLASS : undefined);
 
-const eraTab = (eras: readonly EraId[], className?: string) => rendered(<EraTabArt eras={eras} className={className} />);
+const eraTab = (eras: readonly EraId[], off: boolean, className?: string) =>
+  rendered(<EraTabArt eras={eras} off={off} className={className} />);
 const eraIcon = (era: EraId) => rendered(<EraIcon era={era} />);
 
-/** Every root svg the components draw. */
+/** Every root svg the components draw, by name. */
 const everyRoot = (): Array<[string, Element]> => [
-  ...GEAR_IDS.flatMap((gear) => VARIANTS.map((variant): [string, Element] => [`${gear} ${variant}`, art(gear, variant, 50)])),
-  ['era tab', eraTab(['s90'])],
+  ...GEAR_IDS.flatMap((gear) =>
+    VARIANTS.map((variant): [string, Element] => [`${gear} ${variant}`, art(gear, variant, 50, false)]),
+  ),
+  ['era tab', eraTab(['s90'], false)],
   ...ERA_IDS.map((era): [string, Element] => [`${era} icon`, eraIcon(era)]),
 ];
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The walk
 
-/** Reference classes mapped to the CSS-module class that stands for them here. */
-const MODULE_CLASS: Record<string, string> = {
-  'art-lane': 'artLane',
-  'art-cream': 'artCream',
-  'art-dark': 'artDark',
-  'art-black': 'artBlack',
-  'hist-note': 'histNote',
-  'pop-bolt': 'popBolt',
-  'metro-pend': 'metroPend',
-  bob: 'bob',
-  zap: 'zap',
-};
-/** Reference classes that only exist for its script to find an element. The components have no class for them. */
-const SCRIPT_HOOKS = new Set(['lane-band', 'lane-dashes', 'lane-dash', 'metro-weight', 'era-dot']);
+/** The classes the components carry. Reference classes mapped to the CSS-module class that stands for them. */
+function expectedClass(referenceClass: string, variant: Context['variant']): string[] {
+  switch (referenceClass) {
+    case PARENT_CLASS: // the parent's, which this test passes in
+    case 'flick':
+    case 'fade':
+    case 'bob':
+      return [referenceClass];
+    case 'pend':
+      // The pivot differs between the strip's 150x80 grid and the tab's 28x22, so the module has a class for each.
+      return [variant === 'tab' ? 'pendTab' : 'pend'];
+    default:
+      throw new Error(`The reference class "${referenceClass}" has no mapping in this test`);
+  }
+}
 
-/** Attributes the reference's script sets, by the reference class of the element. The component sets them too. */
-const DYNAMIC_ATTRS: Record<string, string[]> = {
-  'lane-band': ['y', 'height', 'fill'],
-  'lane-dashes': ['fill'],
-  'lane-dash': ['y'],
-  'metro-weight': ['transform'],
-  'era-dot': ['fill'],
-};
-/** Inline style properties the reference's script sets. */
-const DYNAMIC_STYLE: Record<string, string[]> = {
-  'hist-note': ['opacity'],
-  'pop-bolt': ['opacity'],
-  'metro-pend': ['animation'],
-};
+/** The attributes the walk does not compare one by one. */
+const NOT_COMPARED = new Set(['class', 'style', 'id', 'data-b', 'data-on']);
+/** What the components add so the browser tests can find a part. Each is asserted on its own. */
+const HOOKS = new Set(['data-note', 'data-bolt', 'data-ray', 'data-i', 'data-pendulum', 'data-weight', 'data-jukebox']);
+/** An id that is safe inside `url(#...)`. */
+const PLAIN_ID = /^[A-Za-z][\w-]*$/;
 
 const classTokens = (el: Element) => (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
-/** vitest turns a module class `artLane` into `_artLane_<hash>`; a real build has its own scheme. Compare by name. */
+/** vitest turns a module class `pend` into `_pend_<hash>`; a real build has its own scheme. Compare by name. */
 const moduleName = (token: string) => /^_(.+)_[0-9a-f]+$/.exec(token)?.[1] ?? token;
-
-function expectedClass(referenceClass: string): string[] {
-  const own = MODULE_CLASS[referenceClass];
-  if (own) return [own];
-  if (SCRIPT_HOOKS.has(referenceClass)) return [];
-  if (referenceClass === PARENT_CLASS) return [PARENT_CLASS];
-  throw new Error(`The reference class "${referenceClass}" has no mapping in this test`);
-}
 
 function styleOf(el: Element): Record<string, string> {
   const out: Record<string, string> = {};
@@ -129,6 +243,16 @@ const sortedEntries = (record: Record<string, string>) =>
   JSON.stringify(Object.entries(record).sort(([a], [b]) => a.localeCompare(b)));
 const show = (value: string | null) => (value === null ? 'missing' : JSON.stringify(value));
 
+interface Context {
+  vm: ViewModel;
+  /** Where the art is: a strip's width and height are the parent's; an era icon's glow is the era button's. */
+  variant: 'strip' | 'tab' | 'era-icon';
+  /** The reference's filter ids mapped to the component's, filled in as the walk meets each filter. */
+  ids: Map<string, string>;
+}
+
+const contextFor = (vm: ViewModel, variant: Context['variant']): Context => ({ vm, variant, ids: new Map() });
+
 interface Pair {
   ref: Element;
   got: Element;
@@ -138,44 +262,73 @@ interface Walk {
   pairs: Pair[];
 }
 
-function walk(ref: Element, got: Element, path: string, out: Walk): void {
+function walk(ref: Element, got: Element, path: string, ctx: Context, out: Walk): void {
   out.pairs.push({ ref, got });
   if (ref.localName !== got.localName) {
     out.problems.push(`${path}: <${ref.localName}> in the reference, <${got.localName}> in the component`);
     return;
   }
-  const refClasses = classTokens(ref);
-  const dynamicAttrs = refClasses.flatMap((c) => DYNAMIC_ATTRS[c] ?? []);
-  const dynamicStyle = refClasses.flatMap((c) => DYNAMIC_STYLE[c] ?? []);
+  const bindings = bindingsOf(ref);
+  // What the parent owns is on the root svg alone: the band inside a strip has a height of its own.
+  const isRoot = !path.includes('>');
+  const parentAttrs = isRoot && ctx.variant === 'strip' ? ['width', 'height'] : [];
+  const parentStyle = isRoot && ctx.variant === 'era-icon' ? ['filter'] : [];
 
-  // Attributes are identical, apart from the ones that follow the value.
-  for (const name of new Set([...ref.getAttributeNames(), ...got.getAttributeNames()])) {
-    if (name === 'class' || name === 'style' || dynamicAttrs.includes(name)) continue;
-    if (ref.getAttribute(name) !== got.getAttribute(name)) {
-      const was = show(ref.getAttribute(name));
-      out.problems.push(`${path}: ${name} is ${was} in the reference, ${show(got.getAttribute(name))} in the component`);
+  // Attributes: what the reference's markup says, then what its bindings write for this state.
+  const want = new Map<string, string>();
+  for (const name of ref.getAttributeNames()) {
+    if (!NOT_COMPARED.has(name)) want.set(name, ref.getAttribute(name) ?? '');
+  }
+  for (const binding of bindings.filter(isAttributeBinding)) {
+    if (parentAttrs.includes(binding.target)) continue;
+    const value = boundValue(ctx.vm, binding);
+    if (value === null) want.delete(binding.target);
+    else want.set(binding.target, value);
+  }
+
+  // A filter is found by id, and the component's ids are its own: the walk learns each one, then checks the url() that uses it.
+  const refId = ref.getAttribute('id');
+  const gotId = got.getAttribute('id');
+  if (refId !== null && gotId !== null && PLAIN_ID.test(gotId)) ctx.ids.set(refId, gotId);
+  else if (refId !== null || gotId !== null) {
+    out.problems.push(`${path}: id is ${show(refId)} in the reference, ${show(gotId)} in the component`);
+  }
+  for (const [name, value] of want) {
+    const url = /^url\(#(.+)\)$/.exec(value);
+    if (url) want.set(name, `url(#${ctx.ids.get(url[1] ?? '') ?? 'a filter the component does not have'})`);
+  }
+
+  for (const name of new Set([...want.keys(), ...got.getAttributeNames()])) {
+    if (NOT_COMPARED.has(name) || HOOKS.has(name)) continue;
+    const wanted = want.get(name) ?? null;
+    if (wanted !== got.getAttribute(name)) {
+      out.problems.push(`${path}: ${name} is ${show(wanted)} in the reference, ${show(got.getAttribute(name))} in the component`);
     }
   }
-  for (const name of dynamicAttrs) {
-    if (!got.hasAttribute(name)) out.problems.push(`${path}: the component does not set ${name}`);
-  }
 
-  // Inline style is identical, apart from the properties that follow the value.
-  const refStyle = styleOf(ref);
-  const gotStyle = styleOf(got);
-  for (const property of dynamicStyle) {
-    if (!(property in gotStyle)) out.problems.push(`${path}: the component does not set style ${property}`);
-    delete gotStyle[property];
+  // Inline style: the reference's own, then what its bindings write. The pendulum's pivot is in the module CSS (checked
+  // with the CSS below), so it must not be inline.
+  const wantStyle = styleOf(ref);
+  delete wantStyle['transform-origin'];
+  for (const binding of bindings.filter(isStyleBinding)) {
+    const property = binding.target.slice('style.'.length);
+    if (parentStyle.includes(property)) continue;
+    const value = boundValue(ctx.vm, binding);
+    if (value === null) delete wantStyle[property];
+    else wantStyle[property] = value;
   }
-  if (sortedEntries(refStyle) !== sortedEntries(gotStyle)) {
-    out.problems.push(`${path}: style is ${sortedEntries(refStyle)} in the reference, ${sortedEntries(gotStyle)} in the component`);
+  const gotStyle = styleOf(got);
+  if (sortedEntries(wantStyle) !== sortedEntries(gotStyle)) {
+    out.problems.push(`${path}: style is ${sortedEntries(wantStyle)} in the reference, ${sortedEntries(gotStyle)} in the component`);
   }
 
   // The classes that carry the CSS are all there, and no others.
-  const want = refClasses.flatMap(expectedClass).sort();
-  const have = classTokens(got).map(moduleName).sort();
-  if (want.join(' ') !== have.join(' ')) {
-    out.problems.push(`${path}: classes are [${have}] but the reference's [${refClasses}] map to [${want}]`);
+  const wantClasses = classTokens(ref)
+    .flatMap((c) => expectedClass(c, ctx.variant))
+    .sort();
+  const haveClasses = classTokens(got).map(moduleName).sort();
+  if (wantClasses.join(' ') !== haveClasses.join(' ')) {
+    out.problems.push(`${path}: classes are [${haveClasses}] but the reference's [${classTokens(ref)}] map to [${wantClasses}]`);
   }
 
   const refKids = [...ref.children];
@@ -186,21 +339,21 @@ function walk(ref: Element, got: Element, path: string, out: Walk): void {
   }
   refKids.forEach((kid, i) => {
     const other = gotKids[i];
-    if (other) walk(kid, other, `${path}>${kid.localName}[${i}]`, out);
+    if (other) walk(kid, other, `${path}>${kid.localName}[${i}]`, ctx, out);
   });
 }
 
-function compare(ref: Element, got: Element): Walk {
+function compare(ref: Element, got: Element, ctx: Context): Walk {
   const out: Walk = { problems: [], pairs: [] };
-  walk(ref, got, ref.localName, out);
+  walk(ref, got, ref.localName, ctx, out);
   return out;
 }
 
 const elementCount = (root: Element) => 1 + root.querySelectorAll('*').length;
 
 /** Fails with the list of differences; also fails if the walk did not reach every element of the reference. */
-function expectSameMarkup(ref: Element, got: Element): Walk {
-  const walked = compare(ref, got);
+function expectSameMarkup(ref: Element, got: Element, ctx: Context): Walk {
+  const walked = compare(ref, got, ctx);
   expect(walked.problems).toEqual([]);
   expect(walked.pairs).toHaveLength(elementCount(ref));
   expect(ref.textContent?.trim()).toBe('');
@@ -208,16 +361,59 @@ function expectSameMarkup(ref: Element, got: Element): Walk {
   return walked;
 }
 
+/** One art to check: a gear's strip or tab, or the Era tab. */
+type Part = { gear: GearId; variant: GearArtVariant } | { gear: 'era' };
+const GEAR_PARTS: Part[] = GEAR_IDS.flatMap((gear) => VARIANTS.map((variant): Part => ({ gear, variant })));
+const ALL_PARTS: Part[] = [...GEAR_PARTS, { gear: 'era' }];
+
+/** A part drawn for a state, next to the reference's art for it. */
+function drawn(part: Part, state: ReferenceState) {
+  const off = state.off.includes(part.gear);
+  if ('variant' in part) {
+    const { gear, variant } = part;
+    return {
+      label: `${gear} ${variant}`,
+      ref: referenceArt(gear, variant),
+      got: artAsParentRenders(gear, variant, state[gear], off),
+      variant,
+    };
+  }
+  return { label: 'era tab', ref: referenceEraTab(), got: eraTab(state.eras, off), variant: 'tab' as const };
+}
+
+/** Draws `parts` for a state and compares each with the reference's art for that state. Returns every difference. */
+function differences(patch: Partial<ReferenceState>, parts: readonly Part[]): string[] {
+  const state = stateOf(patch);
+  const vm = viewModelFor(patch);
+  const problems: string[] = [];
+  for (const part of parts) {
+    const { label, ref, got, variant } = drawn(part, state);
+    const walked = compare(ref, got, contextFor(vm, variant));
+    problems.push(...walked.problems.map((problem) => `${label} at ${JSON.stringify(patch)}: ${problem}`));
+    if (walked.pairs.length !== elementCount(ref)) problems.push(`${label} at ${JSON.stringify(patch)}: the walk missed elements`);
+  }
+  return problems;
+}
+
 const attr = (name: string) => (el: Element) => el.getAttribute(name);
 const styleProp = (name: string) => (el: Element) => styleOf(el)[name];
 const attrs = (el: Element, names: string[]) => Object.fromEntries(names.map((name) => [name, el.getAttribute(name)]));
-const INDEXES = ['0', '1', '2', '3', '4', '5', '6'];
+const all = (root: Element, selector: string) => [...root.querySelectorAll(selector)];
+const one = (root: Element, selector: string) => must(root.querySelector(selector), selector);
 
-/** Draws a gear's art at `value`, checks it against the reference, and finds elements by their reference class. */
-function drawn(gear: GearId, variant: GearArtVariant, value: number) {
-  const walked = expectSameMarkup(referenceArt(gear, variant), artAsParentRenders(gear, variant, value));
-  const byClass = (name: string) => walked.pairs.filter(({ ref }) => classTokens(ref).includes(name)).map(({ got }) => got);
-  return { byClass };
+/** The colours an art is drawn in: every stroke and fill, and a tab's `color`, apart from the faint grid behind the strip. */
+function paints(root: Element): string[] {
+  const found = new Set<string>();
+  for (const el of [root, ...root.querySelectorAll('*')]) {
+    for (const name of ['stroke', 'fill']) {
+      const value = el.getAttribute(name);
+      if (value && value !== 'none' && value !== 'currentColor') found.add(value);
+    }
+    const color = styleOf(el).color;
+    if (color) found.add(color);
+  }
+  found.delete(COLOR.grid);
+  return [...found].sort();
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -230,33 +426,75 @@ describe('the reference this test reads', () => {
     expect([...reference.querySelectorAll('.era-btn')].map(attr('data-era'))).toEqual([...ERA_IDS]);
   });
 
-  it('leaves the parts that follow a value blank until its script runs, which is why the walk skips them', () => {
-    expect(reference.querySelectorAll('.hist-note[style], .pop-bolt[style], .metro-pend[style]')).toHaveLength(0);
-    expect(reference.querySelectorAll('.metro-weight[transform], .era-dot[fill], .lane-dashes[fill], .lane-dash[y]')).toHaveLength(0);
-    expect(reference.querySelectorAll('.lane-band')).toHaveLength(2);
-    for (const band of reference.querySelectorAll('.lane-band')) {
-      expect(attrs(band, ['y', 'height', 'fill'])).toEqual({ y: '0', height: '0', fill: null });
+  it('leaves the parts that follow a state to its bindings, which is why the walk reads them', () => {
+    // The raw markup has no opacity, animation or colour on the parts that move; its script writes them.
+    expect(reference.querySelectorAll('.fade[style], .bob[style*="opacity"], .pend[style*="animation"]')).toHaveLength(0);
+    expect(reference.querySelectorAll('.strip > svg[style], .tab > svg[style]')).toHaveLength(0);
+  });
+
+  it('is run in a document of its own, and its view model answers for the state it is given', () => {
+    // README test 26: at the mock defaults five notes and six bolts show.
+    const vm = viewModelFor();
+    expect(INDEXES.map((i) => lookup(vm, `art.o${i}`))).toEqual([1, 1, 1, 1, 1, 0, 0]);
+    expect(INDEXES.map((i) => lookup(vm, `art.q${i}`))).toEqual([1, 1, 1, 1, 1, 1, 0]);
+    expect(lookup(viewModelFor({ off: ['tempo'] }), 'metro.anim')).toBe('none');
+    expect(lookup(viewModelFor({ tempo: 55 }), 'metro.tabWeightY')).toBe('9.9');
+  });
+
+  it('binds every part of its art that follows a state to a view-model value that exists', () => {
+    // A binding to a path the view model lacks would write nothing, and the walk would then expect nothing.
+    const vm = viewModelFor();
+    const svgs = [
+      ...GEAR_IDS.flatMap((gear) => VARIANTS.map((variant) => referenceArt(gear, variant))),
+      referenceEraTab(),
+      ...ERA_IDS.map(referenceEraIcon),
+    ];
+    expect(svgs).toHaveLength(16);
+    let checked = 0;
+    for (const svg of svgs) {
+      for (const el of [svg, ...svg.querySelectorAll('[data-b]')]) {
+        for (const binding of bindingsOf(el)) {
+          expect(boundValue(vm, binding), `${el.localName} ${binding.target}:${binding.path}`).not.toBeNull();
+          checked++;
+        }
+      }
     }
+    expect(checked).toBeGreaterThan(100);
   });
 });
 
 describe('GearArt: the markup is the reference markup', () => {
   for (const gear of GEAR_IDS) {
     for (const variant of VARIANTS) {
-      it(`${gear} ${variant} matches the reference, element by element`, () => {
-        // The structure must not depend on the value.
-        for (const value of [0, 50, 100]) expectSameMarkup(referenceArt(gear, variant), artAsParentRenders(gear, variant, value));
+      it(`${gear} ${variant} matches the reference, element by element, at the mock defaults`, () => {
+        const vm = viewModelFor();
+        const state = stateOf({});
+        expectSameMarkup(referenceArt(gear, variant), artAsParentRenders(gear, variant, state[gear], false), contextFor(vm, variant));
       });
     }
   }
 
-  it('draws both variants of every gear, as one svg on a 150x80 viewBox, hidden from assistive tech', () => {
+  it('draws a whole screen of art as the reference does, in the mock defaults and the app defaults and with everything off or at an end', () => {
+    const states: Array<Partial<ReferenceState>> = [
+      {},
+      APP_DEFAULTS,
+      { off: ['difficulty', 'history', 'popularity', 'tempo', 'era'] },
+      { difficulty: 0, history: 0, popularity: 0, tempo: 0, eras: [] },
+      { difficulty: 100, history: 100, popularity: 100, tempo: 100, eras: [...ERA_IDS] },
+      { difficulty: 100, history: 0, popularity: 100, tempo: 0, off: ['history', 'tempo'] },
+    ];
+    for (const patch of states) expect(differences(patch, ALL_PARTS)).toEqual([]);
+  });
+
+  it('draws both variants of every gear, strip on a 150x80 viewBox and tab on a 28x22 one, hidden from assistive tech', () => {
     for (const gear of GEAR_IDS) {
-      const strip = art(gear, 'strip', 50);
-      const tab = art(gear, 'tab', 50);
+      const strip = art(gear, 'strip', 50, false);
+      const tab = art(gear, 'tab', 50, false);
+      expect(strip.localName).toBe('svg');
+      expect(strip.getAttribute('viewBox')).toBe('0 0 150 80');
+      expect(tab.getAttribute('viewBox')).toBe('0 0 28 22');
       for (const root of [strip, tab]) {
         expect(root.localName).toBe('svg');
-        expect(root.getAttribute('viewBox')).toBe('0 0 150 80');
         expect(root.getAttribute('aria-hidden')).toBe('true');
         expect(root.querySelectorAll('svg')).toHaveLength(0);
       }
@@ -264,41 +502,103 @@ describe('GearArt: the markup is the reference markup', () => {
     }
   });
 
-  it('puts the parent className on the root svg, after the background class that belongs to the gear', () => {
-    const background: Record<GearId, string> = { difficulty: 'artLane', history: 'artCream', popularity: 'artDark', tempo: 'artCream' };
+  it('keeps the structure whatever the value, and whether the gear is on or off', () => {
+    const shape = (root: Element) => [root, ...root.querySelectorAll('*')].map((el) => el.localName).join(' ');
     for (const gear of GEAR_IDS) {
       for (const variant of VARIANTS) {
-        expect(classTokens(art(gear, variant, 50, 'probe')).map(moduleName)).toEqual([background[gear], 'probe']);
-        expect(classTokens(art(gear, variant, 50)).map(moduleName)).toEqual([background[gear]]);
+        const shapes = new Set(VALUES.flatMap((value) => [false, true].map((off) => shape(art(gear, variant, value, off)))));
+        expect(shapes.size, `${gear} ${variant}`).toBe(1);
       }
     }
-    expect(classTokens(eraTab([], 'probe')).map(moduleName)).toEqual(['artBlack', 'probe']);
-    expect(classTokens(eraTab([])).map(moduleName)).toEqual(['artBlack']);
+  });
+});
+
+describe('GearArt: every value, on and off, is drawn as the reference draws it', () => {
+  // The reference's view model is asked for each value; the walk expects the component to hold exactly what it gives. This
+  // covers the pitch lane's band and dashes at every difficulty, the thresholds of the seven notes, bolts and rays, and the
+  // metronome's swing, period and weight at every tempo (the reference rounds its bpm; see art.ts).
+  for (const gear of GEAR_IDS) {
+    it(`${gear}, strip and tab, at every value from 0 to 100`, () => {
+      const parts = VARIANTS.map((variant): Part => ({ gear, variant }));
+      const problems: string[] = [];
+      for (const value of VALUES) {
+        for (const off of [false, true]) {
+          const patch: Partial<ReferenceState> = { off: off ? [gear] : [] };
+          patch[gear] = value;
+          problems.push(...differences(patch, parts));
+        }
+      }
+      expect(problems).toEqual([]);
+    });
+  }
+
+  it('the Era tab, with no era, one, two, three and all seven picked, on and off', () => {
+    const picks: EraId[][] = [[], ['s90'], ['s80', 's90'], ['s90', 's00', 's10'], [...ERA_IDS]];
+    const problems: string[] = [];
+    for (const eras of picks) {
+      for (const off of [false, true]) problems.push(...differences({ eras, off: off ? ['era'] : [] }, [{ gear: 'era' }]));
+    }
+    expect(problems).toEqual([]);
   });
 });
 
 describe('GearArt: difficulty follows the value (the pitch lane)', () => {
-  // The band is 14 + value x 0.62 high around y = 40, in the tier colour; the dashes spread with it.
+  // The band is 14 + value x 0.62 high around y = 40 at 12%; the seven dashes are round-capped lines that spread with it.
   const DIFFICULTY = [
-    { value: 0, color: '#4FD17A', bandY: '33', bandHeight: '14', dashY: ['40', '38', '33', '36', '41', '35', '33'] },
-    { value: 20, color: '#4FD17A', bandY: '27', bandHeight: '26', dashY: ['45', '39', '27', '34', '47', '31', '28'] },
-    { value: 60, color: '#F5B82E', bandY: '14', bandHeight: '51', dashY: ['55', '42', '14', '30', '60', '23', '17'] },
-    { value: 90, color: '#FF6B70', bandY: '5', bandHeight: '70', dashY: ['63', '43', '5', '27', '69', '18', '8'] },
-    { value: 100, color: '#FF6B70', bandY: '2', bandHeight: '76', dashY: ['65', '44', '2', '27', '72', '16', '6'] },
+    { value: 0, color: COLOR.easy, bandY: '33', bandHeight: '14', dashY: ['43', '41', '36', '39', '44', '38', '36'] },
+    { value: 30, color: COLOR.easy, bandY: '24', bandHeight: '33', dashY: ['51', '43', '27', '36', '53', '32', '28'] },
+    { value: 60, color: '#FFC24A', bandY: '14', bandHeight: '51', dashY: ['58', '45', '17', '33', '63', '26', '20'] },
+    { value: 100, color: COLOR.hard, bandY: '2', bandHeight: '76', dashY: ['68', '47', '5', '30', '75', '19', '9'] },
   ];
 
   for (const { value, color, bandY, bandHeight, dashY } of DIFFICULTY) {
-    for (const variant of VARIANTS) {
-      it(`${variant} at ${value}: band at y ${bandY}, ${bandHeight} high, in ${color}`, () => {
-        const { byClass } = drawn('difficulty', variant, value);
-        const band = byClass('lane-band').map((el) => attrs(el, ['x', 'y', 'width', 'height', 'fill', 'fill-opacity']));
-        expect(band).toEqual([{ x: '0', y: bandY, width: '150', height: bandHeight, fill: color, 'fill-opacity': '0.2' }]);
-        expect(byClass('lane-dashes').map(attr('fill'))).toEqual([color]);
-        expect(byClass('lane-dash').map(attr('data-i'))).toEqual(INDEXES);
-        expect(byClass('lane-dash').map(attr('y'))).toEqual(dashY);
+    it(`strip at ${value}: band at y ${bandY}, ${bandHeight} high at 12%, and the dashes in ${color}`, () => {
+      const root = art('difficulty', 'strip', value, false);
+      const band = one(root, 'rect');
+      expect(attrs(band, ['x', 'y', 'width', 'height', 'fill', 'fill-opacity'])).toEqual({
+        x: '0',
+        y: bandY,
+        width: '150',
+        height: bandHeight,
+        fill: color,
+        'fill-opacity': '0.12',
       });
-    }
+      const dashes = all(root, 'g[filter] > line');
+      expect(dashes).toHaveLength(7);
+      expect(one(root, 'g[filter]').getAttribute('stroke')).toBe(color);
+      expect(dashes.map((line) => [line.getAttribute('x1'), line.getAttribute('x2')])).toEqual([
+        ['9', '22'],
+        ['30', '36'],
+        ['46', '62'],
+        ['71', '77'],
+        ['87', '97'],
+        ['107', '115'],
+        ['125', '141'],
+      ]);
+      // A dash is a horizontal line: both ends at one y.
+      expect(dashes.map(attr('y1'))).toEqual(dashY);
+      expect(dashes.map(attr('y2'))).toEqual(dashY);
+    });
+
+    it(`tab at ${value}: three dashes in ${color}, no band`, () => {
+      const root = art('difficulty', 'tab', value, false);
+      expect(styleOf(root).color).toBe(color);
+      expect(root.getAttribute('stroke')).toBe('currentColor');
+      expect(one(root, 'path').getAttribute('d')).toBe('M4 15 H9 M12 8 H17 M20 12 H25');
+      expect(all(root, '*')).toHaveLength(1);
+    });
   }
+
+  it('hides the band and unlights the dashes while the gear is off, at the value it is given (README §7)', () => {
+    const root = art('difficulty', 'strip', 0, true);
+    expect(attrs(one(root, 'rect'), ['fill', 'fill-opacity', 'y', 'height'])).toEqual({
+      fill: COLOR.unlit,
+      'fill-opacity': '0',
+      y: '33',
+      height: '14',
+    });
+    expect(one(root, 'g[filter]').getAttribute('stroke')).toBe(COLOR.unlit);
+  });
 });
 
 describe('GearArt: history notes and popularity bolts follow the value', () => {
@@ -310,152 +610,555 @@ describe('GearArt: history notes and popularity bolts follow the value', () => {
   ];
 
   for (const { value, opacity } of ITEMS) {
-    for (const variant of VARIANTS) {
-      it(`history ${variant} at ${value}: note opacities ${opacity.join(' ')}`, () => {
-        const notes = drawn('history', variant, value).byClass('hist-note');
-        expect(notes.map(attr('data-i'))).toEqual(INDEXES);
-        expect(notes.map(styleProp('opacity'))).toEqual(opacity);
-      });
+    it(`history strip at ${value}: note opacities ${opacity.join(' ')}`, () => {
+      const notes = all(art('history', 'strip', value, false), '[data-note]');
+      expect(notes.map(attr('data-i'))).toEqual(INDEXES);
+      expect(notes.map(styleProp('opacity'))).toEqual(opacity);
+    });
 
-      it(`popularity ${variant} at ${value}: bolt opacities ${opacity.join(' ')}`, () => {
-        const bolts = drawn('popularity', variant, value).byClass('pop-bolt');
-        expect(bolts.map(attr('data-i'))).toEqual(INDEXES);
-        expect(bolts.map(styleProp('opacity'))).toEqual(opacity);
+    it(`popularity strip at ${value}: bolt opacities ${opacity.join(' ')}`, () => {
+      const bolts = all(art('popularity', 'strip', value, false), '[data-bolt]');
+      expect(bolts.map(attr('data-i'))).toEqual(INDEXES);
+      expect(bolts.map(styleProp('opacity'))).toEqual(opacity);
+    });
+
+    for (const gear of ['history', 'popularity'] as const) {
+      it(`${gear} tab at ${value}: ray opacities ${opacity.join(' ')}`, () => {
+        const rays = all(art(gear, 'tab', value, false), '[data-ray]');
+        expect(rays.map(attr('data-i'))).toEqual(INDEXES);
+        expect(rays.map(styleProp('opacity'))).toEqual(opacity);
       });
     }
   }
 
+  it('shows five notes and six bolts at the mock defaults, 65 and 80, on the strip and as rays on the tab (README test 26)', () => {
+    const visible = (els: Element[]) => els.filter((el) => styleOf(el).opacity === '1').length;
+    expect(visible(all(art('history', 'strip', 65, false), '[data-note]'))).toBe(5);
+    expect(visible(all(art('popularity', 'strip', 80, false), '[data-bolt]'))).toBe(6);
+    expect(visible(all(art('history', 'tab', 65, false), '[data-ray]'))).toBe(5);
+    expect(visible(all(art('popularity', 'tab', 80, false), '[data-ray]'))).toBe(6);
+  });
+
+  it('keeps every note, bolt and ray in the drawing, hidden by opacity alone; the strip ones fade over 180 ms', () => {
+    const withoutOpacity = (el: Element) => el.outerHTML.replace(/opacity:[01]/, 'opacity:_');
+    for (const [gear, variant, hookSelector] of [
+      ['history', 'strip', '[data-note]'],
+      ['popularity', 'strip', '[data-bolt]'],
+      ['history', 'tab', '[data-ray]'],
+      ['popularity', 'tab', '[data-ray]'],
+    ] as const) {
+      const hidden = all(art(gear, variant, 0, false), hookSelector);
+      const shown = all(art(gear, variant, 100, false), hookSelector);
+      expect(hidden, `${gear} ${variant}`).toHaveLength(7);
+      expect(hidden.map(withoutOpacity), `${gear} ${variant}`).toEqual(shown.map(withoutOpacity));
+      // Only the strip's notes and bolts have the fade; the reference's rays do not.
+      const classes = hidden.map((el) => classTokens(el).map(moduleName));
+      expect(classes, `${gear} ${variant}`).toEqual(Array(7).fill(variant === 'strip' ? ['fade'] : []));
+    }
+  });
+
   it('bobs the notes and the bolts on the strip only, each with its own delay', () => {
-    const delays = (gear: 'history' | 'popularity', variant: GearArtVariant, cls: string) =>
-      drawn(gear, variant, 50)
-        .byClass(cls)
+    const delays = (gear: 'history' | 'popularity', variant: GearArtVariant) =>
+      all(art(gear, variant, 50, false), '*')
+        .filter((el) => classTokens(el).map(moduleName).includes('bob'))
         .map((el) => styleOf(el)['animation-delay']);
-    expect(delays('history', 'strip', 'bob')).toEqual([undefined, '0.2s', '0.4s', '0.1s', '0.3s', '0.5s', '0.6s']);
-    expect(delays('popularity', 'strip', 'zap')).toEqual([undefined, '0.1s', '0.2s', '0.3s', '0.4s', '0.5s', '0.6s']);
-    expect(drawn('history', 'tab', 50).byClass('bob')).toHaveLength(0);
-    expect(drawn('popularity', 'tab', 50).byClass('zap')).toHaveLength(0);
+    expect(delays('history', 'strip')).toEqual([undefined, '0.2s', '0.4s', '0.1s', '0.3s', '0.5s', '0.6s']);
+    expect(delays('popularity', 'strip')).toEqual([undefined, '0.1s', '0.2s', '0.3s', '0.4s', '0.5s', '0.6s']);
+    expect(delays('history', 'tab')).toEqual([]);
+    expect(delays('popularity', 'tab')).toEqual([]);
   });
 });
 
 describe('GearArt: tempo follows the value (the metronome)', () => {
   // Faster tempo: a shorter half-swing, a narrower swing and the weight further down the rod.
   const TEMPO = [
-    { value: 0, animation: 'swing20 1.20s ease-in-out infinite alternate', weight: 'translate(0 16)' },
-    { value: 55, animation: 'swing14 0.45s ease-in-out infinite alternate', weight: 'translate(0 31)' },
-    { value: 100, animation: 'swing8 0.30s ease-in-out infinite alternate', weight: 'translate(0 43)' },
+    { value: 0, animation: 'swing20 1.20s ease-in-out infinite alternate', weight: '18', tabWeight: '6.0' },
+    { value: 55, animation: 'swing14 0.45s ease-in-out infinite alternate', weight: '33', tabWeight: '9.9' },
+    { value: 100, animation: 'swing8 0.30s ease-in-out infinite alternate', weight: '45', tabWeight: '13.0' },
   ];
 
-  for (const { value, animation, weight } of TEMPO) {
-    for (const variant of VARIANTS) {
-      it(`${variant} at ${value}: ${animation}, weight at ${weight}`, () => {
-        const { byClass } = drawn('tempo', variant, value);
-        expect(byClass('metro-pend').map(styleProp('animation'))).toEqual([animation]);
-        expect(byClass('metro-weight').map(attr('transform'))).toEqual([weight]);
-      });
-    }
+  for (const { value, animation, weight, tabWeight } of TEMPO) {
+    it(`strip at ${value}: ${animation}, weight at y ${weight}`, () => {
+      const root = art('tempo', 'strip', value, false);
+      expect(styleOf(one(root, '[data-pendulum]')).animation).toBe(animation);
+      expect(one(root, '[data-weight]').getAttribute('y')).toBe(weight);
+    });
+
+    it(`tab at ${value}: ${animation}, weight at y ${tabWeight}`, () => {
+      const root = art('tempo', 'tab', value, false);
+      expect(styleOf(one(root, '[data-pendulum]')).animation).toBe(animation);
+      expect(one(root, '[data-weight]').getAttribute('y')).toBe(tabWeight);
+    });
   }
 
-  it('at tempo 55 swings 14 degrees each way, 0.45 s a half-swing (spec test 12)', () => {
-    for (const variant of VARIANTS) {
-      const pendulum = drawn('tempo', variant, 55).byClass('metro-pend');
-      expect(pendulum.map(styleProp('animation'))).toEqual(['swing14 0.45s ease-in-out infinite alternate']);
-    }
+  it('at tempo 55 the tab pendulum has the strip pendulum\'s animation, swing14 at 0.45 s, and the tab weight is at y 9.9 (README test 28)', () => {
+    const strip = art('tempo', 'strip', 55, false);
+    const tab = art('tempo', 'tab', 55, false);
+    const swing = (root: Element) => styleOf(one(root, '[data-pendulum]')).animation;
+    expect(swing(strip)).toBe('swing14 0.45s ease-in-out infinite alternate');
+    expect(swing(tab)).toBe(swing(strip));
+    expect(one(tab, '[data-weight]').getAttribute('y')).toBe('9.9');
+    expect(one(strip, '[data-weight]').getAttribute('y')).toBe('33');
+  });
+
+  it('swings each pendulum around its own pivot, the strip\'s and the tab\'s', () => {
+    expect(classTokens(one(art('tempo', 'strip', 50, false), '[data-pendulum]')).map(moduleName)).toEqual(['pend']);
+    expect(classTokens(one(art('tempo', 'tab', 50, false), '[data-pendulum]')).map(moduleName)).toEqual(['pendTab']);
   });
 });
 
-describe('EraTabArt', () => {
-  const PICKED = '#FFD84D';
-  const NOT_PICKED = '#4A1B0C';
-  // The fills are in ERA_IDS order: pre, s70, s80, s90, s00, s10, s20.
-  const DOTS: Array<{ eras: EraId[]; fills: string[] }> = [
-    { eras: [], fills: Array(7).fill(NOT_PICKED) },
-    { eras: ['s90', 's00', 's10'], fills: [NOT_PICKED, NOT_PICKED, NOT_PICKED, PICKED, PICKED, PICKED, NOT_PICKED] },
-    { eras: ['s20', 'pre'], fills: [PICKED, NOT_PICKED, NOT_PICKED, NOT_PICKED, NOT_PICKED, NOT_PICKED, PICKED] },
-    { eras: ['s80'], fills: [NOT_PICKED, NOT_PICKED, PICKED, NOT_PICKED, NOT_PICKED, NOT_PICKED, NOT_PICKED] },
-    { eras: [...ERA_IDS], fills: Array(7).fill(PICKED) },
+describe('EraTabArt: the jukebox (README §9, test 27)', () => {
+  const jukebox = (eras: EraId[], off: boolean) => {
+    const root = eraTab(eras, off);
+    return {
+      body: root.getAttribute('stroke'),
+      buttons: all(root, '[data-jukebox="button"]').map(attr('fill')),
+      glow: styleOf(root).filter,
+    };
+  };
+
+  const CASES: Array<{ name: string; eras: EraId[]; off: boolean; body: string; buttons: string[] }> = [
+    { name: 'the default three eras: body pink, both buttons amber', eras: ['s90', 's00', 's10'], off: false, body: COLOR.pink, buttons: [COLOR.amber, COLOR.amber] },
+    { name: 'only the 80s: left amber, right dark', eras: ['s80'], off: false, body: COLOR.pink, buttons: [COLOR.amber, COLOR.lightOff] },
+    { name: 'two eras: both amber', eras: ['s70', 's20'], off: false, body: COLOR.pink, buttons: [COLOR.amber, COLOR.amber] },
+    { name: 'all seven eras: both amber', eras: [...ERA_IDS], off: false, body: COLOR.pink, buttons: [COLOR.amber, COLOR.amber] },
+    { name: 'Era on and none picked: body pink, both buttons dark', eras: [], off: false, body: COLOR.pink, buttons: [COLOR.lightOff, COLOR.lightOff] },
+    { name: 'Era off with nothing parked (every gear reset): body unlit, both buttons dark', eras: [], off: true, body: COLOR.unlit, buttons: [COLOR.lightOff, COLOR.lightOff] },
+    { name: 'Era off with picks parked: body unlit, both buttons still dark', eras: ['s90', 's00', 's10'], off: true, body: COLOR.unlit, buttons: [COLOR.lightOff, COLOR.lightOff] },
   ];
 
-  it('matches the reference Era tab art, element by element', () => {
-    for (const { eras } of DOTS) expectSameMarkup(referenceEraTab(), eraTab(eras));
-  });
-
-  it('is one svg on a 62x33 viewBox, hidden from assistive tech', () => {
-    const root = eraTab([]);
-    expect(root.localName).toBe('svg');
-    expect(root.getAttribute('viewBox')).toBe('0 0 62 33');
-    expect(root.getAttribute('aria-hidden')).toBe('true');
-  });
-
-  for (const { eras, fills } of DOTS) {
-    it(`eras [${eras.join(' ')}]: the dots of the picked eras are yellow and the rest dark`, () => {
-      const dots = [...eraTab(eras).querySelectorAll('circle')];
-      expect(dots.map(attr('data-era'))).toEqual([...ERA_IDS]);
-      expect(dots.map(attr('fill'))).toEqual(fills);
+  for (const { name, eras, off, body, buttons } of CASES) {
+    it(name, () => {
+      expect(jukebox(eras, off)).toEqual({ body, buttons, glow: off ? 'none' : `drop-shadow(0 0 3px ${COLOR.pink})` });
     });
   }
+
+  it('matches the reference Era tab art, element by element, whatever is picked and whether Era is on or off', () => {
+    const picks: EraId[][] = [[], ['s90'], ['s20', 'pre'], ['s90', 's00', 's10'], [...ERA_IDS]];
+    for (const eras of picks) {
+      for (const off of [false, true]) {
+        const vm = viewModelFor({ eras, off: off ? ['era'] : [] });
+        expectSameMarkup(referenceEraTab(), eraTab(eras, off), contextFor(vm, 'tab'));
+      }
+    }
+  });
+
+  it('is one svg on a 28x22 viewBox, 34x27 on screen, hidden from assistive tech', () => {
+    const root = eraTab([], false);
+    expect(root.localName).toBe('svg');
+    expect(attrs(root, ['viewBox', 'width', 'height', 'aria-hidden'])).toEqual({
+      viewBox: '0 0 28 22',
+      width: '34',
+      height: '27',
+      'aria-hidden': 'true',
+    });
+  });
+
+  it('has one body path and two button circles, marked for the browser tests', () => {
+    const root = eraTab(['s90'], false);
+    expect(all(root, '[data-jukebox]').map((el) => [el.localName, el.getAttribute('data-jukebox'), el.getAttribute('data-i')])).toEqual([
+      ['path', 'body', null],
+      ['circle', 'button', '0'],
+      ['circle', 'button', '1'],
+    ]);
+    expect(all(root, '[data-i]')).toHaveLength(2);
+  });
+
+  it('puts the parent className on the root svg', () => {
+    expect(classTokens(eraTab([], false, 'probe'))).toEqual(['probe']);
+    expect(eraTab([], false).hasAttribute('class')).toBe(false);
+  });
 });
 
 describe('EraIcon', () => {
   it.each(ERA_IDS)('%s matches the icon in the reference era button, element by element', (era) => {
-    expectSameMarkup(referenceEraIcon(era), eraIcon(era));
+    // The glow is the era button's: its CSS draws the lit drop-shadow, so the icon must not set a filter of its own.
+    expectSameMarkup(referenceEraIcon(era), eraIcon(era), contextFor(viewModelFor(), 'era-icon'));
   });
 
-  it('draws a different icon for each of the seven eras, 26x26 on a 30x30 grid, in the text colour', () => {
+  it('draws a different neon outline for each of the seven eras, 22x22 on a 30x30 grid, in the text colour', () => {
     const icons = ERA_IDS.map(eraIcon);
     expect(new Set(icons.map((icon) => icon.outerHTML)).size).toBe(7);
     for (const icon of icons) {
       expect(attrs(icon, ['width', 'height', 'viewBox', 'fill', 'stroke', 'aria-hidden'])).toEqual({
-        width: '26',
-        height: '26',
+        width: '22',
+        height: '22',
         viewBox: '0 0 30 30',
         fill: 'none',
         stroke: 'currentColor',
         'aria-hidden': 'true',
       });
+      expect(icon.hasAttribute('style')).toBe(false);
+      expect(icon.hasAttribute('class')).toBe(false);
+    }
+  });
+
+  it('has no colour of its own: every stroke and fill is currentColor or none, so the era button sets the colour', () => {
+    for (const era of ERA_IDS) {
+      const icon = eraIcon(era);
+      expect(icon.getAttribute('stroke'), era).toBe('currentColor');
+      expect(paints(icon), era).toEqual([]);
     }
   });
 });
 
+// ---------------------------------------------------------------------------------------------------------------------
+// The off state and the colours (README §3.1, §7)
+
+describe('GearArt: an off gear is a switched-off sign (README §7, test 25)', () => {
+  it('draws every tube of an off gear, strip and tab, in the unlit colour', () => {
+    for (const gear of GEAR_IDS) {
+      for (const variant of VARIANTS) {
+        expect(paints(art(gear, variant, 50, true)), `${gear} ${variant}`).toEqual([COLOR.unlit]);
+      }
+    }
+    // The jukebox's two lights are a dark rose of their own, not the unlit grey.
+    expect(paints(eraTab(['s90'], true))).toEqual([COLOR.lightOff, COLOR.unlit].sort());
+  });
+
+  it('stills the metronome: a reset Tempo has unlit strokes and a pendulum with no animation, strip and tab', () => {
+    for (const variant of VARIANTS) {
+      const root = art('tempo', variant, 50, true);
+      expect(paints(root), variant).toEqual([COLOR.unlit]);
+      expect(styleOf(one(root, '[data-pendulum]')).animation, variant).toBe('none');
+      // It still stands where its value puts it.
+      expect(one(root, '[data-weight]').getAttribute('y'), variant).toBe(variant === 'strip' ? '32' : '9.5');
+    }
+  });
+
+  it('puts no glow on an off tab icon and no flicker on an off strip', () => {
+    for (const gear of GEAR_IDS) {
+      expect(styleOf(art(gear, 'tab', 50, true)).filter, gear).toBe('none');
+      expect(styleOf(art(gear, 'strip', 50, true)).animation, gear).toBe('none');
+    }
+    expect(styleOf(eraTab(['s90'], true)).filter).toBe('none');
+  });
+});
+
+describe('GearArt: a lit gear is drawn in its colours (README §3.1, §6, §9)', () => {
+  it('Difficulty is its tier colour: green below 34, amber below 67, pink-red from there, strip and tab', () => {
+    const tiers: Array<[number, string]> = [
+      [0, COLOR.easy],
+      [33, COLOR.easy],
+      [34, COLOR.amber],
+      [66, COLOR.amber],
+      [67, COLOR.hard],
+      [100, COLOR.hard],
+    ];
+    for (const [value, color] of tiers) {
+      for (const variant of VARIANTS) {
+        expect(paints(art('difficulty', variant, value, false)), `${variant} at ${value}`).toEqual([color]);
+      }
+    }
+  });
+
+  it("History has cyan headphones, and notes in the reference order, pink and cyan; the tab's rays follow the notes", () => {
+    const { cyan, pink } = COLOR;
+    const order = [cyan, pink, pink, cyan, cyan, pink, cyan];
+
+    const strip = art('history', 'strip', 100, false);
+    // The headband and both muffs, with the button line inside the left one, are cyan and nothing else.
+    const headphones = all(strip, 'g[filter] > path, g[filter] > g[transform^="rotate"]');
+    expect(headphones).toHaveLength(3);
+    expect(headphones.map(attr('stroke'))).toEqual([cyan, cyan, cyan]);
+    expect(all(strip, '[data-note] > g').map(attr('fill'))).toEqual(order);
+    expect(paints(strip)).toEqual([cyan, pink].sort());
+
+    const tab = art('history', 'tab', 100, false);
+    expect(one(tab, 'g').getAttribute('stroke')).toBe(cyan);
+    expect(all(tab, '[data-ray]').map(attr('stroke'))).toEqual(order);
+    expect(paints(tab)).toEqual([cyan, pink].sort());
+  });
+
+  it('Popularity has a pink mic and amber bolts, and amber rays on the tab', () => {
+    const { pink, amber } = COLOR;
+    const strip = art('popularity', 'strip', 100, false);
+    expect(one(strip, 'g[transform^="translate(75 44)"]').getAttribute('stroke')).toBe(pink);
+    expect(all(strip, '[data-bolt] > path').map(attr('fill'))).toEqual(Array(7).fill(amber));
+    expect(paints(strip)).toEqual([pink, amber].sort());
+
+    const tab = art('popularity', 'tab', 100, false);
+    expect(one(tab, 'g[transform^="rotate(-16"]').getAttribute('stroke')).toBe(pink);
+    expect(all(tab, '[data-ray]').map(attr('stroke'))).toEqual(Array(7).fill(amber));
+    expect(paints(tab)).toEqual([pink, amber].sort());
+  });
+
+  it('Tempo is violet, strip and tab', () => {
+    for (const variant of VARIANTS) expect(paints(art('tempo', variant, 50, false)), variant).toEqual([COLOR.violet]);
+  });
+
+  it('Era is a pink jukebox with amber lights', () => {
+    expect(paints(eraTab(['s90', 's00'], false))).toEqual([COLOR.pink, COLOR.amber].sort());
+  });
+
+  it('glows a lit tab icon with a 3 px drop-shadow in its gear colour (README §7, §9)', () => {
+    const glow = (root: Element) => styleOf(root).filter;
+    expect(glow(art('difficulty', 'tab', 20, false))).toBe(`drop-shadow(0 0 3px ${COLOR.easy})`);
+    expect(glow(art('difficulty', 'tab', 50, false))).toBe(`drop-shadow(0 0 3px ${COLOR.amber})`);
+    expect(glow(art('difficulty', 'tab', 90, false))).toBe(`drop-shadow(0 0 3px ${COLOR.hard})`);
+    expect(glow(art('history', 'tab', 50, false))).toBe(`drop-shadow(0 0 3px ${COLOR.cyan})`);
+    expect(glow(art('popularity', 'tab', 50, false))).toBe(`drop-shadow(0 0 3px ${COLOR.amber})`);
+    expect(glow(art('tempo', 'tab', 50, false))).toBe(`drop-shadow(0 0 3px ${COLOR.violet})`);
+    expect(glow(eraTab(['s90'], false))).toBe(`drop-shadow(0 0 3px ${COLOR.pink})`);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The flicker (README §7, test 29)
+
+describe('GearArt: the turn-on flicker (README §7, test 29)', () => {
+  it('is an inline neonOn animation on the strip root, once for 0.7 s, linear; none while the gear is off', () => {
+    for (const gear of GEAR_IDS) {
+      expect(styleProp('animation')(art(gear, 'strip', 50, false)), gear).toBe('neonOn 0.7s linear 1');
+      expect(styleProp('animation')(art(gear, 'strip', 50, true)), gear).toBe('none');
+    }
+    expect(neonFlicker(false)).toBe('neonOn 0.7s linear 1');
+  });
+
+  it('is not on a tab icon: its root carries a glow, and for Difficulty a colour, and no animation', () => {
+    for (const gear of GEAR_IDS) {
+      const style = styleOf(art(gear, 'tab', 50, false));
+      expect(Object.keys(style).sort(), gear).toEqual(gear === 'difficulty' ? ['color', 'filter'] : ['filter']);
+    }
+    expect(Object.keys(styleOf(eraTab(['s90'], false)))).toEqual(['filter']);
+  });
+
+  it('plays on first load and each time the gear goes from off to on, and is left alone when only the value changes', () => {
+    const draw = (value: number, off: boolean) => <GearArt gear="tempo" variant="strip" value={value} off={off} />;
+    const view = render(draw(50, false));
+    const svg = must(view.container.querySelector('svg'), 'the strip svg');
+    const animation = () => styleOf(svg).animation;
+
+    // First load: the animation is there from the first paint.
+    expect(animation()).toBe('neonOn 0.7s linear 1');
+
+    // A browser restarts an animation when its `animation` style is written with a different value, and not otherwise.
+    const observer = new MutationObserver(() => {});
+    observer.observe(svg, { attributes: true, attributeFilter: ['style'] });
+    const writes = () => observer.takeRecords().length;
+
+    view.rerender(draw(60, false));
+    expect(writes(), 'a new value, still on').toBe(0);
+    view.rerender(draw(61, false));
+    expect(writes(), 'another new value').toBe(0);
+
+    view.rerender(draw(61, true));
+    expect(writes(), 'reset').toBeGreaterThan(0);
+    expect(animation()).toBe('none');
+
+    view.rerender(draw(62, true));
+    expect(writes(), 'a value change while off').toBe(0);
+    view.rerender(draw(62, false));
+    expect(writes(), 'turned back on').toBeGreaterThan(0);
+    expect(animation()).toBe('neonOn 0.7s linear 1');
+
+    // The same svg throughout: it was updated, not replaced.
+    expect(view.container.querySelector('svg')).toBe(svg);
+    observer.disconnect();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The hooks, and what the parent owns
+
+describe('GearArt: the hooks the browser tests use', () => {
+  const counts = (root: Element) => ({
+    notes: all(root, '[data-note]').length,
+    bolts: all(root, '[data-bolt]').length,
+    rays: all(root, '[data-ray]').length,
+    pendulums: all(root, '[data-pendulum]').length,
+    weights: all(root, '[data-weight]').length,
+    jukebox: all(root, '[data-jukebox]').length,
+    indexed: all(root, '[data-i]').length,
+  });
+  const NONE = { notes: 0, bolts: 0, rays: 0, pendulums: 0, weights: 0, jukebox: 0, indexed: 0 };
+
+  it('puts each hook on its own part and nowhere else', () => {
+    expect(counts(art('difficulty', 'strip', 50, false))).toEqual(NONE);
+    expect(counts(art('difficulty', 'tab', 50, false))).toEqual(NONE);
+    expect(counts(art('history', 'strip', 50, false))).toEqual({ ...NONE, notes: 7, indexed: 7 });
+    expect(counts(art('history', 'tab', 50, false))).toEqual({ ...NONE, rays: 7, indexed: 7 });
+    expect(counts(art('popularity', 'strip', 50, false))).toEqual({ ...NONE, bolts: 7, indexed: 7 });
+    expect(counts(art('popularity', 'tab', 50, false))).toEqual({ ...NONE, rays: 7, indexed: 7 });
+    for (const variant of VARIANTS) {
+      expect(counts(art('tempo', variant, 50, false)), variant).toEqual({ ...NONE, pendulums: 1, weights: 1 });
+    }
+    expect(counts(eraTab([], false))).toEqual({ ...NONE, jukebox: 3, indexed: 2 });
+  });
+
+  it('puts them on the elements the tests read: notes and bolts on their group, rays on their path, the weight on its rect', () => {
+    const tags = (root: Element, selector: string) => [...new Set(all(root, selector).map((el) => el.localName))];
+    expect(tags(art('history', 'strip', 50, false), '[data-note]')).toEqual(['g']);
+    expect(tags(art('popularity', 'strip', 50, false), '[data-bolt]')).toEqual(['g']);
+    for (const gear of ['history', 'popularity'] as const) {
+      expect(tags(art(gear, 'tab', 50, false), '[data-ray]'), gear).toEqual(['path']);
+    }
+    for (const variant of VARIANTS) {
+      expect(tags(art('tempo', variant, 50, false), '[data-pendulum]'), variant).toEqual(['g']);
+      expect(tags(art('tempo', variant, 50, false), '[data-weight]'), variant).toEqual(['rect']);
+    }
+  });
+
+  it('puts the opacity of a note, bolt or ray inline on the element that carries the hook', () => {
+    for (const [gear, variant, selector] of [
+      ['history', 'strip', '[data-note]'],
+      ['popularity', 'strip', '[data-bolt]'],
+      ['history', 'tab', '[data-ray]'],
+      ['popularity', 'tab', '[data-ray]'],
+    ] as const) {
+      for (const el of all(art(gear, variant, 50, false), selector)) expect(['0', '1']).toContain(styleOf(el).opacity);
+    }
+  });
+});
+
+describe('GearArt: what the parent owns', () => {
+  it("leaves the strip art's size, corner radius and box to the parent: no width, height or background of its own", () => {
+    for (const gear of GEAR_IDS) {
+      for (const off of [false, true]) {
+        const root = art(gear, 'strip', 50, off);
+        expect(root.hasAttribute('width') || root.hasAttribute('height'), gear).toBe(false);
+        // The one thing it styles itself is the flicker.
+        expect(Object.keys(styleOf(root)), gear).toEqual(['animation']);
+        expect(classTokens(root).map(moduleName), gear).toEqual(['flick']);
+      }
+    }
+  });
+
+  it('brings its own size to a tab icon: 34x27 on screen', () => {
+    for (const gear of GEAR_IDS) {
+      expect(attrs(art(gear, 'tab', 50, false), ['width', 'height']), gear).toEqual({ width: '34', height: '27' });
+    }
+  });
+
+  it("puts the parent's className on the root svg, after the art's own", () => {
+    for (const gear of GEAR_IDS) {
+      expect(classTokens(art(gear, 'strip', 50, false, 'probe')).map(moduleName), gear).toEqual(['flick', 'probe']);
+      expect(classTokens(art(gear, 'tab', 50, false, 'probe')), gear).toEqual(['probe']);
+      expect(art(gear, 'tab', 50, false).hasAttribute('class'), gear).toBe(false);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Decorative, and the glow filter
+
 describe('every root svg is decorative', () => {
-  it('has aria-hidden, no id anywhere, no title or role, and no text', () => {
+  it("has aria-hidden, no role, title or text, and no id except a strip's glow filter", () => {
     const roots = everyRoot();
     expect(roots).toHaveLength(GEAR_IDS.length * VARIANTS.length + 1 + ERA_IDS.length);
     for (const [name, root] of roots) {
       expect(root.getAttribute('aria-hidden'), name).toBe('true');
       expect(root.hasAttribute('id') || root.hasAttribute('role'), name).toBe(false);
-      expect(root.querySelectorAll('[id], [role], title, desc'), name).toHaveLength(0);
+      expect(root.querySelectorAll('[role], title, desc'), name).toHaveLength(0);
+      expect(root.querySelectorAll('[id]'), name).toHaveLength(name.endsWith('strip') ? 1 : 0);
       expect(root.textContent, name).toBe('');
     }
   });
 });
 
+describe('the glow filter on the strips (README §6)', () => {
+  it('blurs the art by 2 and merges the sharp art on top, in a region a little larger than the art', () => {
+    const regions: Record<GearId, [string, string]> = {
+      difficulty: ['-40%', '180%'],
+      history: ['-30%', '160%'],
+      popularity: ['-30%', '160%'],
+      tempo: ['-20%', '140%'],
+    };
+    for (const gear of GEAR_IDS) {
+      const filter = one(art(gear, 'strip', 50, false), 'defs > filter');
+      const [y, height] = regions[gear];
+      expect(attrs(filter, ['x', 'y', 'width', 'height']), gear).toEqual({ x: '-20%', y, width: '140%', height });
+      expect(all(filter, '*').map((el) => el.localName), gear).toEqual(['feGaussianBlur', 'feMerge', 'feMergeNode', 'feMergeNode']);
+      expect(attrs(one(filter, 'feGaussianBlur'), ['stdDeviation', 'result']), gear).toEqual({ stdDeviation: '2', result: 'b' });
+      expect(all(filter, 'feMergeNode').map(attr('in')), gear).toEqual(['b', 'SourceGraphic']);
+    }
+  });
+
+  it('is drawn once per strip, on one group, and the tab icons have none', () => {
+    for (const gear of GEAR_IDS) {
+      const strip = art(gear, 'strip', 50, false);
+      expect(all(strip, 'filter'), gear).toHaveLength(1);
+      expect(all(strip, '[filter]'), gear).toHaveLength(1);
+      expect(all(art(gear, 'tab', 50, false), 'filter, [filter]'), gear).toHaveLength(0);
+    }
+  });
+
+  it('has an id of its own in each instance, so every strip on a screen uses its own filter', () => {
+    const doc = parse(
+      `<!doctype html><body>${renderToStaticMarkup(
+        <>
+          {[0, 1].flatMap((copy) =>
+            GEAR_IDS.map((gear) => <GearArt key={`${copy}${gear}`} gear={gear} variant="strip" value={50} off={false} />),
+          )}
+        </>,
+      )}`,
+    );
+    const svgs = [...doc.querySelectorAll('svg')];
+    expect(svgs).toHaveLength(8);
+    const ids = svgs.map((svg) => one(svg, 'filter').id);
+    expect(new Set(ids).size).toBe(8);
+    svgs.forEach((svg, i) => {
+      // An id that is safe inside url(#...), and the one group that uses the filter names this svg's own.
+      expect(ids[i]).toMatch(PLAIN_ID);
+      expect(one(svg, '[filter]').getAttribute('filter')).toBe(`url(#${ids[i]})`);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+
 describe('the comparison itself', () => {
-  it('notices a changed attribute, a missing element, a lost class and a value-driven part left unset', () => {
+  it('notices a changed attribute, a missing element, a lost class, a wrong value, an unset binding and a filter that points nowhere', () => {
+    const vm = viewModelFor();
+    const ctx = () => contextFor(vm, 'strip');
     const ref = referenceArt('difficulty', 'strip');
-    const fresh = () => artAsParentRenders('difficulty', 'strip', 50);
-    expect(compare(ref, fresh()).problems).toEqual([]);
+    const fresh = () => artAsParentRenders('difficulty', 'strip', 30, false);
+    expect(compare(ref, fresh(), ctx()).problems).toEqual([]);
 
     const changed = fresh();
-    must(changed.querySelector('line'), 'a grid line').setAttribute('y1', '13');
-    expect(compare(ref, changed).problems).toHaveLength(1);
+    one(changed, 'line').setAttribute('y1', '13');
+    expect(compare(ref, changed, ctx()).problems).toHaveLength(1);
+
+    const extra = fresh();
+    one(extra, 'line').setAttribute('data-x', '1');
+    expect(compare(ref, extra, ctx()).problems).toHaveLength(1);
 
     const missing = fresh();
-    must(missing.querySelector('g'), 'a group').remove();
-    expect(compare(ref, missing).problems.length).toBeGreaterThan(0);
+    one(missing, 'g').remove();
+    expect(compare(ref, missing, ctx()).problems.length).toBeGreaterThan(0);
 
     const classless = fresh();
-    classless.removeAttribute('class');
-    expect(compare(ref, classless).problems).toHaveLength(1);
+    classless.setAttribute('class', PARENT_CLASS);
+    expect(compare(ref, classless, ctx()).problems).toHaveLength(1);
+
+    const wrong = fresh();
+    one(wrong, 'rect').setAttribute('y', '25');
+    expect(compare(ref, wrong, ctx()).problems).toEqual(['svg>rect[2]: y is "24" in the reference, "25" in the component']);
 
     const unset = fresh();
-    must(unset.querySelector('rect'), 'the band').removeAttribute('fill');
-    expect(compare(ref, unset).problems).toEqual(['svg>rect[0]: the component does not set fill']);
-
-    const noOpacity = artAsParentRenders('history', 'strip', 50);
-    must(noOpacity.querySelector('[data-i]'), 'a note').removeAttribute('style');
-    expect(compare(referenceArt('history', 'strip'), noOpacity).problems).toEqual([
-      'svg>g[3]: the component does not set style opacity',
+    one(unset, 'rect').removeAttribute('fill-opacity');
+    expect(compare(ref, unset, ctx()).problems).toEqual([
+      'svg>rect[2]: fill-opacity is "0.12" in the reference, missing in the component',
     ]);
+
+    const noFlicker = fresh();
+    noFlicker.removeAttribute('style');
+    expect(compare(ref, noFlicker, ctx()).problems).toHaveLength(1);
+
+    // The parent sets a strip's size; if the art did too, the parent's class could not win.
+    const sized = fresh();
+    sized.setAttribute('width', '120');
+    expect(compare(ref, sized, ctx()).problems).toEqual(['svg: width is missing in the reference, "120" in the component']);
+
+    const nowhere = fresh();
+    one(nowhere, 'g[filter]').setAttribute('filter', 'url(#nothing)');
+    expect(compare(ref, nowhere, ctx()).problems).toHaveLength(1);
+
+    const noOpacity = artAsParentRenders('history', 'strip', 65, false);
+    one(noOpacity, '[data-note]').removeAttribute('style');
+    const problems = compare(referenceArt('history', 'strip'), noOpacity, contextFor(vm, 'strip')).problems;
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('opacity');
   });
 });
 
@@ -496,63 +1199,90 @@ function bodyOf(css: string, prelude: string): string {
 
 describe('GearArt.module.css', () => {
   const moduleCss = readFileSync(MODULE_CSS, 'utf8');
+  const REDUCED = '@media (prefers-reduced-motion: reduce)';
 
   it('defines exactly the classes the components use', () => {
     const used = new Set<string>();
     for (const [, root] of everyRoot()) {
       for (const el of [root, ...root.querySelectorAll('*')]) for (const token of classTokens(el)) used.add(moduleName(token));
     }
+    // The strip root's flicker hook and the tab pendulum's pivot class are both drawn by the roots above.
+    expect([...used].sort()).toEqual(['bob', 'fade', 'flick', 'pend', 'pendTab']);
     const defined = new Set([...squash(moduleCss).matchAll(/\.([A-Za-z_][\w-]*)/g)].map((m) => m[1] ?? ''));
     expect([...used].sort()).toEqual([...defined].sort());
   });
 
-  it('draws the reference backgrounds, as literal colours (the app has its own --bg)', () => {
-    const tokenRules = [...bodyOf(referenceCss, ':root').matchAll(/(--[\w-]+):([^;]+);/g)];
-    const tokens = new Map(tokenRules.map((m): [string, string] => [m[1] ?? '', m[2] ?? '']));
-    const resolved = (body: string) =>
-      body.replace(/var\((--[\w-]+)\)/g, (_all, name: string) => tokens.get(name) ?? `unknown ${name}`).toLowerCase();
-    const backgrounds = [
-      ['.art-lane', '.artLane'],
-      ['.art-cream', '.artCream'],
-      ['.art-dark', '.artDark'],
-      ['.art-black', '.artBlack'],
-    ] as const;
-    for (const [from, to] of backgrounds) {
-      expect(bodyOf(moduleCss, to).toLowerCase()).toBe(resolved(bodyOf(referenceCss, from)));
-    }
-    expect(squash(moduleCss)).not.toContain('var(');
-  });
-
-  it('has the reference rules for the fade, the pendulum pivot and the bob', () => {
+  it('has the reference rules for the fade and the bob', () => {
     const same = [
-      ['.hist-note, .pop-bolt', '.histNote, .popBolt'],
-      ['.metro-pend', '.metroPend'],
+      ['.fade', '.fade'],
       ['@keyframes bob', '@keyframes bob'],
-      ['.bob, .zap', '.bob, .zap'],
+      ['.bob', '.bob'],
     ] as const;
     for (const [from, to] of same) expect(bodyOf(moduleCss, to), to).toBe(bodyOf(referenceCss, from));
+    // README §10: 2 px up, 1.1 s, alternate; the fade is 180 ms.
+    expect(bodyOf(moduleCss, '.bob')).toBe('animation:bob 1.1s ease-in-out infinite alternate;');
+    expect(bodyOf(moduleCss, '.fade')).toBe('transition:opacity 180ms;');
   });
 
-  it('turns the pendulum, bob and zap animations off for reduced motion, with !important', () => {
-    const reduced = '@media (prefers-reduced-motion: reduce)';
-    // In the reference that block also holds the rows' and the rack's transitions, which are not the art's.
-    expect(rulesOf(bodyOf(referenceCss, reduced))[0]).toEqual(['.metro-pend,.bob,.zap', 'animation:none !important;']);
-    expect(rulesOf(bodyOf(moduleCss, reduced))).toEqual([['.metroPend,.bob,.zap', 'animation:none !important;']]);
+  it('pivots the pendulum where the reference does: (75, 56) on the strip and (14, 15.5) on the tab', () => {
+    // The reference sets the pivot inline on each pendulum, strip first; the module carries it in a class for each.
+    const origins = [...reference.querySelectorAll('.pend')].map((el) => styleOf(el)['transform-origin']);
+    expect(origins).toEqual(['75px 56px', '14px 15.5px']);
+    expect(bodyOf(moduleCss, '.pend')).toBe(`transform-origin:${origins[0]};`);
+    expect(bodyOf(moduleCss, '.pendTab')).toBe(`transform-origin:${origins[1]};`);
+  });
+
+  it("turns the pendulums, the bob and the strip flicker off for reduced motion, and the fade's transition, with !important (README test 30)", () => {
+    // In the reference that block also holds the sign's buzz, the lyric wipe and the rows' and the rack's transitions, which
+    // are not the art's. The art's classes are the reference's .pend, .bob, .flick and .fade, and .pend has a twin for the tab.
+    const OWN: Record<string, string[]> = {
+      '.pend': ['.pend', '.pendTab'],
+      '.bob': ['.bob'],
+      '.flick': ['.flick'],
+      '.fade': ['.fade'],
+    };
+    const owned = rulesOf(bodyOf(referenceCss, REDUCED))
+      .map(([selectors, body]): [string, string] => [selectors.split(',').flatMap((s) => OWN[s] ?? []).join(','), body])
+      .filter(([selectors]) => selectors !== '');
+    expect(owned).toEqual([
+      ['.pend,.pendTab,.bob,.flick', 'animation:none !important;'],
+      ['.fade', 'transition:none !important;'],
+    ]);
+    expect(rulesOf(bodyOf(moduleCss, REDUCED))).toEqual(owned);
+  });
+
+  it('leaves the size, the corner radius, the box and the dimming to the parent: it sets none of them', () => {
+    const css = squash(moduleCss);
+    expect(css).not.toMatch(/background|width|height|radius|grayscale|play-state|filter:/);
+    expect(css).not.toMatch(/(^|[{;])opacity:/);
+  });
+
+  it('leaves the keyframes of the inline animations to setlist-global.css, where CSS Modules cannot rename them', () => {
+    expect(squash(moduleCss)).not.toMatch(/@keyframes (swing|neonOn)/);
+    expect(squash(moduleCss)).not.toContain('var(');
   });
 });
 
 describe('setlist-global.css', () => {
-  const swings = (css: string) => rulesOf(css).filter(([prelude]) => prelude.startsWith('@keyframes swing'));
   const globalCss = readFileSync(GLOBAL_CSS, 'utf8');
+  /** The keyframes the art needs from the reference: the swings, and the flicker. */
+  const artKeyframes = (css: string) => rulesOf(css).filter(([prelude]) => /^@keyframes (swing\d+|neonOn)$/.test(prelude));
 
-  it('holds the reference swing keyframes and nothing else', () => {
-    expect(rulesOf(globalCss)).toEqual(swings(referenceCss));
+  it('holds the reference swing keyframes and the neonOn flicker, and nothing else', () => {
+    expect(rulesOf(globalCss)).toEqual(artKeyframes(referenceCss));
     const names = ['20', '18', '16', '14', '12', '10', '8'].map((n) => `@keyframes swing${n}`);
-    expect(swings(globalCss).map(([prelude]) => prelude)).toEqual(names);
+    expect(artKeyframes(globalCss).map(([prelude]) => prelude)).toEqual([...names, '@keyframes neonOn']);
   });
 
-  it('has a keyframes rule for every animation name the metronome can ask for', () => {
-    const asked = new Set(Array.from({ length: 101 }, (_, tempo) => `@keyframes ${metronome(tempo).keyframes}`));
-    expect([...asked].sort()).toEqual(swings(globalCss).map(([prelude]) => prelude).sort());
+  it('plays the flicker the README describes: 0.25 to 1 to 0.35 to 1 to 0.6 to 1, then holds at 1 (§7)', () => {
+    expect(bodyOf(globalCss, '@keyframes neonOn')).toBe(
+      '0%{opacity:0.25;}8%{opacity:1;}12%{opacity:0.35;}20%{opacity:1;}26%{opacity:0.6;}34%{opacity:1;}100%{opacity:1;}',
+    );
+  });
+
+  it('has a keyframes rule for every animation name the art can ask for', () => {
+    const asked = new Set([...VALUES.map((tempo) => metronome(tempo).keyframes), neonFlicker(false).split(' ')[0]]);
+    const defined = rulesOf(globalCss).map(([prelude]) => prelude.replace('@keyframes ', ''));
+    expect([...asked].sort()).toEqual(defined.sort());
   });
 });

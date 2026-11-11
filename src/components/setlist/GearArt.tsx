@@ -1,120 +1,176 @@
-// The gear art (spec §6): the illustration on each gear's strip and its smaller copy on the gear's tab, the Era tab's
-// art, and the icon on each era button. The geometry is copied from docs/setlist-round5/setlist-round5.html, and
+// The gear art (Round 6A §6 to §9): the neon tubes on each gear's strip, the simplified icon on its tab, the Era tab's
+// jukebox, and the icon on each era button. The geometry is copied from docs/setlist-round6a/setlist-round6a.html, and
 // tests/setlist/gearArt.test.tsx checks it against that file, element by element.
 //
-// What moves with a value comes from src/lib/setlist/art.ts; this file only applies it. Presentational: no state, no
-// effects. The parent sets the size and the corner radius, and dims the art when its gear is off (it then passes the
-// gear's default as `value`, and a className that carries the dimming).
+// What moves with a value, what an off gear looks like and which jukebox lights are on come from src/lib/setlist/art.ts;
+// this file only applies it. Presentational: no state, no effects. The parent sizes the strip art and draws the box behind
+// it (the svg has no background, width or height of its own), and passes the gear's default as `value` while it is off.
 
-import type { ReactElement } from 'react';
-import { itemOpacity, laneArt, metronome } from '../../lib/setlist/art';
-import { ERA_IDS, type EraId, type GearId } from '../../lib/setlist/types';
+import { useId, type ReactElement, type ReactNode } from 'react';
+import {
+  AMBER,
+  CYAN,
+  PINK,
+  VIOLET,
+  itemOpacity,
+  jukeboxArt,
+  laneArt,
+  metronome,
+  neonFlicker,
+  noteColor,
+  tabGlow,
+  tube,
+} from '../../lib/setlist/art';
+import type { EraId, GearId } from '../../lib/setlist/types';
 import styles from './GearArt.module.css';
 
-/** `strip` is the 150x80 art in a gear's strip (shown at 120x64, or 150x80 in the mini sheet); `tab` is the small copy. */
+/** `strip` is the 150x80 art on a gear's strip; `tab` is the simplified 34x27 icon on its tab (§9). */
 export type GearArtVariant = 'strip' | 'tab';
 
 export interface GearArtProps {
   gear: GearId;
   variant: GearArtVariant;
-  /** The 0 to 100 value to draw. */
+  /** The 0 to 100 value to draw. While the gear is off this is its default. */
   value: number;
-  /** For the parent: the svg's size, its corner radius and the off-state dimming. */
+  /** The gear is off (reset, not factored in): it is drawn as unlit tubes, the metronome still, no flicker (§7). */
+  off: boolean;
+  /** For the parent: the strip art's size, corner radius and the box behind it. The tab icon brings its own size. */
   className?: string;
 }
 
 interface ArtProps {
   value: number;
+  off: boolean;
   className?: string;
 }
 
-/** The art's own background class first, then the parent's. */
-const rootClass = (background: string | undefined, parent: string | undefined) =>
-  [background, parent].filter(Boolean).join(' ') || undefined;
+/** The art's own class first, then the parent's. */
+const rootClass = (own: string | undefined, parent: string | undefined) => [own, parent].filter(Boolean).join(' ');
+
+/**
+ * An id for this instance's glow filter. A screen draws four strips at once, and with one id repeated every `url(#id)`
+ * would use the first filter of that name. React 19's ids (`_R_1_`) are plain enough for `url(#...)`; the test checks it.
+ */
+function useFilterId(): string {
+  return `neon-${useId()}`;
+}
+
+/**
+ * The glow every strip shares (§6): the shape blurred (stdDeviation 2), with the sharp shape merged on top. The region is a
+ * little larger than the art so the blur is not clipped; how much taller depends on the art, as in the reference.
+ */
+function Glow({ id, y, height }: { id: string; y: string; height: string }) {
+  return (
+    <defs>
+      <filter id={id} x="-20%" y={y} width="140%" height={height}>
+        <feGaussianBlur stdDeviation="2" result="b" />
+        <feMerge>
+          <feMergeNode in="b" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    </defs>
+  );
+}
+
+/**
+ * The strip art's root. The flicker is an inline style so that it restarts exactly when the gear goes from off to on, when
+ * its value changes from `none`; a change of the gear's own value leaves it alone (§7). The `flick` class is only the hook
+ * the reduced-motion rule needs to switch it off.
+ */
+function StripSvg({ off, className, children }: { off: boolean; className?: string; children: ReactNode }) {
+  return (
+    <svg
+      viewBox="0 0 150 80"
+      aria-hidden="true"
+      className={rootClass(styles.flick, className)}
+      style={{ animation: neonFlicker(off) }}
+    >
+      {children}
+    </svg>
+  );
+}
+
+/** What every tab icon shares: 34x27 on screen, drawn on a 28x22 grid (§9). */
+const TAB = { width: '34', height: '27', viewBox: '0 0 28 22', fill: 'none', 'aria-hidden': 'true' } as const;
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Difficulty: a pitch lane. The band and the dashes take their height, position and colour from laneArt(value).
+// Difficulty: a pitch lane. The band and the dashes take their height, position and colour from laneArt(value, off).
 
-/** The seven dashes: x and width. Their y comes from the value. */
+/** The seven dashes: x1 and x2. Their y comes from the value. */
 const DASHES = [
-  ['6', '18'],
-  ['27', '12'],
-  ['43', '22'],
-  ['68', '12'],
-  ['84', '16'],
-  ['104', '14'],
-  ['122', '22'],
+  ['9', '22'],
+  ['30', '36'],
+  ['46', '62'],
+  ['71', '77'],
+  ['87', '97'],
+  ['107', '115'],
+  ['125', '141'],
 ] as const;
 
 const GRID_Y = ['12', '26', '40', '54', '68'] as const;
 
-function DifficultyStrip({ value, className }: ArtProps) {
-  const lane = laneArt(value);
+function DifficultyStrip({ value, off, className }: ArtProps) {
+  const glow = useFilterId();
+  const lane = laneArt(value, off);
   return (
-    <svg viewBox="0 0 150 80" aria-hidden="true" className={rootClass(styles.artLane, className)}>
-      <rect x="0" y={lane.bandY} width="150" height={lane.bandH} fill={lane.color} fillOpacity="0.2" />
-      <g stroke="#3A3466" strokeWidth="1">
+    <StripSvg off={off} className={className}>
+      <Glow id={glow} y="-40%" height="180%" />
+      <g stroke="#1F1D26" strokeWidth="1">
         {GRID_Y.map((y) => (
           <line key={y} x1="0" y1={y} x2="150" y2={y} />
         ))}
       </g>
-      <g fill={lane.color}>
-        {DASHES.map(([x, width], i) => (
-          <rect key={x} data-i={i} x={x} y={lane.dashY[i]} width={width} height="6" rx="3" />
+      <rect x="0" y={lane.bandY} width="150" height={lane.bandH} fill={lane.color} fillOpacity={lane.bandOpacity} />
+      <g filter={`url(#${glow})`} strokeWidth="5" strokeLinecap="round" stroke={lane.color}>
+        {DASHES.map(([x1, x2], i) => (
+          <line key={x1} x1={x1} x2={x2} y1={lane.dashY[i]} y2={lane.dashY[i]} />
         ))}
       </g>
-    </svg>
+    </StripSvg>
   );
 }
 
-function DifficultyTab({ value, className }: ArtProps) {
-  const lane = laneArt(value);
+/** Three dashes; the colour follows the tier. The icon is drawn in `currentColor`, so the tier colour is its `color`. */
+function DifficultyTab({ value, off, className }: ArtProps) {
+  const lane = laneArt(value, off);
   return (
-    <svg viewBox="0 0 150 80" aria-hidden="true" className={rootClass(styles.artLane, className)}>
-      <rect x="0" y={lane.bandY} width="150" height={lane.bandH} fill={lane.color} fillOpacity="0.2" />
-      <g fill={lane.color}>
-        {DASHES.map(([x, width], i) => (
-          <rect key={x} data-i={i} x={x} y={lane.dashY[i]} width={width} height="8" rx="4" />
-        ))}
-      </g>
+    <svg
+      {...TAB}
+      stroke="currentColor"
+      strokeWidth="2.6"
+      strokeLinecap="round"
+      className={className}
+      style={{ color: lane.color, filter: tabGlow(lane.color, off) }}
+    >
+      <path d="M4 15 H9 M12 8 H17 M20 12 H25" />
     </svg>
   );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Listening history: headphones and seven notes. Note i is drawn once the value reaches its threshold (itemOpacity).
+// History: headphones and seven notes. Note i is drawn once the value reaches its threshold (itemOpacity).
 
 interface Note {
   transform: string;
-  fill: string;
   /** Two notes joined by a beam, not one note with a flag. */
   beamed?: true;
-  /** Strip only: when this note's bob starts, so the notes do not move in step. */
+  /** When this note's bob starts, so the notes do not move in step. */
   delay?: string;
 }
 
-const STRIP_NOTES: readonly Note[] = [
-  { transform: 'translate(33 38) rotate(-10)', fill: '#191714' },
-  { transform: 'translate(118 38) rotate(10)', fill: '#A8283D', delay: '0.2s' },
-  { transform: 'translate(22 64) rotate(-14) scale(1.1)', fill: '#A8283D', beamed: true, delay: '0.4s' },
-  { transform: 'translate(126 58) rotate(12) scale(1.05)', fill: '#191714', delay: '0.1s' },
-  { transform: 'translate(56 20) rotate(-8) scale(0.85)', fill: '#191714', delay: '0.3s' },
-  { transform: 'translate(92 18) rotate(8) scale(0.85)', fill: '#A8283D', delay: '0.5s' },
-  { transform: 'translate(10 40) rotate(-18) scale(0.9)', fill: '#191714', delay: '0.6s' },
+const NOTES: readonly Note[] = [
+  { transform: 'translate(24 38) rotate(-10)' },
+  { transform: 'translate(126 36) rotate(10)', delay: '0.2s' },
+  { transform: 'translate(12 66) rotate(-14) scale(1.1)', beamed: true, delay: '0.4s' },
+  { transform: 'translate(132 64) rotate(12) scale(1.05)', delay: '0.1s' },
+  { transform: 'translate(52 14) rotate(-8) scale(0.85)', delay: '0.3s' },
+  { transform: 'translate(100 12) rotate(8) scale(0.85)', delay: '0.5s' },
+  { transform: 'translate(8 22) rotate(-18) scale(0.9)', delay: '0.6s' },
 ];
 
-const TAB_NOTES: readonly Note[] = [
-  { transform: 'translate(30 40) rotate(-10) scale(1.6)', fill: '#191714' },
-  { transform: 'translate(118 40) rotate(10) scale(1.6)', fill: '#A8283D' },
-  { transform: 'translate(16 68) rotate(-14) scale(1.4)', fill: '#A8283D', beamed: true },
-  { transform: 'translate(124 66) rotate(12) scale(1.6)', fill: '#191714' },
-  { transform: 'translate(56 20) rotate(-8) scale(1.4)', fill: '#191714' },
-  { transform: 'translate(93 19) rotate(8) scale(1.4)', fill: '#A8283D' },
-  { transform: 'translate(8 38) rotate(-18) scale(1.4)', fill: '#191714' },
-];
-
-// The note shapes. The tab's stems are a little thicker than the strip's.
-const STRIP_NOTE = (
+// The note shapes, filled with the note's colour by the group around them.
+const NOTE = (
   <>
     <ellipse rx="3.4" ry="2.6" transform="rotate(-20)" />
     <rect x="2.3" y="-12" width="1.3" height="12" />
@@ -122,7 +178,7 @@ const STRIP_NOTE = (
   </>
 );
 
-const STRIP_BEAMED = (
+const BEAMED = (
   <>
     <ellipse rx="3.4" ry="2.6" transform="rotate(-20)" />
     <ellipse cx="9" cy="-2" rx="3.4" ry="2.6" transform="rotate(-20 9 -2)" />
@@ -132,78 +188,76 @@ const STRIP_BEAMED = (
   </>
 );
 
-const TAB_NOTE = (
-  <>
-    <ellipse rx="3.4" ry="2.6" transform="rotate(-20)" />
-    <rect x="2.1" y="-12" width="1.6" height="12" />
-    <path d="M3.7 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z" />
-  </>
-);
-
-const TAB_BEAMED = (
-  <>
-    <ellipse rx="3.4" ry="2.6" transform="rotate(-20)" />
-    <ellipse cx="9" cy="-2" rx="3.4" ry="2.6" transform="rotate(-20 9 -2)" />
-    <rect x="2.1" y="-12" width="1.6" height="12" />
-    <rect x="11.1" y="-14" width="1.6" height="12" />
-    <polygon points="2.1,-12 12.7,-14 12.7,-10.8 2.1,-8.8" />
-  </>
-);
-
-function HistoryStrip({ value, className }: ArtProps) {
+function HistoryStrip({ value, off, className }: ArtProps) {
+  const glow = useFilterId();
+  const headphones = tube(CYAN, off);
   return (
-    <svg viewBox="0 0 150 80" aria-hidden="true" className={rootClass(styles.artCream, className)}>
-      <path d="M49.3 50 A26 26 0 1 1 100.7 50" fill="none" stroke="#191714" strokeWidth="5" strokeLinecap="round" />
-      <g transform="rotate(-7 49 60)">
-        <rect x="41" y="46" width="16" height="28" rx="8" fill="#191714" />
-        <rect x="54" y="49" width="6" height="22" rx="3" fill="#A8283D" />
-        <rect x="45.5" y="61" width="3" height="7" rx="1.5" fill="#D9D3C4" />
-      </g>
-      <g transform="rotate(7 101 60)">
-        <rect x="93" y="46" width="16" height="28" rx="8" fill="#191714" />
-        <rect x="90" y="49" width="6" height="22" rx="3" fill="#A8283D" />
-      </g>
-      {STRIP_NOTES.map((note, i) => (
-        <g
-          key={note.transform}
-          className={styles.histNote}
-          data-i={i}
-          transform={note.transform}
-          style={{ opacity: itemOpacity(value, i) }}
-        >
-          <g className={styles.bob} fill={note.fill} style={note.delay ? { animationDelay: note.delay } : undefined}>
-            {note.beamed ? STRIP_BEAMED : STRIP_NOTE}
-          </g>
+    <StripSvg off={off} className={className}>
+      <Glow id={glow} y="-30%" height="160%" />
+      <g filter={`url(#${glow})`} strokeLinecap="round" strokeLinejoin="round">
+        {/* The headband arcs over and drops onto the top of each muff; it never crosses into one. */}
+        <path d="M47.3 46 V40 A28.4 28.4 0 0 1 102.7 40 V46" fill="none" strokeWidth="3" stroke={headphones} />
+        <g transform="rotate(-7 49 60)" fill="none" stroke={headphones}>
+          <rect x="41" y="46" width="16" height="28" rx="8" strokeWidth="2.4" />
+          <path d="M46 61 Q45.4 64 46 67" strokeWidth="1.4" />
         </g>
-      ))}
-    </svg>
+        <g transform="rotate(7 101 60)" fill="none" stroke={headphones}>
+          <rect x="93" y="46" width="16" height="28" rx="8" strokeWidth="2.4" />
+        </g>
+        {NOTES.map((note, i) => (
+          <g
+            key={note.transform}
+            className={styles.fade}
+            data-note=""
+            data-i={i}
+            transform={note.transform}
+            style={{ opacity: itemOpacity(value, i) }}
+          >
+            <g
+              className={styles.bob}
+              fill={tube(noteColor(i), off)}
+              style={note.delay ? { animationDelay: note.delay } : undefined}
+            >
+              {note.beamed ? BEAMED : NOTE}
+            </g>
+          </g>
+        ))}
+      </g>
+    </StripSvg>
   );
 }
 
-function HistoryTab({ value, className }: ArtProps) {
+/** Where ray i sits around the headphones: ray i mirrors note i, in the note's colour and on the note's threshold. */
+const HISTORY_RAYS = [
+  'M6.1 9.3 L3.9 8.9',
+  'M21.9 9 L24 8.6',
+  'M3.9 13.6 L1.8 14.2',
+  'M23.1 13.4 L25.2 14',
+  'M9.4 4.1 L8.1 2.3',
+  'M18.7 4.1 L20 2.4',
+  'M4.6 3.9 L3.1 2.9',
+] as const;
+
+function HistoryTab({ value, off, className }: ArtProps) {
   return (
-    <svg viewBox="0 0 150 80" aria-hidden="true" className={rootClass(styles.artCream, className)}>
-      <path d="M49.3 50 A26 26 0 1 1 100.7 50" fill="none" stroke="#191714" strokeWidth="6" strokeLinecap="round" />
-      <g transform="rotate(-7 49 60)">
-        <rect x="41" y="46" width="16" height="28" rx="8" fill="#191714" />
-        <rect x="54" y="49" width="6" height="22" rx="3" fill="#A8283D" />
+    <svg {...TAB} strokeLinecap="round" strokeLinejoin="round" className={className} style={{ filter: tabGlow(CYAN, off) }}>
+      <g strokeWidth="1.5" stroke={tube(CYAN, off)}>
+        <path d="M10.2 12.2 V10 A3.8 3.8 0 0 1 17.8 10 V12.2" />
+        <rect x="8.9" y="12.2" width="3.2" height="5.6" rx="1.6" transform="rotate(-7 10.5 15)" />
+        <rect x="15.9" y="12.2" width="3.2" height="5.6" rx="1.6" transform="rotate(7 17.5 15)" />
       </g>
-      <g transform="rotate(7 101 60)">
-        <rect x="93" y="46" width="16" height="28" rx="8" fill="#191714" />
-        <rect x="90" y="49" width="6" height="22" rx="3" fill="#A8283D" />
+      <g strokeWidth="1.5">
+        {HISTORY_RAYS.map((d, i) => (
+          <path
+            key={d}
+            data-ray=""
+            data-i={i}
+            d={d}
+            stroke={tube(noteColor(i), off)}
+            style={{ opacity: itemOpacity(value, i) }}
+          />
+        ))}
       </g>
-      {TAB_NOTES.map((note, i) => (
-        <g
-          key={note.transform}
-          className={styles.histNote}
-          data-i={i}
-          transform={note.transform}
-          fill={note.fill}
-          style={{ opacity: itemOpacity(value, i) }}
-        >
-          {note.beamed ? TAB_BEAMED : TAB_NOTE}
-        </g>
-      ))}
     </svg>
   );
 }
@@ -219,7 +273,7 @@ interface Bolt {
   delay?: string;
 }
 
-const STRIP_BOLTS: readonly Bolt[] = [
+const BOLTS: readonly Bolt[] = [
   { transform: 'translate(75 14) scale(1.25)' },
   { transform: 'translate(100 18.8) rotate(44.8) scale(1.1)', delay: '0.1s' },
   { transform: 'translate(50 18.8) rotate(-44.8) scale(1.1)', delay: '0.2s' },
@@ -229,77 +283,69 @@ const STRIP_BOLTS: readonly Bolt[] = [
   { transform: 'translate(29.7 49.2) rotate(-96.5) scale(1.05)', delay: '0.6s' },
 ];
 
-/** The tab's bolts sit where the strip's do, all at one larger size, and do not bob. */
-const TAB_BOLTS = [
-  'translate(75 14) scale(1.6)',
-  'translate(100 18.8) rotate(44.8) scale(1.6)',
-  'translate(50 18.8) rotate(-44.8) scale(1.6)',
-  'translate(117 31.8) rotate(73.8) scale(1.6)',
-  'translate(33 31.8) rotate(-73.8) scale(1.6)',
-  'translate(120.3 49.2) rotate(96.5) scale(1.6)',
-  'translate(29.7 49.2) rotate(-96.5) scale(1.6)',
-] as const;
-
-function PopularityStrip({ value, className }: ArtProps) {
+function PopularityStrip({ value, off, className }: ArtProps) {
+  const glow = useFilterId();
+  const bolt = tube(AMBER, off);
   return (
-    <svg viewBox="0 0 150 80" aria-hidden="true" className={rootClass(styles.artDark, className)}>
-      <g transform="translate(75 44) rotate(-16)">
-        <polygon points="-6.8,19 6.8,19 6.3,26 -6.3,26" fill="#6E685F" />
-        <polygon points="-6,27 6,27 4.2,60 -4.2,60" fill="#6E685F" />
-        <polygon points="-4,19 -2.4,19 -1.6,60 -2.6,60" fill="#8F897E" />
-        <rect x="-7" y="15.5" width="14" height="3.5" fill="#A8283D" />
-        <polygon points="-9.6,9.5 9.6,9.5 7.2,15.5 -7.2,15.5" fill="#6E685F" />
-        <polygon points="-5.5,9.5 -3.5,9.5 -3,15.5 -4.5,15.5" fill="#8F897E" />
-        <circle cx="0" cy="0" r="13" fill="#D9D3C4" />
-        <g fill="none" stroke="#6A645A" strokeWidth="0.8">
-          <ellipse cx="0" cy="0" rx="5" ry="13" />
-          <ellipse cx="0" cy="0" rx="10" ry="13" />
-          <path d="M-9.4 -9 Q0 -11 9.4 -9" />
-          <path d="M-12.2 -4.5 Q0 -6 12.2 -4.5" />
-          <path d="M-12.2 4.5 Q0 6 12.2 4.5" />
-          <path d="M-9.4 9 Q0 11 9.4 9" />
+    <StripSvg off={off} className={className}>
+      <Glow id={glow} y="-30%" height="160%" />
+      <g filter={`url(#${glow})`} fill="none" strokeLinecap="round" strokeLinejoin="round">
+        <g transform="translate(75 44) rotate(-16)" strokeWidth="2.4" stroke={tube(PINK, off)}>
+          <circle r="12" />
+          <path d="M-12 0 H12" strokeWidth="1.6" />
+          <ellipse rx="5" ry="12" strokeWidth="1.4" />
+          <path d="M-8 14 H8 L6 20 H-6 Z" />
+          <path d="M-4.5 22 L-3 42 H3 L4.5 22" />
         </g>
-        <rect x="-14.2" y="-1.9" width="28.4" height="3.8" rx="1.9" fill="#F7F3EA" />
+        {BOLTS.map((b, i) => (
+          <g
+            key={b.transform}
+            className={styles.fade}
+            data-bolt=""
+            data-i={i}
+            transform={b.transform}
+            style={{ opacity: itemOpacity(value, i) }}
+          >
+            <path
+              className={styles.bob}
+              style={b.delay ? { animationDelay: b.delay } : undefined}
+              d={BOLT_PATH}
+              fill={bolt}
+            />
+          </g>
+        ))}
       </g>
-      {STRIP_BOLTS.map((bolt, i) => (
-        <g
-          key={bolt.transform}
-          className={styles.popBolt}
-          data-i={i}
-          transform={bolt.transform}
-          style={{ opacity: itemOpacity(value, i) }}
-        >
-          <path
-            className={styles.zap}
-            style={bolt.delay ? { animationDelay: bolt.delay } : undefined}
-            d={BOLT_PATH}
-            fill="#FFD84D"
-          />
-        </g>
-      ))}
-    </svg>
+    </StripSvg>
   );
 }
 
-function PopularityTab({ value, className }: ArtProps) {
+/** Where ray i sits around the mic: ray i mirrors bolt i, in amber and on the bolt's threshold. */
+const POPULARITY_RAYS = [
+  'M13.7 3.4 V1.3',
+  'M17 4.3 L18.1 2.4',
+  'M10.4 4.3 L9.3 2.4',
+  'M19.4 6.7 L21.3 5.6',
+  'M8 6.7 L6.1 5.6',
+  'M20.3 10 H22.5',
+  'M7.1 10 H4.9',
+] as const;
+
+function PopularityTab({ value, off, className }: ArtProps) {
   return (
-    <svg viewBox="0 0 150 80" aria-hidden="true" className={rootClass(styles.artDark, className)}>
-      <g transform="translate(75 44) rotate(-16)">
-        <polygon points="-6.8,19 6.8,19 4.2,60 -4.2,60" fill="#8F897E" />
-        <rect x="-7" y="15.5" width="14" height="3.5" fill="#A8283D" />
-        <polygon points="-9.6,9.5 9.6,9.5 7.2,15.5 -7.2,15.5" fill="#8F897E" />
-        <circle cx="0" cy="0" r="13" fill="#D9D3C4" />
-        <ellipse cx="0" cy="0" rx="6" ry="13" fill="none" stroke="#6A645A" strokeWidth="1.6" />
-        <rect x="-14.2" y="-2.4" width="28.4" height="4.8" rx="2.4" fill="#F7F3EA" />
+    <svg {...TAB} strokeLinecap="round" strokeLinejoin="round" className={className} style={{ filter: tabGlow(AMBER, off) }}>
+      <g transform="rotate(-16 14 11)" strokeWidth="1.4" stroke={tube(PINK, off)}>
+        <circle cx="14" cy="10" r="3.4" />
+        <path d="M10.6 10 H17.4" strokeWidth="1" />
+        <path d="M11.9 14.4 H16.1 L15.4 21 H12.6 Z" />
       </g>
-      <g fill="#FFD84D">
-        {TAB_BOLTS.map((transform, i) => (
+      <g strokeWidth="1.5">
+        {POPULARITY_RAYS.map((d, i) => (
           <path
-            key={transform}
-            className={styles.popBolt}
+            key={d}
+            data-ray=""
             data-i={i}
-            transform={transform}
-            d={BOLT_PATH}
+            d={d}
+            stroke={tube(AMBER, off)}
             style={{ opacity: itemOpacity(value, i) }}
           />
         ))}
@@ -310,60 +356,47 @@ function PopularityTab({ value, className }: ArtProps) {
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Tempo: a metronome. The pendulum swings at the speed and width metronome(value) gives, and its weight slides down.
+// An off metronome is unlit and still.
 
-const TICK_Y = ['18', '23', '28', '33', '38', '43', '48'] as const;
-
-function TempoStrip({ value, className }: ArtProps) {
-  const pendulum = metronome(value);
+function TempoStrip({ value, off, className }: ArtProps) {
+  const glow = useFilterId();
+  const pendulum = metronome(value, off);
   return (
-    <svg viewBox="0 0 150 80" aria-hidden="true" className={rootClass(styles.artCream, className)}>
-      <polygon points="75,2 86,8 64,8" fill="#8E5F35" />
-      <polygon points="65,8 85,8 107,78 43,78" fill="#8E5F35" />
-      <polygon points="68,11 82,11 94.5,54 55.5,54" fill="#191714" />
-      <rect x="71" y="14" width="8" height="40" fill="#4A453D" />
-      <line x1="75" y1="14" x2="75" y2="54" stroke="#D9D3C4" strokeWidth="1" />
-      <g stroke="#D9D3C4" strokeWidth="0.8">
-        {TICK_Y.map((y) => (
-          <line key={y} x1="72.5" y1={y} x2="77.5" y2={y} />
-        ))}
+    <StripSvg off={off} className={className}>
+      <Glow id={glow} y="-20%" height="140%" />
+      <g filter={`url(#${glow})`} fill="none" strokeLinecap="round" strokeLinejoin="round" stroke={pendulum.color}>
+        <path d="M65 10 H85 L104 76 H46 Z" strokeWidth="2.4" />
+        <path d="M70 10 L75 5 L80 10" strokeWidth="2" />
+        <path d="M53 56 H97" strokeWidth="1.8" />
+        <path d="M101.5 64 H107" strokeWidth="1.8" />
+        <circle cx="110.5" cy="64" r="3.5" strokeWidth="1.8" />
+        <g className={styles.pend} data-pendulum="" style={{ animation: pendulum.animation }}>
+          <path d="M75 56 V16" strokeWidth="2" />
+          <rect data-weight="" x="69" y={pendulum.weightY} width="12" height="7" rx="2" strokeWidth="1.8" />
+        </g>
       </g>
-      <g className={styles.metroPend} style={{ animation: pendulum.animation }}>
-        <line x1="75" y1="62" x2="75" y2="14" stroke="#4A453D" strokeWidth="3" />
-        <line x1="75" y1="62" x2="75" y2="14" stroke="#F7F3EA" strokeWidth="1.6" />
-        <polygon
-          points="66,0 84,0 80,10 70,10"
-          fill="#F4E7C5"
-          stroke="#4A453D"
-          strokeWidth="0.8"
-          transform={`translate(0 ${pendulum.weightY})`}
-        />
-      </g>
-      <polygon points="50.6,54 99.4,54 107,78 43,78" fill="#A5703F" />
-      <line x1="102.6" y1="64" x2="109" y2="64" stroke="#6A645A" strokeWidth="1.6" />
-      <circle cx="112" cy="64" r="3.5" fill="none" stroke="#6A645A" strokeWidth="1.6" />
-    </svg>
+    </StripSvg>
   );
 }
 
-function TempoTab({ value, className }: ArtProps) {
-  const pendulum = metronome(value);
+function TempoTab({ value, off, className }: ArtProps) {
+  const pendulum = metronome(value, off);
   return (
-    <svg viewBox="0 0 150 80" aria-hidden="true" className={rootClass(styles.artCream, className)}>
-      <polygon points="75,2 86,8 64,8" fill="#8E5F35" />
-      <polygon points="65,8 85,8 107,78 43,78" fill="#8E5F35" />
-      <polygon points="68,11 82,11 94.5,54 55.5,54" fill="#191714" />
-      <g className={styles.metroPend} style={{ animation: pendulum.animation }}>
-        <line x1="75" y1="62" x2="75" y2="14" stroke="#4A453D" strokeWidth="4.5" />
-        <line x1="75" y1="62" x2="75" y2="14" stroke="#F7F3EA" strokeWidth="2.6" />
-        <polygon
-          points="66,0 84,0 80,10 70,10"
-          fill="#F4E7C5"
-          stroke="#4A453D"
-          strokeWidth="1.2"
-          transform={`translate(0 ${pendulum.weightY})`}
-        />
+    <svg
+      {...TAB}
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      stroke={pendulum.color}
+      className={className}
+      style={{ filter: tabGlow(VIOLET, off) }}
+    >
+      <path d="M11 3 H17 L22 20 H6 Z" />
+      <path d="M8.2 15.5 H19.8" strokeWidth="1.2" />
+      <g className={styles.pendTab} data-pendulum="" style={{ animation: pendulum.animation }}>
+        <path d="M14 15.5 V5" />
+        <rect data-weight="" x="12.4" y={pendulum.tabWeightY} width="3.2" height="2.2" rx="0.6" strokeWidth="1.1" />
       </g>
-      <polygon points="50.6,54 99.4,54 107,78 43,78" fill="#A5703F" />
     </svg>
   );
 }
@@ -378,51 +411,51 @@ const ART: Record<GearId, Record<GearArtVariant, (props: ArtProps) => ReactEleme
 };
 
 /**
- * A gear's illustration at `value` (0 to 100). One root svg on a 150x80 viewBox, decorative (`aria-hidden`).
- * A gear that is off is drawn at its default value, dimmed by the parent's className.
+ * A gear's illustration at `value` (0 to 100), decorative (`aria-hidden`). The strip art is one svg on a 150x80 viewBox
+ * that flickers on when its gear is turned on; the tab icon is a simpler one on a 28x22 viewBox. A gear that is off is
+ * drawn at its default value in unlit tubes, so the caller passes that default as `value`.
  */
-export function GearArt({ gear, variant, value, className }: GearArtProps) {
+export function GearArt({ gear, variant, value, off, className }: GearArtProps) {
   const Art = ART[gear][variant];
-  return <Art value={value} className={className} />;
+  return <Art value={value} off={off} className={className} />;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Era
 
-/** Where each era's dot sits along the bottom of the Era tab's art. */
-const ERA_DOT_X: Record<EraId, string> = { pre: '19', s70: '23', s80: '27', s90: '31', s00: '35', s10: '39', s20: '43' };
-const DOT_PICKED = '#FFD84D';
-const DOT_NOT_PICKED = '#4A1B0C';
+interface EraTabArtProps {
+  /** The picked eras: how many are picked decides which jukebox lights are on. */
+  eras: readonly EraId[];
+  off: boolean;
+  className?: string;
+}
 
-/** The Era tab's art: one dot per era, yellow for each era in `eras` and dark for the rest. */
-export function EraTabArt({ eras, className }: { eras: readonly EraId[]; className?: string }) {
+/** The Era tab's art: a jukebox (§9) with a light for the first era picked and one for the second, pink while Era is on. */
+export function EraTabArt({ eras, off, className }: EraTabArtProps) {
+  const jukebox = jukeboxArt(eras.length, off);
   return (
-    <svg viewBox="0 0 62 33" aria-hidden="true" className={rootClass(styles.artBlack, className)}>
-      <path d="M14 31 V15 A17 13 0 0 1 48 15 V31 Z" fill="#A8283D" />
-      <path d="M19 21 V15 A12 9 0 0 1 43 15 V21 Z" fill="#F4E7C5" />
-      <g stroke="#A8283D" strokeWidth="1">
-        <line x1="25" y1="9" x2="25" y2="21" />
-        <line x1="31" y1="6" x2="31" y2="21" />
-        <line x1="37" y1="9" x2="37" y2="21" />
-      </g>
-      {ERA_IDS.map((era) => (
-        <circle
-          key={era}
-          data-era={era}
-          cx={ERA_DOT_X[era]}
-          cy="26"
-          r="1.6"
-          fill={eras.includes(era) ? DOT_PICKED : DOT_NOT_PICKED}
-        />
-      ))}
+    <svg
+      {...TAB}
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      stroke={jukebox.body}
+      className={className}
+      style={{ filter: tabGlow(PINK, off) }}
+    >
+      <path data-jukebox="body" d="M3 21 V10.8 A11 8.3 0 0 1 25 10.8 V21 Z" />
+      <path d="M6.2 14.6 V10.8 A7.8 5.75 0 0 1 21.8 10.8 V14.6 Z" strokeWidth="1.1" />
+      <path d="M10.1 7 V14.6 M14 5.1 V14.6 M17.9 7 V14.6" strokeWidth="0.8" />
+      <circle data-jukebox="button" data-i="0" cx="10.5" cy="17.8" r="1.7" stroke="none" fill={jukebox.lights[0]} />
+      <circle data-jukebox="button" data-i="1" cx="17.5" cy="17.8" r="1.7" stroke="none" fill={jukebox.lights[1]} />
     </svg>
   );
 }
 
-/** What every era icon shares: 26x26 on screen, drawn on a 30x30 grid in the button's text colour. */
+/** What every era icon shares: 22x22 on screen, drawn on a 30x30 grid in the button's text colour. */
 const ICON = {
-  width: '26',
-  height: '26',
+  width: '22',
+  height: '22',
   viewBox: '0 0 30 30',
   fill: 'none',
   stroke: 'currentColor',
@@ -489,7 +522,10 @@ const ERA_ICONS: Record<EraId, ReactElement> = {
   ),
 };
 
-/** The icon inside an era button, one per era. Drawn in the button's text colour. */
+/**
+ * The neon outline inside an era button, one per era (§8). It is drawn in the button's text colour; the button's CSS also
+ * gives it the lit glow, so nothing here depends on the era being picked.
+ */
 export function EraIcon({ era }: { era: EraId }) {
   return ERA_ICONS[era];
 }
