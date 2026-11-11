@@ -7,7 +7,11 @@ The TV is phone-shaped on every screen and every step (Round 6A §3.3, QWW-57, r
 min(844 px, the window less 32 px) tall, centred, with the bezel padding 9 9 0, bezel radius 30, screen radius 22 and a
 34 px chin with the LED. On a phone (up to 430 px wide) it is the whole screen instead: page padding 14 10 12 (or the
 safe-area insets, if larger), no height cap. Text that scales with the window width (`--vw`) stops growing at a phone's
-width, so a wide window shows the phone's type, not a bigger one. There is no wider TV and no column inside one.
+width, so a wide window shows the phone's type, not a bigger one. There is no wider TV and no column inside one. A phone on
+its side is wider than 430 px and would get a 328 px TV with no room for songs, so on a touch screen in landscape under 500 px
+tall (`(hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 500px)`) a full-screen "Turn your
+phone upright" covers every step (`RotateNotice`, drawn by `Tv`). It is only drawn over the page, so turning the phone back
+finds the screen, the tuner and a running mic step as they were. A tablet (taller than 500 px) and a desktop never see it.
 
 ## Flow
 
@@ -97,8 +101,9 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
    a newer one replaced is aborted. The list keeps the last answer until its own arrives. `libraryUnavailable` comes in the answer.
    - **The header**: a 28 px row with the singer's range (each note re-sings that end), **redo** (re-sings both), the
      カラオケ sign and the Spotify logo at the far right. The sign is centred on the row's own middle (R1: the row's
-     centre, to a pixel, not the room between redo and the logo) and is hidden, not moved, when that would put it within
-     8 px of redo or the logo (`signFits` in `fit.ts`, measured by `useSignFit`; a long range on a 360 px phone). The notes
+     centre, to a pixel, not the room between redo and the logo). It shrinks from 16 px down to 13 px to keep 8 px clear of
+     redo and the logo, and is hidden, not moved, only when 13 px does not fit (`signSize` in `fit.ts`, measured by
+     `useSignFit`; the longest range on a 360 px phone). The notes
      and redo are 44 px tall to tap, and turn pink on hover and on keyboard focus (R9). The heading is below the row.
    - **The list**: a row (66 px) is the slot (44 px) with the rank number, the title over "Artist · Era" (`’90s`) over a
      **reason line**, and a **difficulty badge**. The slot holds the rank number and the ▶ on top of each other (R3): on a
@@ -111,10 +116,12 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
      of it), "Crowd favourite" or "Deep cut" (place on Popularity at least 85, or at most 35), "On repeat" or "Rediscover"
      (History at least 85, or at most 20), and when none holds "Gets the room moving" / "Slow burner" / "Solid pick"
      (Tempo at least 70, at most 25, or unknown). The places are the engine's, percentiles among the songs that fit the
-     singer; a place that is null skips its rule, so a signed-out singer never sees the History ones. A song that fits only an octave away says "Shifted down to fit range" or "Shifted up to fit range" first, in place of "In your sweet spot" (R13; its other reasons and its badge stay). The badge is the song's
+     singer; a place that is null skips its rule, so a signed-out singer never sees the History ones. A song that fits only an octave away says "Shifted down to fit range" or "Shifted up to fit range" and nothing else (R13; its badge stays). The badge is the song's
      own label (what the song page shows); a Maybe song has none. Each title fills in once, left to right (about 0.6 s,
-     `useFillIn`), as its row scrolls into view, and ends the normal white. It plays once per visit to the list: a row that
-     scrolls out and back, or is re-ranked, does not replay it (R12; with reduced motion there is no fill). The ▶ is QWW-48's
+     `useFillIn`), as its row scrolls into view, and ends the normal white. It plays once per visit, and a visit lasts until the
+     singer's range changes (redo) or the page is reloaded: a row that scrolls out and back, is re-ranked, leaves when an era
+     is untapped and comes back, or comes back after a song page and Back, does not replay it (R12; `KaraokeApp` keeps the
+     memory, `useFillMemory`; with reduced motion there is no fill). The ▶ is QWW-48's
      play button (Play from the list, below), and a line under the list, over the credits link, shows Deezer's logo while a song on
      screen has a preview. Rows are in rank order in the DOM, and slide to their new place when
      the order changes (`flip.ts`; reduced motion turns it off). Tapping a row opens the song page; the ▶ does not.
@@ -140,7 +147,7 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
      Space, or by a vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live.
      **Which mode it opens in** (`src/lib/setlist/fit.ts`, measured in `useSheetFit`): mini when the expanded sheet
      would leave fewer than 3 whole rows (every phone but a tall one; a 390×844 still opens expanded), and where the
-     expanded sheet cannot fit inside the screen at all (an iPhone SE with Safari's bars, a phone on its side) the handle
+     expanded sheet cannot fit inside the screen at all (an iPhone SE with Safari's bars) the handle
      keeps it mini. `?mini=1` always starts in mini mode.
    - **Type**: Inter 400, 500, 600 and 700, self-hosted (`@fontsource/inter`, SIL OFL 1.1), and Noto Sans JP 700
      subset to the four characters of the sign (`src/components/setlist/fonts/`). The earlier steps keep the system font.
@@ -270,6 +277,7 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/lib/client/spotifyEmbed.ts` | A song's `open.spotify.com/track/ID` link to the address of Spotify's player, or null. |
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `reload`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,SongDetail,PickSongs}.tsx` | The screen pieces. |
+| `src/components/RotateNotice.tsx` | "Turn your phone upright", over every step on a touch screen in landscape under 500 px tall (drawn by `Tv`; its media query is in `screen.module.css`). |
 | `src/components/setlist/` | The Setlist tuner: `SetlistScreen`, `Sheet`, `GearStrip`, `EraPanel`, `SongRows` (+ `flip.ts`), `GearArt`, and `setlist.module.css` (its tokens are `--sl-*`). |
 | `src/components/SpotifyAccount.tsx` | The signed-in Spotify logo and its "Logged in as ... · Log out" box. |
 | `src/components/RoundButton.tsx` | The round pink-ringed button, shared by the record button (`HoldStep.tsx`, a dot in it) and "Turn on microphone" (`MicStep.tsx`, a microphone in it), so the two keep one look. |
