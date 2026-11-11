@@ -35,3 +35,19 @@
   font-size: 14px;
   line-height: 1.45;
 }
+
+.note {
+  margin-top: 32px;
+}
+
+.note h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.note p {
+  margin: 8px 0 0;
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1.45;
+}

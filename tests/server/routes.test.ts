@@ -862,17 +862,17 @@ describe('admin events', () => {
 
   it('returns the funnel, per-control numbers and sessions', async () => {
     await send('device-aaaa', [
-      { name: 'landing_viewed', at: at(60) },
+      { name: 'title_view', at: at(60) },
       { name: 'start_pressed', at: at(59) },
-      { name: 'note_detected', at: at(50), props: { step: 'low' } },
-      { name: 'note_detected', at: at(40), props: { step: 'high' } },
+      { name: 'low_note_done', at: at(50), props: { midi: 45 } },
+      { name: 'high_note_done', at: at(40), props: { midi: 72 } },
       { name: 'range_shown', at: at(39) },
     ]);
     const view = { difficulty: null, familiarity: null, popularity: null, tempo: null, decade: '80s', mood: null, duetsOnly: false };
-    const opened = { name: 'song_opened', at: at(15), props: { ...view, position: 2 } };
+    const opened = { name: 'song_open', at: at(15), props: { ...view, position: 2 } };
     await send('device-bbbb', [
-      { name: 'landing_viewed', at: at(30) },
-      { name: 'results_viewed', at: at(20) },
+      { name: 'title_view', at: at(30) },
+      { name: 'list_view', at: at(20) },
       opened,
       { name: 'spotify_link_pressed', at: at(14), props: view },
       { name: 'feedback_tapped', at: at(10), props: { ...view, thumbs: 'up' } },
@@ -882,33 +882,33 @@ describe('admin events', () => {
     expect(res.headers.get('cache-control')).toBe('no-store');
     const body = (await res.json()) as AdminEventsResponse;
     expect(body.funnel).toEqual([
-      { name: 'landing_viewed', devices: 2 },
+      { name: 'title_view', devices: 2 },
       { name: 'start_pressed', devices: 1 },
-      { name: 'low_note_detected', devices: 1 },
-      { name: 'high_note_detected', devices: 1 },
+      { name: 'low_note_done', devices: 1 },
+      { name: 'high_note_done', devices: 1 },
       { name: 'range_shown', devices: 1 },
-      { name: 'results_viewed', devices: 1 },
-      { name: 'song_opened', devices: 1 },
+      { name: 'list_view', devices: 1 },
+      { name: 'song_open', devices: 1 },
       { name: 'spotify_link_pressed', devices: 1 },
-      { name: 'spotify_connect_pressed', devices: 0 },
+      { name: 'spotify_connect', devices: 0 },
     ]);
     expect(body.byControl).toEqual({ decade: { opened: 1, spotify: 1, up: 1, down: 0, medianPosition: 2 } });
     expect(body.sessions.map((s) => s.anonId)).toEqual(['device-bbbb', 'device-aaaa']);
     const names = (i: number) => body.sessions[i]!.events.map((e) => e.name);
-    expect(names(0)).toEqual(['landing_viewed', 'results_viewed', 'song_opened', 'spotify_link_pressed', 'feedback_tapped']);
-    expect(names(1)).toEqual(['landing_viewed', 'start_pressed', 'note_detected', 'note_detected', 'range_shown']);
+    expect(names(0)).toEqual(['title_view', 'list_view', 'song_open', 'spotify_link_pressed', 'feedback_tapped']);
+    expect(names(1)).toEqual(['title_view', 'start_pressed', 'low_note_done', 'high_note_done', 'range_shown']);
     expect(body.sessions[0]!.events[2]).toEqual(opened);
   });
 
   it('reads only the newest `limit` events, and rejects a bad limit', async () => {
     await send('device-aaaa', [
-      { name: 'landing_viewed', at: at(30) },
+      { name: 'title_view', at: at(30) },
       { name: 'start_pressed', at: at(20) },
       { name: 'range_shown', at: at(10) },
     ]);
     const body = (await (await asAdmin('/api/admin/events?limit=2')).json()) as AdminEventsResponse;
     expect(body.funnel.slice(0, 2)).toEqual([
-      { name: 'landing_viewed', devices: 0 },
+      { name: 'title_view', devices: 0 },
       { name: 'start_pressed', devices: 1 },
     ]);
     expect(body.sessions[0]!.events.map((e) => e.name)).toEqual(['start_pressed', 'range_shown']);

@@ -1019,7 +1019,7 @@ describe('KaraokeApp', () => {
     fireEvent.input(slider, { target: { value: '20' } });
     fireEvent.pointerUp(slider);
     fireEvent.change(slider);
-    expect(tracked.map((e) => e.name)).toEqual(['results_viewed', 'song_opened', 'feedback_tapped', 'slider_changed']);
+    expect(tracked.map((e) => e.name)).toEqual(['list_view', 'song_open', 'feedback_tapped', 'slider_changed']);
     expect(tracked[1]!.props).toEqual({
       mode: 'library',
       difficulty: null,

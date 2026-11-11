@@ -55,6 +55,7 @@ ran out of budget (a first visit to a very large library), `all=1` returns `comp
 | `EVENTS` | `on` or `off`: whether `POST /api/events` stores beta events. Unset or blank, it is on only when `NODE_ENV=production`, `SPOTIFY_MOCK` is not `1` and the store is Postgres, so tests, e2e and local dev collect nothing. Any other value counts as off |
 | `DUETS_AND_MOODS` | `on` shows duets and moods on screen; unset, blank or any other value (`1`, `true`, a typo) hides them (QWW-43). Off, the four recommendation responses (`/api/recommendations` and `/api/catalogue/recommendations`, paged or `all=1`) carry no `moods` and no duet markers (`range.duet`, `range.parts`, `part`, `partSinger`), so the Duets and mood chips, the "Duet: take ..." lines and the song-page mood pills never appear. It is applied after ranking (`src/lib/server/features.ts`), so the songs and their order are the same either way; a duet is still scored on the part that fits the singer |
 | `MOODS_SHIPPED` | Comma-separated moods (`upbeat`, `heartfelt`) allowed on screen as chips, while `DUETS_AND_MOODS=on`. Set a mood here only after it passes the QWW-11 precision gate (`npm run moods:report`). Unset = no mood chips |
+| `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | PostHog as the event log's second sink (QWW-51). The key is the project token (`phc_...`, public by design; a personal API key is refused), the host the region's ingest address (`https://us.i.posthog.com` or `https://eu.i.posthog.com`; https only, and a reverse proxy's path is kept). Either missing or malformed and the app records to our own log alone. Read per request by `app/page.tsx` (`postHogSettings` in `src/lib/server/config.ts`) and handed to the screen. `VERCEL_ENV` (set by Vercel) tags every event `production`, `preview` or, anywhere else, `local` |
 | `PICK_SONGS` | `on` shows "or pick songs you sing well" on the title screen and "or use songs from your Spotify" under the range; unset, blank or any other value hides both (QWW-55: one onboarding flow for the first release; the Spotify logo on the list is then the one way to sign in). Read per request by `app/page.tsx` (`pickSongsOn` in `src/lib/server/config.ts`), not baked in at build time, so one build can serve it on or off; no API response changes |
 
 ## Store
@@ -413,17 +414,60 @@ The client tracker (`createTracker`) batches events and sends them with `sendEve
 (`navigator.sendBeacon`, else `fetch` with `keepalive`); `flushWhenHidden` flushes when the page
 is hidden or unloaded. It never throws, and drops props the server would reject.
 
+The names of the events the first tester release is judged by are in `src/lib/eventNames.ts`
+(`title_view`, the mic events, `low_note_done`, `high_note_done`, `list_view`, `gear_change`,
+`era_change`, `row_play`, `song_open`, `spotify_connect`), the one place the mic flow, the tuner and
+the play row take them from. Their props are documented there. The mic events carry `browser`, `via`
+and `reason` (and `app` for an in-app browser), all short labels from closed sets; `row_play` is sent by the
+preview player when a preview a tap started makes its first sound.
+
+### PostHog (QWW-51)
+
+PostHog is a second sink behind the same tracker: `createTracker`'s `mirror` option hands each
+event it accepted, after cleaning, to `createPostHogSink` (`src/lib/client/posthog.ts`), so one
+`track()` call reaches our log and PostHog. Our log stays the one that counts; PostHog may fail or
+be switched off (no key) and nothing else changes. What the sink keeps to:
+
+- **Identity**: the device's own random id (`loadAnonId`) is the PostHog distinct id, set at every
+  load. Nobody is identified and no person profile is made. PostHog stores nothing on the device
+  (`persistence: 'memory'`: no cookie, no localStorage).
+- **What leaves**: only events our tracker named, and only the props on an allowlist
+  (`POSTHOG_PROPS` in `src/lib/eventNames.ts`); our log keeps whatever the tracker accepts. A new
+  prop reaches PostHog only once it is added there, which is a privacy decision: never a Spotify id
+  or URI, a name, an email, or the title or artist of a song from a library (a catalogue song's key
+  is public and fine). Autocapture (and with it click text), pageviews, heatmaps, dead clicks,
+  exception capture and surveys are off, and `beforeSend` drops every other event whose name is not
+  one of ours, web vitals included (PostHog's own start with `$`; the replay's `$snapshot` is the
+  one exception). `beforeSend` also strips props named `trackId`, `spotifyId`, `userId`,
+  `displayName` or `email` (any case, underscores ignored), whoever added them, even from a call
+  that goes around the tracker. IP-based location is a PostHog project setting ("Discard client IP
+  data"), not something the page can switch off.
+- **Environment**: previews and production send to one PostHog project, so every event carries
+  `environment` (`production`, `preview` or `local`, from `VERCEL_ENV`). The "Release funnel"
+  insight should filter on `environment = production`, to leave out preview and local traffic.
+- **Session replay**: inputs are masked (`maskAllInputs`). Replay starts only once the screen knows
+  the visitor is signed out (`PostHogSink.setReplay`, driven from `KaraokeApp`) and stays off for a
+  signed-in visitor, whose screen shows their Spotify name and songs from their library; a Log out
+  starts it. It also needs "Record user sessions" on in PostHog (Settings > Project > Session
+  replay).
+- **Loading**: `posthog-js` is a separate chunk, imported once the screen is up (the screen's first
+  `setReplay`) or at the first event, whichever is first, so the title screen never waits for it.
+  Events that arrive while it loads wait (at most 100) and keep the time they happened; a page that
+  closes before it is ready loses them from PostHog, not from our log.
+
+The `/credits` page tells testers this in plain words (`ANALYTICS_NOTE` in `src/lib/credits.ts`); change both together.
+
 `GET /api/admin/events` is computed by `summarizeEvents` (`src/lib/server/eventStats.ts`) from
 these names and props:
 
-- **Funnel**, distinct devices per step: `landing_viewed`, `start_pressed`, `note_detected` with
-  `step: 'low'` and with `step: 'high'`, `range_shown`, `results_viewed`, `song_opened`,
-  `spotify_link_pressed`, `spotify_connect_pressed`. Each step counts on its own, so a returning
-  tester who lands on results still counts there.
+- **Funnel**, distinct devices per step: `title_view`, `start_pressed`, `low_note_done`,
+  `high_note_done`, `range_shown`, `list_view`, `song_open`, `spotify_link_pressed`,
+  `spotify_connect`. Each step counts on its own, so a returning tester who lands on results still
+  counts there.
 - **By control**, keyed by each control in use when the event happened: `difficulty`,
   `familiarity` or `popularity` when that slider prop is a number, `decade` or `mood` when one is
   picked, `duets` when `duetsOnly` is true, else `none`. An event with several controls in use
-  counts toward each. Per control: `song_opened` (count, and the median of its `position` prop),
+  counts toward each. Per control: `song_open` (count, and the median of its `position` prop),
   `spotify_link_pressed` (count), `feedback_tapped` (its `thumbs` prop, `up` or `down`).
 - **Sessions**: each device's events in time order, the 50 most recently active devices first.
 

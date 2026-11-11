@@ -143,9 +143,13 @@ button and must stay on screen (spike QWW-44).
   "Previews from [logo] Deezer" whenever a song on it has a preview. It links to the credits page, which says the
   previews stream from Deezer for private, non-commercial listening and that no audio is kept, as the terms ask
   listeners to be told.
+- **Event log (QWW-51).** When a preview a tap started makes its first sound, the player tells `KaraokeApp`
+  (`listenForRowPlay` in `PreviewButton.tsx`), which records `row_play` with the row's place in the list and a
+  catalogue song's key (`rowPlayEvent` in `funnel.ts`; a library song carries only its place). A pause, a resume, a
+  resume from a fresh link and a preview that never sounds record nothing.
 - **For the round 5 rows (QWW-46).** `PreviewButton` takes the row's track id (`id`), the song's `deezerId`, title and
-  artist, and needs nothing else; `DeezerCredit` is the logo line. Both draw in `currentColor` and the pink accent, so
-  a new row can restyle them.
+  artist, and its `position` (the row's 1-based place on screen, which `row_play` carries); `DeezerCredit` is the logo
+  line. Both draw in `currentColor` and the pink accent, so a new row can restyle them.
 
 ## Spotify player
 
@@ -201,6 +205,7 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/lib/client/storage.ts` | Guarded `sessionStorage` for test progress and the pick-songs intent; `localStorage` for a range kept on the device. |
 | `src/lib/songs/browse.ts` | Sliders, chips, counts and the "Saved, not played lately" divider, as pure functions over every match. |
 | `src/lib/client/funnel.ts`, `events.ts` | What each action records in the beta event log, and the batching tracker that sends it. |
+| `src/lib/client/posthog.ts`, `src/lib/eventNames.ts` | PostHog as the tracker's second sink (replay only while signed out), and the release funnel's event names, shared with the mic flow, tuner and play row. |
 | `src/lib/client/spotifyEmbed.ts` | A song's `open.spotify.com/track/ID` link to the address of Spotify's player, or null. |
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `reload`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,Results,SongDetail,PickSongs}.tsx` | The screen pieces. |

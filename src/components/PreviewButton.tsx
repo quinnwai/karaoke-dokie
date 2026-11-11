@@ -8,8 +8,19 @@ import styles from './screen.module.css';
 // (lib/client/preview.ts). There is no visible player: the playing button shows ⏸ and a thin ring that fills as the
 // preview plays.
 
+/** Who hears when a preview starts playing: the event log's row_play (QWW-51). The screen sets it while it is on the page. */
+let rowPlayListener: ((trackId: string, position: number | undefined) => void) | null = null;
+
+/** Listens for previews that start playing on the page's shared player, until the returned function is called. */
+export function listenForRowPlay(listener: (trackId: string, position: number | undefined) => void): () => void {
+  rowPlayListener = listener;
+  return () => {
+    if (rowPlayListener === listener) rowPlayListener = null;
+  };
+}
+
 /** The page's one player. Made here, but it touches the page only on the first tap, so this is safe on the server. */
-const shared = createPreviewPlayer();
+const shared = createPreviewPlayer({ onStart: (trackId, position) => rowPlayListener?.(trackId, position) });
 
 /** Which player the buttons use. Tests provide one with a fake <audio>. */
 export const PreviewPlayerContext = createContext<PreviewPlayer>(shared);
@@ -24,9 +35,9 @@ export function previewStateOf(s: PreviewSnapshot, id: string, deezerId: number 
 
 /**
  * One row's preview: its state, and the toggle for a tap. `id` is the row's own id (the song's track id); `deezerId`
- * unset means nothing to play.
+ * unset means nothing to play; `position` is the row's 1-based place in the list, reported with the play.
  */
-export function usePreview(id: string, deezerId: number | undefined): { state: PreviewButtonState; toggle(): void; player: PreviewPlayer } {
+export function usePreview(id: string, deezerId: number | undefined, position?: number): { state: PreviewButtonState; toggle(): void; player: PreviewPlayer } {
   const player = useContext(PreviewPlayerContext);
   // A string, so a change to another row's state does not redraw this one.
   const state = useSyncExternalStore(
@@ -39,7 +50,7 @@ export function usePreview(id: string, deezerId: number | undefined): { state: P
   return {
     state,
     toggle: () => {
-      if (deezerId !== undefined) player.toggle(id, deezerId);
+      if (deezerId !== undefined) player.toggle(id, deezerId, position);
     },
     player,
   };
@@ -56,11 +67,13 @@ interface PreviewButtonProps {
   deezerId: number | undefined;
   title: string;
   artist: string;
+  /** The row's 1-based place in the list on screen, for the event log's row_play (QWW-51). */
+  position?: number;
   className?: string;
 }
 
-export function PreviewButton({ id, deezerId, title, artist, className }: PreviewButtonProps) {
-  const { state, toggle, player } = usePreview(id, deezerId);
+export function PreviewButton({ id, deezerId, title, artist, position, className }: PreviewButtonProps) {
+  const { state, toggle, player } = usePreview(id, deezerId, position);
   const ring = useRef<SVGCircleElement>(null);
 
   // The ring follows the preview a frame at a time while it plays, and stays where it stopped when paused.

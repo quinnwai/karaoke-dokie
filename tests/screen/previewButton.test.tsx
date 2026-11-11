@@ -13,9 +13,9 @@ import { match } from '../fixtures/screen';
 
 afterEach(cleanup);
 
-function withPlayer(check: PreviewCheck = async () => 'retry') {
+function withPlayer(check: PreviewCheck = async () => 'retry', onStart?: (key: string, position: number | undefined) => void) {
   const audio = new FakeAudio();
-  const player = createPreviewPlayer({ makeAudio: () => audio as unknown as HTMLAudioElement, check });
+  const player = createPreviewPlayer({ makeAudio: () => audio as unknown as HTMLAudioElement, check, onStart });
   const wrap = (ui: ReactNode) => <PreviewPlayerContext.Provider value={player}>{ui}</PreviewPlayerContext.Provider>;
   return { audio, player, wrap };
 }
@@ -57,6 +57,20 @@ describe('PreviewButton', () => {
       await settle();
     });
     expect(screen.getByRole('button', { name: 'No preview of Gone by Nobody' })).toHaveProperty('disabled', true);
+  });
+
+  it('hands its place in the list to the player, so a preview that starts is reported with it (QWW-51)', async () => {
+    const onStart = vi.fn();
+    const { audio, wrap } = withPlayer(undefined, onStart);
+    render(wrap(<PreviewButton id="t1" deezerId={9} title="Africa" artist="Toto" position={3} />));
+    fireEvent.click(screen.getByRole('button', { name: 'Play Africa by Toto' }));
+    expect(onStart).not.toHaveBeenCalled(); // the tap alone is not a preview playing
+    await act(async () => {
+      audio.start();
+      await settle();
+    });
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith('t1', 3);
   });
 
   it('never passes its tap on to the row around it', () => {
@@ -139,6 +153,21 @@ describe('play button in the result rows', () => {
     expect(onSelect).toHaveBeenCalledWith('t0', 1);
     // A song without a Deezer match has a disabled button.
     expect(screen.getByRole('button', { name: 'No preview of Lemon by Kenshi Yonezu' })).toHaveProperty('disabled', true);
+  });
+
+  it("reports a row's preview with the row's place in the list on screen (QWW-51)", async () => {
+    const onStart = vi.fn();
+    const { audio, wrap } = withPlayer(undefined, onStart);
+    render(wrap(<Results {...resultsProps(range, [withId(match(0), 101), withId(match(1), 102), withId(match(2), 103)])} />));
+    // The second row on screen, whatever its song.
+    const plays = screen.getAllByRole('button', { name: /^Play / });
+    fireEvent.click(plays[1]!);
+    await act(async () => {
+      audio.start();
+      await settle();
+    });
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart.mock.calls[0]![1]).toBe(2);
   });
 
   it('is never inside the row button, so the two are separate buttons', () => {

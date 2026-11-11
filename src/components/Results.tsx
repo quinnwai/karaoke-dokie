@@ -101,7 +101,7 @@ export function Results(props: ResultsProps) {
     const yearText = typeof m.year === 'number' ? `, ${m.year}` : '';
     return (
       <div className={styles.songRow}>
-        <PreviewButton id={m.track.id} deezerId={m.deezerId} title={m.track.title} artist={m.track.artist} />
+        <PreviewButton id={m.track.id} deezerId={m.deezerId} title={m.track.title} artist={m.track.artist} position={position} />
         <button
           type="button"
           className={styles.song}
