@@ -28,6 +28,7 @@ import { useOverlayHistory } from '../lib/client/useOverlayHistory';
 import { useRankedSetlist } from '../lib/client/useRankedSetlist';
 import { createNetworkEngine, type SetlistEngine } from '../lib/setlist/engine';
 import { toRequest } from '../lib/setlist/tuner';
+import { BackToSongs } from './BackToSongs';
 import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';
 import { MicStep } from './MicStep';
@@ -83,6 +84,8 @@ const LIVE_EVERY_MS = 50; // ~20 times a second
 
 /** A slider drag asks on every input event; the server is asked once the thumb has rested this long (an engine passed in is asked at once). */
 const SETLIST_DEBOUNCE_MS = 120;
+/** How long taps on the range notes, redo and "Back to songs" are ignored after a tap has put one of them under the finger (a double tap). */
+export const TAP_GUARD_MS = 400;
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 const defaultReload = () => window.location.reload();
@@ -165,12 +168,17 @@ export function KaraokeApp({
       if (authError && authError !== 'access_denied' && !me) setSignInFailed(true);
       // Always taken, so a pick left over from an earlier visit cannot surface later; only used when picking is on.
       const wantedPick = me ? takeWantsPick() : false;
+      const progress = loadProgress();
+      const savedRange = me ? null : loadSavedRange();
+      // Half a test left over from a redo that was abandoned is dropped when the singer already has a range (the flow goes to the list):
+      // it must not come back at the next visit as a first test with no way back (the second review of PR #38).
+      if ((me?.range || savedRange) && progress && (progress.low === null || progress.high === null)) clearProgress();
       dispatch({
         type: 'booted',
         me,
-        progress: loadProgress(),
+        progress,
         wantsPick: wantedPick && canPick,
-        savedRange: me ? null : loadSavedRange(),
+        savedRange,
         // ?mini=1 starts the tuner's sheet in mini mode (the reference's way to open its "L2 mini" board).
         mini: url.searchParams.get('mini') === '1',
       });
@@ -264,6 +272,25 @@ export function KaraokeApp({
   const openSong = (trackId: string, position: number) => {
     setOpened(findMatch(trackId) ?? null);
     dispatch({ type: 'select', trackId, position });
+  };
+  // A double tap puts its second tap on the screen the first one brought up: the song page's ‹ is over the tuner's low note, "Back to
+  // songs" is over its range notes and redo, and a range note is over "Back to songs". So for a moment after a tap changes the screen,
+  // taps on those are ignored (the second review of PR #38). A tap that comes after the moment is a choice, and works.
+  const quietUntil = useRef(0);
+  const hush = () => {
+    quietUntil.current = Date.now() + TAP_GUARD_MS;
+  };
+  const unlessHushed =
+    <A extends unknown[]>(act: (...args: A) => void) =>
+    (...args: A) => {
+      if (Date.now() >= quietUntil.current) act(...args);
+    };
+  // Closing a song page puts the focus back on the row that opened it, at its place in the list now (a re-rank may have moved it). The
+  // page and the list are never in the page together, so the focus would otherwise be lost to the top of the page.
+  const returnTo = useRef<string | null>(null);
+  const closeSong = () => {
+    returnTo.current = state.selectedId;
+    dispatch({ type: 'deselect' });
   };
 
   // ---- mic ----
@@ -457,7 +484,18 @@ export function KaraokeApp({
     clearProgress();
     dispatch({ type: 'backToSongs' });
   };
-  useOverlayHistory(overlay, () => (overlay === 'redo' ? backToSongs() : dispatch({ type: 'deselect' })));
+  const tapBackToSongs = unlessHushed(() => {
+    hush();
+    backToSongs();
+  });
+  useOverlayHistory(overlay, () => (overlay === 'redo' ? backToSongs() : closeSong()));
+  useEffect(() => {
+    const id = returnTo.current;
+    if (id === null || state.selectedId !== null || step !== 'results' || !ranked.result) return;
+    returnTo.current = null;
+    const row = [...document.querySelectorAll<HTMLElement>('#list [data-row]')].find((li) => li.dataset.id === id);
+    row?.querySelector<HTMLElement>(':scope > button')?.focus();
+  }, [state.selectedId, step, ranked.result]);
 
   // The Setlist tuner is on the TV like every other step (Round 6A, QWW-57): one frame for the whole flow, with no second
   // bezel. It fills the TV's screen, and only its list scrolls.
@@ -487,8 +525,11 @@ export function KaraokeApp({
           onSelect={openSong}
           onMore={() => dispatch({ type: 'loadMore' })}
           onRetry={() => dispatch({ type: 'retryLoad' })}
-          onRedo={redo}
-          onRedoEnd={(end) => dispatch({ type: 'redoEnd', end })}
+          onRedo={unlessHushed(redo)}
+          onRedoEnd={unlessHushed((end) => {
+            hush();
+            dispatch({ type: 'redoEnd', end });
+          })}
           onConnect={connectSpotify}
           onLogout={logOut}
           renderPlay={renderPlay}
@@ -528,7 +569,7 @@ export function KaraokeApp({
       )}
 
       {step === 'mic' && (
-        <MicStep gate={gate} onAsk={askMic} onTryHere={() => dispatch({ type: 'micTryHere' })} onReload={reload} onBack={overlay === 'redo' ? backToSongs : undefined} />
+        <MicStep gate={gate} onAsk={askMic} onTryHere={() => dispatch({ type: 'micTryHere' })} onReload={reload} onBack={overlay === 'redo' ? tapBackToSongs : undefined} />
       )}
 
       {(step === 'low' || step === 'high') && (
@@ -539,36 +580,40 @@ export function KaraokeApp({
           lowNote={step === 'high' && state.low !== null ? midiToNoteName(state.low) : null}
           onPress={holdStart}
           onRelease={holdEnd}
-          onBack={overlay === 'redo' ? backToSongs : undefined}
+          onBack={overlay === 'redo' ? tapBackToSongs : undefined}
         />
       )}
 
       {step === 'signin' && state.range && (
-        <div className={styles.center}>
-          <Lyric text="That's your range" small />
-          <p className={styles.bigRange}>
-            <span data-testid="range-low">{midiToNoteName(state.range.low)}</span>
-            <span className={styles.dash} aria-hidden>
-              –
-            </span>
-            <span data-testid="range-high">{midiToNoteName(state.range.high)}</span>
-          </p>
-          <button type="button" className={styles.arrow} aria-label="Continue" onClick={showCatalogue}>
-            <svg viewBox="0 0 48 24" width="56" height="28" aria-hidden>
-              <path d="M2 12h40M32 3l10 9-10 9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          {canPick && (
-            <button type="button" className={styles.textButton} onClick={connectSpotify}>
-              or use songs from your Spotify
-            </button>
-          )}
-          {signInFailed && (
-            <p className={styles.hint} role="status">
-              Couldn’t sign in. Spotify sign-in is for invited testers only right now.
+        <>
+          {/* A redo's new range waits here to be confirmed: Back to songs (or the browser's Back) keeps the old one, as on the steps before. */}
+          {overlay === 'redo' && <BackToSongs onBack={tapBackToSongs} />}
+          <div className={styles.center}>
+            <Lyric text="That's your range" small />
+            <p className={styles.bigRange}>
+              <span data-testid="range-low">{midiToNoteName(state.range.low)}</span>
+              <span className={styles.dash} aria-hidden>
+                –
+              </span>
+              <span data-testid="range-high">{midiToNoteName(state.range.high)}</span>
             </p>
-          )}
-        </div>
+            <button type="button" className={styles.arrow} aria-label="Continue" onClick={showCatalogue}>
+              <svg viewBox="0 0 48 24" width="56" height="28" aria-hidden>
+                <path d="M2 12h40M32 3l10 9-10 9" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {canPick && (
+              <button type="button" className={styles.textButton} onClick={connectSpotify}>
+                or use songs from your Spotify
+              </button>
+            )}
+            {signInFailed && (
+              <p className={styles.hint} role="status">
+                Couldn’t sign in. Spotify sign-in is for invited testers only right now.
+              </p>
+            )}
+          </div>
+        </>
       )}
 
       {step === 'saving' && (
@@ -594,7 +639,10 @@ export function KaraokeApp({
           feedback={state.feedback[selected.track.id]}
           onFeedback={(thumbs) => sendFeedback(selected.track.id, thumbs)}
           onSpotify={() => tracker.track('spotify_link_pressed', viewProps(state))}
-          onBack={() => dispatch({ type: 'deselect' })}
+          onBack={() => {
+            hush();
+            closeSong();
+          }}
         />
       )}
 

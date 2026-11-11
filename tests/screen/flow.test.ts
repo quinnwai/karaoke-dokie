@@ -57,10 +57,23 @@ describe('boot', () => {
     expect(s).toMatchObject({ step: 'results', mode: 'catalogue', loading: true, range: { low: 45, high: 72, source: 'test' } });
   });
 
-  it('a half-done test wins over a range kept on the device, and Spotify wins over both', () => {
-    expect(run([{ type: 'booted', me: null, progress: { low: 45, high: null }, wantsPick: false, savedRange: { low: 40, high: 60 } }])).toMatchObject({ step: 'mic', mic: { next: 'high' } });
+  it('a range kept on the device wins over half a test, which a redo that was abandoned leaves behind; Spotify wins over both', () => {
+    // A reload in the middle of a one-note redo used to resume it as a first test: no "Back to songs", and no way to the list (the second
+    // review of PR #38). With a range kept, half a test is dropped and the singer is where the redo started.
+    for (const progress of [{ low: 45, high: null }, { low: null, high: 72 }, { low: null, high: null }]) {
+      const s = run([{ type: 'booted', me: null, progress, wantsPick: false, savedRange: { low: 40, high: 60 } }]);
+      expect(s, JSON.stringify(progress)).toMatchObject({ step: 'results', mode: 'catalogue', loading: true, range: { low: 40, high: 60, source: 'test' }, previousRange: null });
+    }
     const signedIn = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false, savedRange: { low: 40, high: 60 } }]);
     expect(signedIn).toMatchObject({ step: 'results', mode: 'library', range: { low: 45, high: 72 } });
+    // Signed in with a range saved and half a test left: the list too.
+    expect(run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: { low: 40, high: null }, wantsPick: false }])).toMatchObject({ step: 'results', range: { low: 45, high: 72 } });
+  });
+
+  it('half a test with no range kept is a first test, and is resumed (the Spotify round trip); a finished test waiting at the arrow is resumed too, range kept or not', () => {
+    expect(run([{ type: 'booted', me: null, progress: { low: 45, high: null }, wantsPick: false }])).toMatchObject({ step: 'mic', mic: { next: 'high' }, low: 45, range: null });
+    const finished = run([{ type: 'booted', me: null, progress: { low: 45, high: 72 }, wantsPick: false, savedRange: { low: 40, high: 60 } }]);
+    expect(finished).toMatchObject({ step: 'signin', low: 45, high: 72, range: { low: 45, high: 72 } });
   });
 });
 
@@ -400,6 +413,58 @@ describe('what is open on top of the list, and Back to songs from a redo (QWW-57
     expect(whole).toMatchObject({ step: 'results', matches: [], loading: true, attempt: 0, error: null });
     // ...and the load that follows fills it, as at the first visit.
     expect(run([{ type: 'allLoaded', page: allMatches() }], whole)).toMatchObject({ loading: false, matches: allMatches().matches });
+  });
+
+  describe('the result screen of a redo, for a singer without Spotify ("That\'s your range")', () => {
+    // Signed out, with a range kept on the device: the list is catalogue songs, and a finished test waits for Continue.
+    const OLD = { low: 45, high: 72, source: 'test' as const };
+    const signedOutAtResults = run([{ type: 'booted', me: null, progress: null, wantsPick: false, savedRange: OLD }, { type: 'allLoaded', page: allMatches() }]);
+    const tunedOut = run(tune({ type: 'input', gear: 'difficulty', value: 80 }, { type: 'era', era: 's80' }), signedOutAtResults);
+    const oneEnd = run([{ type: 'redoEnd', end: 'low' }, ...micOn, { type: 'holdEnd', midi: 43 }], tunedOut);
+    const wholeTest = run([{ type: 'redo' }, { type: 'quietDone' }, ...micOn, { type: 'holdEnd', midi: 40 }, { type: 'holdEnd', midi: 70 }], tunedOut);
+
+    it('remembers the range a redo started from, and forgets it when the redo is over', () => {
+      expect(run([{ type: 'redoEnd', end: 'low' }], tunedOut).previousRange).toEqual(OLD);
+      expect(run([{ type: 'redo' }], tunedOut).previousRange).toEqual(OLD);
+      expect(tunedOut.previousRange).toBeNull();
+      // The finished test is waiting at the arrow: the new range is `range`, the old one is `previousRange`.
+      expect(oneEnd).toMatchObject({ step: 'signin', range: { low: 43, high: 72 }, previousRange: OLD });
+      expect(wholeTest).toMatchObject({ step: 'signin', range: { low: 40, high: 70 }, previousRange: OLD });
+      // Continue keeps the new range, and the redo is over.
+      expect(run([{ type: 'showCatalogue' }], oneEnd)).toMatchObject({ step: 'results', range: { low: 43, high: 72 }, previousRange: null });
+      // A signed-in singer's range is saved as soon as it is sung, and the redo is over then.
+      const signedIn = run([{ type: 'redoEnd', end: 'low' }, ...micOn, { type: 'holdEnd', midi: 43 }], loaded);
+      expect(signedIn).toMatchObject({ step: 'saving', range: { low: 43, high: 72 }, previousRange: range });
+      expect(run([{ type: 'rangeSaved' }], signedIn).previousRange).toBeNull();
+    });
+
+    it('is something open on top of the list, which the browser’s Back closes: a redo’s result, not the first test’s', () => {
+      expect(overlayOf(oneEnd)).toBe('redo');
+      expect(overlayOf(wholeTest)).toBe('redo');
+      expect(overlayOf(run([{ type: 'showCatalogue' }], oneEnd))).toBeNull();
+      // The first test of a singer with no range: the same screen, with nothing before it.
+      const first = run([signedOut, { type: 'start' }, { type: 'quietDone' }, ...micOn, { type: 'holdEnd', midi: 45 }, { type: 'holdEnd', midi: 72 }]);
+      expect(first).toMatchObject({ step: 'signin', previousRange: null });
+      expect(overlayOf(first)).toBeNull();
+      // A finished test that a reload found waiting (no memory of the redo it came from) is the first test's case too.
+      expect(overlayOf(run([{ type: 'booted', me: null, progress: { low: 45, high: 72 }, wantsPick: false, savedRange: OLD }]))).toBeNull();
+      // Saving is not one: the range is on its way to the account.
+      expect(overlayOf({ step: 'saving', selectedId: null, range: OLD, previousRange: OLD })).toBeNull();
+    });
+
+    it('Back to songs from it puts the old range, the tuning and the list back, and the new range is gone', () => {
+      const s = run([{ type: 'backToSongs' }], oneEnd);
+      expect(s).toMatchObject({ step: 'results', range: OLD, low: 45, high: 72, previousRange: null, redoing: null, loading: false });
+      expect(s.matches).toEqual(tunedOut.matches); // a one-end redo kept the list
+      expect(s.tuner).toEqual(tunedOut.tuner);
+      expect(overlayOf(s)).toBeNull();
+    });
+
+    it('after a whole redo the list was emptied, so it loads again', () => {
+      const s = run([{ type: 'backToSongs' }], wholeTest);
+      expect(s).toMatchObject({ step: 'results', range: OLD, previousRange: null, matches: [], loading: true, attempt: 0 });
+      expect(s.tuner).toEqual(tunedOut.tuner);
+    });
   });
 
   it('does nothing outside a redo: the list, a song page, the title, and the very first test', () => {

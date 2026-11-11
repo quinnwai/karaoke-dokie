@@ -4,10 +4,14 @@
 //   2. opening a song pushes a history entry, and the system Back closes the page like the page's own ‹ Back, tuning kept
 //   3. the mic and note steps of a redo show "Back to songs" (keeps the old range and the tuning), and the system Back does the same;
 //      the very first test, with no range yet, has no such button and pushes nothing
+// and of the final pass on d623eda:
+//   a. a double tap lands once: for a moment after a tap brings up a screen, taps on the range notes, redo and "Back to songs" are ignored
+//   b. "That's your range" after a redo (no Spotify) has Back to songs and answers the system Back: the old range and the tuning come back
+//   c. closing a song page puts the focus back on the row that opened it, at its place in the list now
 // Layout and a real phone's Back are tests/e2e/setlist-back.spec.ts's; here is the app's behaviour with jsdom's own History API.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { KaraokeApp } from '../../src/components/KaraokeApp';
+import { KaraokeApp, TAP_GUARD_MS } from '../../src/components/KaraokeApp';
 import type { Api } from '../../src/lib/client/api';
 import type { Mic, MicRecorder } from '../../src/lib/client/mic';
 import { OVERLAY_STATE_KEY } from '../../src/lib/client/useOverlayHistory';
@@ -16,6 +20,7 @@ import type { SetlistEngine } from '../../src/lib/setlist/engine';
 import type { SetlistResponse } from '../../src/lib/setlist/types';
 import { allMatches, knownSongs, me, recommendationsPage } from '../fixtures/screen';
 import { el, ranked, response, rowIds, SEL } from '../helpers/setlist';
+import { SAMPLE_RATE, voice } from '../helpers/synth';
 
 const RANGE = { low: 45, high: 72, source: 'test' as const };
 
@@ -50,6 +55,42 @@ const recorder: MicRecorder = {
   close: () => {},
 };
 const mic: Mic = { permission: async () => 'prompt', open: async () => recorder };
+
+/** A microphone that hears the note queued for the next hold: enough to finish a redo. */
+function singingMic() {
+  const queue: Float32Array[] = [];
+  let current: Float32Array = new Float32Array(0);
+  const sung: MicRecorder = {
+    sampleRate: SAMPLE_RATE,
+    reset: () => {
+      current = queue.shift() ?? new Float32Array(0);
+    },
+    latest: (n) => current.subarray(Math.max(0, current.length - n)),
+    take: () => current,
+    live: () => true,
+    running: () => true,
+    resume: () => {},
+    close: () => {},
+  };
+  const heard: Mic = { permission: async () => 'prompt', open: async () => sung };
+  return { mic: heard, sing: (hz: number) => void queue.push(voice(hz, 1.5)) };
+}
+/** Holds the note button (the label names the note) and lets go. */
+async function hold(label: RegExp) {
+  const button = screen.getByRole('button', { name: label });
+  await act(async () => {
+    fireEvent.pointerDown(button);
+  });
+  await act(async () => {
+    fireEvent.pointerUp(button);
+  });
+}
+/** The app's clock moves on (only `Date` is faked in the describes that call this): the tap guard is a matter of how long since a tap. */
+const tick = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
+const clock = () => {
+  beforeEach(() => void vi.useFakeTimers({ toFake: ['Date'] }));
+  afterEach(() => void vi.useRealTimers());
+};
 
 const inOrder = (page: RecommendationsResponse, without: string[] = []): SetlistResponse =>
   response(page.matches.filter((m) => !without.includes(m.track.id)).map((m) => ranked(m)));
@@ -206,19 +247,34 @@ describe("the browser's Back button on a song page (2)", () => {
     goBack.mockRestore();
   });
 
-  it('does nothing on the tuner itself: a Back press there is the browser’s own', async () => {
+  it('pushes nothing on the tuner itself, and a Back press there is the browser’s own: nothing of the app answers it', async () => {
+    const before = window.history.length;
     await onTheTuner({ engine: engine() });
-    const entries = window.history.length;
-    expect(window.history.length).toBe(entries);
-    expect(overlayNow()).toBeUndefined();
-    window.history.pushState({ elsewhere: true }, '');
-    act(() => window.history.back());
+    tuneIt();
     await settle();
+    const tuned = tuning();
+    // Moving gears and picking eras is not something to go back from: no entry, and no marker on the one the page is on.
+    expect(window.history.length, 'the tuner pushes no entry').toBe(before);
+    expect(overlayNow()).toBeUndefined();
+
+    // Something else leaves an entry, and the browser goes back through it: the app has no entry of its own to answer, so it
+    // pushes none, takes none off, and changes nothing (the guard in useOverlayHistory: a Back press is the app's only when it pushed).
+    window.history.pushState({ elsewhere: true }, '');
+    const back = vi.spyOn(window.history, 'back');
+    const push = vi.spyOn(window.history, 'pushState');
+    act(() => window.history.go(-1));
+    await settle();
+    expect(back).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
     expect(tunerOpen()).toBe(true);
+    expect(tuning()).toEqual(tuned);
+    back.mockRestore();
+    push.mockRestore();
   });
 });
 
 describe('"Back to songs" on the mic and note steps of a redo (3)', () => {
+  clock();
   const engine = (): SetlistEngine => ({ rank: async () => inOrder(allMatches()) });
   const redoLow = () => fireEvent.click(screen.getByRole('button', { name: /^Redo your low note/ }));
 
@@ -232,6 +288,7 @@ describe('"Back to songs" on the mic and note steps of a redo (3)', () => {
     redoLow();
     await screen.findByRole('button', { name: 'Turn on microphone' });
     expect(overlayNow()).toBe('redo');
+    tick(TAP_GUARD_MS); // a tap that is meant comes after the moment a double tap's second one would
     fireEvent.click(back());
     await waitFor(() => expect(tunerOpen()).toBe(true));
     expect(tuning()).toEqual(tuned);
@@ -251,6 +308,7 @@ describe('"Back to songs" on the mic and note steps of a redo (3)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Turn on microphone' }));
     await screen.findByRole('button', { name: 'Hold to record your lowest note' });
     expect(sessionStorage.getItem('kd.test')).not.toBeNull(); // the test's progress, kept for a Spotify round trip
+    tick(TAP_GUARD_MS);
     fireEvent.click(back());
     await waitFor(() => expect(tunerOpen()).toBe(true));
     expect(sessionStorage.getItem('kd.test')).toBeNull();
@@ -270,25 +328,6 @@ describe('"Back to songs" on the mic and note steps of a redo (3)', () => {
     await screen.findByText('Plastic Love');
     expect(api.allRecommendations).toHaveBeenCalledTimes(2);
     expect(tuning()).toEqual(tuned);
-  });
-
-  it('is what a double tap on the song page’s ‹ Back leaves the singer with: the second tap lands on the range note, and there is a way back', async () => {
-    await onTheTuner({ engine: engine() });
-    tuneIt();
-    await settle();
-    const tuned = tuning();
-
-    fireEvent.click(await row(/^Plastic Love/));
-    fireEvent.click(back()); // the first tap: the page closes
-    expect(tunerOpen()).toBe(true);
-    await settle();
-    redoLow(); // the second tap, 250 ms later, on whatever the tuner has under the ‹
-    await screen.findByRole('button', { name: 'Turn on microphone' });
-    fireEvent.click(back());
-    await waitFor(() => expect(tunerOpen()).toBe(true));
-    expect(tuning()).toEqual(tuned);
-    await settle();
-    expect(overlayNow()).toBeUndefined();
   });
 
   it('is what the system Back does there too', async () => {
@@ -317,5 +356,339 @@ describe('"Back to songs" on the mic and note steps of a redo (3)', () => {
     expect(screen.queryByRole('button', { name: 'Back to songs' })).toBeNull();
     expect(window.history.length).toBe(entries);
     expect(overlayNow()).toBeUndefined();
+  });
+});
+
+describe('a double tap lands once (a): taps on the range notes, redo and "Back to songs" wait a moment after a tap brings one up', () => {
+  clock();
+  const engine = (): SetlistEngine => ({ rank: async () => inOrder(allMatches()) });
+  const redoLow = () => fireEvent.click(screen.getByRole('button', { name: /^Redo your low note/ }));
+  const redoAll = () => fireEvent.click(screen.getByRole('button', { name: 'Redo the singing test' }));
+  const micStep = () => screen.queryByRole('button', { name: 'Turn on microphone' });
+  /** The same gaps a finger leaves between two taps: close to none, a quick double tap, and just inside the moment. */
+  const GAPS = [60, 250, TAP_GUARD_MS - 10];
+
+  it.each(GAPS)('‹ on a song page, then %i ms later the low note under it: the second tap is ignored, and a tap after the moment works', async (gap) => {
+    await onTheTuner({ engine: engine() });
+    tuneIt();
+    await settle();
+    const tuned = tuning();
+
+    fireEvent.click(await row(/^Plastic Love/));
+    fireEvent.click(back()); // the first tap: the page closes
+    tick(gap);
+    redoLow(); // the second tap: on whatever the tuner has under the ‹
+    await settle();
+    expect(micStep()).toBeNull();
+    expect(tunerOpen()).toBe(true);
+    expect(tuning()).toEqual(tuned);
+    expect(overlayNow()).toBeUndefined();
+
+    tick(TAP_GUARD_MS - gap); // the moment is over: a tap is a choice
+    redoLow();
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+  });
+
+  it.each(GAPS)('a range note, then %i ms later "Back to songs" under it: the second tap is ignored, so the redo is not cancelled at once', async (gap) => {
+    await onTheTuner({ engine: engine() });
+    tuneIt();
+    await settle();
+    const tuned = tuning();
+
+    redoLow(); // the first tap: the mic step comes up
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+    tick(gap);
+    fireEvent.click(back()); // the second tap: on "Back to songs"
+    await settle();
+    expect(micStep()).not.toBeNull();
+    expect(tunerOpen()).toBe(false);
+    expect(overlayNow()).toBe('redo');
+
+    tick(TAP_GUARD_MS - gap);
+    fireEvent.click(back());
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    expect(tuning()).toEqual(tuned);
+  });
+
+  it.each(GAPS)('"Back to songs", then %i ms later redo under it: the second tap is ignored, so the whole test does not start and the list is not emptied', async (gap) => {
+    const { api } = await onTheTuner({ engine: engine() });
+    tuneIt();
+    await settle();
+    const tuned = tuning();
+    const ids = rowIds();
+
+    redoLow();
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+    tick(TAP_GUARD_MS);
+    fireEvent.click(back()); // the first tap: back to the list
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    tick(gap);
+    redoAll(); // the second tap: on redo
+    await settle();
+    expect(screen.queryByRole('button', { name: /Find a quiet spot/ })).toBeNull();
+    expect(tunerOpen()).toBe(true);
+    expect(rowIds()).toEqual(ids);
+    expect(api.allRecommendations).toHaveBeenCalledTimes(1); // no list was emptied and fetched again
+    expect(tuning()).toEqual(tuned);
+
+    tick(TAP_GUARD_MS - gap);
+    redoAll(); // after the moment it is a choice
+    await screen.findByRole('button', { name: /Find a quiet spot/ });
+  });
+
+  it('the moment is only for those three: a tap on a song row, or on a gear, right after a tap is not held back', async () => {
+    await onTheTuner({ engine: engine() });
+    fireEvent.click(await row(/^Plastic Love/));
+    fireEvent.click(back()); // a tap that starts the moment
+    fireEvent.input(el(SEL.slider('difficulty')), { target: { value: '55' } }); // a gear
+    expect(el<HTMLInputElement>(SEL.slider('difficulty')).value).toBe('55');
+    fireEvent.click(await row(/^Lemon/)); // a row
+    expect(songPageOpen('Lemon')).toBe(true);
+  });
+
+  it('the system Back is not a tap, and starts no moment: redo right after it works', async () => {
+    await onTheTuner({ engine: engine() });
+    fireEvent.click(await row(/^Plastic Love/));
+    act(() => window.history.back());
+    await settle();
+    expect(tunerOpen()).toBe(true);
+    redoLow();
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+  });
+});
+
+describe('"That’s your range" after a redo, for a singer without Spotify (b)', () => {
+  clock();
+  const OLD = { low: 45, high: 72 };
+  const engine = (): SetlistEngine => ({ rank: async () => inOrder(allMatches()) });
+  const rangeChip = () => document.querySelector('[role="group"][aria-label^="Your range"]')?.getAttribute('aria-label');
+
+  /** A singer without Spotify who kept A2 to C5 on the device, on the tuner. */
+  async function onTheTunerWithoutSpotify() {
+    localStorage.setItem('kd.range', JSON.stringify(OLD));
+    const heard = singingMic();
+    const api = fakeApi(null);
+    render(<KaraokeApp api={api} track={{ track: vi.fn(), flush: async () => {} }} mic={heard.mic} quietMs={5} setlistEngine={engine()} />);
+    await screen.findByText('Plastic Love');
+    return { api, sing: heard.sing };
+  }
+  /** Redoes the low note, sings G2 and lands on "That's your range". */
+  async function redoToTheResult(sing: (hz: number) => void) {
+    fireEvent.click(screen.getByRole('button', { name: /^Redo your low note/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Turn on microphone' }));
+    await screen.findByRole('button', { name: /lowest note/ });
+    sing(98); // G2
+    await hold(/lowest note/);
+    await screen.findByTestId('range-low');
+    expect(screen.getByTestId('range-low').textContent).toBe('G2');
+    expect(screen.getByTestId('range-high').textContent).toBe('C5');
+  }
+
+  it('has "Back to songs", and the redo’s history entry is still there for the system Back', async () => {
+    const { sing } = await onTheTunerWithoutSpotify();
+    await redoToTheResult(sing);
+    expect(overlayNow()).toBe('redo');
+    expect(screen.getByRole('button', { name: 'Back to songs' })).toBeTruthy();
+  });
+
+  it('answers the system Back with the songs: the old range and the tuning are as they were, and the new range is not kept', async () => {
+    const { sing } = await onTheTunerWithoutSpotify();
+    tuneIt();
+    await settle();
+    const tuned = tuning();
+    const ids = rowIds();
+    expect(tuned.range).toBe('Your range A2 to C5');
+
+    await redoToTheResult(sing);
+    act(() => window.history.back());
+    await settle();
+    expect(tunerOpen()).toBe(true);
+    expect(tuning()).toEqual(tuned);
+    expect(rangeChip()).toBe('Your range A2 to C5');
+    await waitFor(() => expect(rowIds()).toEqual(ids));
+    // Nothing of the new range is kept, on this device or for the next visit.
+    expect(JSON.parse(localStorage.getItem('kd.range')!)).toMatchObject(OLD);
+    expect(sessionStorage.getItem('kd.test')).toBeNull();
+    expect(overlayNow()).toBeUndefined();
+  });
+
+  it('answers "Back to songs" the same way', async () => {
+    const { sing } = await onTheTunerWithoutSpotify();
+    tuneIt();
+    await settle();
+    const tuned = tuning();
+    await redoToTheResult(sing);
+    tick(TAP_GUARD_MS);
+    fireEvent.click(back());
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    expect(tuning()).toEqual(tuned);
+    expect(rangeChip()).toBe('Your range A2 to C5');
+    expect(JSON.parse(localStorage.getItem('kd.range')!)).toMatchObject(OLD);
+    await settle();
+    expect(overlayNow()).toBeUndefined();
+  });
+
+  it('Continue keeps the new range, as it always did, and takes the redo’s entry off', async () => {
+    const { sing } = await onTheTunerWithoutSpotify();
+    await redoToTheResult(sing);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByText('Plastic Love');
+    expect(rangeChip()).toBe('Your range G2 to C5');
+    expect(JSON.parse(localStorage.getItem('kd.range')!)).toMatchObject({ low: 43, high: 72 });
+    await settle();
+    expect(overlayNow()).toBeUndefined();
+    expect(screen.queryByRole('button', { name: 'Back to songs' })).toBeNull();
+  });
+
+  it('is not on the first test’s result: no old range to go back to, and no entry pushed', async () => {
+    const heard = singingMic();
+    render(<KaraokeApp api={fakeApi(null)} track={{ track: vi.fn(), flush: async () => {} }} mic={heard.mic} quietMs={5} setlistEngine={engine()} />);
+    const entries = window.history.length;
+    fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Turn on microphone' }));
+    await screen.findByRole('button', { name: /lowest note/ });
+    heard.sing(110); // A2
+    await hold(/lowest note/);
+    await screen.findByRole('button', { name: /highest note/ });
+    heard.sing(440); // A4
+    await hold(/highest note/);
+    await screen.findByTestId('range-low');
+    expect(screen.queryByRole('button', { name: 'Back to songs' })).toBeNull();
+    expect(window.history.length).toBe(entries);
+    expect(overlayNow()).toBeUndefined();
+  });
+});
+
+describe('closing a song page puts the focus back on the row that opened it (c)', () => {
+  clock();
+  const engine = (): SetlistEngine => ({ rank: async () => inOrder(allMatches()) });
+  const rowOf = (button: HTMLElement) => button.closest<HTMLElement>('[data-row]')!;
+  /** Opens a song the way the keyboard does: the row has focus, and Enter presses it. */
+  async function openByKeyboard(title: RegExp) {
+    const button = await row(title);
+    button.focus();
+    fireEvent.click(button);
+    return rowOf(button).dataset.id!;
+  }
+
+  it('‹ Back: the focus is on that row’s button, not at the top of the page', async () => {
+    await onTheTuner({ engine: engine() });
+    const id = await openByKeyboard(/^Lemon/);
+    expect(songPageOpen('Lemon')).toBe(true);
+    fireEvent.click(back());
+    const again = await row(/^Lemon/);
+    await waitFor(() => expect(document.activeElement).toBe(again));
+    expect(rowOf(again).dataset.id).toBe(id);
+  });
+
+  it('the system Back does the same', async () => {
+    await onTheTuner({ engine: engine() });
+    await openByKeyboard(/^Dancing Queen/);
+    act(() => window.history.back());
+    await settle();
+    expect(tunerOpen()).toBe(true);
+    const again = await row(/^Dancing Queen/);
+    await waitFor(() => expect(document.activeElement).toBe(again));
+  });
+
+  it('at the row’s new place when a re-rank moved it under the page', async () => {
+    const page = allMatches();
+    const second = deferred<SetlistResponse>();
+    let asked = 0;
+    await onTheTuner({ engine: { rank: async () => (++asked === 2 ? second.promise : inOrder(page)) } });
+    const before = rowOf(await row(/^Lemon/)).dataset.rank;
+    fireEvent.input(el(SEL.slider('difficulty')), { target: { value: '60' } });
+    await waitFor(() => expect(asked).toBe(2));
+    await openByKeyboard(/^Lemon/); // opened in the list the singer was looking at
+    await act(async () => second.resolve(response([...page.matches].reverse().map((m) => ranked(m)))));
+    await settle();
+    expect(songPageOpen('Lemon')).toBe(true);
+
+    fireEvent.click(back());
+    const again = await row(/^Lemon/);
+    await waitFor(() => expect(document.activeElement).toBe(again));
+    expect(rowOf(again).dataset.rank, 'the list was ranked again under the page: the row is somewhere else').not.toBe(before);
+  });
+
+  it('a song that has left the list leaves the focus where the page left it, and breaks nothing', async () => {
+    const page = allMatches();
+    const second = deferred<SetlistResponse>();
+    let asked = 0;
+    await onTheTuner({ engine: { rank: async () => (++asked === 2 ? second.promise : inOrder(page)) } });
+    fireEvent.input(el(SEL.slider('difficulty')), { target: { value: '60' } });
+    await waitFor(() => expect(asked).toBe(2));
+    await openByKeyboard(/^Lemon/);
+    await act(async () => second.resolve(inOrder(page, ['t1'])));
+    await settle();
+    fireEvent.click(back());
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    expect(rowIds()).not.toContain('t1');
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('is for a page that is closed, not for one that was left some other way: the next visit to the tuner takes no focus', async () => {
+    await onTheTuner({ engine: engine() });
+    await openByKeyboard(/^Lemon/);
+    fireEvent.click(back());
+    await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Lemon/));
+    // Away to a redo and back: the focus is not put on the row again by an old memory of it.
+    (document.activeElement as HTMLElement).blur();
+    tick(TAP_GUARD_MS); // redo is not one a double tap's second tap may reach
+    fireEvent.click(screen.getByRole('button', { name: 'Redo the singing test' }));
+    await screen.findByRole('button', { name: /Find a quiet spot/ });
+    fireEvent.click(await screen.findByRole('button', { name: 'Turn on microphone' }));
+    await screen.findByRole('button', { name: /lowest note/ });
+    act(() => window.history.back());
+    await settle();
+    await screen.findByText('Plastic Love');
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
+describe('a reload in the middle of a redo (d)', () => {
+  const OLD = { low: 45, high: 72 };
+  const engine = (): SetlistEngine => ({ rank: async () => inOrder(allMatches()) });
+  const rangeChip = () => document.querySelector('[role="group"][aria-label^="Your range"]')?.getAttribute('aria-label');
+  /** The page loaded again: what the device kept (the range, and the test's progress, which survives a reload to survive Spotify's round trip). */
+  function reload(opts: { saved?: typeof OLD | null; progress?: { low: number | null; high: number | null } | null; user?: MeResponse | null }) {
+    if (opts.saved) localStorage.setItem('kd.range', JSON.stringify(opts.saved));
+    if (opts.progress) sessionStorage.setItem('kd.test', JSON.stringify(opts.progress));
+    render(<KaraokeApp api={fakeApi(opts.user ?? null)} track={{ track: vi.fn(), flush: async () => {} }} mic={mic} quietMs={5} setlistEngine={engine()} />);
+  }
+
+  it.each([
+    ['the low note, the first one sung in a whole redo or the one of a low-note redo', { low: 50, high: null }],
+    ['the high note of a high-note redo', { low: null, high: 69 }],
+  ])('after %s, with a range kept, comes back to the songs with it, and drops the half-finished test', async (_what, progress) => {
+    const entries = window.history.length;
+    reload({ saved: OLD, progress });
+    await screen.findByText('Plastic Love');
+    expect(rangeChip()).toBe('Your range A2 to C5');
+    expect(screen.queryByRole('button', { name: 'Turn on microphone' })).toBeNull();
+    // It was a redo that was left, not a first test: nothing of it is kept, here or for the next visit, and nothing is pushed.
+    expect(sessionStorage.getItem('kd.test')).toBeNull();
+    expect(window.history.length).toBe(entries);
+    expect(overlayNow()).toBeUndefined();
+  });
+
+  it('signed in with a range saved does the same', async () => {
+    reload({ user: me(RANGE), progress: { low: 50, high: null } });
+    await screen.findByText('Plastic Love');
+    expect(rangeChip()).toBe('Your range A2 to C5');
+    expect(sessionStorage.getItem('kd.test')).toBeNull();
+  });
+
+  it('half a test with no range kept is a first test, and is resumed: on the mic step to sing the high note, with nothing to go back to', async () => {
+    reload({ progress: { low: 50, high: null } });
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+    expect(screen.queryByRole('button', { name: 'Back to songs' })).toBeNull();
+    expect(sessionStorage.getItem('kd.test')).not.toBeNull();
+  });
+
+  it('a finished test waiting at the arrow is kept, range kept or not: it is what the Spotify round trip comes back to', async () => {
+    reload({ saved: OLD, progress: { low: 43, high: 72 } });
+    await screen.findByTestId('range-low');
+    expect(screen.getByTestId('range-low').textContent).toBe('G2');
+    expect(sessionStorage.getItem('kd.test')).not.toBeNull();
   });
 });

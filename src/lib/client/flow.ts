@@ -117,6 +117,11 @@ export interface FlowState {
   picks: string[];
   /** Set while re-singing just one end of a saved range; the other end is kept. */
   redoing: 'low' | 'high' | null;
+  /**
+   * The range the singer had when a redo started, kept until the redo is over: Back to songs (or the browser's Back) brings it back, also from
+   * "That's your range", where `range` is already the new one, which is only kept when the singer presses Continue. Null in the first test.
+   */
+  previousRange: VocalRange | null;
 }
 
 export const initialState: FlowState = {
@@ -142,6 +147,7 @@ export const initialState: FlowState = {
   known: null,
   picks: [],
   redoing: null,
+  previousRange: null,
 };
 
 export type FlowEvent =
@@ -244,15 +250,17 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
         return { ...base, step: 'landing' };
       }
       if (low !== null && high !== null) return { ...fresh, step: 'signin', low, high, range: testRange(low, high) };
-      if (low !== null) return enterMic({ ...fresh, low }, 'high');
+      // Half a test left over from a redo that was abandoned, with a range saved: the list, not a first test with no way back to it
+      // (the second review of PR #38). Without a saved range it is a first test, and is resumed (the Spotify round trip).
       if (savedRange) {
         const range = testRange(savedRange.low, savedRange.high);
         return { ...fresh, ...freshResults(), step: 'results', mode: 'catalogue', range, loading: true };
       }
+      if (low !== null) return enterMic({ ...fresh, low }, 'high');
       return { ...fresh, step: 'landing' };
     }
     case 'start':
-      return { ...state, step: 'quiet', hold: 'ready', low: null, high: null, redoing: null };
+      return { ...state, step: 'quiet', hold: 'ready', low: null, high: null, redoing: null, previousRange: null };
     case 'quietDone':
       return state.step === 'quiet' ? enterMic(state, 'low') : state;
     case 'holdStart':
@@ -302,13 +310,13 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
     case 'micLost':
       return state.step === 'low' || state.step === 'high' ? enterMic(state, state.step, true) : state;
     case 'rangeSaved':
-      return { ...state, ...freshResults(), step: 'results', mode: 'library', loading: true };
+      return { ...state, ...freshResults(), step: 'results', mode: 'library', loading: true, previousRange: null };
     case 'showCatalogue':
-      return state.range ? { ...state, ...freshResults(), step: 'results', mode: 'catalogue', loading: true } : state;
+      return state.range ? { ...state, ...freshResults(), step: 'results', mode: 'catalogue', loading: true, previousRange: null } : state;
     case 'loggedOut': {
       // Nothing of the library stays: not its matches, not the songs offered to pick from.
       const out = { ...state, signedIn: false, displayName: null, known: null, picks: [] };
-      return state.range ? { ...out, ...freshResults(), step: 'results', mode: 'catalogue', loading: true } : out;
+      return state.range ? { ...out, ...freshResults(), step: 'results', mode: 'catalogue', loading: true, previousRange: null } : out;
     }
     case 'saveFailed':
       return { ...state, error: 'save' };
@@ -346,19 +354,21 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
     case 'feedback':
       return { ...state, feedback: { ...state.feedback, [event.trackId]: event.thumbs } };
     case 'redo':
-      return { ...state, ...freshResults(), step: 'quiet', hold: 'ready', low: null, high: null, loading: false, picks: [], redoing: null };
+      return { ...state, ...freshResults(), step: 'quiet', hold: 'ready', low: null, high: null, loading: false, picks: [], redoing: null, previousRange: state.range };
     case 'redoEnd': {
       if (!state.range) return state;
       const keep = event.end === 'low' ? { low: null, high: state.range.high } : { low: state.range.low, high: null };
-      return enterMic({ ...state, ...keep, redoing: event.end, selectedId: null }, event.end);
+      return enterMic({ ...state, ...keep, redoing: event.end, selectedId: null, previousRange: state.range }, event.end);
     }
     case 'backToSongs': {
-      // Only a singer who already has a range can leave a redo this way (the first test has nothing to go back to). `redoEnd` kept
-      // the list; `redo` emptied it, so that one loads again.
-      if (!state.range || overlayOf(state) !== 'redo') return state;
-      const { range } = state;
+      // Only a singer who already has a range can leave a redo this way (the first test has nothing to go back to). The range is the one
+      // they had before: `range` itself while the test runs, `previousRange` once a finished test waits to be confirmed ("That's your
+      // range", where `range` is the new one). `redoEnd` kept the list; `redo` emptied it, so that one loads again.
+      if (overlayOf(state) !== 'redo') return state;
+      const range = state.previousRange ?? state.range;
+      if (!range) return state;
       const reload = state.matches.length === 0;
-      return { ...state, step: 'results', hold: 'ready', low: range.low, high: range.high, redoing: null, selectedId: null, ...(reload ? { loading: true, error: null, attempt: 0 } : {}) };
+      return { ...state, step: 'results', hold: 'ready', low: range.low, high: range.high, range, previousRange: null, redoing: null, selectedId: null, ...(reload ? { loading: true, error: null, attempt: 0 } : {}) };
     }
     case 'pickStart':
       return { ...state, step: 'pick', picks: [], selectedId: null };
@@ -386,13 +396,15 @@ export type Overlay = 'song' | 'redo';
 
 /**
  * What is open on top of the song list, which the browser's Back button closes (QWW-57): a song's page, or the quiet, mic and note
- * steps of a redo, which only a singer who already has a range reaches from the list. The first test, with no range yet, has nothing
- * to go back to.
+ * steps of a redo, which only a singer who already has a range reaches from the list, and the result screen that follows them
+ * ("That's your range", for a singer without Spotify) while the redo's new range waits to be confirmed. The first test, with no range
+ * yet, has nothing to go back to.
  */
-export function overlayOf(state: Pick<FlowState, 'step' | 'selectedId' | 'range'>): Overlay | null {
+export function overlayOf(state: Pick<FlowState, 'step' | 'selectedId' | 'range' | 'previousRange'>): Overlay | null {
   if (state.step === 'results') return state.selectedId !== null ? 'song' : null;
   const inRedo = state.step === 'quiet' || state.step === 'mic' || state.step === 'low' || state.step === 'high';
-  return state.range !== null && inRedo ? 'redo' : null;
+  if (inRedo) return state.range !== null ? 'redo' : null;
+  return state.step === 'signin' && state.previousRange !== null ? 'redo' : null;
 }
 
 /** Lowest low and highest high of the picked songs. */
