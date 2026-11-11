@@ -2,7 +2,7 @@ import { useRef, type ReactNode, type RefObject } from 'react';
 import type { Match } from '../../lib/contracts';
 import type { SetlistRow } from '../../lib/setlist/rows';
 import { useFlip } from './flip';
-import styles from './setlist.module.css';
+import styles from './rows.module.css';
 
 interface SongRowsProps {
   /** The rows to show, best first. The DOM follows this order. */

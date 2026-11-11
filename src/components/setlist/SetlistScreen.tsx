@@ -21,6 +21,7 @@ import screen from '../screen.module.css';
 import { Sheet } from './Sheet';
 import { SongRows } from './SongRows';
 import { useSheetFit } from './useSheetFit';
+import listStyles from './rows.module.css';
 import styles from './setlist.module.css';
 
 export interface SetlistScreenProps {
@@ -168,60 +169,60 @@ export function SetlistScreen(props: SetlistScreenProps) {
         <h1 className={styles.title}>Tune your setlist</h1>
       </header>
 
-      <div ref={scroller} id="list-scroll" className={styles.listScroll}>
+      <div ref={scroller} id="list-scroll" className={listStyles.listScroll}>
         {props.libraryUnavailable && (
-          <p className={styles.note} role="status">
+          <p className={listStyles.note} role="status">
             Couldn’t reach Spotify, showing popular songs.
           </p>
         )}
         {props.signInFailed && (
-          <p className={styles.note} role="status">
+          <p className={listStyles.note} role="status">
             Couldn’t sign in to Spotify.
           </p>
         )}
 
         {pickAnEra && (
-          <p id="empty" className={styles.empty} role="status">
+          <p id="empty" className={listStyles.empty} role="status">
             Pick an era to see songs.
           </p>
         )}
-        {noneInEra && <p className={styles.empty}>No songs from those eras fit your range. Try another era, or reset Era.</p>}
+        {noneInEra && <p className={listStyles.empty}>No songs from those eras fit your range. Try another era, or reset Era.</p>}
         {nothing && (
-          <p className={styles.empty}>
+          <p className={listStyles.empty}>
             {mode === 'catalogue' ? 'None of our catalogue songs fit this range yet.' : 'None of your songs have range data yet, or none fit your range.'}
           </p>
         )}
-        {error && <p className={styles.empty}>Couldn’t load songs.</p>}
+        {error && <p className={listStyles.empty}>Couldn’t load songs.</p>}
         {error && (
-          <button type="button" className={styles.more} onClick={props.onRetry} aria-label="Try loading songs again">
+          <button type="button" className={listStyles.more} onClick={props.onRetry} aria-label="Try loading songs again">
             Try again
           </button>
         )}
-        {waiting && visible.length === 0 && <p className={styles.empty}>Loading…</p>}
+        {waiting && visible.length === 0 && <p className={listStyles.empty}>Loading…</p>}
 
         {visible.length > 0 && <SongRows rows={visible} scroller={scroller} onOpen={props.onSelect} renderPlay={props.renderPlay} />}
         {/* A big library comes in pages: the rows that have arrived are shown, and what is still coming is said under them. */}
-        {waiting && visible.length > 0 && <p className={styles.note}>Loading…</p>}
+        {waiting && visible.length > 0 && <p className={listStyles.note}>Loading…</p>}
 
         {!error && visible.length < rows.length && (
-          <button type="button" className={styles.more} onClick={props.onMore} aria-label="Load more songs">
+          <button type="button" className={listStyles.more} onClick={props.onMore} aria-label="Load more songs">
             Load more
           </button>
         )}
         {/* Only when this really is the end: the engine sends one page (the most a request may ask for), and when it says
             there is more (nextOffset) the list ends without claiming it has shown every song that fits. */}
         {mode === 'library' && !waiting && !error && rows.length > 0 && visible.length >= rows.length && nextOffset === null && (
-          <p className={styles.note}>That’s every song that fits, for now.</p>
+          <p className={listStyles.note}>That’s every song that fits, for now.</p>
         )}
         {mode === 'catalogue' && !props.libraryUnavailable && rows.length > 0 && (
-          <div className={styles.connectNote}>
+          <div className={listStyles.connectNote}>
             <p>Want personalized recommendations?</p>
-            <button type="button" className={styles.connectLink} onClick={props.onConnect}>
+            <button type="button" className={listStyles.connectLink} onClick={props.onConnect}>
               Connect to Spotify
             </button>
           </div>
         )}
-        <a className={styles.credits} href="/credits" aria-label="Sources and credits" title="Sources and credits">
+        <a className={listStyles.credits} href="/credits" aria-label="Sources and credits" title="Sources and credits">
           <BookIcon />
         </a>
       </div>
