@@ -9,7 +9,9 @@ import {
   DEFAULT_EVENTS_LIMIT,
   DEFAULT_LIST_LIMIT,
   MAX_EVENTS_LIMIT,
+  type CanonicalInput,
   type CatalogueSong,
+  type SongCanonical,
   type SongMoodsRecord,
   type SongDeezerRecord,
   type SongFeelRecord,
@@ -141,6 +143,19 @@ function toSongTempo(r: Row): SongTempoRecord {
   if (isSet(r.preview_url)) t.previewUrl = str(r.preview_url);
   if (isSet(r.checked_at)) t.checkedAt = str(r.checked_at);
   return t;
+}
+
+function toSongCanonical(r: Row): SongCanonical {
+  return {
+    key: str(r.song_key),
+    canonicalKey: str(r.canonical_key),
+    title: str(r.title),
+    artist: str(r.artist),
+    method: str(r.method),
+    reason: str(r.reason) as SongCanonical['reason'],
+    sourceTitle: str(r.source_title),
+    sourceArtist: str(r.source_artist),
+  };
 }
 
 /** A song_feel row as a record; null for a feel this code does not know (the table has no CHECK, so it is checked here). */
@@ -524,6 +539,73 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         out.set(d.key, d);
       }
       return out;
+    },
+
+    // ---- one song, one row (QWW-49) ----
+    async putSongCanonical(entries) {
+      // One row per key, the last entry winning, as for mood labels: Postgres refuses a statement that names a key twice.
+      const unique = [...new Map(entries.map((e) => [e.key, e])).values()];
+      for (let i = 0; i < unique.length; i += 100) {
+        const params: unknown[] = [];
+        const rows = unique.slice(i, i + 100).map((e) => {
+          params.push(e.key, e.canonicalKey, e.title, e.artist, e.method, e.reason, e.sourceTitle, e.sourceArtist);
+          const n = params.length;
+          return `(${Array.from({ length: 8 }, (_, j) => `$${n - 7 + j}`).join(', ')})`;
+        });
+        await query(
+          `INSERT INTO song_canonical (song_key, canonical_key, title, artist, method, reason, source_title, source_artist) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET canonical_key = EXCLUDED.canonical_key, title = EXCLUDED.title,
+             artist = EXCLUDED.artist, method = EXCLUDED.method, reason = EXCLUDED.reason,
+             source_title = EXCLUDED.source_title, source_artist = EXCLUDED.source_artist`,
+          params,
+        );
+      }
+    },
+    async getSongCanonical(songKeys) {
+      // 1,000 keys a query, all at once: the catalogue asks for all of its songs when it loads.
+      const out = new Map<string, SongCanonical>();
+      const unique = [...new Set(songKeys)];
+      const chunks: string[][] = [];
+      for (let i = 0; i < unique.length; i += 1000) chunks.push(unique.slice(i, i + 1000));
+      await Promise.all(
+        chunks.map(async (chunk) => {
+          const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
+          for (const r of await query(`SELECT * FROM song_canonical WHERE song_key IN (${placeholders})`, chunk)) out.set(str(r.song_key), toSongCanonical(r));
+        }),
+      );
+      return out;
+    },
+    async listSongCanonical() {
+      return new Map((await query('SELECT * FROM song_canonical')).map((r) => [str(r.song_key), toSongCanonical(r)] as const));
+    },
+    async listCanonicalInputs() {
+      // The same numbers listCatalogue ranks by (its first query), for every measured song.
+      const sources = MEASURED_SOURCES.map((_, i) => `$${i + 1}`).join(', ');
+      const rows = await query(
+        `SELECT s.song_key, s.log_json::json ->> 'artist' AS artist, s.log_json::json ->> 'title' AS title,
+           s.range_json::json ->> 'usdbViews' AS range_views, s.range_json::json ->> 'low' AS low, s.range_json::json ->> 'high' AS high,
+           b.views, p.karaoke_views, p.chart_rank, d.rank AS deezer_rank
+         FROM song_ranges s
+         LEFT JOIN (SELECT DISTINCT ON (song_key) song_key, id, views FROM usdb_songs ORDER BY song_key, COALESCE(views, 0) DESC, id) b
+           ON (b.song_key || '') = s.song_key
+         LEFT JOIN song_popularity p ON p.song_key = s.song_key
+         LEFT JOIN song_deezer d ON d.song_key = s.song_key
+         WHERE s.skipped = false AND (s.range_json::json ->> 'source') IN (${sources})`,
+        MEASURED_SOURCES,
+      );
+      const opt = (v: unknown): number | undefined => (isSet(v) ? num(v) : undefined);
+      return rows.map((r): CanonicalInput => ({
+        key: str(r.song_key),
+        artist: isSet(r.artist) ? str(r.artist) : '',
+        title: isSet(r.title) ? str(r.title) : '',
+        rank: catalogueRank(
+          { usdbViews: opt(r.range_views) },
+          { views: opt(r.views) },
+          { karaokeViews: opt(r.karaoke_views), chartRank: opt(r.chart_rank), deezerRank: opt(r.deezer_rank) },
+        ),
+        low: num(r.low),
+        high: num(r.high),
+      }));
     },
 
     // ---- Spotify rate-limit block (QWW-55) ----

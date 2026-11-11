@@ -31,6 +31,7 @@
     "tempo:fill": "tsx scripts/tempo-fill.ts",
     "tempo:ultrastar": "tsx scripts/tempo-ultrastar.ts",
     "tempo:report": "tsx scripts/tempo-report.ts",
+    "titles:build": "tsx scripts/song-titles.ts",
     "tempo:feel": "tsx scripts/tempo-feel.ts",
     "smoke:live": "tsx scripts/smoke-live.ts",
     "eval:release": "tsx scripts/eval-release.ts"
