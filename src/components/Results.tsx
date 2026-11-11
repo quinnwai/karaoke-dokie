@@ -315,6 +315,7 @@ export function Results(props: ResultsProps) {
           <button type="button" className={styles.textButton} onClick={props.onConnect}>
             Connect to Spotify
           </button>
+          <p>Invited testers only for now.</p>
         </div>
       )}
       <a className={styles.credits} href="/credits" aria-label="Sources and credits" title="Sources and credits">

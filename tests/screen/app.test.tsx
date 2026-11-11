@@ -142,8 +142,9 @@ describe('KaraokeApp', () => {
     expect(JSON.parse(localStorage.getItem('kd.range')!)).toEqual({ low: 45, high: 72 });
     expect(sessionStorage.getItem('kd.test')).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2);
-    // Under the list: one short question and the button, nothing else.
+    // Under the list: one short question, the button, and who can sign in (Spotify adds testers by hand, QWW-53).
     expect(screen.getByText('Want personalized recommendations?')).toBeTruthy();
+    expect(screen.getByText('Invited testers only for now.')).toBeTruthy();
     expect(screen.queryByText(/every song that fits|invite-only|from our catalogue/)).toBeNull();
     // Catalogue songs are nobody's library, so there is no on-repeat slider.
     expect(screen.getByRole('slider', { name: 'Light work to Locked in' })).toBeTruthy();
