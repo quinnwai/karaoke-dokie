@@ -139,10 +139,13 @@ async function main() {
   const store = createPostgresStore(query, { autoMigrate: false });
 
   const [entries, deezer, billboardCsv] = await Promise.all([
-    loadCatalogue(store),
+    // As the app loads it (wiring.ts): one row per song, with its clean title (QWW-49's song_canonical).
+    loadCatalogue(store, undefined, { canonical: true }),
     store.listSongDeezer(),
     readFile(new URL('../data/billboard-year-end.csv', import.meta.url), 'utf8'),
   ]);
+  // The app retries a failed read of the clean titles within a minute; a graded run must not use the stored ones.
+  if (entries.degraded) throw new Error('Could not read song_canonical, so the titles would be as stored, not as the app shows them. Run again.');
   const billboard = new Set(billboardCharts(billboardCsv).keys());
   const tracks = catalogueTracks(entries);
   const deps = productionSongDeps(store, false);
@@ -158,7 +161,7 @@ async function main() {
   }
 
   const meta = [
-    `Database: ${db} (${entries.length} catalogue songs), code: this checkout, logged out.`,
+    `Database: ${db} (${entries.length} catalogue songs, titles as the app shows them), code: this checkout, logged out.`,
     'Lists: the tuner engine (POST /api/setlist). Criteria 1, 4 and 6 read the list as the tuner opens (Popularity and Difficulty on); criterion 2 reads each era with Tempo alone at each end.',
     'Ranges: ' + TEST_RANGES.map((t) => t.label).join('; ') + '.',
   ];
