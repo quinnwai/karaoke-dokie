@@ -145,16 +145,22 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
   expect(log.entries.length).toBeGreaterThan(0);
   expect(log.entries.some((e: { outcome: string }) => e.outcome === 'skipped')).toBe(true);
 
-  // The event log recorded this session's funnel, and no Spotify track id or library song.
+  // The event log recorded this session's funnel, and no Spotify track id or library song. The log is the server's, which every spec that
+  // runs against it shares, and a page that leaves its document sends what it has by beacon, which a spec's mocked API does not catch:
+  // another device's list_view can be in it. So the funnel is read for this device alone, by the id its page kept.
+  const anonId = await page.evaluate(() => localStorage.getItem('kd.anonId'));
+  expect(anonId).toMatch(/^[A-Za-z0-9-]{8,64}$/);
   await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
   expect((await page.request.get('/api/admin/events')).status()).toBe(403);
+  const events = async () => (await page.request.get('/api/admin/events', { headers: { 'x-admin-token': 'e2e-admin' } })).json();
   await expect
     .poll(async () => {
-      const ev = await (await page.request.get('/api/admin/events', { headers: { 'x-admin-token': 'e2e-admin' } })).json();
-      return Object.fromEntries(ev.funnel.map((f: { name: string; devices: number }) => [f.name, f.devices]));
+      const session = (await events()).sessions.find((s: { anonId: string }) => s.anonId === anonId);
+      const steps = new Set<string>((session?.events ?? []).map((e: { name: string }) => e.name));
+      return ['list_view', 'song_open', 'spotify_connect'].map((name) => steps.has(name));
     })
-    .toMatchObject({ list_view: 1, song_open: 1, spotify_connect: 1 });
-  const ev = await (await page.request.get('/api/admin/events', { headers: { 'x-admin-token': 'e2e-admin' } })).json();
+    .toEqual([true, true, true]);
+  const ev = await events();
   const stored = JSON.stringify(ev.sessions);
   expect(stored).not.toMatch(/mock-\d+-/);
   for (const m of recs.matches) expect(stored).not.toContain(m.track.title);
