@@ -25,9 +25,9 @@ export interface PreviewPlayer {
   subscribe(listener: () => void): () => void;
   /**
    * Plays row `key`'s preview (Deezer track `deezerId`), or pauses or resumes it when it is the row held. Call it
-   * inside the tap's handler.
+   * inside the tap's handler. `position` is the row's 1-based place in the list; it is only handed on to onStart.
    */
-  toggle(key: string, deezerId: number): void;
+  toggle(key: string, deezerId: number, position?: number): void;
   /** Stops row `key` when it is the one held: its row went away (the song page opened, or a filter took it off). */
   release(key: string): void;
   /** How far the held preview has played, 0 to 1. */
@@ -72,6 +72,12 @@ export interface PreviewPlayerOptions {
   makeAudio?: () => HTMLAudioElement;
   check?: PreviewCheck;
   now?: () => number;
+  /**
+   * Called once when a preview that a tap started makes its first sound (QWW-51: the event log's row_play): not at the
+   * tap, not for a pause or a resume, and not for a preview that never sounds. `position` is what toggle was given.
+   * If it throws, the music goes on.
+   */
+  onStart?: (key: string, position: number | undefined) => void;
 }
 
 export function createPreviewPlayer(opts: PreviewPlayerOptions = {}): PreviewPlayer {
@@ -87,6 +93,9 @@ export function createPreviewPlayer(opts: PreviewPlayerOptions = {}): PreviewPla
   let loads = 0;
   /** The held load has made a sound, so its preview exists: a later failure is the network or a link that ran out. */
   let sounded = false;
+  /** A tap started the held row and it has not made its first sound yet, so onStart is still owed; where the row sits. */
+  let owed = false;
+  let heldPosition: number | undefined;
   let pausedAt = 0;
   /** The load whose failure was last reported: a failed load fires an error and rejects play(), and is asked about once. */
   let reported = -1;
@@ -95,6 +104,17 @@ export function createPreviewPlayer(opts: PreviewPlayerOptions = {}): PreviewPla
   const set = (patch: Partial<PreviewSnapshot>) => {
     state = { ...state, ...patch };
     for (const listener of [...listeners]) listener();
+  };
+
+  /** The first sound of a preview a tap started: told to onStart, once. */
+  const reportStart = () => {
+    if (!owed || state.key === null) return;
+    owed = false;
+    try {
+      opts.onStart?.(state.key, heldPosition);
+    } catch {
+      // Reporting must never stop the music.
+    }
   };
 
   /**
@@ -118,6 +138,7 @@ export function createPreviewPlayer(opts: PreviewPlayerOptions = {}): PreviewPla
       if (a.paused || state.key === null) return;
       sounded = true;
       if (state.status === 'loading' || state.status === 'paused') set({ status: 'playing' });
+      reportStart();
     });
     // Paused by something other than our button: the phone's controls, a call, headphones unplugged, another app.
     a.addEventListener('pause', () => {
@@ -152,6 +173,7 @@ export function createPreviewPlayer(opts: PreviewPlayerOptions = {}): PreviewPla
         if (mine !== turn || state.key !== key || state.status !== 'loading') return;
         sounded = true;
         set({ status: 'playing' });
+        reportStart();
       },
       (err: unknown) => {
         if (mine !== turn) return; // a later tap took over
@@ -190,7 +212,7 @@ export function createPreviewPlayer(opts: PreviewPlayerOptions = {}): PreviewPla
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    toggle(key, deezerId) {
+    toggle(key, deezerId, position) {
       if (state.missing.has(deezerId)) return;
       const a = element();
       if (state.key === key && state.status !== 'idle') {
@@ -206,6 +228,9 @@ export function createPreviewPlayer(opts: PreviewPlayerOptions = {}): PreviewPla
         if (a.error || now() - pausedAt > RELOAD_AFTER_PAUSE_MS) return start(a, key, deezerId, a.currentTime);
         return play(a, key, deezerId);
       }
+      // A new play: another row, or this one after it stopped. Its first sound is owed to onStart.
+      owed = true;
+      heldPosition = position;
       start(a, key, deezerId);
     },
     release(key) {
@@ -216,6 +241,7 @@ export function createPreviewPlayer(opts: PreviewPlayerOptions = {}): PreviewPla
       audio.removeAttribute('src');
       audio.load(); // drops the download as well
       sounded = false;
+      owed = false;
       held = null;
       set({ key: null, status: 'idle' });
     },

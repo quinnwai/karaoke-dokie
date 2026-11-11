@@ -36,6 +36,17 @@ export function catalogueKey(trackId: string): string | null {
   return trackId.startsWith('cat:') ? trackId.slice(4) : null;
 }
 
+/**
+ * A row's preview started playing (QWW-48's ▶, reported by the preview player): the row's place in the list, and a
+ * catalogue song's key (a library song carries only its place).
+ */
+export function rowPlayEvent(trackId: string, position?: number): FunnelEvent {
+  const props: Record<string, EventValue> = { position: position ?? null };
+  const key = catalogueKey(trackId);
+  if (key) props.songKey = key;
+  return { name: EVENT.rowPlay, props };
+}
+
 /** Events for one action, given the state before it. */
 export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
   const next = flowReducer(prev, action);

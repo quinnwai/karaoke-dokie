@@ -392,7 +392,9 @@ is hidden or unloaded. It never throws, and drops props the server would reject.
 The names of the events the first tester release is judged by are in `src/lib/eventNames.ts`
 (`title_view`, the mic events, `low_note_done`, `high_note_done`, `list_view`, `gear_change`,
 `era_change`, `row_play`, `song_open`, `spotify_connect`), the one place the mic flow, the tuner and
-the play row take them from. Their props are documented there.
+the play row take them from. Their props are documented there. The mic events carry `browser`, `via`
+and `reason` (and `app` for an in-app browser), all short labels from closed sets; `row_play` is sent by the
+preview player when a preview a tap started makes its first sound.
 
 ### PostHog (QWW-51)
 

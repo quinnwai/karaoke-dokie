@@ -85,6 +85,15 @@ describe('beforeSend', () => {
     expect(out?.properties).toEqual({ mode: 'catalogue', $current_url: 'https://app.test/', environment: 'production' });
   });
 
+  it('tags every release-funnel event with the environment, the mic and play events included', () => {
+    const preview = beforeSend('preview');
+    for (const name of Object.values(EVENT)) {
+      const out = preview(result(name, { browser: 'ios-safari', position: 2 }));
+      expect(out, name).not.toBeNull();
+      expect(out!.properties.environment, name).toBe('preview');
+    }
+  });
+
   it('keeps the replay data, tagged too, untouched', () => {
     const data = [{ type: 2 }];
     const out = send(result('$snapshot', { $snapshot_data: data, $session_id: 's' }));

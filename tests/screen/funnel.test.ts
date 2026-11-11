@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { catalogueKey, eventsFor } from '../../src/lib/client/funnel';
+import { catalogueKey, eventsFor, rowPlayEvent } from '../../src/lib/client/funnel';
 import { flowReducer, initialState, type FlowEvent, type FlowState } from '../../src/lib/client/flow';
 import { POSTHOG_PROPS } from '../../src/lib/eventNames';
 import { allMatches, me } from '../fixtures/screen';
@@ -184,6 +184,18 @@ describe('funnel events', () => {
     expect(names(partial, { type: 'allLoaded', page: allMatches() })).toEqual([]);
   });
 
+  it("records a preview that started playing with its place in the list, and a catalogue song's key only (QWW-48)", () => {
+    expect(rowPlayEvent('cat:queen|bohemian rhapsody', 3)).toEqual({ name: 'row_play', props: { position: 3, songKey: 'queen|bohemian rhapsody' } });
+    // A library song carries only its place: nothing that names it.
+    const library = rowPlayEvent('4uLU6hMCjMI75M1A2tKUQC', 5);
+    expect(library).toEqual({ name: 'row_play', props: { position: 5 } });
+    expect(JSON.stringify(library)).not.toContain('4uLU6h');
+    expect(rowPlayEvent('t1')).toEqual({ name: 'row_play', props: { position: null } });
+    for (const e of [rowPlayEvent('cat:a|b', 1), rowPlayEvent('t1', 2)]) {
+      for (const key of Object.keys(e.props!)) expect(POSTHOG_PROPS.has(key), key).toBe(true);
+    }
+  });
+
   it('records only props that PostHog may have (POSTHOG_PROPS), so a new prop is a conscious choice', () => {
     const seen = new Set<string>();
     let state = initialState;
@@ -191,9 +203,15 @@ describe('funnel events', () => {
       signedOut,
       { type: 'start' },
       { type: 'quietDone' },
+      // The mic step: inside another app's browser, tried anyway, refused, then allowed (QWW-50).
+      { type: 'micChecked', env: INSTAGRAM, permission: 'prompt' },
+      { type: 'micTryHere' },
+      { type: 'micAsk' },
+      { type: 'micFailed', reason: 'denied' },
+      { type: 'micAsk' },
+      { type: 'micGranted' },
       { type: 'holdStart' },
       { type: 'holdEnd', midi: null },
-      { type: 'micDenied' },
       { type: 'holdEnd', midi: 45 },
       { type: 'holdEnd', midi: 40 },
       { type: 'holdEnd', midi: 72 },
@@ -222,7 +240,7 @@ describe('funnel events', () => {
     }
     expect([...seen].filter((key) => !POSTHOG_PROPS.has(key))).toEqual([]);
     // The walk reached the events that carry props, so the check above means something.
-    for (const key of ['step', 'midi', 'low', 'high', 'spanSemitones', 'mode', 'matchCount', 'libraryUnavailable', 'shown', 'slider', 'kind', 'value', 'on', 'decade', 'position', 'songKey', 'thumbs', 'end', 'from', 'signedIn']) {
+    for (const key of ['step', 'midi', 'low', 'high', 'spanSemitones', 'mode', 'matchCount', 'libraryUnavailable', 'shown', 'slider', 'kind', 'value', 'on', 'decade', 'position', 'songKey', 'thumbs', 'end', 'from', 'signedIn', 'browser', 'via', 'reason', 'app']) {
       expect(seen.has(key), key).toBe(true);
     }
   });

@@ -37,7 +37,7 @@ function fakeApi(user: MeResponse | null) {
   } satisfies Api;
 }
 
-const mic: Mic = { open: async () => Promise.reject(new Error('no mic in this test')) };
+const mic: Mic = { permission: async () => 'prompt', open: async () => Promise.reject(new Error('no mic in this test')) };
 const captured = () => posthog.capture.mock.calls.map(([name]) => name as string);
 
 /** The tracker's own log posts to /api/events; nothing here is listening, so the requests are what it recorded. */
@@ -160,3 +160,73 @@ describe('KaraokeApp with PostHog', () => {
     }
   });
 });
+
+describe('a preview starting to play (row_play, QWW-48)', () => {
+  /** The page's matches, each with a Deezer track so its play button is on, and ids chosen by `idOf`. */
+  const withPreviews = (page: ReturnType<typeof allMatches>, idOf: (i: number, id: string, title: string, artist: string) => string) => ({
+    ...page,
+    matches: page.matches.map((m, i) => ({ ...m, track: { ...m.track, id: idOf(i, m.track.id, m.track.title, m.track.artist) }, deezerId: 7000 + i })),
+  });
+
+  // jsdom has no media stack: the page's one <audio> plays, and says so, when asked.
+  beforeEach(() => {
+    vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+      Object.defineProperty(this, 'paused', { value: false, configurable: true });
+      queueMicrotask(() => this.dispatchEvent(new Event('playing')));
+      return Promise.resolve();
+    });
+    vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    vi.spyOn(window.HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    cleanup(); // the rows going away stop their preview: before the stand-ins for jsdom's missing media calls go
+    vi.restoreAllMocks();
+  });
+
+  const rowPlays = () => posthog.capture.mock.calls.filter(([name]) => name === 'row_play');
+
+  it("reaches PostHog and our log with the row's place and a catalogue song's key, once the sound starts", async () => {
+    const api = fakeApi(null);
+    const page = withPreviews(allMatches(), (_i, _id, title, artist) => `cat:${artist.toLowerCase()}|${title.toLowerCase()}`);
+    api.catalogue.mockImplementation(async () => page);
+    sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
+    render(<KaraokeApp api={api} mic={mic} postHog={SETTINGS} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }));
+    const plays = await screen.findAllByRole('button', { name: /^Play / });
+    const second = plays[1]!;
+    const label = second.getAttribute('aria-label'); // it reads "Pause ..." once the song plays
+    fireEvent.click(second);
+
+    await waitFor(() => expect(rowPlays()).toHaveLength(1));
+    const played = page.matches.find((m) => `Play ${m.track.title} by ${m.track.artist}` === label)!;
+    expect(rowPlays()[0]![1]).toEqual({ position: 2, songKey: played.track.id.slice(4) });
+
+    // Our own log has it too.
+    window.dispatchEvent(new Event('pagehide'));
+    await waitFor(() => expect(loggedNames()).toContain('row_play'));
+  });
+
+  it('carries only the place for a song from the singer’s Spotify library, never its id or title', async () => {
+    const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
+    const page = withPreviews(allMatches(), (i) => `4uLU6hMCjMI75M1A2tKUQ${i}`);
+    api.allRecommendations.mockImplementation(async () => page);
+    render(<KaraokeApp api={api} mic={mic} postHog={SETTINGS} />);
+    const plays = await screen.findAllByRole('button', { name: /^Play / });
+    fireEvent.click(plays[0]!);
+
+    await waitFor(() => expect(rowPlays()).toHaveLength(1));
+    expect(rowPlays()[0]![1]).toEqual({ position: 1 });
+    expect(JSON.stringify(posthog.capture.mock.calls)).not.toMatch(/4uLU6h|Plastic Love|Mariya/);
+    // The visitor is signed in, so there is no replay of this screen.
+    expect(posthog.startSessionRecording).not.toHaveBeenCalled();
+  });
+
+  it('is not sent for a tap that starts nothing: a play button with no preview is disabled', async () => {
+    render(<KaraokeApp api={fakeApi(me({ low: 45, high: 72, source: 'test' }))} mic={mic} postHog={SETTINGS} />);
+    const buttons = await screen.findAllByRole('button', { name: /^No preview of / });
+    fireEvent.click(buttons[0]!);
+    await act(async () => {});
+    expect(rowPlays()).toHaveLength(0);
+  });
+});
+

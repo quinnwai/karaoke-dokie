@@ -9,7 +9,7 @@ import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
 import { detectBrowser } from '../lib/client/browser';
 import { createTracker, flushWhenHidden, loadAnonId, sendEvents, type Tracker } from '../lib/client/events';
 import { flowReducer, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
-import { eventsFor } from '../lib/client/funnel';
+import { eventsFor, rowPlayEvent } from '../lib/client/funnel';
 import { browserMic, classifyMicError, MicError, type Mic, type MicRecorder } from '../lib/client/mic';
 import { createPostHogSink } from '../lib/client/posthog';
 import {
@@ -27,6 +27,7 @@ import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';
 import { MicStep } from './MicStep';
 import { PickSongs } from './PickSongs';
+import { listenForRowPlay } from './PreviewButton';
 import { Results } from './Results';
 import { SongDetail } from './SongDetail';
 import { Tv } from './Tv';
@@ -84,6 +85,15 @@ export function KaraokeApp({
   const [posthog] = useState(() => (track || !postHog ? null : createPostHogSink(postHog, loadAnonId())));
   const [tracker] = useState(() => track ?? createTracker({ anonId: loadAnonId(), send: sendEvents, mirror: posthog ?? undefined }));
   useEffect(() => (typeof window === 'undefined' ? undefined : flushWhenHidden(tracker)), [tracker]);
+  // The page's one preview player (QWW-48) tells the event log when a preview starts playing (QWW-51).
+  useEffect(
+    () =>
+      listenForRowPlay((trackId, position) => {
+        const e = rowPlayEvent(trackId, position);
+        tracker.track(e.name, e.props);
+      }),
+    [tracker],
+  );
   const stateRef = useRef<FlowState>(state);
   useEffect(() => {
     stateRef.current = state;

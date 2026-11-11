@@ -10,15 +10,19 @@ export const EVENT = {
   /** The title screen is on screen. */
   titleView: 'title_view',
 
-  // The mic permission flow (QWW-50), in the order a tester meets it.
-  /** Our pre-prompt screen, before the browser's own prompt. */
+  // The mic permission flow (QWW-50), in the order a tester meets it. Their props are short labels from closed sets, never
+  // free text: `browser` ('ios-safari', 'android-chrome', 'other', ...), `via` ('prompt' when a tap asked, 'already'
+  // when the browser had said), `reason` (denied, dismissed, system, missing, busy or unsupported) and `app` (the
+  // in-app browser's name, or 'webview').
+  /** Our pre-prompt screen, before the browser's own prompt. Props: `browser`. */
   micPromptShown: 'mic_prompt_shown',
+  /** The microphone is on. Props: `via`, `browser`. */
   micGranted: 'mic_granted',
-  /** Props: `step` ('low' or 'high') where the test itself found no mic; the flow may add the reason. */
+  /** Any way the answer was no. Props: `reason`, `via`, `browser`. */
   micDenied: 'mic_denied',
-  /** The how-to-fix screen shown after a denied or dismissed prompt. */
+  /** The how-to-fix screen shown after a denied or dismissed prompt. Props: `reason`, `browser`. */
   micRecoveryShown: 'mic_recovery_shown',
-  /** An Instagram, Facebook, LinkedIn or similar in-app browser that hides the mic. */
+  /** An Instagram, Facebook, LinkedIn or similar in-app browser that hides the mic. Props: `app`, `browser`. */
   inappBrowserDetected: 'inapp_browser_detected',
 
   /** The lowest note was held and heard. Props: `midi`. */
@@ -34,7 +38,7 @@ export const EVENT = {
   /** An era was toggled, or Era was reset. Props: `era` (the one toggled, null for a reset), `on` (that era is picked now), `eras` (all picked, comma-separated), `off` (Era is reset, so every era counts). */
   eraChange: 'era_change',
 
-  /** The play button in a list row was pressed (QWW-48). Props: `position` (1-based place in the list). */
+  /** A row's preview started playing, from a tap on its play button (QWW-48): the first sound, not a pause or a resume. Props: `position` (1-based place in the list), and `songKey` for a catalogue song only. */
   rowPlay: 'row_play',
   /** A song's page was opened. Props: `position`, and `songKey` for a catalogue song only. */
   songOpen: 'song_open',
@@ -65,6 +69,11 @@ export const POSTHOG_PROPS: ReadonlySet<string> = new Set([
   'maybeCount',
   'libraryUnavailable',
   'shown',
+  // The mic step (QWW-50): short labels from closed sets, see EVENT.
+  'browser',
+  'via',
+  'reason',
+  'app',
   // The range test.
   'step',
   'midi',
