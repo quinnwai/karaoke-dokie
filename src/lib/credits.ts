@@ -50,9 +50,14 @@ export const CREDITS: Credit[] = [
     what: "An AI model that suggests Upbeat and Heartfelt labels from a song's artist, title and year, ahead of time. We show a mood only once its labels pass our accuracy check.",
   },
   {
-    name: 'Barlow Semi Condensed, by Jeremy Tribby',
-    url: 'https://github.com/jpt/barlow',
+    name: 'Inter, by Rasmus Andersson',
+    url: 'https://rsms.me/inter/',
     what: 'The typeface of the Setlist tuner (SIL Open Font License 1.1), served from this site, not from Google.',
+  },
+  {
+    name: 'Noto Sans JP, Google',
+    url: 'https://fonts.google.com/noto/specimen/Noto+Sans+JP',
+    what: 'The four katakana of the カラオケ sign on the Setlist tuner, a tiny subset of the typeface (SIL Open Font License 1.1), served from this site, not from Google.',
   },
   {
     name: 'Material Symbols, Google',
