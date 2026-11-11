@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Match } from '../../src/lib/contracts';
+import type { Match, SongRange } from '../../src/lib/contracts';
 import {
   checkNeverEmpty,
   checkPlay,
@@ -24,7 +24,10 @@ import {
   type SongFacts,
   verdict,
 } from '../../src/lib/eval/release';
-import { selectOnly } from '../../scripts/eval-release';
+import { loadHarnessCatalogue, selectOnly } from '../../scripts/eval-release';
+import { loadCatalogue } from '../../src/lib/server/catalogue';
+import { createMemoryStore } from '../../src/lib/server/memoryStore';
+import type { SongCanonical } from '../../src/lib/server/store';
 import { songKey } from '../../src/lib/songs/resolve';
 import { prepareSetlist } from '../../src/lib/songs/setlist';
 
@@ -97,6 +100,50 @@ describe('play (criterion 6)', () => {
     expect(checkPlay(input(ms), facts).pass).toBe(false);
     facts.set(ms[17]!.track.id, { playable: true });
     expect(checkPlay(input(ms), facts)).toMatchObject({ pass: true, value: '18/20' });
+  });
+});
+
+describe('the catalogue the harness grades (QWW-49)', () => {
+  const stored = (artist: string, title: string) => {
+    const range: SongRange = { low: 55, high: 67, tessitura: 61, source: 'note-file', confidence: 'high', fastLyrics: false };
+    return {
+      key: `${artist}|${title}`.toLowerCase(),
+      artist,
+      title,
+      range,
+      log: { trackId: '', title, artist, outcome: range.source, reason: 'Measured.', at: '2026-11-11T00:00:00.000Z' },
+    };
+  };
+  /** A record as the title build writes it: the clean title to show, for a row that still has the title it had then. */
+  const folded = (row: ReturnType<typeof stored>, intoKey: string, title: string): SongCanonical => ({
+    key: row.key,
+    canonicalKey: intoKey,
+    title,
+    artist: row.artist,
+    method: 'titles-v1',
+    reason: row.key === intoKey ? 'same' : 'folded',
+    sourceTitle: row.title,
+    sourceArtist: row.artist,
+  });
+
+  it('is the list the app serves: one row per song, with its clean title, not the rows as stored', async () => {
+    const store = createMemoryStore();
+    const rows = [stored('Aaliyah', "I Don't Wanna"), stored('Aaliyah', 'I Don’t Wanna'), stored('10cc', 'Dreadlock Holiday (Album Version)'), stored('Toto', 'Africa')];
+    for (const r of rows) await store.putSongRange(r.key, { range: r.range, log: r.log });
+    await store.putSongPopularity([
+      { key: rows[0]!.key, karaokeViews: 1_000, source: 'test' },
+      { key: rows[1]!.key, karaokeViews: 40_000_000, source: 'test' },
+    ]);
+    await store.putSongCanonical([
+      folded(rows[0]!, rows[1]!.key, 'I Don’t Wanna'), // the same song under another spelling: folded into the more popular row
+      folded(rows[1]!, rows[1]!.key, 'I Don’t Wanna'),
+      folded(rows[2]!, rows[2]!.key, 'Dreadlock Holiday'), // the version tag is gone
+    ]);
+
+    const loaded = await loadHarnessCatalogue(store);
+    expect(loaded.map((m) => `${m.artist} - ${m.title}`).sort()).toEqual(['10cc - Dreadlock Holiday', 'Aaliyah - I Don’t Wanna', 'Toto - Africa']);
+    // The harness used to read the rows as stored, which is four, with the tag, and a song twice.
+    expect(await loadCatalogue(store)).toHaveLength(4);
   });
 });
 

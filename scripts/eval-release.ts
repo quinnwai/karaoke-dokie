@@ -123,6 +123,15 @@ async function deezerPlayable(id: number): Promise<boolean | 'error'> {
   return 'error';
 }
 
+/**
+ * The catalogue as the app serves it (wiring.ts): one row per song with its clean title (QWW-49, `canonical`), so the harness
+ * grades the list a logged-out singer sees and not the rows as stored. Titles and the tags on them (criterion 4) and the songs
+ * in a top 20 (criteria 6 and 9) would differ otherwise. A mapping that cannot be read gives the titles as stored, and `degraded`.
+ */
+export function loadHarnessCatalogue(store: Parameters<typeof loadCatalogue>[0]) {
+  return loadCatalogue(store, undefined, { canonical: true });
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -143,7 +152,7 @@ async function main() {
   const store = createPostgresStore(query, { autoMigrate: false });
 
   const [entries, deezer, billboardCsv] = await Promise.all([
-    loadCatalogue(store),
+    loadHarnessCatalogue(store),
     store.listSongDeezer(),
     readFile(new URL('../data/billboard-year-end.csv', import.meta.url), 'utf8'),
   ]);
@@ -169,7 +178,7 @@ async function main() {
   }
 
   const meta = [
-    `Database: ${db} (${entries.length} catalogue songs), code: this checkout, logged out, duets and moods off.`,
+    `Database: ${db} (${entries.length} catalogue songs, ${entries.degraded ? 'titles as stored: the canonical mapping could not be read' : 'one row per song with its clean title, as the app serves it'}), code: this checkout, logged out, duets and moods off.`,
     'Ranges: ' + TEST_RANGES.map((t) => t.label).join('; ') + '.',
   ];
   const checks: Check[] = [];
