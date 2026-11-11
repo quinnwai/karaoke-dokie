@@ -13,6 +13,7 @@ import {
   judgeList,
   judgeSongs,
   parseJudgeReply,
+  shuffled,
   tempoLists,
   TEST_RANGES,
   toMarkdown,
@@ -21,9 +22,12 @@ import {
   type SongFacts,
   type TestRange,
   verdict,
+  VIEWS,
 } from '../../src/lib/eval/release';
 import { selectOnly } from '../../scripts/eval-release';
+import { setlistFor } from '../../src/lib/server/setlistService';
 import { prepareSetlist } from '../../src/lib/songs/setlist';
+import { DEFAULT_OFF, DEFAULTS } from '../../src/lib/songs/setlistConfig';
 import { songKey } from '../../src/lib/songs/resolve';
 
 const range = TEST_RANGES[0]!;
@@ -72,6 +76,32 @@ describe('titles (criterion 4)', () => {
 
   it('passes a clean top 50', () => {
     expect(checkTitles(input(list(60))).pass).toBe(true);
+  });
+
+  it('counts a title with a curly apostrophe and one with a straight one as the same song', () => {
+    const ms = [song(0, { artist: 'Ricky Martin', title: 'Livin’ la vida loca' }), song(1, { artist: 'Ricky Martin', title: "Livin' La Vida Loca" })];
+    expect(checkTitles(input(ms)).value).toBe('0 version, 1 duplicate');
+  });
+});
+
+describe('the lists are the tuner engine’s (POST /api/setlist)', () => {
+  // Labels and ranges vary, so every gear moves the order.
+  const songs = list(300).map((m, i): Match => ({ ...m, difficulty: (['easy', 'medium', 'hard'] as const)[i % 3]!, range: { ...m.range, low: 44 + (i % 17), high: 56 + (i % 17) } }));
+  const t = input(songs);
+  const base = { matches: songs, logs: new Map(), prepared: t.prepared };
+  const route = (req: Omit<Parameters<typeof setlistFor>[2], 'range' | 'limit'>) =>
+    setlistFor(base, null, { ...req, range: { low: range.range.low, high: range.range.high }, limit: 200 }).songs.map((s) => s.match.track.id);
+  const ids = (ms: Match[]) => ms.slice(0, 200).map((m) => m.track.id);
+  const { eras: _eras, ...gears } = DEFAULTS;
+
+  it('ranks the first list as the route does for the tuner as it opens', () => {
+    expect(ids(VIEWS.default(t.prepared))).toEqual(route({ gears, off: [...DEFAULT_OFF], eras: [] }));
+  });
+
+  it('ranks a tempo end as the route does with Tempo alone and one era picked', () => {
+    const off = ['difficulty', 'history', 'popularity'] as const;
+    expect(ids(VIEWS.eraTempo(t.prepared, 's80', 'slow'))).toEqual(route({ gears: { ...gears, tempo: 0 }, off: [...off], eras: ['s80'] }));
+    expect(ids(VIEWS.eraTempo(t.prepared, null, 'upbeat'))).toEqual(route({ gears: { ...gears, tempo: 100 }, off: [...off, 'era'], eras: [] }));
   });
 });
 
@@ -162,9 +192,28 @@ describe('tempo judge (criterion 2)', () => {
     expect(judgeList(l, labels([18, 19]))).toMatchObject({ counted: 18, pass: true });
     expect(judgeList(l, labels([0, 1]))).toMatchObject({ counted: 18, pass: true });
     expect(judgeList(l, labels([17, 18, 19]))).toMatchObject({ counted: 17, pass: false });
-    expect(judgeList(l, labels([0, 1, 2]))).toMatchObject({ counted: 17, pass: false });
+    expect(judgeList(l, labels([0, 1, 2]))).toMatchObject({ counted: 17, pass: false, missed: ['Artist 0 - Song 0 (mid, slow, mid)', 'Artist 1 - Song 1 (mid, slow, mid)', 'Artist 2 - Song 2 (mid, slow, mid)'] });
     const results = [judgeList(l, labels([])), judgeList({ ...l, end: 'upbeat' }, labels([]))];
-    expect(checkTempo(range.id, results)).toMatchObject({ pass: false, value: '1/2 era-ends', notes: ['any era upbeat: 0/20 count'] });
+    const c = checkTempo(range.id, results);
+    expect(c).toMatchObject({ pass: false, value: '1/2 era-ends' });
+    expect(c.notes).toHaveLength(1);
+    expect(c.notes[0]).toMatch(/^any era upbeat: 0\/20 count\. Not counted: Artist 0 - Song 0 \(slow, mid, slow\); /);
+  });
+
+  it('grades only the top 20 of a longer list', () => {
+    const songs = list(25);
+    const l = { range: range.id, era: null, end: 'slow' as const, songs };
+    expect(judgeList(l, votes(songs, ['slow', 'slow', 'slow'], (_, i) => (i < 3 ? ['mid', 'mid', 'mid'] : undefined)))).toMatchObject({ counted: 17, pass: false });
+  });
+
+  it('sends each run the songs in its own order, not sorted by stored tempo', () => {
+    const songs = judgeSongs(tempoLists(input(list(300))));
+    const runs = [1, 2, 3].map((seed) => shuffled(songs, seed));
+    for (const order of runs) expect([...order].sort((a, b) => a.key.localeCompare(b.key))).toEqual([...songs].sort((a, b) => a.key.localeCompare(b.key)));
+    expect(runs[0]).toEqual(shuffled(songs, 1));
+    expect(runs[0]).not.toEqual(songs);
+    expect(runs[0]).not.toEqual(runs[1]);
+    expect(runs[1]).not.toEqual(runs[2]);
   });
 
   it('grades an era whose pool is thin like the rest: it fails unless 18 songs count', () => {
@@ -186,9 +235,10 @@ describe('tempo judge (criterion 2)', () => {
     const c = checkTempo(range.id, results);
     expect(c.pass).toBe(false);
     expect(c.value).toMatch(/\/16 era-ends$/);
-    expect(c.notes).toContain('’20s slow: 6/20 count');
-    expect(c.notes).toContain('’90s slow: 12/20 count (only 12 songs in the pool)');
-    expect(c.notes).toContain('’70s slow: 0/20 count (only 0 songs in the pool)');
+    const note = (start: string) => c.notes.filter((n) => n.startsWith(start));
+    expect(note('’20s slow: 6/20 count. Not counted: ')).toHaveLength(1);
+    expect(note('’90s slow: 12/20 count (only 12 songs in the pool)')).toEqual(['’90s slow: 12/20 count (only 12 songs in the pool)']);
+    expect(note('’70s slow: 0/20 count (only 0 songs in the pool)')).toHaveLength(1);
   });
 
   it('sends each song to the judge once, with artist, title and year only', () => {

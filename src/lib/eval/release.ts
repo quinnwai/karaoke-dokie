@@ -115,8 +115,11 @@ export function isVersionTitle(title: string): boolean {
   return tags.some((t) => VERSION_WORDS.test(t));
 }
 
+/** Curly apostrophes as straight ones: "Livin’ la vida loca" and "Livin' La Vida Loca" are one song. */
+const straight = (s: string) => s.replace(/[‘’]/g, "'");
+
 /** The same song twice: same lead artist and the same title once version tags are gone. */
-export const sameSongKey = (m: Match) => songKey(leadArtist(m.track.artist), m.track.title);
+export const sameSongKey = (m: Match) => songKey(straight(leadArtist(m.track.artist)), straight(m.track.title));
 
 // ---------- 2. tempo judge ----------
 
@@ -159,6 +162,27 @@ export const JUDGE_SCHEMA = {
 
 export function judgePrompt(songs: JudgeSong[]): string {
   return songs.map((s) => `${s.id}. ${s.artist} - ${s.title}${s.year ? ` (${s.year})` : ''}`).join('\n');
+}
+
+/**
+ * `items` in a fixed pseudo-random order, one order per seed (mulberry32). The tempo lists are sorted by stored
+ * tempo, so sending their songs in list order would tell the judge which ones we think are slow. Each run gets
+ * its own seed, so no order is shared by the runs that vote.
+ */
+export function shuffled<T>(items: T[], seed: number): T[] {
+  let a = seed >>> 0;
+  const rand = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [copy[i], copy[j]] = [copy[j]!, copy[i]!];
+  }
+  return copy;
 }
 
 /** The labels in one reply, by id; ids the reply skipped or mangled are left out (they count as unknown). */
@@ -306,8 +330,10 @@ export function tempoLists(t: RangeInput): TempoList[] {
 
 export interface TempoResult {
   list: TempoList;
-  /** The songs of the list that count (fitsEnd). */
+  /** The songs of the top END_TOP that count (fitsEnd). */
   counted: number;
+  /** The ones that do not, as "Artist - Title (the runs' labels)". */
+  missed: string[];
   pass: boolean;
 }
 
@@ -316,8 +342,14 @@ export interface TempoResult {
  * graded like the rest, so one whose list is short, or filled out with songs of the wrong feel, fails.
  */
 export function judgeList(list: TempoList, labels: Map<string, JudgeLabel[]>): TempoResult {
-  const counted = list.songs.filter((m) => fitsEnd(labels.get(key(m)) ?? [], list.end)).length;
-  return { list, counted, pass: counted >= END_PASS };
+  const missed: string[] = [];
+  let counted = 0;
+  for (const m of list.songs.slice(0, END_TOP)) {
+    const ls = labels.get(key(m)) ?? [];
+    if (fitsEnd(ls, list.end)) counted++;
+    else missed.push(`${m.track.artist} - ${m.track.title} (${ls.join(', ') || 'no labels'})`);
+  }
+  return { list, counted, missed, pass: counted >= END_PASS };
 }
 
 export function checkTempo(range: string, results: TempoResult[]): Check {
@@ -330,7 +362,9 @@ export function checkTempo(range: string, results: TempoResult[]): Check {
     value: `${mine.length - failed.length}/${mine.length} era-ends`,
     want: 'all',
     notes: failed.map(
-      (r) => `${eraName(r.list.era)} ${r.list.end}: ${r.counted}/${END_TOP} count${r.list.songs.length < END_TOP ? ` (only ${r.list.songs.length} songs in the pool)` : ''}`,
+      (r) =>
+        `${eraName(r.list.era)} ${r.list.end}: ${r.counted}/${END_TOP} count${r.list.songs.length < END_TOP ? ` (only ${r.list.songs.length} songs in the pool)` : ''}` +
+        (r.missed.length ? `. Not counted: ${r.missed.join('; ')}` : ''),
     ),
   };
 }
@@ -437,7 +471,7 @@ export function toMarkdown(r: Report): string {
     lines.push(`### Tempo hand check: ${label}, ${eraName(h.era)}`, '');
     for (const { end, songs } of h.ends) {
       lines.push(`**${end === 'slow' ? 'Slow' : 'Upbeat'} end, top ${songs.length}: ${songs.filter((s) => s.counts).length} count**`, '');
-      lines.push(`| # | Song | Year | Stored bpm | Judge (${JUDGE_RUNS} runs) | Counts |`, '|---|---|---|---|---|---|');
+      lines.push(`| # | Song | Year | Effective bpm | Judge (${JUDGE_RUNS} runs) | Counts |`, '|---|---|---|---|---|---|');
       songs.forEach((s, i) =>
         lines.push(`| ${i + 1} | ${s.artist} - ${s.title} | ${s.year ?? ''} | ${s.bpm === undefined ? '' : Math.round(s.bpm)} | ${s.labels.join(', ')} | ${s.counts ? 'yes' : '**no**'} |`),
       );

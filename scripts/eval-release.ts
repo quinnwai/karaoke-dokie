@@ -36,6 +36,7 @@ import {
   judgePrompt,
   judgeSongs,
   parseJudgeReply,
+  shuffled,
   TEST_RANGES,
   tempoLists,
   toMarkdown,
@@ -191,10 +192,14 @@ async function main() {
     const ask = PROVIDERS[provider].create({ apiKey: keyOf(provider)! });
     const lists = inputs.flatMap(tempoLists);
     const songs = judgeSongs(lists);
-    const batches: { key: string; song: { artist: string; title: string; year?: number } }[][] = [];
-    for (let i = 0; i < songs.length; i += JUDGE_BATCH) batches.push(songs.slice(i, i + JUDGE_BATCH));
-    const oneRun = () =>
-      pool(batches, PARALLEL, async (batch) => {
+    // Ids the replies left out or mangled: they count as unknown, so this says how much the judge failed to answer.
+    let missing = 0;
+    // Each run sees the songs in its own shuffled order, never the lists' order (sorted by stored tempo).
+    const oneRun = (run: number) => {
+      const order = shuffled(songs, run + 1);
+      const batches: (typeof songs)[] = [];
+      for (let i = 0; i < order.length; i += JUDGE_BATCH) batches.push(order.slice(i, i + JUDGE_BATCH));
+      return pool(batches, PARALLEL, async (batch) => {
         const res = await ask({
           model,
           system: JUDGE_SYSTEM,
@@ -203,14 +208,18 @@ async function main() {
           schema: JUDGE_SCHEMA,
         });
         const got = parseJudgeReply(res.text);
+        missing += batch.length - batch.filter((_, id) => got.has(id)).length;
         return batch.map((b, id): [string, JudgeLabel] => [b.key, got.get(id) ?? 'unknown']);
       }).then((parts) => new Map(parts.flat()));
-    const runMaps = await Promise.all(Array.from({ length: JUDGE_RUNS }, oneRun));
+    };
+    const runMaps = await Promise.all(Array.from({ length: JUDGE_RUNS }, (_, run) => oneRun(run)));
     const labels = new Map(songs.map((s) => [s.key, runMaps.map((r) => r.get(s.key) ?? 'unknown')]));
     const results = lists.map((l) => judgeList(l, labels));
     for (const t of TEST_RANGES) checks.push(checkTempo(t.id, results));
     const split = [...labels.values()].filter((l) => new Set(l).size > 1).length;
-    meta.push(`Tempo judge: ${provider} ${model}, ${JUDGE_RUNS} runs in parallel over ${songs.length} songs; the runs split on ${split} of them.`);
+    meta.push(
+      `Tempo judge: ${provider} ${model}, ${JUDGE_RUNS} runs in parallel over ${songs.length} songs, each run in its own shuffled order; the runs split on ${split} songs, and ${missing} of ${JUDGE_RUNS * songs.length} answers were missing from the replies (counted as unknown).`,
+    );
     hand = handCheck(lists, labels);
   } else meta.push('Tempo: skipped (--skip-judge).');
 
@@ -221,7 +230,7 @@ async function main() {
     handCheck: hand,
     meta,
   };
-  report.meta.push('Not checked by the harness: 1b (Quinn-Wai recognises 8 of the top 10, list below), 5 (octave), 7 (design), 8 (funnel). Criterion 4 flags every variant, including one that is the more popular version.');
+  report.meta.push('Not checked by the harness: 1b (Quinn-Wai recognises 8 of the top 10, list below), 2b (Quinn-Wai hand-checks the tempo lists below), 5 (octave), 7 (design), 8 (funnel). Criterion 4 flags every variant, including one that is the more popular version.');
   const md = toMarkdown(report);
   await mkdir(values.out!, { recursive: true });
   const stem = join(values.out!, `release-${db}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
