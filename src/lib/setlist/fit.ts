@@ -40,14 +40,21 @@ export function expandedFit({ list, rack, overflow = 0 }: { list: number; rack: 
   return { listHeight, rows, canExpand: listHeight >= 0, opensMini: rows < MIN_OPENING_ROWS };
 }
 
-/** How close the centred カラオケ sign may come to redo or the Spotify button before it goes (QWW-57, R1). */
+/** How close the centred カラオケ sign must stay to redo and to the Spotify button (QWW-57, R1). */
 export const SIGN_GAP = 8;
+/** The sign is 16 px where there is room. Short of room it shrinks to 13 px, the size of the range and redo beside it, before it goes. */
+export const SIGN_MAX_SIZE = 16;
+export const SIGN_MIN_SIZE = 13;
 
 /**
- * The sign is centred on the header's own middle (R1), not in the room between its neighbours, so a long range or a narrow phone
- * can put it on top of redo. It then goes (before anything else shrinks): it is shown only when it keeps `gap` px clear of redo's
- * right edge and of the Spotify button's left edge. All three are page coordinates of the same row.
+ * The type size of the sign (QWW-57, R1): the largest, from SIGN_MAX_SIZE down to SIGN_MIN_SIZE px, at which it keeps `gap` px clear
+ * of redo's right edge and of the Spotify button's left edge; null when even SIGN_MIN_SIZE does not (then it goes). It is centred on
+ * the header's own `middle`, not in the room between its neighbours, so the room it has is twice the nearer neighbour's distance
+ * from the middle, less a gap each side. `sign` is its box at SIGN_MAX_SIZE; its width is proportional to its type size (the
+ * letter-spacing is in em). All of it is page coordinates of the same row.
  */
-export function signFits(sign: { left: number; right: number }, redoRight: number, spotifyLeft: number, gap: number = SIGN_GAP): boolean {
-  return sign.left - redoRight >= gap && spotifyLeft - sign.right >= gap;
+export function signSize(sign: { left: number; right: number }, middle: number, redoRight: number, spotifyLeft: number, gap: number = SIGN_GAP): number | null {
+  const room = 2 * Math.min(middle - redoRight, spotifyLeft - middle) - 2 * gap;
+  const size = (room * SIGN_MAX_SIZE) / (sign.right - sign.left);
+  return size >= SIGN_MIN_SIZE ? Math.min(size, SIGN_MAX_SIZE) : null;
 }

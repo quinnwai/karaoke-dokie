@@ -166,8 +166,9 @@
 
 /* The sign is centred on the header's own middle, not in the room between redo and the Spotify button (QWW-57, R1: the
    room's middle sits right of the screen's). It is out of the row's flow, so it does not push anything, and a long range or a
-   narrow phone can run it into redo: useSignFit hides it (`data-hidden`, still laid out so it can be measured) when it would
-   come within 8 px of redo or the Spotify button. */
+   narrow phone can run it into redo: useSignFit shrinks it (an inline font-size, 16 px down to 13 px) to keep 8 px clear of redo
+   and the Spotify button, and hides it (`data-hidden`, still laid out so it can be measured) only when even 13 px does not fit.
+   The 16 px here is what it is before that runs, and what it is measured at. */
 .sign {
   position: absolute;
   left: 50%;

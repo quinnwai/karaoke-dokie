@@ -1,5 +1,6 @@
 // Review items R1, R2, R4 and R9 of QWW-57 (Quinn-Wai's review of the 6A preview, 11 Nov), one check each as the ticket asks:
-//   R1  the カラオケ sign is centred on the header's true middle, and goes when it would come within 8 px of redo or the logo
+//   R1  the カラオケ sign is centred on the header's true middle, shrinks from 16 px to 13 px to keep 8 px clear of redo and the logo,
+//       and goes only when even 13 px does not fit
 //   R2  the TV is phone-shaped on every screen: 390 px wide, min(844 px, window - 32 px) tall, centred, on every step
 //   R4  "Find on Spotify" and "Open in Spotify" on the song page end with the external-link icon
 //   R9  hovering or focusing the range notes and redo turns them pink
@@ -10,7 +11,7 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { launchWithMic, writeTone } from './fakeMic';
-import { css, open, openButton, rgb, rows } from '../helpers/tunerE2e';
+import { css, ME, open, openButton, rgb, rows } from '../helpers/tunerE2e';
 
 const SCREENS = path.resolve('test-results/screens');
 test.beforeAll(() => mkdirSync(SCREENS, { recursive: true }));
@@ -22,12 +23,18 @@ const PINK_TEXT = rgb('#FF6FB1');
 const DESKTOP = { hasTouch: false, isMobile: false } as const;
 
 // ============================================================================================================
-// R1: the sign is centred on the header
+// R1: the sign is centred on the header, shrinks to keep 8 px clear of redo and the logo, and goes only when 13 px does not fit
 // ============================================================================================================
 
-/** The header row's parts, in page pixels; `sign` is null while it is hidden (`visibility: hidden`). */
+/**
+ * The header row's parts, in page pixels. `signShown` is false while the sign is hidden (`visibility: hidden`, so it is still
+ * measured), and `size` is its font size in px. The sign is measured again when the fonts arrive (its glyphs and Inter both change
+ * widths), so this waits for them and for the frame that measure lands in.
+ */
 const headerBox = (page: Page) =>
-  page.evaluate(() => {
+  page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const bar = document.querySelector('#app header > div') as HTMLElement;
     const box = (e: Element | null) => {
       if (!e) return null;
@@ -41,45 +48,123 @@ const headerBox = (page: Page) =>
       redo: box(bar.querySelector('button[aria-label="Redo the singing test"]')),
       sign: box(sign),
       signShown: getComputedStyle(sign).visibility !== 'hidden' && getComputedStyle(sign).display !== 'none',
+      size: Number.parseFloat(getComputedStyle(sign).fontSize),
       spotify: box(bar.querySelector('button[aria-label="Connect to Spotify"], button[aria-label="Spotify account"]')),
     };
   });
+type Header = Awaited<ReturnType<typeof headerBox>>;
 
-for (const width of [390, 412, 430]) {
-  test(`R1. at ${width} px the sign's centre is the header's centre (within 1 px), and it is clear of redo and the logo by 8 px or more`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 844 });
-    await open(page, { range: { low: 41, high: 65 } }); // F2 to F4
-    const h = await headerBox(page);
-    expect(h.signShown).toBe(true);
-    expect(Math.abs(h.sign!.cx - h.bar!.cx)).toBeLessThanOrEqual(1);
-    expect(h.sign!.x - h.redo!.r).toBeGreaterThanOrEqual(8);
-    expect(h.spotify!.x - h.sign!.r).toBeGreaterThanOrEqual(8);
-    // It is the middle of the screen too: the header is as wide as the tuner, which is symmetric in the TV.
-    const screenCentre = await page.evaluate(() => {
-      const b = document.getElementById('app')!.getBoundingClientRect();
-      return b.x + b.width / 2;
-    });
-    expect(Math.abs(h.sign!.cx - screenCentre)).toBeLessThanOrEqual(1);
-  });
+/** Opens the tuner with this range: signed out, kept on the device; signed in, saved on the account (a page route answers GET /api/me with it, which wins over the shared mock's). */
+async function openWith(page: Page, range: { low: number; high: number }, signedIn: boolean) {
+  if (signedIn) {
+    await page.route('**/api/me', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...ME, range: { ...ME.range, ...range } }) }),
+    );
+  }
+  await open(page, { loggedIn: signedIn, range });
+  // The far-right logo is the other state's button, so a route that did not take would not pass for signed in.
+  await expect(page.locator('#app header').getByRole('button', { name: signedIn ? 'Spotify account' : 'Connect to Spotify', exact: true })).toBeVisible();
 }
 
-test('R1. at 390 px with F2 to F4 the sign shows, and with a range from the other end of the scale too', async ({ page }) => {
-  await open(page, { range: { low: 41, high: 65 } });
-  expect((await headerBox(page)).signShown).toBe(true);
-  expect(await page.locator('#app header').textContent()).toContain('F2');
-});
+/** The sign's font size and visibility over the next 12 frames, as the computed style says: a sign that flip-flops between two answers shows up as more than one. */
+const sampled = (page: Page) =>
+  page.evaluate(async () => {
+    const sign = document.querySelector('#app header [data-sign]') as HTMLElement;
+    const seen = new Set<string>();
+    for (let i = 0; i < 12; i++) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const style = getComputedStyle(sign);
+      seen.add(`${style.fontSize} ${style.visibility}`);
+    }
+    return [...seen];
+  });
 
-test('R1. at 360 px with C#2 to G#5 the sign is hidden and nothing overlaps', async ({ page }) => {
-  await page.setViewportSize({ width: 360, height: 740 });
-  await open(page, { range: { low: 37, high: 80 } }); // C#2 to G#5
-  await expect(page.locator('#app header')).toContainText('C#2');
-  const h = await headerBox(page);
-  expect(h.signShown, 'the long range leaves the centred sign no room at 360 px').toBe(false);
-  expect(h.range!.r).toBeLessThanOrEqual(h.redo!.x);
-  expect(h.redo!.r).toBeLessThanOrEqual(h.spotify!.x);
-  expect(h.spotify!.r).toBeLessThanOrEqual(h.bar!.r + 0.5);
-  expect(h.bar!.h).toBe(28);
-});
+const WHO = [
+  [false, 'signed out'],
+  [true, 'signed in'],
+] as const;
+
+/** The sign is shown, its centre is the header's centre (within 1 px), and it keeps 8 px clear of redo and of the logo. */
+function expectCentredAndClear(h: Header) {
+  expect(h.signShown).toBe(true);
+  expect(Math.abs(h.sign!.cx - h.bar!.cx)).toBeLessThanOrEqual(1);
+  expect(h.sign!.x - h.redo!.r).toBeGreaterThanOrEqual(8);
+  expect(h.spotify!.x - h.sign!.r).toBeGreaterThanOrEqual(8);
+}
+
+for (const [signedIn, who] of WHO) {
+  for (const width of [390, 412, 430]) {
+    test(`R1. ${who}, at ${width} px the sign is 16 px, its centre is the header's centre (within 1 px), and it is clear of redo and the logo by 8 px or more`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await openWith(page, { low: 41, high: 65 }, signedIn); // F2 to F4
+      const h = await headerBox(page);
+      expectCentredAndClear(h);
+      expect(h.size, 'where there is room it is not made smaller').toBe(16);
+      // It is the middle of the screen too: the header is as wide as the tuner, which is symmetric in the TV.
+      const screenCentre = await page.evaluate(() => {
+        const b = document.getElementById('app')!.getBoundingClientRect();
+        return b.x + b.width / 2;
+      });
+      expect(Math.abs(h.sign!.cx - screenCentre)).toBeLessThanOrEqual(1);
+    });
+  }
+}
+
+// A range from each end of the scale at 390 px (the test that was here checked only F2 to F4): the sign shows at full size with either.
+for (const [signedIn, who] of WHO) {
+  for (const { note, low, high } of [
+    { note: 'F2 to F4', low: 41, high: 65 }, // the low end
+    { note: 'C4 to C6', low: 60, high: 84 }, // the high end
+  ]) {
+    test(`R1. ${who}, at 390 px with ${note} the sign shows at full size, centred`, async ({ page }) => {
+      await openWith(page, { low, high }, signedIn);
+      await expect(page.getByRole('group', { name: `Your range ${note}` })).toBeVisible();
+      const h = await headerBox(page);
+      expectCentredAndClear(h);
+      expect(h.size).toBe(16);
+    });
+  }
+}
+
+// Where the sign used to go (the adversarial review of #38: at 360 px even the default range hid it, at 390 px any range with sharps at
+// both ends did), it now shrinks to the largest size, 13 px at the least, that keeps its 8 px gaps.
+for (const [signedIn, who] of WHO) {
+  for (const { width, note, low, high } of [
+    { width: 390, note: 'C#3 to C#5', low: 49, high: 73 },
+    { width: 360, note: 'A2 to C5', low: 45, high: 72 }, // the default range
+  ]) {
+    test(`R1. ${who}, at ${width} px with ${note} the sign shrinks to keep 8 px clear of redo, and is centred`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 740 });
+      await openWith(page, { low, high }, signedIn);
+      await expect(page.getByRole('group', { name: `Your range ${note}` })).toBeVisible();
+      const h = await headerBox(page);
+      expectCentredAndClear(h);
+      expect(h.size, 'smaller than full size').toBeLessThan(16);
+      expect(h.size, 'and not smaller than 13 px').toBeGreaterThanOrEqual(13);
+      // The largest size that fits: redo, the nearer neighbour, is within half a px of the gap (a tenth of a px of type is 0.4 px of sign).
+      expect(h.sign!.x - h.redo!.r).toBeLessThan(8.5);
+    });
+  }
+}
+
+for (const [signedIn, who] of WHO) {
+  test(`R1. ${who}, at 360 px with C#2 to G#5 the sign is hidden, left at 16 px, and nothing overlaps`, async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await openWith(page, { low: 37, high: 80 }, signedIn); // C#2 to G#5
+    await expect(page.getByRole('group', { name: 'Your range C#2 to G#5' })).toBeVisible();
+    const h = await headerBox(page);
+    expect(h.signShown, 'the long range leaves even a 13 px sign no room at 360 px').toBe(false);
+    // Hidden because 13 px does not fit, not because the rule gave up early. The room a centred sign has is twice the nearer neighbour's
+    // distance from the middle, less 8 px each side; the hidden sign is still laid out, at 16 px, so its width at 13 px is known.
+    const room = 2 * Math.min(h.bar!.cx - h.redo!.r, h.spotify!.x - h.bar!.cx) - 2 * 8;
+    expect(room).toBeLessThan((h.sign!.w * 13) / 16);
+    expect(h.size, 'a hidden sign is left at full size, not at a stale small one').toBe(16);
+    expect(h.range!.r).toBeLessThanOrEqual(h.redo!.x);
+    expect(h.redo!.r).toBeLessThanOrEqual(h.spotify!.x);
+    expect(h.spotify!.r).toBeLessThanOrEqual(h.bar!.r + 0.5);
+    expect(h.bar!.h).toBe(28);
+  });
+}
 
 test('R1. the sign comes back when the room does, and goes again when it does not (a phone turned)', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
@@ -87,8 +172,27 @@ test('R1. the sign comes back when the room does, and goes again when it does no
   expect((await headerBox(page)).signShown).toBe(false);
   await page.setViewportSize({ width: 430, height: 740 });
   await expect.poll(async () => (await headerBox(page)).signShown).toBe(true);
+  expect((await headerBox(page)).size, 'back at full size, not at a size left over from before').toBe(16);
   await page.setViewportSize({ width: 360, height: 740 });
   await expect.poll(async () => (await headerBox(page)).signShown).toBe(false);
+});
+
+test('R1. the sign grows and shrinks with the room: 16 px on a bigger phone, and the same size again when the phone is back', async ({ page }) => {
+  await open(page, { range: { low: 49, high: 73 } }); // C#3 to C#5, 390 px
+  const shrunk = (await headerBox(page)).size;
+  expect(shrunk).toBeLessThan(16);
+  expect(await sampled(page), 'it settles on one size').toHaveLength(1);
+  await page.setViewportSize({ width: 430, height: 844 });
+  await expect.poll(async () => (await headerBox(page)).size).toBe(16);
+  expect(await sampled(page)).toHaveLength(1);
+  await page.setViewportSize({ width: 360, height: 844 });
+  await expect.poll(async () => (await headerBox(page)).signShown).toBe(false);
+  expect((await headerBox(page)).size, 'hidden at 16 px, not at the last small size').toBe(16);
+  expect(await sampled(page)).toHaveLength(1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await headerBox(page)).signShown).toBe(true);
+  expect((await headerBox(page)).size, 'sized from scratch, so the same as the first time').toBe(shrunk);
+  expect(await sampled(page)).toHaveLength(1);
 });
 
 test.describe('R1 on a desktop', () => {
@@ -98,6 +202,7 @@ test.describe('R1 on a desktop', () => {
     await open(page, { range: { low: 41, high: 65 } });
     const h = await headerBox(page);
     expect(h.signShown).toBe(true);
+    expect(h.size).toBe(16);
     expect(Math.abs(h.sign!.cx - h.bar!.cx)).toBeLessThanOrEqual(1);
     // And the frame's own middle is the window's middle.
     expect(Math.abs(h.sign!.cx - 1280 / 2)).toBeLessThanOrEqual(1);

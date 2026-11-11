@@ -911,9 +911,15 @@ test('turning a phone on its side while the sheet is expanded keeps it from bein
 
 // ---- the header (6A §3.4; QWW-57, decisions 4 and the hit areas) ----
 
-/** The header row's parts, in page pixels; the sign is null while it is hidden (R1: `visibility: hidden`, so it can be measured again). */
+/**
+ * The header row's parts, in page pixels; the sign is null while it is hidden (R1: `visibility: hidden`, so it can be measured again), and
+ * `signSize` is its font size in px (16, or less when it shrinks to keep 8 px clear). The sign is measured again when the fonts arrive, so
+ * this waits for them and for the frame that measure lands in.
+ */
 const headerBox = (page: Page) =>
-  page.evaluate(() => {
+  page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const bar = document.querySelector('#app header > div') as HTMLElement;
     const box = (e: Element | null) => {
       if (!e) return null;
@@ -928,6 +934,7 @@ const headerBox = (page: Page) =>
       range: box(bar.querySelector('[role="group"]')),
       redo: box(bar.querySelector('button[aria-label="Redo the singing test"]')),
       sign: signStyle.display === 'none' || signStyle.visibility === 'hidden' ? null : box(sign),
+      signSize: Number.parseFloat(signStyle.fontSize),
       spotify: box(bar.querySelector('button[aria-label="Connect to Spotify"], button[aria-label="Spotify account"]')),
       heading: { ...box(heading)!, cut: heading.scrollWidth > heading.clientWidth, fontSize: getComputedStyle(heading).fontSize },
     };
@@ -969,8 +976,8 @@ test('the Spotify logo is at the far right of the row, and the カラオケ sign
   expect(h.sign!.r).toBeLessThanOrEqual(h.spotify!.x - 8);
 });
 
-test('when the row is too tight, the sign goes first: it is hidden once it would come within 8 px of redo or the logo, and nothing else shrinks', async ({ page }) => {
-  // The longest range, C#2 to G#5, on a 360 px phone: the sign at the row's middle would touch redo, so it is hidden.
+test('when the row is too tight, the sign gives way first: it shrinks to keep 8 px clear of redo and the logo, goes when even 13 px does not fit, and nothing else shrinks', async ({ page }) => {
+  // The longest range, C#2 to G#5, on a 360 px phone: the sign at the row's middle has no room even at 13 px, so it is hidden.
   await page.setViewportSize({ width: 360, height: 740 });
   await open(page, { range: { low: 37, high: 80 } });
   await expect.poll(async () => (await headerBox(page)).sign).toBeNull();
@@ -978,13 +985,25 @@ test('when the row is too tight, the sign goes first: it is hidden once it would
   expect(tight.bar!.h).toBe(28);
   expect(tight.range!.r).toBeLessThanOrEqual(tight.redo!.x);
   expect(tight.redo!.r).toBeLessThanOrEqual(tight.spotify!.x);
-  // Roomier again (a phone turned, a bigger phone): the sign is back, clear of both by 8 px, and redo, the range and the logo are what they were.
-  await page.setViewportSize({ width: 430, height: 740 });
+  // A little more room (390 px): the sign is back, smaller than 16 px, clear of both by 8 px.
+  await page.setViewportSize({ width: 390, height: 740 });
   await expect.poll(async () => (await headerBox(page)).sign !== null).toBe(true);
+  const snug = await headerBox(page);
+  expect(snug.signSize).toBeLessThan(16);
+  expect(snug.signSize).toBeGreaterThanOrEqual(13);
+  expect(snug.sign!.x - snug.redo!.r).toBeGreaterThanOrEqual(8);
+  expect(snug.spotify!.x - snug.sign!.r).toBeGreaterThanOrEqual(8);
+  // Roomier again (a phone turned, a bigger phone): the sign is back at full size, clear of both by 8 px.
+  await page.setViewportSize({ width: 430, height: 740 });
+  await expect.poll(async () => (await headerBox(page)).signSize).toBe(16);
   const roomy = await headerBox(page);
-  expect({ redo: roomy.redo!.w, range: roomy.range!.w, spotify: roomy.spotify!.w }).toEqual({ redo: tight.redo!.w, range: tight.range!.w, spotify: tight.spotify!.w });
+  expect(roomy.sign).not.toBeNull();
   expect(roomy.sign!.x - roomy.redo!.r).toBeGreaterThanOrEqual(8);
   expect(roomy.spotify!.x - roomy.sign!.r).toBeGreaterThanOrEqual(8);
+  // Through all three, redo, the range and the logo are what they were: only the sign gave way.
+  const widths = (h: typeof tight) => ({ redo: h.redo!.w, range: h.range!.w, spotify: h.spotify!.w });
+  expect(widths(snug)).toEqual(widths(tight));
+  expect(widths(roomy)).toEqual(widths(tight));
 });
 
 test('the range notes and redo look as they did and are 44 px tall to tap', async ({ page }) => {
@@ -1302,8 +1321,9 @@ test('32. no tab label has Japanese in it, and the カラオケ sign is decorati
   expect(await page.getByRole('heading', { name: 'Tune your setlist' }).count()).toBe(1);
 });
 
-// "Pre-’70s" is 43 px wide in Inter at 6A's 10.5 px and its button is 37 to 41 px wide on a 360 to 390 px phone, so the labels
-// are sized to fit (sheet.module.css): the largest size that does, 9 px at 360 and 6A's own 10.5 px from about 405 px up.
+// "Pre-’70s" is 40 px wide in Inter at 6A's 10.5 px and its button is 35 to 42 px wide (a 360 px phone to the desktop frame), so the
+// labels are sized to fit by the Era panel's width (sheet.module.css): the largest size that does, 9 px at 360 and 6A's own 10.5 px
+// from about 405 px up. The desktop frame is in tests/e2e/setlist-sheet-fit.spec.ts.
 test('the era labels fit their buttons without wrapping on every phone from 360 px, "Pre-’70s" included, as large as will fit', async ({ page }) => {
   await open(page); // 390x844 opens expanded, so the Era panel is on screen at every width below
   const sizes: number[] = [];
