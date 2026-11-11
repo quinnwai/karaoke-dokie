@@ -75,14 +75,14 @@ test('a refused sign-in says so under the range and under the list, and Cancel o
   await withRange(context, 39, 72);
   const page = await context.newPage();
   await page.goto('/?authError=spotify');
-  await expect(page.getByRole('status')).toHaveText('Couldn’t sign in to Spotify.');
+  await expect(page.getByRole('status')).toHaveText('Couldn’t sign in. Spotify sign-in is for invited testers only right now.');
   expect(new URL(page.url()).search).toBe('');
   await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(SCREENS, 'qww55-sign-in-refused-range-375px.png') });
 
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.locator('[data-row]').first()).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('Couldn’t sign in to Spotify.');
+  await expect(page.getByRole('status')).toHaveText('Couldn’t sign in. Spotify sign-in is for invited testers only right now.');
   // Still the plain list, with both ways to try again.
   await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(2);
   await expect(page.getByText('Couldn’t load songs.')).toHaveCount(0);

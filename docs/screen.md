@@ -80,7 +80,8 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
    results (step 7) is the one way to sign in.
    A sign-in that fails (Spotify says wait, one of the sign-in's Spotify calls fails, the sign-in cookie is gone,
    ...) is sent back by the callback as `/?authError=<reason>`. The range was kept for the round trip, so
-   it lands here: `?authError` is taken out of the address and one quiet line, "Couldn’t sign in to Spotify.",
+   it lands here: `?authError` is taken out of the address and one quiet line, "Couldn’t sign in. Spotify
+   sign-in is for invited testers only right now.",
    shows under the arrow, and again under the bar of the results the arrow leads to. `access_denied` is the
    singer pressing Cancel on Spotify's page, which is their answer, so nothing is said.
 7. **Results: the Setlist tuner** (QWW-46, the round 5 design, spec and reference in `docs/setlist-round5/`; reskinned in

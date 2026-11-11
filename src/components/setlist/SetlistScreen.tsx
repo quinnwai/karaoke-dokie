@@ -180,7 +180,7 @@ export function SetlistScreen(props: SetlistScreenProps) {
         )}
         {props.signInFailed && (
           <p className={listStyles.note} role="status">
-            Couldn’t sign in to Spotify.
+            Couldn’t sign in. Spotify sign-in is for invited testers only right now.
           </p>
         )}
 
@@ -223,6 +223,7 @@ export function SetlistScreen(props: SetlistScreenProps) {
             <button type="button" className={listStyles.connectLink} onClick={props.onConnect}>
               Connect to Spotify
             </button>
+            <p>Invited testers only for now.</p>
           </div>
         )}
         <a className={listStyles.credits} href="/credits" aria-label="Sources and credits" title="Sources and credits">
