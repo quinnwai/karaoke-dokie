@@ -169,12 +169,18 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      `flow.ts` says what is open). Opening one pushes an entry and leaves the address alone, and the system Back (a phone's back
      button or swipe) pops it and closes what was opened, like the page's own ‹ Back, with the range, the tuning (gears, eras,
      sheet mode) and the list as they were. When the app closes it itself, the entry is taken off with `history.back()`, so the
-     next Back press leaves the page as it did before. On the mic and note steps of a redo, and only there, every screen has
-     "Back to songs" in the top-left corner (`BackToSongs`, `backToSongs` in `flow.ts`): it keeps the old range, which only a
-     finished test replaces, drops the half-finished test's saved progress, and loads the list again if the redo emptied it (a
-     whole redo does, one end does not). The very first test has no range to go back to: no button, no entry. The song page keeps
-     the match it was opened with (`KaraokeApp`), so a re-rank that lands under it and leaves the song out of the new list no
-     longer closes it; only Back does.
+     next Back press leaves the page as it did before. On the mic and note steps of a redo, and on "That's your range" that follows
+     them for a singer without Spotify (where the new range waits for Continue), every screen has "Back to songs" in the top-left
+     corner (`BackToSongs`, `backToSongs` in `flow.ts`): it keeps the old range (`previousRange`, kept from the redo's first tap until
+     it is over, since on "That's your range" `range` is already the new one), drops the half-finished test's saved progress, and loads
+     the list again if the redo emptied it (a whole redo does, one end does not). The very first test has no range to go back to: no
+     button, no entry. The song page keeps the match it was opened with (`KaraokeApp`), so a re-rank that lands under it and leaves the
+     song out of the new list no longer closes it; only Back does. Closing the page puts the focus on the row that opened it, at its
+     place in the list now (a re-rank may have moved it); a song that has left the list leaves it where it was. For 400 ms after a tap
+     changes the screen (the song page's ‹, "Back to songs", a range note), taps on the range notes, redo and "Back to songs" are
+     ignored (`TAP_GUARD_MS`, `unlessHushed` in `KaraokeApp`): a double tap's second tap lands on what the first one brought up, since
+     the song page's ‹ is over the low note, "Back to songs" over the range notes and redo, and a range note over "Back to songs". A
+     tap after the moment is a choice and works, and the system Back is not a tap and starts no moment.
    - **Tests**: `window.setlist` (`getState`, `setState`, `ranking`, `songs`) exists only in a build made with
      `NEXT_PUBLIC_SETLIST_TEST_HOOK=1`, which is the e2e build (`playwright.config.ts`); production has none.
    In catalogue mode "Connect Spotify" saves the range for the sign-in round trip; back from Spotify,
@@ -198,7 +204,9 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
    data came from (for Maybe songs, also that the range is an estimate), Spotify's own player
    (see below), and "How'd it go?" thumbs that POST `/api/feedback`.
 9. **Returning user** with a saved range lands on results; "redo" restarts the test. Someone
-   without Spotify whose range is kept on the device lands on catalogue results.
+   without Spotify whose range is kept on the device lands on catalogue results. Half a test left behind by a redo that was
+   abandoned (a reload in the middle of one note) is dropped then, from the flow and from the device: the singer is where the redo
+   started. Without a saved range it is a first test and is resumed, as is a finished test waiting at the arrow (the Spotify round trip).
 10. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
    low and highest high become the range (`source: 'songs'`). Signed-out users sign in first.
 
@@ -230,7 +238,9 @@ button and must stay on screen (spike QWW-44).
   the list) stops the preview.
 - **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly, so a line under the list reads
   "Previews from [logo] Deezer" whenever a song on it has a preview. It links to the credits page (in a new tab, as the book
-  icon's link is, so reading it does not cost the singer their range and tuning), which says the
+  icon's link is, so reading it does not cost the singer their range and tuning; its "‹ Back" closes that tab when it is a tab
+  of its own, which shows the tuned tab again, and goes back otherwise, `CreditsBack`; the book icon's link is a 44 px square at the
+  list's right end, not a band as wide as the list), which says the
   previews stream from Deezer for private, non-commercial listening and that no audio is kept, as the terms ask
   listeners to be told.
 - **Event log (QWW-51).** When a preview a tap started makes its first sound, the player tells `KaraokeApp`
