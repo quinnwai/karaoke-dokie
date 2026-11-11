@@ -1,11 +1,13 @@
-// Release eval harness (QWW-52): a pass/fail table for the QWW-42 success criteria 1 to 4 and 6, on
-// five fixed test ranges (src/lib/eval/release.ts). Reads the catalogue straight from Postgres with
-// SELECT only, ranks it with this checkout's code, and checks what a logged-out singer would see.
+// Release eval harness (QWW-52): a pass/fail table for the QWW-42 success criteria 1 to 4, 6 and 9, on
+// nine fixed test ranges, one per voice type (src/lib/eval/release.ts). Reads the catalogue straight from
+// Postgres with SELECT only, ranks it with this checkout's code, and checks what a logged-out singer would see.
 //
 //   1  recognisable: the bundled Billboard Year-End list (data/billboard-year-end.csv) or a high Deezer rank
 //   2  tempo: an LLM judges every song in each era's slow and upbeat top 20, 3 runs in parallel, seeing
 //      only artist, title and year; a song fits only when all 3 runs agree
 //   3  never empty, 4  titles, 6  play: Deezer is asked whether each top-20 song has a 30 s preview
+//   9  sung as written (QWW-58): at least 15 of the Setlist tuner's top 20 have no octave shift. This one reads
+//      the tuner's list (the engine, the defaults); 1 to 4 and 6 still read the old results view.
 //
 // Usage: npm run eval:release -- [--db production|preview] [--runs 3] [--provider anthropic|openai|gemini]
 //                                [--model <id>] [--skip-judge] [--skip-play] [--out eval-out]
@@ -24,6 +26,7 @@ import {
   checkNeverEmpty,
   checkPlay,
   checkRecognisable,
+  checkSungAsWritten,
   checkTempo,
   checkTitles,
   judgeList,
@@ -36,6 +39,7 @@ import {
   TEST_RANGES,
   tempoLists,
   toMarkdown,
+  tunerDefaultList,
   verdict,
   topTen,
   type Check,
@@ -46,7 +50,7 @@ import {
 } from '../src/lib/eval/release';
 import { isProvider, PROVIDER_NAMES, PROVIDERS } from '../src/lib/moods/providers';
 import { billboardCharts } from '../src/lib/popularity/import';
-import { catalogueTracks, loadCatalogue, recommendCatalogue } from '../src/lib/server/catalogue';
+import { catalogueTracks, loadCatalogue, prepareCatalogue, recommendCatalogue } from '../src/lib/server/catalogue';
 import { withoutDuetsAndMoods } from '../src/lib/server/features';
 import { neonQuery } from '../src/lib/server/getStore';
 import { createPostgresStore, type QueryFn } from '../src/lib/server/postgresStore';
@@ -154,6 +158,9 @@ async function main() {
     matches: recommendCatalogue(tracks, test.range, deps, { all: true }).matches.map(withoutDuetsAndMoods),
   }));
 
+  // What the Setlist tuner lists for the same singer (QWW-58): the engine with the defaults, as POST /api/setlist answers it.
+  const tuner = new Map(TEST_RANGES.map((test) => [test.id, tunerDefaultList(prepareCatalogue(tracks, test.range, deps).prepared)]));
+
   const facts = new Map<string, SongFacts>();
   const fact = (id: string) => facts.get(id) ?? (facts.set(id, {}), facts.get(id)!);
   for (const t of tracks) {
@@ -166,7 +173,7 @@ async function main() {
     'Ranges: ' + TEST_RANGES.map((t) => t.label).join('; ') + '.',
   ];
   const checks: Check[] = [];
-  for (const t of inputs) checks.push(checkRecognisable(t, billboard, facts), checkNeverEmpty(t), checkTitles(t));
+  for (const t of inputs) checks.push(checkRecognisable(t, billboard, facts), checkNeverEmpty(t), checkTitles(t), checkSungAsWritten(t.test, tuner.get(t.test.id)!));
 
   // 6. Play: ask Deezer about every top-20 song once.
   if (!values['skip-play']) {
@@ -236,7 +243,7 @@ async function main() {
     tempoSample,
     meta,
   };
-  report.meta.push('Not checked by the harness: 1b (Quinn-Wai recognises 8 of the top 10, list below), 5 (octave), 7 (design), 8 (funnel). Criterion 4 flags every variant, including one that is the more popular version.');
+  report.meta.push('Not checked by the harness: 1b (Quinn-Wai recognises 8 of the top 10, list below), 5 (octave), 7 (design), 8 (funnel). Criterion 4 flags every variant, including one that is the more popular version. Criteria 1 to 4 and 6 grade the old results view; criterion 9 grades the tuner\'s list.');
   const md = toMarkdown(report);
   await mkdir(values.out!, { recursive: true });
   const stem = join(values.out!, `release-${db}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
