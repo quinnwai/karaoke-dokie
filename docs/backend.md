@@ -167,12 +167,30 @@ import. The model is the design's distance ranking (round 5 spec section 5), dec
    popularity with difficulty breaking ties: of two songs, the one 10 places less popular needs to be 20 places easier to
    come first, so the single most popular song is first only if it is also easy. `GEAR_WEIGHTS` is the one knob if the top
    of the default list needs to lean harder.
-4. **Order.** The Maybe songs (estimated ranges) come after all the others, as everywhere else. Within each group, a song
-   we do not know on an active gear (no tempo, a one-note range, not in the library) comes after every song we do. When
-   songs miss different gears the more specific control wins: History, then Tempo, then Popularity, then Difficulty (so a
-   song with no tempo is after every song that has one, whatever else either is missing). Then the closest sum first.
-   Exact ties go to the more popular song, the easier, the one sung as written, then artist and title (so a song keeps its
-   place whether it is the catalogue's track or the singer's own), then track id.
+4. **Order.** The Maybe songs (estimated ranges) come after all the others, as everywhere else. Inside the Maybe songs and
+   inside all the others, every song that fits as written comes before any song that needs an octave jump, up or down
+   (QWW-58, Quinn-Wai's decision A, 11 Nov; see below). The jump songs still follow, so a range whose popular songs all
+   need a jump gets a full list, never an empty one. Within each of those groups, a song we do not know on an active gear
+   (no tempo, a one-note range, not in the library) comes after every song we do. When songs miss different gears the more
+   specific control wins: History, then Tempo, then Popularity, then Difficulty (so a song with no tempo is after every
+   song that has one, whatever else either is missing). Then the closest sum first. Exact ties go to the more popular
+   song, the easier, then artist and title (so a song keeps its place whether it is the catalogue's track or the
+   singer's own), then track id.
+
+**Songs sung as written first (QWW-58).** The range filter takes a song as written, an octave down or an octave up, so for
+a range of two octaves it keeps 86 to 90% of the catalogue and hardly tells voice types apart. The gear places do not
+tell the jump from the real thing either, and they favour it: a song that is too high for you sits in the lower half of
+your range an octave down, where the "easy leans low" curve is kindest, so it reads Easy ("In your sweet spot"), and the
+catalogue's biggest hits (mostly tenor and female pop, written around B3 to G4) win in whichever octave fits them. Before
+this rule the octave only broke exact ties, which a sum of places almost never produces, and the octave penalty of the old
+Top picks score never reached the engine. Measured on production's catalogue, logged out with the defaults, no bass (E2 to
+E4) or F2 to F4 list had a song sung as written in its top 20, although every voice type has at least 100 popular songs it
+can sing as written. The penalty inside the distance (option B) was not chosen: it would trade the octave against
+popularity and difficulty at a rate nobody can justify, where the group is a rule a singer can follow. A song that needs a
+jump keeps its places on the gears, and its difficulty is still measured as sung, after the jump; only its position
+relative to the songs sung as written is new. "As written" is only as reliable as the stored octave (`octave.ts`,
+QWW-31), so some songs that a low voice would have to jump (mostly women's and falsetto songs) can still count as sung
+as written.
 
 **The curve (rule 2, easy leans low).** The strain of a song is the sung-time-weighted average of a note's cost, `t` being
 where the note sits in the singer's range (0 lowest, 1 highest, an octave shift applied): `((t - 0.35) / 0.65)²` from the
@@ -197,10 +215,13 @@ most popular Hard songs first: the Hard third of the track is nearest to 100, an
 them. On the synthetic catalogues in the tests (hundreds of Hard songs of every popularity) the first 10 are all Hard in
 every range. It is exact, the first songs being all Hard and the hardest first, when Popularity is off. It is not a law with
 Popularity on: a range with only a handful of Hard songs, all obscure, puts popular Medium and Easy ones among them.
-Quinn-Wai chose this (option A) on 11 Nov, and that the default list leans on popularity as it does (`GEAR_WEIGHTS`).
+Quinn-Wai chose this (option A) on 11 Nov, and that the default list leans on popularity as it does (`GEAR_WEIGHTS`). Songs
+sung as written come first here too (QWW-58): the Hard songs sung as written lead, then the Easy and Medium ones sung as
+written, and only then the Hard songs that need a jump. On production's catalogue every voice type has hundreds of Hard
+songs it can sing as written (655 to 1,815 over the eight ranges of QWW-58), so the first 10 are still all Hard.
 
-**Not used by the ranking:** the fast-lyrics flag and the octave penalty of the Top picks score (a song an octave away
-only loses a tie to one sung as written; its notes are scored as sung). A singer whose range is so narrow that no song
+**Not used by the ranking:** the fast-lyrics flag and the octave penalty of the Top picks score (the octave decides a
+group, rule 4, and is not a penalty; a song that needs a jump has its notes scored as sung). A singer whose range is so narrow that no song
 fits (5 to about 9 semitones) gets `no-songs-in-range`; Quinn-Wai (11 Nov) did not want a widening fallback, so the tests
 and the release checks use ranges of an octave or more.
 

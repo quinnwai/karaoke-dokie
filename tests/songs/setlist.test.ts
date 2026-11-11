@@ -349,7 +349,7 @@ describe('the distance (spec §5, model A)', () => {
     expect(rankPrepared(preparedOf(...songs), state({ off: ['history', 'tempo', 'era', 'difficulty'] })).applied).toEqual(['popularity']);
   });
 
-  it('lists the catalogue in popularity order when every gear is off (spec test 18), whatever order the songs came in', () => {
+  it('lists the catalogue in popularity order when every gear is off (spec test 18), inside each group, whatever order the songs came in', () => {
     const range = TEST_RANGES[0]![1];
     const { matches } = prepareCatalogue(CATALOGUE, range, deps);
     const allOff = state({ off: [...GEAR_IDS, 'era'] });
@@ -357,7 +357,14 @@ describe('the distance (spec §5, model A)', () => {
     expect(first.songs).toHaveLength(matches.length);
     expect(first.applied).toEqual([]);
     const pop = first.songs.map((s) => (s.match.parts?.popularityKnown ? s.match.parts.popularity : -1));
-    for (let i = 1; i < pop.length; i++) expect(pop[i]!).toBeLessThanOrEqual(pop[i - 1]!);
+    // The groups, in their order: sure songs sung as written, sure songs that need a jump, then the same two of the Maybe songs (QWW-58).
+    const group = (s: (typeof first.songs)[number]) => (s.match.difficulty === 'maybe' ? 2 : 0) + (s.match.octave === 'none' ? 0 : 1);
+    expect(new Set(first.songs.map(group)).size, 'groups in this list').toBeGreaterThanOrEqual(2); // songs sung as written and songs that need a jump
+    for (let i = 1; i < pop.length; i++) {
+      const [a, b] = [group(first.songs[i - 1]!), group(first.songs[i]!)];
+      expect(b, `song ${i}`).toBeGreaterThanOrEqual(a);
+      if (a === b) expect(pop[i]!).toBeLessThanOrEqual(pop[i - 1]!);
+    }
     for (const seed of [1, 2, 3]) {
       expect(ids(rankSetlist(cands(...shuffled(matches, seed)), { range, ...allOff })), `shuffle ${seed}`).toEqual(ids(first));
     }
@@ -448,11 +455,15 @@ describe('a song we do not know on an active gear is a tier of its own', () => {
     expect(ids(rankPrepared(preparedOf(...songs), state({ off: ['history', 'era', 'difficulty'] })))).toEqual(['near', 'far']);
   });
 
-  it('puts a song with no tempo after the songs that have one when Tempo is on, on a real list', () => {
+  it('puts a song with no tempo after the songs that have one when Tempo is on, on a real list, in each group (QWW-58)', () => {
     const r = rankCatalogue(CATALOGUE, input(TEST_RANGES[0]![1], { gears: { tempo: 0 }, off: [...others, 'difficulty', 'popularity'].filter((p, i, all) => all.indexOf(p) === i) as TunerPart[] }), deps);
-    const firstUnknown = r.songs.findIndex((s) => s.gears.tempo === null);
-    expect(firstUnknown).toBeGreaterThan(1000);
-    expect(r.songs.slice(firstUnknown).every((s) => s.gears.tempo === null)).toBe(true);
+    // The songs sung as written come first, then the jumps; a song with no tempo goes after the others of its own group.
+    for (const written of [true, false]) {
+      const group = r.songs.filter((s) => s.match.difficulty !== 'maybe' && (s.match.octave === 'none') === written);
+      const firstUnknown = group.findIndex((s) => s.gears.tempo === null);
+      expect(firstUnknown, written ? 'sung as written' : 'jumps').toBeGreaterThan(500);
+      expect(group.slice(firstUnknown).every((s) => s.gears.tempo === null)).toBe(true);
+    }
   });
 });
 
@@ -690,7 +701,7 @@ describe('songs sung as written come before songs that need an octave jump (QWW-
       const r = rankPrepared(list, s);
       expect(r.songs).toHaveLength(14);
       expect(r.empty).toBeUndefined();
-      expect(ids(r, 2)).toEqual(['quiet-a', 'quiet-b']);
+      expect(ids(r, 2).sort()).toEqual(['quiet-a', 'quiet-b']); // which of the two is first depends on the gears
     }
     // With nothing sung as written at all, the jumps are the list, in popularity order as before.
     const onlyJumps = rankPrepared(prepareSetlist(cands(...jumps), USER), state());
@@ -822,12 +833,20 @@ describe.each(TEST_RANGES)('%s', (_name, range) => {
     expect(r.songs[0]!.gears.difficulty!).toBeGreaterThan(90);
   });
 
-  it('puts only Hard songs first at max difficulty with Popularity off, hardest first', () => {
+  it('puts only Hard songs first at max difficulty with Popularity off, hardest first, inside each group (QWW-58)', () => {
     const r = rankPrepared(list.prepared, state({ gears: { difficulty: 100 }, off: ['history', 'tempo', 'era', 'popularity'] }));
-    const top = r.songs.slice(0, hard.length);
-    expect(top.every((s) => s.match.difficulty === 'hard' || s.gears.difficulty === null)).toBe(true);
-    const ds = top.map((s) => s.gears.difficulty!);
-    for (let i = 1; i < ds.length; i++) expect(ds[i]!).toBeLessThanOrEqual(ds[i - 1]!);
+    // The songs sung as written come before the jumps, so the Hard songs are first inside each of the two groups.
+    let hardChecked = 0;
+    for (const written of [true, false]) {
+      const group = r.songs.filter((s) => s.match.difficulty !== 'maybe' && (s.match.octave === 'none') === written);
+      const hardHere = group.filter((s) => s.match.difficulty === 'hard').length;
+      const top = group.slice(0, hardHere);
+      expect(top.every((s) => s.match.difficulty === 'hard' || s.gears.difficulty === null)).toBe(true);
+      const ds = top.map((s) => s.gears.difficulty!);
+      for (let i = 1; i < ds.length; i++) expect(ds[i]!).toBeLessThanOrEqual(ds[i - 1]!);
+      hardChecked += hardHere;
+    }
+    expect(hardChecked).toBe(hard.length); // every Hard song was in one of the two groups
   });
 
   it('is never empty at max difficulty: at least 10 songs (criterion 3)', () => {
@@ -851,16 +870,20 @@ describe.each(TEST_RANGES)('%s', (_name, range) => {
     }
   });
 
-  it('with the default state is sorted by the documented sum, popularity counting double (rule 3)', () => {
+  it('with the default state is sorted by the documented sum, popularity counting double (rule 3), inside each group (QWW-58)', () => {
     const r = rankPrepared(list.prepared, state());
-    // Sorted by the documented sum, among the songs that have both gears.
-    const complete = r.songs.filter((s) => s.match.difficulty !== 'maybe' && s.gears.popularity !== null && s.gears.difficulty !== null);
     const distance = (s: (typeof r.songs)[number]) => 2 * Math.abs(s.gears.popularity! - 100) + Math.abs(s.gears.difficulty! - 0);
-    expect(complete.length).toBeGreaterThan(100);
-    for (let i = 1; i < complete.length; i++) expect(distance(complete[i]!)).toBeGreaterThanOrEqual(distance(complete[i - 1]!) - 1e-6);
-    // And the songs missing one of them come after all of those.
-    const firstIncomplete = r.songs.findIndex((s) => s.gears.popularity === null || s.gears.difficulty === null);
-    if (firstIncomplete >= 0) expect(r.songs.slice(0, firstIncomplete).every((s) => s.gears.popularity !== null && s.gears.difficulty !== null)).toBe(true);
+    // The songs sung as written come before the jumps; inside each group the order is the documented sum.
+    for (const written of [true, false]) {
+      const group = r.songs.filter((s) => s.match.difficulty !== 'maybe' && (s.match.octave === 'none') === written);
+      // Sorted by the documented sum, among the songs that have both gears.
+      const complete = group.filter((s) => s.gears.popularity !== null && s.gears.difficulty !== null);
+      expect(complete.length, written ? 'sung as written' : 'jumps').toBeGreaterThan(50);
+      for (let i = 1; i < complete.length; i++) expect(distance(complete[i]!)).toBeGreaterThanOrEqual(distance(complete[i - 1]!) - 1e-6);
+      // And the songs missing one of them come after all of those.
+      const firstIncomplete = group.findIndex((s) => s.gears.popularity === null || s.gears.difficulty === null);
+      if (firstIncomplete >= 0) expect(group.slice(0, firstIncomplete).every((s) => s.gears.popularity !== null && s.gears.difficulty !== null)).toBe(true);
+    }
   });
 
   it('moves the list along the whole length of every gear (QWW-33): the top 10 differ between neighbouring tenths', () => {
