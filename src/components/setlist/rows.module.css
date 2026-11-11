@@ -350,9 +350,17 @@ p.deezer {
   cursor: pointer;
 }
 
+/* The book icon's link (QWW-57): a 44 px square at the list's right end, with the icon flush right and 6 px under what comes before
+   it, where it always was. It used to be a band as wide as the list, so a tap anywhere along it opened the credits. The square starts
+   where the old 6 px of padding did and reaches 20 px under the icon, into the spacer under the list; the margin takes those 20 px back,
+   so the list ends where it did. The square still stops above the handle's touch area, and nothing else is under it. */
 .credits {
   display: flex;
   justify-content: flex-end;
+  align-items: flex-start;
+  width: 44px;
+  height: 44px;
+  margin: 0 0 -20px auto;
   padding: 6px 0 0;
   color: var(--sl-text-3);
   opacity: 0.6;
