@@ -81,7 +81,7 @@ test('switch off: the results screen shows no duet or mood anywhere, and no duet
   const duet = songs.filter({ hasText: 'Islands in the Stream' });
   await expect(duet).toHaveCount(1);
   await expect(page.getByText(/Duet/)).toHaveCount(0);
-  await duet.locator(':scope > button').click();
+  await duet.getByRole('button', { name: /^Islands in the Stream by/ }).click();
   await expect(page.getByRole('heading', { name: 'Islands in the Stream' })).toBeVisible();
   await expect(page.getByText(/Duet|Upbeat|Heartfelt/)).toHaveCount(0);
   await page.screenshot({ path: path.join(SCREENS, 'duets-moods-off-02-song.png') });

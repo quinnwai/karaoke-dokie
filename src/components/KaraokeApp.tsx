@@ -28,6 +28,7 @@ import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';
 import { MicStep } from './MicStep';
 import { PickSongs } from './PickSongs';
+import { PreviewButton } from './PreviewButton';
 import { SetlistScreen } from './setlist/SetlistScreen';
 import { SongDetail } from './SongDetail';
 import { Tv } from './Tv';
@@ -56,9 +57,12 @@ export interface KaraokeAppProps {
    * src/lib/setlist/engine.ts). Tests pass one that records its requests.
    */
   setlistEngine?: SetlistEngine;
-  /** The ▶ of a list row, mounted by QWW-48. Without it each row shows an inert ▶. */
+  /** The ▶ of a list row. Default: the song's 30 s Deezer preview (QWW-48, PreviewButton); a test can pass its own. */
   renderPlay?(match: Match): ReactNode;
 }
+
+/** The ▶ in a row's slot: plays the song's Deezer preview, or is disabled when the song has none. */
+const previewPlay = (m: Match): ReactNode => <PreviewButton id={m.track.id} deezerId={m.deezerId} title={m.track.title} artist={m.track.artist} />;
 
 const LIVE_FRAME = 2048;
 /** A press shorter than this is a tap. */
@@ -80,7 +84,7 @@ export function KaraokeApp({
   quietMs = 2600,
   pickSongs: canPick = false,
   setlistEngine,
-  renderPlay,
+  renderPlay = previewPlay,
 }: KaraokeAppProps) {
   const [api] = useState(() => apiProp ?? createApi());
   const [state, rawDispatch] = useReducer(flowReducer, initialState);

@@ -13,7 +13,7 @@ interface SongRowsProps {
   /** `position` is the song's 1-based place in the list on screen. */
   onOpen(trackId: string, position: number): void;
   /**
-   * The ▶ at the start of each row, where the rank number was (Round 6A, decision 3). QWW-48 owns playback and mounts its
+   * The ▶ at the start of each row, where the rank number was (Round 6A, decision 3). QWW-48 owns playback and KaraokeApp mounts its
    * button here; it sits beside the row's own button, never inside it, so a tap on ▶ cannot also open the song page. Without
    * it the slot shows an inert ▶.
    */
@@ -81,8 +81,9 @@ export function SongRows({ rows, scroller, onOpen, renderPlay }: SongRowsProps) 
 }
 
 /**
- * Stands where QWW-48's ▶ goes until it is mounted: the glyph alone (R3 took the ring away), faded and disabled, so a row's
- * layout is final. The slot's CSS gives it, and QWW-48's button, the size, the colour and the swap with the rank number.
+ * Stands where QWW-48's ▶ goes when a screen is given no `renderPlay` (the app always gives one, KaraokeApp's PreviewButton): the
+ * glyph alone (R3 took the ring away), faded and disabled, so a row's layout is final. The slot's CSS gives it, and QWW-48's
+ * button, the size, the colour and the swap with the rank number.
  */
 function PlayPlaceholder() {
   return (

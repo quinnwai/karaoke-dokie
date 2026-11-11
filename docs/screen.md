@@ -104,8 +104,8 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
      **reason line**, and a **difficulty badge**. The slot holds the rank number and the ▶ on top of each other (R3): on a
      pointer device the number shows and a hover on the row, or keyboard focus on the ▶, swaps it for the ▶ (the glyph
      alone, no ring or circle); on a touch screen, which cannot hover, the ▶ stands in the number's place and the number
-     is not drawn. A ▶ that cannot play yet is faded and disabled; a preview that is loading, playing or paused shows its
-     ⏸ or ▶ with no hover. The number is hidden from a screen reader (the list is an `<ol>`) and the rank is also in
+     is not drawn. A ▶ that cannot play (the song has no preview) is faded and disabled; a preview that is loading, playing or
+     paused shows its ⏸ or ▶ with no hover. The number is hidden from a screen reader (the list is an `<ol>`) and the rank is also in
      `data-rank`. The reason line is
      `whyOf` in `src/lib/setlist/rows.ts`: the first two of "In your sweet spot" (Difficulty on, the song's place within 15
      of it), "Crowd favourite" or "Deep cut" (place on Popularity at least 85, or at most 35), "On repeat" or "Rediscover"
@@ -114,8 +114,9 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
      singer; a place that is null skips its rule, so a signed-out singer never sees the History ones. A song that fits only an octave away says "Shifted down to fit range" or "Shifted up to fit range" first, in place of "In your sweet spot" (R13; its other reasons and its badge stay). The badge is the song's
      own label (what the song page shows); a Maybe song has none. Each title fills in once, left to right (about 0.6 s,
      `useFillIn`), as its row scrolls into view, and ends the normal white. It plays once per visit to the list: a row that
-     scrolls out and back, or is re-ranked, does not replay it (R12; with reduced motion there is no fill). The ▶ slot is
-     filled by QWW-48 (until then a disabled ▶). Rows are in rank order in the DOM, and slide to their new place when
+     scrolls out and back, or is re-ranked, does not replay it (R12; with reduced motion there is no fill). The ▶ is QWW-48's
+     play button (Play from the list, below), and a line above the first row shows Deezer's logo while a song on screen has a
+     preview; both scroll with the list, and the sheet's fit counts the line. Rows are in rank order in the DOM, and slide to their new place when
      the order changes (`flip.ts`; reduced motion turns it off). Tapping a row opens the song page; the ▶ does not.
      40 songs show at first, then "Load more". Songs with no year are in the list while Era is off and out of it
      while Era is on. When there are no songs the engine says why (`empty`): "Pick an era to see songs." (Era on,
@@ -138,7 +139,8 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
      every gear (rack 416 px); **mini** shows one gear and a tab bar (164 px). The grab handle switches by tap, Enter or
      Space, or by a vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live.
      **Which mode it opens in** (`src/lib/setlist/fit.ts`, measured in `useSheetFit`): mini when the expanded sheet
-     would leave fewer than 3 whole rows (every phone but a tall one; a 390×844 still opens expanded), and where the
+     would leave fewer than 3 whole rows (every phone but a tall one; a 390×844 still opens expanded; what stands over
+     the first row counts, and Deezer's 22 px line is counted from the first measure, before the rows are there), and where the
      expanded sheet cannot fit inside the screen at all (an iPhone SE with Safari's bars, a phone on its side) the handle
      keeps it mini. `?mini=1` always starts in mini mode.
    - **Type**: Inter 400, 500, 600 and 700, self-hosted (`@fontsource/inter`, SIL OFL 1.1), and Noto Sans JP 700
@@ -171,6 +173,42 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
    without Spotify whose range is kept on the device lands on catalogue results.
 10. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
    low and highest high become the range (`source: 'songs'`). Signed-out users sign in first.
+
+## Play from the list (QWW-48)
+
+The first slot of each song row holds a play button that plays the song's 30 s Deezer preview, so a singer can hear a
+song without leaving the list. Spotify's player stays on the song page (below); it was too slow to start from our own
+button and must stay on screen (spike QWW-44).
+
+- **One player.** Every button shares one `<audio>` element (`src/lib/client/preview.ts`), so one song plays at a
+  time and a tap on another row switches at once. The latest tap always wins: five taps in five seconds end with the
+  fifth song playing. The player holds a row (its track id), not a Deezer track, so two rows that share a Deezer
+  track never both show ⏸.
+- **iOS.** The tap handler sets the element's address to `/api/preview/<deezerId>` and calls `play()` in the same
+  tick; iOS plays audio only when it starts inside the tap. That route redirects to Deezer's preview link (see
+  backend.md), which expires after 15 minutes, so links are never stored.
+- **What it shows.** ▶ until tapped; then ⏸. Tapped again it pauses; a pause by the phone (a call, the lock screen,
+  headphones) shows the same, and a resume from there shows ⏸ again. At the end it goes back to ▶. The button is 44 px
+  square. The button itself draws a thin pink ring that fills as the preview plays and marks the playing row's title in
+  pink, as Spotify marks the track it is on; in the tuner neither is shown (QWW-57: R3 has no ring or circle in any state,
+  R12 has every title end white), so the row that sounds is the one with ⏸ in its slot.
+- **When there is nothing to play.** A song with no Deezer match (`Match.deezerId` unset) gets a disabled button. A
+  preview that fails to load before making a sound goes back to ▶ at once, and the player asks the route why: only a
+  404 (Deezer has no preview) disables the button for the rest of the visit. Any other failure (Deezer slow or down,
+  the network) leaves ▶ ready for another tap. A resume after a pause of more than 4 minutes, or after the load failed
+  while paused, starts from a fresh link at the same spot, since a link can run out.
+- **The row.** The play button (in the slot) and the song button sit side by side, never one inside the other: the play
+  button never opens the song page, and the rest of the row still does. Opening the song page (or a filter taking the song off
+  the list) stops the preview.
+- **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly, so a line above the first row reads
+  "Previews from [logo] Deezer" whenever a song on it has a preview. It links to the credits page, which says the
+  previews stream from Deezer for private, non-commercial listening and that no audio is kept, as the terms ask
+  listeners to be told.
+- **In the tuner (QWW-46, QWW-57).** `PreviewButton` takes the row's track id (`id`), the song's `deezerId`, title and
+  artist, and needs nothing else; `DeezerCredit` is the logo line. `KaraokeApp` hands the screen a `renderPlay` that
+  mounts the button in each row's slot (a test can pass its own), and the slot's CSS (`rows.module.css`) restyles it: the
+  44 px target, the glyph alone, the swap with the rank number, the faded disabled look. Without a `renderPlay` the
+  screen shows an inert, disabled ▶ and no Deezer line.
 
 ## Spotify player
 
@@ -238,6 +276,7 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/components/RoundButton.tsx` | The round pink-ringed button, shared by the record button (`HoldStep.tsx`, a dot in it) and "Turn on microphone" (`MicStep.tsx`, a microphone in it), so the two keep one look. |
 | `src/components/MicStep.tsx` | The mic step's screens. |
 | `src/components/SpotifyPlayer.tsx` | Spotify's player iframe, or the plain "Open in Spotify" link when there is no track to embed. |
+| `src/components/PreviewButton.tsx`, `src/lib/client/preview.ts` | The play button in each row, its hook and the one shared `<audio>` they drive (QWW-48); the Deezer logo line. |
 | `src/components/screen.module.css`, `app/globals.css` | Styles; `prefers-reduced-motion` stops all animation. |
 
 ## Tests

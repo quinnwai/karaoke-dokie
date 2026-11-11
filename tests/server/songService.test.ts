@@ -445,6 +445,20 @@ describe('song service whole list (all)', () => {
       expect(years).toEqual({ t2: [1975, 'usdb'], t4: [1990, 'spotify'], t8: [2001, 'chart'], t10: [undefined, undefined] });
       expect(res.matches.find((m) => m.track.id === 't10')).not.toHaveProperty('yearSource');
     });
+
+    it("carries each song's Deezer track id on the whole list, for the row's play button (QWW-48)", async () => {
+      const store = createMemoryStore();
+      await store.putSongDeezer([
+        { key: key(2), rank: 700_000, deezerId: 916_424, checkedAt: '2026-11-06T00:00:00.000Z' },
+        { key: key(4), checkedAt: '2026-11-06T00:00:00.000Z' }, // a miss
+      ]);
+      const lib = [track(2), track(4), track(8)];
+      const res = await createSongService(store, fakeDeps().deps).recommend(lib, user, 0, 0, { all: true });
+      const byId = Object.fromEntries(res.matches.map((m) => [m.track.id, m]));
+      expect(byId.t2!.deezerId).toBe(916_424);
+      expect(byId.t4).not.toHaveProperty('deezerId');
+      expect(byId.t8).not.toHaveProperty('deezerId');
+    });
   });
 
   it('leaves pitch histograms out of the whole list, duet parts included, without touching the stored range', async () => {

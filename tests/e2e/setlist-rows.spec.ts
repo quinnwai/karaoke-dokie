@@ -7,9 +7,10 @@
 //        scrolling back or on a re-rank; with reduced motion the titles simply show; each title's text is in the page once
 //   R13  a song that fits only an octave away says "Shifted down/up to fit range" first in its reason line, in place of "In your
 //        sweet spot"; its other reasons and its badge stay (QWW-58's wording; the rule is `whyOf` in src/lib/setlist/rows.ts)
-// The tuner is reached the way tests/e2e/setlist.spec.ts reaches it (tests/helpers/tunerE2e.ts). QWW-48's play button (PR #28) is
-// not in this tree, so the slot holds the disabled placeholder; where a test needs what QWW-48 draws (a button with data-preview,
-// a ring of two circles, then the glyph) it mounts a button of that shape by hand (mountPreview).
+// The tuner is reached the way tests/e2e/setlist.spec.ts reaches it (tests/helpers/tunerE2e.ts). The slot holds QWW-48's real play
+// button (src/components/PreviewButton.tsx, from #28); the fixture songs have no Deezer id, so it is the disabled one. Where a test
+// needs a button in a state the real player reaches only with audio (loading, playing, paused), or one that can play, it mounts a
+// button of the same shape by hand (mountPreview). tests/e2e/preview.spec.ts has the real player, with audio, in these rows.
 //
 // "Hover" is for pointer devices only (@media (hover: hover)): the pointer describes below turn touch off, and the rest of the file
 // is the touch phone every tuner spec starts from.
@@ -37,7 +38,7 @@ const slotOf = (row: Locator) => row.locator('[data-play-slot]');
 const numberOf = (row: Locator) => row.locator('[data-rank-number]');
 /** The ▶'s glyph: the last svg in the slot (QWW-48's button has its ring first and the glyph after it). */
 const glyphOf = (row: Locator) => row.locator('[data-play-slot] button svg').last();
-/** The ▶ that is live: the last button in the slot (a mounted one comes after the placeholder it replaces). */
+/** The ▶ that is live: the last button in the slot (a hand-mounted one comes after the real button it hides). */
 const playOf = (row: Locator) => row.locator('[data-play-slot] button').last();
 /** The title's box, which carries the fill (data-fill-text, data-filled). */
 const boxOf = (row: Locator) => row.locator('[data-fill-text]');
@@ -50,8 +51,9 @@ const away = (page: Page) => page.mouse.move(2, 400); // off every row (and off 
 type Preview = 'idle' | 'loading' | 'playing' | 'paused' | 'unavailable';
 
 /**
- * Puts into a row's slot a button of the shape QWW-48's play button has (PR #28, not in this tree): `data-preview`, a ring of two
- * circles as its first svg, then the glyph (a pause while it sounds). The placeholder it replaces is put away.
+ * Puts into a row's slot a button of the shape QWW-48's play button has (src/components/PreviewButton.tsx): `data-preview`, a ring of
+ * two circles as its first svg, then the glyph (a pause while it sounds), in a state the real player reaches only with audio. The
+ * real button it replaces is put away.
  */
 async function mountPreview(row: Locator, state: Preview = 'idle') {
   await row.evaluate((li, st) => {
@@ -189,14 +191,16 @@ test.describe('R3, with a pointer', () => {
 
   test('R3. the slot draws no ring or circle in any state: at rest, hovered, or with a button of QWW-48\'s shape in it', async ({ page }) => {
     await open(page);
-    const placeholder = rows(page).nth(0);
-    expect(await ringsIn(placeholder)).toEqual([]);
-    await placeholder.hover();
-    await expect(glyphOf(placeholder)).toBeVisible();
-    expect(await ringsIn(placeholder)).toEqual([]);
-    // The placeholder is the glyph alone.
-    expect(await slotOf(placeholder).locator('circle, ellipse').count()).toBe(0);
-    expect(await slotOf(placeholder).locator('svg').count()).toBe(1);
+    // A song with no Deezer id has QWW-48's real button, disabled. It draws a ring (two circles in its first svg), which the slot
+    // does not draw, so the glyph is the only thing on screen.
+    const noPreview = rows(page).nth(0);
+    expect(await ringsIn(noPreview)).toEqual([]);
+    await noPreview.hover();
+    await expect(glyphOf(noPreview)).toBeVisible();
+    expect(await ringsIn(noPreview)).toEqual([]);
+    expect(await css(slotOf(noPreview).locator('[data-preview] > svg').first(), 'display')).toBe('none');
+    expect(await slotOf(noPreview).locator('circle:visible, ellipse:visible').count()).toBe(0);
+    expect(await slotOf(noPreview).locator('svg:visible').count()).toBe(1);
 
     const mounted = rows(page).nth(2);
     await mountPreview(mounted, 'idle');
@@ -242,7 +246,7 @@ test.describe('R3, with a pointer', () => {
   test('R3. Tab to the ▶ shows it in the number\'s place, with a square outline and no circle, and Tab on to the row hides it again', async ({ page }) => {
     await open(page);
     const row = rows(page).nth(1);
-    await mountPreview(row, 'idle'); // the placeholder is disabled and not in the Tab order: a button that can play is
+    await mountPreview(row, 'idle'); // a song with no preview has a disabled button, which is not in the Tab order: a button that can play is
     await openButton(rows(page).first()).focus();
     await page.keyboard.press('Tab');
     await expect(playOf(row)).toBeFocused();
@@ -265,7 +269,7 @@ test.describe('R3, with a pointer', () => {
     const row = rows(page).nth(1);
     await row.hover();
     await expect(glyphOf(row)).toBeVisible();
-    // The placeholder, until QWW-48 is wired in.
+    // A song with no Deezer id has QWW-48's real button, disabled.
     await expect(playOf(row)).toBeDisabled();
     expect(Number(await css(playOf(row), 'opacity'))).toBeLessThan(1);
     expect(Number(await css(playOf(row), 'opacity'))).toBeCloseTo(0.4, 1);
@@ -289,12 +293,12 @@ test.describe('R3, with a pointer', () => {
     expect(await css(playOf(ok), 'color')).toBe(PINK_TEXT);
   });
 
-  test('R3. a click on the ▶ opens nothing, the placeholder or a button that can play, and the row\'s own button still opens the song', async ({ page }) => {
+  test('R3. a click on the ▶ opens nothing, a disabled one or a button that can play, and the row\'s own button still opens the song', async ({ page }) => {
     await open(page);
     const row = rows(page).nth(1);
     await row.hover();
     const at = await centre(slotOf(row));
-    await page.mouse.click(at.x, at.y); // the disabled placeholder
+    await page.mouse.click(at.x, at.y); // the disabled button of a song with no preview
     await expectNoSongPage(page);
     await mountPreview(row, 'idle');
     await playOf(row).click(); // a button that can play: the slot is beside the row's button, not inside it
@@ -340,7 +344,7 @@ test.describe('R3, on a touch screen', () => {
     await expect(numberOf(rows(page).first())).toBeHidden();
   });
 
-  test('R3. a tap on the placeholder ▶ opens nothing either, and the 44 px slot is the ▶\'s, not the row button\'s', async ({ page }) => {
+  test('R3. a tap on a disabled ▶ opens nothing either, and the 44 px slot is the ▶\'s, not the row button\'s', async ({ page }) => {
     await open(page);
     const row = rows(page).first();
     const at = await centre(slotOf(row));

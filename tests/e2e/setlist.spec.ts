@@ -1363,9 +1363,9 @@ test('the slot stands where the rank number was: first in the row, 44 px, 10 px 
   // The number is in the slot for a pointer device (and for data-rank's sake) but is not drawn here: what is read has no digit first.
   expect(m.digits).toBe(false);
   expect(await rows(page).first().locator('[data-rank-number]').textContent()).toBe('1');
-  // The ▶ is the glyph alone, in --pink-text (the placeholder until the play button is mounted): no ring, no circle.
+  // The ▶ is the glyph alone, in --pink-text (a song with no Deezer id has QWW-48's button, disabled): no ring, no circle drawn.
   expect(await css(rows(page).first().locator('[data-play-slot] button'), 'color')).toBe(rgb('#FF6FB1'));
-  expect(await rows(page).first().locator('[data-play-slot] circle').count()).toBe(0);
+  expect(await rows(page).first().locator('[data-play-slot] circle:visible').count()).toBe(0);
 });
 
 test('the badge is the song\'s own label, pink for all three, and a Maybe song has none', async ({ page }) => {
