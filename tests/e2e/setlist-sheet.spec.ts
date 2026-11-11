@@ -1,7 +1,9 @@
 // Review items R5 to R8, R10 and R11 of QWW-57 (Quinn-Wai's review of the 6A preview, 11 Nov), one check each as the ticket asks. They
 // are all about the bottom sheet (src/components/setlist/Sheet.tsx and sheet.module.css):
 //   R5   a strip's and the Era panel's border is the rail's grey in every state, expanded and in mini; only the selected tab has a gear colour
-//   R6   the History strip reads "LISTENING HISTORY" and is not cut off at 360, 375 and 390 px, with History on, off and disabled
+//   R6   the History strip reads "LISTENING HISTORY", on one line and not cut off at 360, 375, 390 and 412 px and in the desktop frame, with
+//        History on, off and disabled, expanded and in mini; each strip's two end labels are on one line too (Tempo's are the widest pair);
+//        and under each strip's drawn knob is that gear's own slider, level with it
 //   R7   a note, bolt or ray the value does not reach is drawn unlit (#34313D, full opacity) instead of hidden
 //   R8   no pink in the sheet's top border or its shadow
 //   R10  on a pointer device an idle tab takes its gear colour for a border, and an unpicked era button the pink; no glow; nothing sticks after a tap
@@ -9,7 +11,7 @@
 // The tuner is reached the way tests/e2e/setlist.spec.ts reaches it (tests/helpers/tunerE2e.ts).
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import type { TunerPart } from '../../src/lib/setlist/types';
+import type { GearId, TunerPart } from '../../src/lib/setlist/types';
 import { AMBER, PINK, UNLIT, VIOLET, css, eraButton, handle, open, pressKey, rack, resetButton, rgb, slider, strip, tab, tabArt } from '../helpers/tunerE2e';
 
 // A 390x844 touch phone, like the tuner spec. Motion is off, so a colour is read where it ends and not on its way (the notes' and
@@ -163,60 +165,133 @@ test('R5. in mini the selected tab keeps its gear-colour border and glow, and ev
 });
 
 // ============================================================================================================
-// R6: "LISTENING HISTORY" on the strip, not cut off
+// R6: "LISTENING HISTORY" on the strip, on one line and not cut off, with each knob over its own slider
 // ============================================================================================================
 
 type HistoryState = 'disabled' | 'off' | 'on';
 /** What the label says. The tag is only for a History that is off but usable: a disabled one says why under its track. */
 const LABEL: Record<HistoryState, string> = { disabled: 'LISTENING HISTORY', off: 'LISTENING HISTORY · OFF', on: 'LISTENING HISTORY' };
 
-const historyLabel = (page: Page) => strip(page, 'history').locator('label');
+/** What a gear's label box and type are now. */
+const labelBox = (page: Page, gear: GearId) =>
+  strip(page, gear)
+    .locator('label')
+    .evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return {
+        text: el.textContent,
+        scroll: el.scrollWidth,
+        client: el.clientWidth,
+        lines: Math.round(el.getBoundingClientRect().height / Number.parseFloat(cs.lineHeight)),
+        size: Number.parseFloat(cs.fontSize),
+        tracking: Number.parseFloat(cs.letterSpacing),
+      };
+    });
 
-/** What the History label's box and type are now. */
-const labelBox = (page: Page) =>
-  historyLabel(page).evaluate((el) => {
-    const cs = getComputedStyle(el);
+/**
+ * What is under the centre of a strip's drawn knob (`hits`: the gear's own slider, or something in it) and how far below the
+ * slider's own vertical centre the knob's centre is, in px. A label that wraps adds a line to the head, which drops the track
+ * and leaves the slider above the knob; an end label that wraps adds one under the track and leaves the slider below it.
+ */
+const knobBox = (page: Page, gear: GearId) =>
+  strip(page, gear).evaluate((el, g) => {
+    const knob = el.querySelector('[data-knob]')!.getBoundingClientRect();
+    const x = knob.left + knob.width / 2;
+    const y = knob.top + knob.height / 2;
+    const under = document.elementFromPoint(x, y);
+    const input = document.getElementById(`slider-${g}`)!;
+    const box = input.getBoundingClientRect();
+    return { hits: under === input || input.contains(under), under: under ? `${under.tagName.toLowerCase()}${under.id ? `#${under.id}` : ''}` : null, below: y - (box.top + box.height / 2) };
+  }, gear);
+
+/** 6A's end-label pairs, which every strip keeps word for word. */
+const ENDS: Record<GearId, [string, string]> = {
+  difficulty: ['Light work', 'Locked in'],
+  popularity: ['Deep cuts', 'Pop hits'],
+  tempo: ['Slow jams', 'Upbeat tracks'],
+  history: ['Rediscover', 'On repeat'],
+};
+
+/**
+ * A strip's two end labels and the row they are in: the words, the lines each takes (the line boxes of a Range over it), how far each
+ * label and the row are wider than their boxes (scrollWidth less clientWidth, so 0 or less when the text fits), the row's height, the
+ * gap between the labels and their type. Null for a strip that says something else where the end labels would be (a disabled History's hint).
+ */
+const endsBox = (page: Page, gear: GearId) =>
+  strip(page, gear).evaluate((el) => {
+    const row = el.querySelector<HTMLElement>('[data-ends=""]');
+    if (!row) return null;
+    const [left, right] = [...row.children] as [HTMLElement, HTMLElement];
+    const lines = (label: HTMLElement) => {
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      return range.getClientRects().length;
+    };
     return {
-      text: el.textContent,
-      scroll: el.scrollWidth,
-      client: el.clientWidth,
-      lines: Math.round(el.getBoundingClientRect().height / Number.parseFloat(cs.lineHeight)),
-      size: Number.parseFloat(cs.fontSize),
-      tracking: Number.parseFloat(cs.letterSpacing),
+      words: [left.textContent, right.textContent],
+      lines: [lines(left), lines(right)],
+      wider: [left, right, row].map((box) => box.scrollWidth - box.clientWidth),
+      height: row.getBoundingClientRect().height,
+      gap: right.getBoundingClientRect().left - left.getBoundingClientRect().right,
+      size: Number.parseFloat(getComputedStyle(left).fontSize),
     };
   });
 
-/** The sheet in a mode, and the History strip on show: all the strips are, expanded; in mini its tab picks it. */
-async function showHistory(page: Page, mode: 'expanded' | 'mini') {
+/** The sheet in a mode, and a gear's strip on show: all the strips are, expanded; in mini its tab picks it. */
+async function showStrip(page: Page, gear: GearId, mode: 'expanded' | 'mini') {
   const app = page.locator('#app');
   if ((await app.getAttribute('data-mode')) !== mode) await handle(page).click();
   await expect(app).toHaveAttribute('data-mode', mode);
-  if (mode === 'mini') await tab(page, 'history').click();
-  await expect(strip(page, 'history')).toBeVisible();
+  if (mode === 'mini') await tab(page, gear).click();
+  await expect(strip(page, gear)).toBeVisible();
 }
 
 /**
- * Checks the History label at the width the page is at, in a mode. It must fit its box (scrollWidth is clientWidth or less) and,
- * but for the one case below, on one line; the strip and the rack keep their heights.
+ * Checks the four strips at the width the page is at, in a mode. Each label must fit its box (scrollWidth is clientWidth or less),
+ * on one line, in type of 9 px or more. Each pair of end labels must be 6A's words, one line each, in type of 9 px or more, none of
+ * them nor their row wider than its box, in a row 14 px tall, 5 px or more apart. The point at each knob's centre must be on that
+ * gear's own slider, and the knob level with it (a disabled History has a hint under its track instead of end labels, which is taller,
+ * and its slider is off by design). History's label reads what it should for the state, and its strip and the rack keep their
+ * heights. Returns History's label.
  */
 async function expectLabelFits(page: Page, state: HistoryState, width: number, mode: 'expanded' | 'mini') {
-  await showHistory(page, mode);
   const at = `${state}, ${width} px, ${mode}`;
-  const m = await labelBox(page);
+  const sizes: number[] = [];
+  for (const gear of GEARS) {
+    await showStrip(page, gear, mode);
+    const m = await labelBox(page, gear);
+    expect(m.scroll, `${at}, ${gear}: the label is ${m.scroll} px of content in a ${m.client} px box`).toBeLessThanOrEqual(m.client);
+    expect(m.lines, `${at}, ${gear}: the label takes ${m.lines} lines`).toBe(1);
+    expect(m.size, `${at}, ${gear}: the type`).toBeGreaterThanOrEqual(9);
+    sizes.push(m.size);
+    const hint = gear === 'history' && state === 'disabled';
+    const ends = await endsBox(page, gear);
+    if (hint) expect(ends, `${at}, ${gear}: a hint stands where the end labels would`).toBeNull();
+    else {
+      expect(ends, `${at}, ${gear}: the end labels`).not.toBeNull();
+      expect(ends!.words, `${at}, ${gear}`).toEqual(ENDS[gear]);
+      expect(ends!.lines, `${at}, ${gear}: the end labels take ${ends!.lines} lines`).toEqual([1, 1]);
+      expect(Math.max(...ends!.wider), `${at}, ${gear}: the end labels and their row are ${ends!.wider} px wider than their boxes`).toBeLessThanOrEqual(0);
+      expect(Math.round(ends!.height), `${at}, ${gear}: the row of end labels`).toBe(14);
+      expect(ends!.gap, `${at}, ${gear}: the end labels are ${ends!.gap} px apart`).toBeGreaterThanOrEqual(5);
+      expect(ends!.size, `${at}, ${gear}: the end labels' type`).toBeGreaterThanOrEqual(9);
+    }
+    const knob = await knobBox(page, gear);
+    expect(knob.hits, `${at}, ${gear}: under the knob's centre is ${knob.under}`).toBe(true);
+    if (!hint) expect(Math.abs(knob.below), `${at}, ${gear}: the knob is ${knob.below} px below its slider's centre`).toBeLessThan(1);
+  }
+  // The four labels are set alike, so the strips match.
+  expect(new Set(sizes).size, `${at}: the four labels' sizes ${sizes}`).toBe(1);
+  // History is on show now, the last of them.
+  const m = await labelBox(page, 'history');
   expect(m.text, at).toBe(LABEL[state]);
-  expect(m.scroll, `${at}: the label is ${m.scroll} px of content in a ${m.client} px box`).toBeLessThanOrEqual(m.client);
-  // One line everywhere but a mini strip at 360 px with History on: there the reset button leaves 85 px and "LISTENING HISTORY" is
-  // 95 px even in 9.5 px type with no tracking, so it takes two lines (the strip is 94 px tall) instead of being cut off.
-  const wraps = state === 'on' && mode === 'mini' && width === 360;
-  if (wraps) expect(m.lines, at).toBeLessThanOrEqual(2);
-  else expect(m.lines, `${at}: the label takes ${m.lines} lines`).toBe(1);
   expect(Math.round((await strip(page, 'history').boundingBox())!.height), at).toBe(mode === 'expanded' ? 76 : 94);
   expect(await rack(page), at).toEqual(mode === 'expanded' ? { height: 416, scroll: 416 } : { height: 164, scroll: 164 });
   return m;
 }
 
 for (const state of ['disabled', 'off', 'on'] as const) {
-  test(`R6. the strip reads "${LABEL[state]}" and the label is not cut off at 360, 375 and 390 px, expanded and in mini, with History ${state}`, async ({ page }) => {
+  test(`R6. the strip reads "${LABEL[state]}" on one line, not cut off, at 360, 375, 390 and 412 px, expanded and in mini, with History ${state}`, async ({ page }) => {
     await openTuner(page, { loggedIn: state !== 'disabled' });
     if (state === 'on') {
       await pressKey(page, 'history', 'ArrowLeft');
@@ -229,7 +304,7 @@ for (const state of ['disabled', 'off', 'on'] as const) {
     await expect(strip(page, 'history').locator('[data-offtag]')).toHaveCount(state === 'off' ? 1 : 0);
     if (state === 'disabled') await expect(strip(page, 'history')).toContainText('Connect Spotify to use your listening history');
 
-    for (const width of [390, 375, 360]) {
+    for (const width of [412, 390, 375, 360]) {
       await page.setViewportSize({ width, height: 844 });
       await fontsReady(page);
       for (const mode of ['expanded', 'mini'] as const) {
@@ -262,14 +337,14 @@ test.describe('R6 on a desktop', () => {
 
   // The frame is 390 px wide whatever the window is, so the window says nothing about the room the label has.
   for (const loggedIn of [false, true]) {
-    test(`R6. inside the phone-shaped frame the label is not cut off either, expanded and in mini (${loggedIn ? 'signed in' : 'signed out'})`, async ({ page }) => {
+    test(`R6. inside the phone-shaped frame the label is on one line and not cut off either, expanded and in mini (${loggedIn ? 'signed in' : 'signed out'})`, async ({ page }) => {
       await openTuner(page, { loggedIn });
       await fontsReady(page);
       const states: HistoryState[] = loggedIn ? ['off', 'on'] : ['disabled'];
       for (const state of states) {
         if (state === 'on') {
           // Expanded first: the slider can be focused there.
-          await showHistory(page, 'expanded');
+          await showStrip(page, 'history', 'expanded');
           await pressKey(page, 'history', 'ArrowLeft');
           await expect(strip(page, 'history')).not.toHaveAttribute('data-off', /.*/);
         }

@@ -132,8 +132,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  /* The gear's label sizes its type by this box's width, not the window's (see .stripBody .eyebrow): the box is 21 px narrower
-     in the mini sheet, and on a desktop the frame is 390 px wide whatever the window is. */
+  /* The gear's label sizes its type by this box's width, not the window's (see .stripBody .eyebrow), and so do Tempo's end labels
+     (see .ends): the box is 21 px narrower in the mini sheet, and on a desktop the frame is 390 px wide whatever the window is. */
   container-type: inline-size;
 }
 
@@ -142,6 +142,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* A strip's label and its reset button have no gap between them (the Era panel's header keeps its 8 px): the button's box has 20 px
+   of nothing to the left of its 16 px icon, so the label's last letter is never nearer the icon than that. Taking the 8 px out is
+   what lets "LISTENING HISTORY" stay on one line in a mini strip at 360 px (see .stripBody .eyebrow). */
+.stripBody .gearHead {
+  gap: 0;
 }
 
 /* A gear's label: its colour while it is on. Off, it is --sl-off (QWW-57, Quinn-Wai, 11 Nov), which is 4.8:1 where 6A's
@@ -163,17 +170,19 @@
   color: var(--sl-off);
 }
 
-/* The four gears' labels set their type by the strip body's width (QWW-57, R6), so "LISTENING HISTORY" is not cut off. In Inter
-   700 it is 132.5 px at 6A's 11 px with 0.12em tracking, and the reset button takes 44 px of the head row beside it, so 11 px
-   fits, with 3 px to spare, where the body is 180 px wide: an expanded strip at 390 px, 6A's own look. The body is 165 px at
-   375 px and 150 at 360, and 21 px narrower again in the mini sheet (its art is 140 px), so 159 at 390. Below 180 the type
-   tightens to keep that 3 px: the size first, 12.04 px of body per px of font size, down to 9.5 px (at a body of 161 px), then
-   the tracking, from 0.12em down to none (at a body of 142 px). The four labels share it, so the strips match. Narrower still,
-   a mini strip at 360 px with History on, the label wraps onto two lines (the strip is 94 px tall and the head 28) rather than
-   be cut off. A browser without container units drops the two declarations and keeps 6A's 11 px and 0.12em. */
+/* The four gears' labels set their type by the strip body's width (QWW-57, R6), so "LISTENING HISTORY" is on one line and not cut
+   off. In Inter 700 it is 10 px per px of font size with no tracking and 12.04 with 0.12em (132.5 px at 6A's 11 px), and the reset
+   button's box takes 36 px of the head row beside it (44 px, 8 of them past the row's edge), so the label has the body's width
+   less 36 px. The body is 180 px wide in an expanded strip at 390 px, 6A's own 11 px and 0.12em with 11 px to spare; 165 at 375 px
+   and 150 at 360 px; and 21 px narrower again in the mini sheet (its art is 140 px): 159, 144 and 129. Below 180 the type tightens
+   to keep the label in its room: the size first, 12.04 px of body per px of font size, down to 9.5 px (at a body of 161 px); then the
+   tracking, from 0.12em down to none (142 px); then the size again, 10 px of body per px of font size, down to 9 px at a body of
+   129 px (a mini strip at 360 px), where the label is 90 of its 93 px. That keeps 3 px free at the tightest, and the type is never
+   under 9 px. The four labels share it, so the strips match. Narrower than 129 px the label wraps rather than be cut off. A browser
+   without container units drops the two declarations and keeps 6A's 11 px and 0.12em. */
 .stripBody .eyebrow {
   white-space: normal;
-  font-size: clamp(9.5px, calc((100cqw - 47px) / 12.04), 11px);
+  font-size: clamp(9px, calc((100cqw - 39px) / 10), clamp(9.5px, calc((100cqw - 47px) / 12.04), 11px));
   letter-spacing: clamp(0px, calc((100cqw - 142px) / 17), 0.12em);
 }
 
@@ -293,6 +302,18 @@
   color: var(--sl-off);
 }
 
+/* Tempo's pair, "Slow jams" and "Upbeat tracks", is the only one too wide for a mini strip at 360 px: 138.5 px at 6A's 12 px in Inter
+   500 (11.54 px per px of font size, over 22 characters) in a body of 129 px, so both labels wrapped, the row took two lines and the
+   slider sat 7 px off the drawn knob. The other pairs are 104 to 120 px and fit there with 8.5 px or more. The body is 144 px in the
+   mini sheet at 375 px, where Tempo's pair fits with 5.5 px between the labels, 6A's look. Narrower than that the tracking tightens to
+   keep the 5.5 px (22 px of body per px of tracking), down to -0.03em, the era labels' (at a body of 136 px); then the size, 10.88 px
+   of body per px of font size (11.54 less 22 characters of 0.03em), to 11.35 px at 129 px; never under 9 px. Wider than 144 px nothing
+   changes. A browser without container units drops the two declarations and keeps 12 px. */
+.strip[data-gear='tempo'] .ends {
+  font-size: clamp(9px, calc((100cqw - 5.5px) / 10.88), 12px);
+  letter-spacing: clamp(-0.03em, calc((100cqw - 144px) / 22), 0px);
+}
+
 /* What the strip says in the place of its end labels when the gear cannot be used (History without Spotify). Up to two
    lines: the strip's height is fixed (76, 94 in the mini sheet), so a longer hint is cut off, not left to push the rack
    out. (max-height is the fallback if a build drops the -webkit- clamp.) */
@@ -357,12 +378,15 @@
 
 /* ===== Era (README §8) ===== */
 
-/* The font size of an era button's label is set here, in one place. "Pre-’70s" is the widest label (about 4 px per px of font
-   size with this tracking, so 43 px at 6A's 10.5 px) and a button is only (100vw - 102px) / 7 wide: 37 px on a 360 px phone,
-   39 px on a 375 and 41 px on a 390, minus its 1 px borders. The size is the largest that fits, up to 6A's 10.5 px:
-   9 px on a 360, about 9.4 on a 375, about 10 on a 390, and 10.5 from about 405 px up. Measured in a browser (QWW-57). */
+/* An era button's label sets its type by the panel's width, not the window's (QWW-57): the panel is the container, and 100cqw is its
+   content box, 282 px on a 360 px phone and 332 px in the desktop frame, which is 390 px wide whatever the window is. A button
+   has (100cqw - 38px) / 7 inside its 1 px borders (6 gaps of 4 px between 7 buttons): 34.8 px at 360, 37 at 375, 39.1 at 390 and
+   42 in the frame. "Pre-’70s" is the widest label, 3.84 px per px of font size with this tracking (40.3 px at 6A's 10.5 px), so the
+   size is that room over 3.93, which leaves it 2% to spare, up to 6A's 10.5 px: 9 px on a 360, about 9.4 on a 375, about 10 on a
+   390, and 10.5 from about 405 px up (a panel of 327 px). Measured in a browser. A browser without container units drops the
+   second font-size (on .eraButton) and keeps 9 px, which fits everywhere. */
 .eraPanel {
-  --sl-era-label-size: clamp(9px, calc((100vw - 116px) / 27.5), 10.5px);
+  container-type: inline-size;
   display: flex;
   flex-shrink: 0;
   box-sizing: border-box;
@@ -397,7 +421,8 @@
   background: rgba(255, 255, 255, 0.02);
   color: #8a8596;
   font-family: inherit;
-  font-size: var(--sl-era-label-size);
+  font-size: 9px;
+  font-size: clamp(9px, calc((100cqw - 38px) / 27.5), 10.5px);
   line-height: 12px;
   font-weight: 600;
   letter-spacing: -0.03em;
@@ -442,6 +467,8 @@
 /* ===== Tab bar (mini only; README §9) ===== */
 
 .tabs {
+  /* The tab labels set their type by this box's width (see .tab). */
+  container-type: inline-size;
   display: grid;
   flex-shrink: 0;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -459,6 +486,12 @@
   color: var(--sl-text-3);
   font-family: inherit;
   font-size: 11px;
+  /* The five labels share one size, set by the bar's width (QWW-57). "Popularity" is the widest, 4.95 px per px of font size in Inter
+     600 (54.4 px at 6A's 11 px), and a tab is (100cqw - 16px) / 5 wide inside its 1 px borders: 54.4 px at 360, 57.4 at 375 and 60.4
+     at 390, so the label touched the border at 360 and ran into the 2 px of padding at 375. The size is the largest that leaves 3 px
+     clear on each side of the label (and half a px for the rounding of clientWidth), up to 6A's 11 px: 9.7 px at 360, 10.3 at 375,
+     10.9 at 390 and 11 from about 393 px up, never under 9.5. A browser without container units drops this line and keeps 11 px. */
+  font-size: clamp(9.5px, calc((100cqw - 58.5px) / 24.74), 11px);
   line-height: 13px;
   font-weight: 600;
   cursor: pointer;

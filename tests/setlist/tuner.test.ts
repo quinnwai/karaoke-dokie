@@ -5,11 +5,11 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { eraOf, ERA_LABEL } from '../../src/lib/setlist/eras';
-import { SHEET_GEARS, SHEET_PARTS } from '../../src/lib/setlist/gears';
+import { GEAR_META, SHEET_GEARS, SHEET_PARTS } from '../../src/lib/setlist/gears';
 import { modeAfterDrag, neonVars, RACK_FULL, RACK_MINI, sheetLayout } from '../../src/lib/setlist/sheet';
 import { initialTuner, isOn, toRequest, tunerReducer } from '../../src/lib/setlist/tuner';
 import type { TunerAction } from '../../src/lib/setlist/tuner';
-import { GEAR_IDS, TUNER_PARTS, type EraId, type TunerState } from '../../src/lib/setlist/types';
+import { GEAR_IDS, TUNER_PARTS, type EraId, type GearId, type TunerState } from '../../src/lib/setlist/types';
 
 const run = (s: TunerState, ...actions: TunerAction[]) => actions.reduce(tunerReducer, s);
 /** The tuner everyone starts from: it takes no sign-in state, the ranking engine decides what counts. */
@@ -362,9 +362,10 @@ describe('the sheet\'s order of gears', () => {
   });
 });
 
-// The sheet's stylesheet, read as text: vitest does not apply CSS Modules, so what a browser draws is tests/e2e/setlist-sheet.spec.ts's.
-// These keep the decisions of the review of the 6A preview (QWW-57, 11 Nov) from being undone quietly.
-describe('sheet.module.css (QWW-57: R5, R6, R8, R10)', () => {
+// The sheet's stylesheet, read as text: vitest does not apply CSS Modules, so what a browser draws is tests/e2e/setlist-sheet.spec.ts's and
+// setlist-sheet-fit.spec.ts's. These keep the decisions of the review of the 6A preview (QWW-57, 11 Nov), and the fits that the adversarial
+// review of #38 asked for, from being undone quietly.
+describe('sheet.module.css (QWW-57: R5, R6, R8, R10; the review of #38: findings 4, 7 and 8)', () => {
   const css = readFileSync(join(__dirname, '../../src/components/setlist/sheet.module.css'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\s+/g, ' ');
@@ -403,16 +404,128 @@ describe('sheet.module.css (QWW-57: R5, R6, R8, R10)', () => {
     expect(outsideHover).not.toMatch(/:hover ?\{[^}]*border/);
   });
 
-  it('sets the four labels\' type by the strip body\'s width, from 6A\'s 11 px and 0.12em down to 9.5 px (R6)', () => {
+  it('sets the four labels\' type by the strip body\'s width, from 6A\'s 11 px and 0.12em down to 9 px (R6)', () => {
     expect(rule('.stripBody')).toContain('container-type: inline-size;');
     // 6A's look is the base, and what a browser without container units keeps.
     expect(rule('.eyebrow')).toContain('font-size: 11px;');
     expect(rule('.eyebrow')).toContain('letter-spacing: 0.12em;');
     const labels = rule('.stripBody .eyebrow');
-    expect(labels).toMatch(/font-size: clamp\(9\.5px, [^;]*100cqw[^;]*, 11px\);/);
+    expect(labels).toMatch(/font-size: clamp\(9px, [^;]*100cqw[^;]*, clamp\(9\.5px, [^;]*100cqw[^;]*, 11px\)\);/);
     expect(labels).toMatch(/letter-spacing: clamp\(0px, [^;]*100cqw[^;]*, 0\.12em\);/);
-    // The one case that cannot fit on a line wraps instead of being cut off.
+    // A body too narrow for any of it wraps the label instead of cutting it off.
     expect(labels).toContain('white-space: normal;');
+  });
+
+  // vitest has no layout, so the formulas are evaluated here, with the widths of the labels measured in Chromium in the Inter files the app ships
+  // (700 for a strip's label, 600 for a tab's and an era button's). tests/e2e/setlist-sheet.spec.ts and setlist-sheet-fit.spec.ts check the real
+  // thing, in a browser, at 360, 375, 390 and 412 px and in the desktop frame.
+  /** The last value a rule gives a property: a second declaration is the one for a browser with container units. */
+  const declared = (selector: string, property: string) => [...rule(selector).matchAll(new RegExp(`(?:^| )${property}: ([^;]+);`, 'g'))].map((m) => m[1]!).at(-1)!;
+  /** A length made of clamp(), calc(), px and 100cqw (and em, of `em` px), with 100cqw as `cqw` px. */
+  const length = (expr: string, cqw: number, em = 0) =>
+    new Function('clamp', `return ${expr.replace(/100cqw/g, `${cqw}`).replace(/([\d.]+)em/g, `($1 * ${em})`).replace(/calc\(/g, '(').replace(/px/g, '')};`)(
+      (min: number, value: number, max: number) => Math.min(Math.max(value, min), max),
+    ) as number;
+
+  it('keeps "LISTENING HISTORY" on one line from a strip body of 129 px (a mini strip at 360 px) up, 3 px to spare at the tightest, and 6A\'s look from 180 px (R6)', () => {
+    const size = declared('.stripBody .eyebrow', 'font-size');
+    const tracking = declared('.stripBody .eyebrow', 'letter-spacing');
+    // The room the label has beside the reset button: its 44 px box, 8 px of it past the row's edge, and no gap before it.
+    expect(rule('.resetButton')).toContain('width: 44px;');
+    expect(rule('.resetButton')).toContain('margin: -8px -8px -4px 0;');
+    expect(rule('.stripBody .gearHead')).toContain('gap: 0;');
+    expect(rule('.gearHead')).toContain('gap: 8px;'); // the Era panel's header
+    const BUTTON = 36;
+    // Inter 700: "LISTENING HISTORY" is 10.0017 px per px of font size and 17 characters, " · OFF" after it 12.7535 and 23.
+    let tightest = Infinity;
+    for (let body = 129; body <= 260; body++) {
+      const s = length(size, body);
+      const t = length(tracking, body, s);
+      expect(s, `a body of ${body} px`).toBeGreaterThanOrEqual(9);
+      expect(s, `a body of ${body} px`).toBeLessThanOrEqual(11);
+      tightest = Math.min(tightest, body - BUTTON - (10.0017 * s + 17 * t));
+      // History off or disabled has no reset button, and the whole body.
+      expect(body - (12.7535 * s + 23 * t), `"LISTENING HISTORY · OFF" in a body of ${body} px`).toBeGreaterThan(0);
+    }
+    expect(tightest).toBeGreaterThanOrEqual(2.9);
+    expect(length(size, 129)).toBe(9);
+    // 6A's own 11 px and 0.12em on an expanded strip at 390 px (a body of 180) and wider; nothing changed from a body of 134 px up.
+    expect(length(size, 180)).toBe(11);
+    expect(length(tracking, 180, 11)).toBeCloseTo(1.32, 5);
+    for (let body = 134; body <= 260; body++) expect(length(size, body), `a body of ${body} px`).toBeCloseTo(Math.min(Math.max((body - 47) / 12.04, 9.5), 11), 5);
+  });
+
+  it('keeps every pair of end labels on one line from a strip body of 129 px up: Tempo\'s tighten 5.5 px apart below a body of 144 px, the others fit at 6A\'s 12 px', () => {
+    // 6A's pairs, word for word. Their widths were measured for these words: change one and they must be measured again.
+    const PAIRS: Record<GearId, [string, string]> = {
+      difficulty: ['Light work', 'Locked in'],
+      popularity: ['Deep cuts', 'Pop hits'],
+      tempo: ['Slow jams', 'Upbeat tracks'],
+      history: ['Rediscover', 'On repeat'],
+    };
+    for (const g of GEAR_IDS) expect([GEAR_META[g].left, GEAR_META[g].right], g).toEqual(PAIRS[g]);
+    // Inter 500 at 12 px: each pair's width, in px. The three without a rule fit in the narrowest body, 129 px, with 8.5 px or more between the labels.
+    const AT_12 = { difficulty: 115.594, popularity: 104.141, history: 120.438 };
+    expect(rule('.ends')).toContain('font-size: 12px;');
+    for (const g of ['difficulty', 'popularity', 'history'] as const) expect(129 - AT_12[g], g).toBeGreaterThanOrEqual(8.5);
+    // Tempo's: 138.516 px at 12 px, which is 11.5416 px per px of font size over 22 characters (22 px of tracking per px of it).
+    const tempo = ".strip[data-gear='tempo'] .ends";
+    const size = declared(tempo, 'font-size');
+    const tracking = declared(tempo, 'letter-spacing');
+    expect(size).toMatch(/^clamp\(9px, [^;]*100cqw[^;]*, 12px\)$/);
+    expect(tracking).toMatch(/^clamp\(-0\.03em, [^;]*100cqw[^;]*, 0px\)$/);
+    for (let body = 129; body <= 260; body++) {
+      const s = length(size, body);
+      const t = length(tracking, body, s);
+      expect(s, `a body of ${body} px`).toBeGreaterThanOrEqual(9);
+      expect(s, `a body of ${body} px`).toBeLessThanOrEqual(12);
+      expect(t, `a body of ${body} px`).toBeGreaterThanOrEqual(-0.03 * s - 1e-9);
+      expect(t, `a body of ${body} px`).toBeLessThanOrEqual(0);
+      // At 375 px in the mini sheet (a body of 144 px) the pair fits as it is, 5.5 px apart: the labels are never nearer than that.
+      expect(body - (11.5416 * s + 22 * t), `Tempo's pair in a body of ${body} px`).toBeGreaterThanOrEqual(5.4);
+    }
+    // 6A's look from that body up, and the tracking before the size.
+    for (let body = 144; body <= 260; body++) {
+      expect(length(size, body), `a body of ${body} px`).toBe(12);
+      expect(length(tracking, body, 12), `a body of ${body} px`).toBeCloseTo(0, 9);
+    }
+    expect(length(size, 137)).toBe(12);
+    expect(length(tracking, 137, 12)).toBeLessThan(0);
+    expect(length(size, 129)).toBeCloseTo(11.35, 2);
+  });
+
+  it('sets the tab labels\' type by the tab bar\'s width: 3 px clear each side of "Popularity" from 360 px, 11 px where that fits (finding 7)', () => {
+    expect(rule('.tabs')).toContain('container-type: inline-size;');
+    expect(rule('.tab')).toContain('font-size: 11px;'); // what a browser without container units keeps
+    const size = declared('.tab', 'font-size');
+    expect(size).toMatch(/^clamp\(9\.5px, [^;]*100cqw[^;]*, 11px\)$/);
+    // Inter 600: "Popularity" is 4.9474 px per px of font size. A tab is a fifth of the bar less four gaps of 4 px, and clientWidth is the box inside its borders, rounded.
+    for (let bar = 298; bar <= 400; bar += 0.5) {
+      const s = length(size, bar);
+      const client = Math.round((bar - 16) / 5 - 2);
+      expect(s, `a bar of ${bar} px`).toBeGreaterThanOrEqual(9.5);
+      expect(client - 4.9474 * s, `"Popularity" at ${s}px in a tab of ${client} px (a bar of ${bar} px)`).toBeGreaterThanOrEqual(6);
+    }
+    expect(length(size, 350)).toBe(11); // a 412 px phone
+    expect(length(size, 348)).toBe(11); // the desktop frame
+  });
+
+  it('sets the era labels\' type by the Era panel\'s width, not the window\'s, and on a phone it is what the window\'s formula gave (finding 8)', () => {
+    expect(rule('.eraPanel')).toContain('container-type: inline-size;');
+    expect(rule('.eraButton')).toContain('font-size: 9px;'); // what a browser without container units keeps
+    const size = declared('.eraButton', 'font-size');
+    expect(size).toMatch(/^clamp\(9px, [^;]*100cqw[^;]*, 10\.5px\)$/);
+    // Nothing in the sheet follows the window, and the old custom property is gone.
+    expect(css).not.toContain('100vw');
+    expect(css).not.toContain('--sl-era-label-size');
+    // A phone of width w has a panel whose content box is w - 78 px: its sizes were (w - 116) / 27.5 from 9 px to 10.5 px.
+    for (let w = 340; w <= 460; w++) expect(length(size, w - 78), `a ${w} px phone`).toBeCloseTo(Math.min(Math.max((w - 116) / 27.5, 9), 10.5), 5);
+    // Inter 600 with -0.03em: "Pre-’70s" is 3.8378 px per px of font size. A button is (content - 24 px of gaps) / 7 less its 1 px borders.
+    for (let content = 282; content <= 332; content++) {
+      const room = (content - 24) / 7 - 2;
+      expect(room - 3.8378 * length(size, content), `a panel of ${content} px`).toBeGreaterThanOrEqual(0);
+    }
+    expect(length(size, 332)).toBe(10.5); // the desktop frame
   });
 });
 
