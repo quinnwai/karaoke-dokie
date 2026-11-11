@@ -172,6 +172,10 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await page1.waitForTimeout(1100);
   await shot(page1, '02-quiet-spot');
 
+  // The mic step (QWW-50): our own screen, then the browser's question (the fake UI says yes), then the note. Its
+  // screens are checked in mic-permission.spec.ts; here the flow just has to pass through it.
+  await page1.getByRole('button', { name: 'Turn on microphone', exact: true }).click({ timeout: 5000 });
+
   const lowButton = page1.getByRole('button', { name: 'Hold to record your lowest note' });
   await expect(lowButton).toBeVisible({ timeout: 5000 });
   await page1.waitForTimeout(1300);
@@ -201,6 +205,8 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   }, progress!);
   const page = await context.newPage();
   await page.goto('/');
+  // A reload let go of the microphone, so the half-done test goes by way of the mic step to the high note.
+  await page.getByRole('button', { name: 'Turn on microphone', exact: true }).click();
   await expect(page.getByTestId('low-note')).toHaveText('A2');
 
   await holdButton(page, /highest note/, 1600);
@@ -315,7 +321,8 @@ test('returning user goes straight to results, and redo restarts the test', asyn
 
   await page.getByRole('button', { name: 'Redo the singing test' }).click();
   await expect(page.getByText('Find a quiet spot')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Hold to record your lowest note' })).toBeVisible({ timeout: 5000 });
+  // The microphone was let go at the results, so the test starts again at the mic step.
+  await expect(page.getByRole('button', { name: 'Turn on microphone', exact: true })).toBeVisible({ timeout: 5000 });
   await context.close();
 });
 
@@ -381,7 +388,7 @@ test('pick songs you sing well', async ({ browser, baseURL }) => {
   await context.close();
 });
 
-test('mic permission denied shows a lyric line', async ({ browser, baseURL }) => {
+test('mic permission denied shows what to do, for this browser (more in mic-permission.spec.ts)', async ({ browser, baseURL }) => {
   const context = await browser.newContext({ ...iPhone, baseURL });
   await mockApi(context, freshState());
   await context.addInitScript(() => {
@@ -390,8 +397,9 @@ test('mic permission denied shows a lyric line', async ({ browser, baseURL }) =>
   const page = await context.newPage();
   await page.goto('/');
   await page.getByRole('button', { name: 'Start' }).click();
-  await holdButton(page, /lowest note/, 300);
-  await expect(page.getByText('We need your mic to hear you')).toBeVisible();
+  await page.getByRole('button', { name: 'Turn on microphone', exact: true }).click({ timeout: 5000 });
+  await expect(page.getByText('The microphone is blocked')).toBeVisible();
+  await expect(page.getByText('Website Settings')).toBeVisible();
   await page.waitForTimeout(1200);
   await shot(page, '14-mic-denied');
   await context.close();
@@ -885,3 +893,44 @@ test('Easy by the Commodores shows no octave mark for F2 to C5', async ({ browse
     await context.close();
   }
 });
+
+// QWW-31, second round: Are You With Me (no recording, no artist evidence: the pitch rule) and Talk Dirty (a recording
+// flagged mostly-rap). Their stored rows, as imported, go through the real fix and matcher for D#2 to D5, the range
+// they were reported with, and the song page shows no octave mark and the label the published range gives.
+const knownCases = (JSON.parse(readFileSync(path.resolve('tests/fixtures/octave-known-cases.json'), 'utf8')) as {
+  songs: { key: string; stored: Pick<SongRange, 'low' | 'high' | 'tessitura' | 'pitchShare' | 'fastLyrics'> }[];
+}).songs;
+
+for (const song of [
+  { key: 'lost frequencies|are you with me', title: 'Are You With Me - Radio Edit', artist: 'Lost Frequencies', label: 'Easy', slug: 'are-you-with-me' },
+  { key: 'jason derulo|talk dirty', title: 'Talk Dirty (feat. 2 Chainz)', artist: 'Jason Derulo', label: 'Easy', slug: 'talk-dirty' },
+] as const) {
+  test(`${song.title} shows no octave mark and ${song.label} for D#2 to D5`, async ({ browser, baseURL }) => {
+    const evidence = JSON.parse(readFileSync(path.resolve('data/octave-evidence.json'), 'utf8')) as OctaveEvidence;
+    const user = { low: 39, high: 74, source: 'test' } as const;
+    const row = knownCases.find((c) => c.key === song.key)!.stored;
+    const stored: SongRange = { ...row, source: 'note-file', confidence: 'high', fastLyrics: row.fastLyrics ?? false };
+    const range = correctOctave(song.key, stored, evidence);
+    const fit = matchSong(user, range)!;
+    const track = { id: song.slug, title: song.title, artist: song.artist, artistId: `a-${song.slug}`, spotifyUrl: `https://open.spotify.com/track/${song.slug}`, playRank: 0 };
+    const api = freshState();
+    api.user = me(user);
+    api.response = { matches: [toMatch(track, range, fit)], nextOffset: null, sources: {}, complete: true };
+    expect(range.octaveFrom).toBeDefined();
+    expect(fit).toMatchObject({ octave: 'none', difficulty: song.label.toLowerCase() });
+
+    for (const [name, viewport] of [['375', { width: 375, height: 812 }], ['1280', { width: 1280, height: 800 }]] as const) {
+      const context = await browser.newContext({ ...iPhone, viewport, baseURL, reducedMotion: 'reduce' });
+      await mockApi(context, api);
+      const page = await context.newPage();
+      await page.goto('/');
+      await page.getByRole('button', { name: new RegExp(`^${song.title.replace(/[()]/g, '\\$&')}`) }).click();
+      await expect(page.getByRole('heading', { name: song.title })).toBeVisible();
+      await expect(page.getByText(song.label, { exact: true })).toBeVisible();
+      await expect(page.getByRole('img', { name: /octave/ })).toHaveCount(0);
+      await expect(page.getByText(/lower than the artist|higher than the artist/)).toHaveCount(0);
+      await shot(page, `qww-31-${song.slug}-${name}`);
+      await context.close();
+    }
+  });
+}

@@ -7,11 +7,14 @@
 // them (score.ts). Popularity comes from the song's USDB views and stars and from our karaoke
 // popularity (KaraFun views, Billboard Year-End rank), whatever measured its range.
 
-import type { DataSourceLogEntry, Match, RecommendationsResponse, SongRange, Track, VocalRange } from '../contracts';
+import type { DataSourceLogEntry, Match, RecommendationsResponse, SetlistInput, SongRange, Track, VocalRange } from '../contracts';
+import { applyCanonical, type SongCanonical } from '../songs/canonical';
 import { partRange } from '../songs/match';
 import { hasLittleSinging } from '../songs/resolve';
 import { withKaraokePopularity } from '../songs/score';
-import { tempoOf } from '../tempo/tempo';
+import { prepareSetlist, rankPrepared, type PreparedSetlist, type RankedSetlist } from '../songs/setlist';
+import { effectiveTempo, type EffectiveSource } from '../tempo/feel';
+import { readSongFeels } from './songFeel';
 import { MAX_ALL_MATCHES, type SongDeps } from './songService';
 import type { CatalogueSong, SongPopularityRecord, Store, UsdbIndexEntry } from './store';
 
@@ -25,8 +28,10 @@ const ID_PREFIX = 'cat:';
 /** A catalogue song as the cache keeps it: with its karaoke popularity row (QWW-6), when it has one. */
 export interface CatalogueEntry extends CatalogueSong {
   popularity?: SongPopularityRecord;
-  /** Tempo in beats per minute (QWW-40), when any source has one. */
+  /** The one tempo the ranking uses, in beats per minute, when the song has one (QWW-40; with its feel label, QWW-54). */
   tempo?: number;
+  /** Where `tempo` came from: a measurement, a checked tempo, or the song's feel label. */
+  tempoSource?: EffectiveSource;
 }
 
 /** A catalogue song and the track it is shown as. Its log line carries the track id. */
@@ -34,22 +39,64 @@ export interface CatalogueTrack extends CatalogueEntry {
   track: Track;
 }
 
+/** A load that could not read the mapping it was asked to apply: the songs are right but not tidy, so the cache keeps it only briefly. */
+export type LoadedCatalogue = CatalogueEntry[] & { degraded?: true };
+/** How long a degraded load is served before the next request reads again. */
+export const DEGRADED_TTL_MS = 60_000;
+
+export interface LoadOptions {
+  /**
+   * Apply the stored one-song-one-row mapping (QWW-49: songs/canonical.ts applyCanonical): one row per song,
+   * with its clean title and artist line. The app and the live-data smoke test ask for it. Off, the catalogue is
+   * as stored, which is what reports that look songs up by key want (report:library, tempo:report).
+   */
+  canonical?: boolean;
+}
+
 /**
- * Reads the catalogue, most popular first, and its songs' karaoke popularity in one batched read.
- * The cache keeps both, so requests read neither.
+ * The stored mapping for these keys, read twice at most. Empty when the build has not run, and also when it
+ * cannot be read: the list then shows the titles as stored, as it did before the build existed, instead of
+ * failing, and `failed` says so, so the cache does not keep that for long.
+ */
+async function readCanonical(
+  store: Partial<Pick<Store, 'getSongCanonical'>>,
+  keys: string[],
+): Promise<{ mapping: Map<string, SongCanonical>; failed: boolean }> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return { mapping: (await store.getSongCanonical?.(keys)) ?? new Map(), failed: false };
+    } catch (err) {
+      if (attempt < 2) continue;
+      console.warn(`[catalogue] could not read song_canonical; showing the titles as stored for a minute: ${err instanceof Error ? err.message : err}`);
+      return { mapping: new Map(), failed: true };
+    }
+  }
+}
+
+/**
+ * Reads the catalogue, most popular first, and its songs' karaoke popularity, measured tempo and feel
+ * labels in batched reads. The cache keeps all of it, so requests read none of it, and the one tempo of
+ * each song is worked out here, once per cache fill (effectiveTempo), never per request. A store with no
+ * feel labels, or one that cannot give them, leaves every song on its measured tempo. With `canonical`, one
+ * row per song with its clean title and artist line, from the stored one-song-one-row mapping when there is one.
  */
 export async function loadCatalogue(
-  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'>,
+  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'> & Partial<Pick<Store, 'getSongCanonical' | 'getSongFeels'>>,
   size: number = CATALOGUE_SIZE,
-): Promise<CatalogueEntry[]> {
-  const songs = await store.listCatalogue(size);
+  opts: LoadOptions = {},
+): Promise<LoadedCatalogue> {
+  const listed = await store.listCatalogue(size);
+  const read = opts.canonical ? await readCanonical(store, listed.map((s) => s.key)) : { mapping: new Map<string, SongCanonical>(), failed: false };
+  const songs = applyCanonical(listed, read.mapping);
   const keys = songs.map((s) => s.key);
-  const [popularity, tempos] = await Promise.all([store.getSongPopularity(keys), store.getSongTempos(keys)]);
-  return songs.map((s) => {
+  const [popularity, tempos, feels] = await Promise.all([store.getSongPopularity(keys), store.getSongTempos(keys), readSongFeels(store, keys)]);
+  const entries: LoadedCatalogue = songs.map((s) => {
     const p = popularity.get(s.key);
-    const tempo = tempoOf(tempos.get(s.key), s.key);
-    return { ...s, ...(p ? { popularity: p } : {}), ...(tempo !== undefined ? { tempo } : {}) };
+    const t = effectiveTempo({ key: s.key, record: tempos.get(s.key), feel: feels.get(s.key)?.feel });
+    return { ...s, ...(p ? { popularity: p } : {}), ...(t ? { tempo: t.tempo, tempoSource: t.source } : {}) };
   });
+  if (read.failed) entries.degraded = true;
+  return entries;
 }
 
 /** The song key in a catalogue track id ("cat:<songKey>"), or null for any other id. */
@@ -104,13 +151,16 @@ function withoutPitchShare(range: SongRange): SongRange {
   return rest;
 }
 
-/** Matches the whole catalogue against the visitor's range, ranks it, then returns all of it or one page. */
-export function recommendCatalogue(
+/**
+ * The catalogue songs that fit `userRange` (the hard range filter: `deps.matchSong` is null for a song that does
+ * not), as matches carrying their year, genre and tempo, and the log line of each by track id. Neither ranked nor
+ * cut, and the stored range, pitch histogram included, is kept.
+ */
+export function catalogueMatches(
   songs: CatalogueTrack[],
   userRange: VocalRange,
-  deps: CatalogueDeps,
-  page: CataloguePage,
-): RecommendationsResponse {
+  deps: Pick<CatalogueDeps, 'matchSong'>,
+): { matches: Match[]; logs: Map<string, DataSourceLogEntry> } {
   const matches: Match[] = [];
   const logs = new Map<string, DataSourceLogEntry>();
   for (const song of songs) {
@@ -131,9 +181,21 @@ export function recommendCatalogue(
     }
     if (song.usdb?.genre) m.genre = song.usdb.genre;
     if (song.tempo !== undefined) m.tempo = song.tempo;
+    if (song.popularity?.deezerId !== undefined) m.deezerId = song.popularity.deezerId;
     matches.push(m);
     logs.set(song.track.id, song.log);
   }
+  return { matches, logs };
+}
+
+/** Matches the whole catalogue against the visitor's range, ranks it, then returns all of it or one page. */
+export function recommendCatalogue(
+  songs: CatalogueTrack[],
+  userRange: VocalRange,
+  deps: CatalogueDeps,
+  page: CataloguePage,
+): RecommendationsResponse {
+  const { matches, logs } = catalogueMatches(songs, userRange, deps);
 
   // Ranked as a whole, then paged. The order is the same on every request while the cached
   // catalogue lasts, so pages never repeat or skip a song.
@@ -151,15 +213,48 @@ export function recommendCatalogue(
   return { matches: items, nextOffset, sources: sources(items) };
 }
 
+// ---------- the Setlist tuner (QWW-47) ----------
+
+/** One singer's catalogue songs, matched and with their place on every gear: made once per range, reused while a slider moves. */
+export interface CatalogueSetlist {
+  /** Every catalogue song that fits the range. */
+  matches: Match[];
+  logs: Map<string, DataSourceLogEntry>;
+  prepared: PreparedSetlist;
+}
+
+/** The hard range filter, then every song's place on every gear (songs/setlist.ts). */
+export function prepareCatalogue(
+  songs: CatalogueTrack[],
+  range: Pick<VocalRange, 'low' | 'high'>,
+  deps: Pick<CatalogueDeps, 'matchSong'>,
+): CatalogueSetlist {
+  const { matches, logs } = catalogueMatches(songs, { low: range.low, high: range.high, source: 'test' }, deps);
+  return { matches, logs, prepared: prepareSetlist(matches.map((match) => ({ match })), range) };
+}
+
+/**
+ * The engine over the catalogue, in one call: the songs of `songs` that fit `input.range`, ranked for the tuner's state.
+ * For a script or a test that holds the tracks; the server asks Catalogue.setlist, which keeps the first part.
+ */
+export function rankCatalogue(songs: CatalogueTrack[], input: SetlistInput, deps: Pick<CatalogueDeps, 'matchSong'>): RankedSetlist {
+  return rankPrepared(prepareCatalogue(songs, input.range, deps).prepared, input);
+}
+
+/** Ranges whose prepared songs a process keeps. Each is a few thousand matches, so only the ranges testers are using. */
+export const SETLIST_RANGES_KEPT = 6;
+
 export interface Catalogue {
   /** The catalogue as tracks: read from the store on first use, and again once the TTL has passed. */
   get(): Promise<CatalogueTrack[]>;
   recommend(userRange: VocalRange, page: CataloguePage): Promise<RecommendationsResponse>;
+  /** The tuner's songs for a range, kept for the next requests (the last SETLIST_RANGES_KEPT ranges), and dropped when the catalogue reloads. */
+  setlist(range: Pick<VocalRange, 'low' | 'high'>): Promise<CatalogueSetlist>;
 }
 
-/** The catalogue cached per process. `load` reads it from the store (loadCatalogue). */
+/** The catalogue cached per process. `load` reads it from the store (loadCatalogue); a degraded load is kept for DEGRADED_TTL_MS only. */
 export function createCatalogue(
-  load: () => Promise<CatalogueEntry[]>,
+  load: () => Promise<LoadedCatalogue>,
   deps: CatalogueDeps,
   opts: { ttlMs?: number; now?: () => number } = {},
 ): Catalogue {
@@ -169,17 +264,40 @@ export function createCatalogue(
   let cached: { tracks: Promise<CatalogueTrack[]>; expires: number } | null = null;
   const get = (): Promise<CatalogueTrack[]> => {
     if (cached && cached.expires > now()) return cached.tracks;
-    const entry = { tracks: load().then(catalogueTracks), expires: now() + ttlMs };
+    const entry = {
+      tracks: load().then((entries) => {
+        if (entries.degraded) entry.expires = Math.min(entry.expires, now() + DEGRADED_TTL_MS);
+        return catalogueTracks(entries);
+      }),
+      expires: now() + ttlMs,
+    };
     entry.tracks.catch(() => {
       if (cached === entry) cached = null;
     });
     cached = entry;
     return entry.tracks;
   };
+  // Most recently used last. Made from one read of the catalogue: a reload (a new array) starts them again.
+  const lists = new Map<string, CatalogueSetlist>();
+  let listsFrom: CatalogueTrack[] | null = null;
   return {
     get,
     async recommend(userRange, page) {
       return recommendCatalogue(await get(), userRange, deps, page);
+    },
+    async setlist(range) {
+      const tracks = await get();
+      if (listsFrom !== tracks) {
+        lists.clear();
+        listsFrom = tracks;
+      }
+      const key = `${range.low}:${range.high}`;
+      const hit = lists.get(key);
+      const list = hit ?? prepareCatalogue(tracks, range, deps);
+      lists.delete(key);
+      lists.set(key, list);
+      if (lists.size > SETLIST_RANGES_KEPT) lists.delete(lists.keys().next().value!);
+      return list;
     },
   };
 }

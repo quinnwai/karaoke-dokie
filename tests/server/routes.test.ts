@@ -155,6 +155,58 @@ describe('sign-in flow', () => {
     }
   });
 
+  // An account off the allowlist is refused one of two ways (QWW-53). The browser gets the same invite-only line
+  // either way, so only the log can tell them apart.
+  it('logs an account Spotify refuses at /me (403, off the allowlist) and sends the browser to authError=spotify', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const jar = new Jar();
+      const r1 = jar.take(await login.GET(req('/api/auth/login')));
+      getAppContext().spotify.getMe = async () => {
+        throw new SpotifyError('Spotify API /me failed (403)', 403, 'Check settings on developer.spotify.com/dashboard, the user may not be registered.');
+      };
+      const r2 = await callback.GET(new Request(r1.headers.get('location')!, { headers: { cookie: jar.header() } }));
+      expect(r2.headers.get('location')).toBe(`${BASE}/?authError=spotify`);
+      expect(r2.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(false);
+      expect(String(spy.mock.calls[0]![0])).toContain('(403) | Check settings on developer.spotify.com/dashboard, the user may not be registered.');
+      // Only a 429 starts Spotify's wait. A 403 is this one account, and must not lock the other testers out.
+      expect(await getAppContext().store.getSpotifyBlock()).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("logs Spotify refusing on its own page (?error=), but not the singer's Cancel", async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const cookie = { headers: { cookie: `${STATE_COOKIE}=s` } };
+      const refused = await callback.GET(new Request(`${BASE}/api/auth/callback?error=server_error&state=s`, cookie));
+      expect(refused.headers.get('location')).toBe(`${BASE}/?authError=server_error`);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]![0])).toBe('[auth] Spotify refused the sign-in on its own page: error="server_error"');
+
+      const cancelled = await callback.GET(new Request(`${BASE}/api/auth/callback?error=access_denied&state=s`, cookie));
+      expect(cancelled.headers.get('location')).toBe(`${BASE}/?authError=access_denied`);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      // A request we didn't start (no or wrong state) is sent back the same way, but leaves no line in the log.
+      const stray = await callback.GET(new Request(`${BASE}/api/auth/callback?error=server_error&state=x`, cookie));
+      expect(stray.headers.get('location')).toBe(`${BASE}/?authError=server_error`);
+      expect((await callback.GET(new Request(`${BASE}/api/auth/callback?error=server_error`))).headers.get('location')).toBe(`${BASE}/?authError=server_error`);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      // Spotify's value is cut to 100 characters and escaped, so it can't forge a second log line.
+      const odd = encodeURIComponent(`x\n[auth] forged${'y'.repeat(200)}`);
+      await callback.GET(new Request(`${BASE}/api/auth/callback?error=${odd}&state=s`, cookie));
+      expect(spy).toHaveBeenCalledTimes(2);
+      const line = String(spy.mock.calls[1]![0]);
+      expect(line).not.toContain('\n');
+      expect(line).toBe(`[auth] Spotify refused the sign-in on its own page: error=${JSON.stringify(`x\n[auth] forged${'y'.repeat(200)}`.slice(0, 100))}`);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   // Was a 502 and an empty "Couldn't load songs" screen (10 Nov 2026); now the catalogue's songs and a flag (QWW-55).
   it('logs why the library could not be read, and answers with catalogue songs and a flag, not a 502', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});

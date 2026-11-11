@@ -1,0 +1,515 @@
+{
+ "about": "Every stored AC/DC range (38 note-file rows), as read on 11 Nov 2026 from production (as written: round 2 has not run there) and from karaoke_pr4_preview (after round 2, where the pitch rule moved 14 of them down an octave). Low, high and typical note are MIDI numbers (C4 = 60). Used by tests/songs/octaveHand.test.ts.",
+ "songs": [
+  {
+   "key": "ac/dc|anything goes",
+   "production": {
+    "low": 62,
+    "high": 74,
+    "tessitura": 69.542
+   },
+   "preview": {
+    "low": 50,
+    "high": 62,
+    "tessitura": 57.542,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|back in black",
+   "production": {
+    "low": 55,
+    "high": 64,
+    "tessitura": 60.325
+   },
+   "preview": {
+    "low": 55,
+    "high": 64,
+    "tessitura": 60.325
+   }
+  },
+  {
+   "key": "ac/dc|big gun",
+   "production": {
+    "low": 52,
+    "high": 64,
+    "tessitura": 60.344
+   },
+   "preview": {
+    "low": 52,
+    "high": 64,
+    "tessitura": 60.344
+   }
+  },
+  {
+   "key": "ac/dc|demon fire",
+   "production": {
+    "low": 52,
+    "high": 74,
+    "tessitura": 68.374
+   },
+   "preview": {
+    "low": 52,
+    "high": 74,
+    "tessitura": 68.374
+   }
+  },
+  {
+   "key": "ac/dc|dirty deeds done dirt cheap",
+   "production": {
+    "low": 62,
+    "high": 71,
+    "tessitura": 67.37,
+    "duet": true
+   },
+   "preview": {
+    "low": 62,
+    "high": 71,
+    "tessitura": 67.37,
+    "duet": true
+   }
+  },
+  {
+   "key": "ac/dc|fire your guns",
+   "production": {
+    "low": 57,
+    "high": 64,
+    "tessitura": 61.925
+   },
+   "preview": {
+    "low": 57,
+    "high": 64,
+    "tessitura": 61.925
+   }
+  },
+  {
+   "key": "ac/dc|flick of the switch",
+   "production": {
+    "low": 57,
+    "high": 64,
+    "tessitura": 62.501
+   },
+   "preview": {
+    "low": 57,
+    "high": 64,
+    "tessitura": 62.501
+   }
+  },
+  {
+   "key": "ac/dc|for those about to rock",
+   "production": {
+    "low": 69,
+    "high": 75,
+    "tessitura": 71.481
+   },
+   "preview": {
+    "low": 57,
+    "high": 63,
+    "tessitura": 59.481,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|gimme a bullet",
+   "production": {
+    "low": 66,
+    "high": 72,
+    "tessitura": 70.103
+   },
+   "preview": {
+    "low": 54,
+    "high": 60,
+    "tessitura": 58.103,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|have a drink on me",
+   "production": {
+    "low": 67,
+    "high": 74,
+    "tessitura": 70.459
+   },
+   "preview": {
+    "low": 55,
+    "high": 62,
+    "tessitura": 58.459,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|heatseeker",
+   "production": {
+    "low": 62,
+    "high": 74,
+    "tessitura": 68.939
+   },
+   "preview": {
+    "low": 62,
+    "high": 74,
+    "tessitura": 68.939
+   }
+  },
+  {
+   "key": "ac/dc|hell ain\u2019t a bad place to be",
+   "production": {
+    "low": 67,
+    "high": 73,
+    "tessitura": 69.843
+   },
+   "preview": {
+    "low": 55,
+    "high": 61,
+    "tessitura": 57.843,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|hells bells",
+   "production": {
+    "low": 57,
+    "high": 64,
+    "tessitura": 60.1
+   },
+   "preview": {
+    "low": 57,
+    "high": 64,
+    "tessitura": 60.1
+   }
+  },
+  {
+   "key": "ac/dc|high voltage",
+   "production": {
+    "low": 48,
+    "high": 76,
+    "tessitura": 65.878
+   },
+   "preview": {
+    "low": 48,
+    "high": 76,
+    "tessitura": 65.878
+   }
+  },
+  {
+   "key": "ac/dc|highway to hell",
+   "production": {
+    "low": 62,
+    "high": 73,
+    "tessitura": 68.994
+   },
+   "preview": {
+    "low": 62,
+    "high": 73,
+    "tessitura": 68.994
+   }
+  },
+  {
+   "key": "ac/dc|it\u2019s a long way to the top",
+   "production": {
+    "low": 61,
+    "high": 70,
+    "tessitura": 67.481
+   },
+   "preview": {
+    "low": 61,
+    "high": 70,
+    "tessitura": 67.481
+   }
+  },
+  {
+   "key": "ac/dc|jailbreak",
+   "production": {
+    "low": 48,
+    "high": 74,
+    "tessitura": 65.085
+   },
+   "preview": {
+    "low": 48,
+    "high": 74,
+    "tessitura": 65.085
+   }
+  },
+  {
+   "key": "ac/dc|let there be rock",
+   "production": {
+    "low": 48,
+    "high": 76,
+    "tessitura": 61.209
+   },
+   "preview": {
+    "low": 48,
+    "high": 76,
+    "tessitura": 61.209
+   }
+  },
+  {
+   "key": "ac/dc|moneytalks",
+   "production": {
+    "low": 66,
+    "high": 74,
+    "tessitura": 69.864
+   },
+   "preview": {
+    "low": 54,
+    "high": 62,
+    "tessitura": 57.864,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|ride on",
+   "production": {
+    "low": 55,
+    "high": 72,
+    "tessitura": 63.047
+   },
+   "preview": {
+    "low": 55,
+    "high": 72,
+    "tessitura": 63.047
+   }
+  },
+  {
+   "key": "ac/dc|riff raff",
+   "production": {
+    "low": 55,
+    "high": 61,
+    "tessitura": 58.677
+   },
+   "preview": {
+    "low": 55,
+    "high": 61,
+    "tessitura": 58.677
+   }
+  },
+  {
+   "key": "ac/dc|rock and roll ain\u2019t noise pollution",
+   "production": {
+    "low": 64,
+    "high": 76,
+    "tessitura": 68.663
+   },
+   "preview": {
+    "low": 64,
+    "high": 76,
+    "tessitura": 68.663
+   }
+  },
+  {
+   "key": "ac/dc|rock n roll train",
+   "production": {
+    "low": 64,
+    "high": 72,
+    "tessitura": 68.492
+   },
+   "preview": {
+    "low": 64,
+    "high": 72,
+    "tessitura": 68.492
+   }
+  },
+  {
+   "key": "ac/dc|rock or bust",
+   "production": {
+    "low": 68,
+    "high": 74,
+    "tessitura": 71.348
+   },
+   "preview": {
+    "low": 56,
+    "high": 62,
+    "tessitura": 59.348,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|rock the blues away",
+   "production": {
+    "low": 59,
+    "high": 67,
+    "tessitura": 64.38
+   },
+   "preview": {
+    "low": 59,
+    "high": 67,
+    "tessitura": 64.38
+   }
+  },
+  {
+   "key": "ac/dc|rocker",
+   "production": {
+    "low": 57,
+    "high": 68,
+    "tessitura": 61.427
+   },
+   "preview": {
+    "low": 57,
+    "high": 68,
+    "tessitura": 61.427
+   }
+  },
+  {
+   "key": "ac/dc|shoot to thrill",
+   "production": {
+    "low": 67,
+    "high": 76,
+    "tessitura": 71.709
+   },
+   "preview": {
+    "low": 55,
+    "high": 64,
+    "tessitura": 59.709,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|shot in the dark",
+   "production": {
+    "low": 67,
+    "high": 72,
+    "tessitura": 70.08
+   },
+   "preview": {
+    "low": 55,
+    "high": 60,
+    "tessitura": 58.08,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|sink the pink",
+   "production": {
+    "low": 67,
+    "high": 74,
+    "tessitura": 69.575
+   },
+   "preview": {
+    "low": 55,
+    "high": 62,
+    "tessitura": 57.575,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|stiff upper lip",
+   "production": {
+    "low": 58,
+    "high": 64,
+    "tessitura": 61.466
+   },
+   "preview": {
+    "low": 58,
+    "high": 64,
+    "tessitura": 61.466
+   }
+  },
+  {
+   "key": "ac/dc|sweet candy",
+   "production": {
+    "low": 64,
+    "high": 73,
+    "tessitura": 68.849
+   },
+   "preview": {
+    "low": 64,
+    "high": 73,
+    "tessitura": 68.849
+   }
+  },
+  {
+   "key": "ac/dc|t.n.t.",
+   "production": {
+    "low": 61,
+    "high": 73,
+    "tessitura": 66.826
+   },
+   "preview": {
+    "low": 61,
+    "high": 73,
+    "tessitura": 66.826
+   }
+  },
+  {
+   "key": "ac/dc|the jack",
+   "production": {
+    "low": 61,
+    "high": 74,
+    "tessitura": 66.345
+   },
+   "preview": {
+    "low": 61,
+    "high": 74,
+    "tessitura": 66.345
+   }
+  },
+  {
+   "key": "ac/dc|thunderstruck",
+   "production": {
+    "low": 59,
+    "high": 78,
+    "tessitura": 69.679
+   },
+   "preview": {
+    "low": 47,
+    "high": 66,
+    "tessitura": 57.679,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|touch too much",
+   "production": {
+    "low": 64,
+    "high": 76,
+    "tessitura": 68.823
+   },
+   "preview": {
+    "low": 64,
+    "high": 76,
+    "tessitura": 68.823
+   }
+  },
+  {
+   "key": "ac/dc|who made who",
+   "production": {
+    "low": 64,
+    "high": 76,
+    "tessitura": 70.434
+   },
+   "preview": {
+    "low": 52,
+    "high": 64,
+    "tessitura": 58.434,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|whole lotta rosie",
+   "production": {
+    "low": 69,
+    "high": 75,
+    "tessitura": 70.817
+   },
+   "preview": {
+    "low": 57,
+    "high": 63,
+    "tessitura": 58.817,
+    "octaveFrom": "pitch"
+   }
+  },
+  {
+   "key": "ac/dc|you shook me all night long",
+   "production": {
+    "low": 67,
+    "high": 74,
+    "tessitura": 70.519
+   },
+   "preview": {
+    "low": 55,
+    "high": 62,
+    "tessitura": 58.519,
+    "octaveFrom": "pitch"
+   }
+  }
+ ]
+}

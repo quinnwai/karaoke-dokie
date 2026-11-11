@@ -1,6 +1,7 @@
 // Persistence interface for the backend. Two implementations:
 // memoryStore.ts (dev, tests, e2e) and postgresStore.ts (Neon in production, pg-mem in tests).
 import type { AppEvent, DataSourceLogEntry, FeedbackEntry, Mood, SongRange, TimeRange, Track, VocalRange } from '../contracts';
+import type { CanonicalInput, SongCanonical } from '../songs/canonical';
 
 /**
  * What the sync knows about one user's stored library (QWW-55 PR 2). The liked songs are rows of their own;
@@ -115,6 +116,8 @@ export interface SongPopularityRecord {
   chartYear?: number;
   /** Deezer's track rank (QWW-37), from song_deezer; higher is more popular. */
   deezerRank?: number;
+  /** The Deezer track that rank belongs to (song_deezer), for the row's play button (QWW-48); never scored with. */
+  deezerId?: number;
   /**
    * Which files the numbers came from: "karafun", "billboard" or "karafun+billboard"; "deezer"
    * when a song has only a Deezer rank.
@@ -132,8 +135,10 @@ export interface SongDeezerRecord {
   checkedAt: string;
 }
 
+import type { SongFeelRecord } from '../tempo/feel';
 import type { SongTempoRecord } from '../tempo/tempo';
-export type { SongTempoRecord };
+export type { SongFeelRecord, SongTempoRecord };
+export type { CanonicalInput, SongCanonical };
 
 export interface Store {
   getUser(id: string): Promise<UserRecord | null>;
@@ -154,6 +159,12 @@ export interface Store {
   listMeasuredRangesByArtist(artistKey: string): Promise<SongRange[]>;
   /** Every stored (not skipped) song range for one artist (the artist part of songKey), by song key; for the octave fix. */
   listSongRangesByArtist(artistKey: string): Promise<Map<string, SongRangeRecord>>;
+  /**
+   * Up to `limit` stored (not skipped) song ranges whose song key sorts after `afterKey`, in key
+   * order; pass the last key of one page to get the next. Empty when the table is done. For walking
+   * every range, such as the octave fix.
+   */
+  listSongRangesPage(afterKey: string, limit: number): Promise<Map<string, SongRangeRecord>>;
 
   /** Adds or updates songs in the USDB song index. */
   putUsdbSongs(entries: UsdbIndexEntry[]): Promise<void>;
@@ -196,7 +207,7 @@ export interface Store {
   putSongPopularity(entries: SongPopularityRecord[]): Promise<void>;
   /**
    * Batch read; the map only has keys that have a row or a Deezer rank. Carries the song's Deezer
-   * rank (song_deezer) as well.
+   * rank and track id (song_deezer) as well.
    */
   getSongPopularity(songKeys: string[]): Promise<Map<string, SongPopularityRecord>>;
 
@@ -205,6 +216,19 @@ export interface Store {
   putSongDeezer(entries: SongDeezerRecord[]): Promise<void>;
   /** Every lookup, hits and misses, by song key. */
   listSongDeezer(): Promise<Map<string, SongDeezerRecord>>;
+
+  // ---- one song, one row (QWW-49) ----
+  /** Adds rows, or replaces a key's whole row; within one call the last entry for a key wins. */
+  putSongCanonical(entries: SongCanonical[]): Promise<void>;
+  /** Batch read; the map only has keys that have a row (the build has not seen the others). */
+  getSongCanonical(songKeys: string[]): Promise<Map<string, SongCanonical>>;
+  /** Every row, for the build to see what a run would change, and for joining feedback and events (`cat:<key>`) to their song. */
+  listSongCanonical(): Promise<Map<string, SongCanonical>>;
+  /**
+   * Every measured song (note file or recording; the catalogue's pool, not only the part of it the list
+   * loads) with what the build reads: its display title and artist, popularity rank and range.
+   */
+  listCanonicalInputs(): Promise<CanonicalInput[]>;
 
   // ---- Spotify rate-limit block (QWW-55) ----
   /**
@@ -251,6 +275,14 @@ export interface Store {
   getSongTempos(songKeys: string[]): Promise<Map<string, SongTempoRecord>>;
   /** Every row, for the fill script's skip list. */
   listSongTempos(): Promise<Map<string, SongTempoRecord>>;
+
+  // ---- feel labels (QWW-54) ----
+  /** Adds rows, or replaces a key's label: the last entry for a key wins. */
+  putSongFeel(entries: SongFeelRecord[]): Promise<void>;
+  /** Batch read; the map only has keys that have a row. */
+  getSongFeels(songKeys: string[]): Promise<Map<string, SongFeelRecord>>;
+  /** Every row, for the import script's comparison. */
+  listSongFeels(): Promise<Map<string, SongFeelRecord>>;
 }
 
 export const DEFAULT_LIST_LIMIT = 200;

@@ -5,9 +5,12 @@ import {
   DEFAULT_EVENTS_LIMIT,
   DEFAULT_LIST_LIMIT,
   MAX_EVENTS_LIMIT,
+  type CanonicalInput,
   type CatalogueSong,
+  type SongCanonical,
   type SongMoodsRecord,
   type SongDeezerRecord,
+  type SongFeelRecord,
   type SongTempoRecord,
   type SongPopularityRecord,
   type SongRangeRecord,
@@ -33,16 +36,20 @@ export function createMemoryStore(): Store {
   const songPopularity = new Map<string, SongPopularityRecord>();
   const songDeezer = new Map<string, SongDeezerRecord>();
   const songTempo = new Map<string, SongTempoRecord>();
+  const songCanonical = new Map<string, SongCanonical>();
+  const songFeel = new Map<string, SongFeelRecord>();
   let spotifyBlock: number | null = null;
   const libraryStates = new Map<string, StoredLibraryState>();
   const savedTracks = new Map<string, Map<string, { track: Track; pos: number; gen: number }>>();
   const spotifyCalls = new Map<string, { day: string; caller: string; calls: number }>();
-  /** A song's popularity row with its Deezer rank, as getSongPopularity reads it. */
+  /** A song's popularity row with its Deezer rank and track id, as getSongPopularity reads it. */
   const popularityOf = (key: string): SongPopularityRecord | undefined => {
     const p = songPopularity.get(key);
-    const rank = songDeezer.get(key)?.rank;
-    if (rank === undefined) return p && clone(p);
-    return { ...(p ? clone(p) : { key, source: 'deezer' }), deezerRank: rank };
+    const deezer = songDeezer.get(key);
+    if (deezer?.rank === undefined) return p && clone(p);
+    const out: SongPopularityRecord = { ...(p ? clone(p) : { key, source: 'deezer' }), deezerRank: deezer.rank };
+    if (deezer.deezerId !== undefined) out.deezerId = deezer.deezerId;
+    return out;
   };
 
   const newestFirst = <T extends { at: string }>(items: T[]): T[] =>
@@ -95,6 +102,10 @@ export function createMemoryStore(): Store {
       const out = new Map<string, SongRangeRecord>();
       for (const [k, rec] of songs) if (k.startsWith(`${artistKey}|`) && rec.range) out.set(k, clone(rec));
       return out;
+    },
+    async listSongRangesPage(afterKey, limit) {
+      const keys = [...songs.keys()].filter((k) => k > afterKey && songs.get(k)!.range).sort();
+      return new Map(keys.slice(0, limit).map((k) => [k, clone(songs.get(k)!)]));
     },
     async putUsdbSongs(entries) {
       for (const e of entries) usdbSongs.set(e.id, clone(e));
@@ -201,6 +212,38 @@ export function createMemoryStore(): Store {
       return new Map([...songDeezer].map(([k, v]) => [k, clone(v)]));
     },
 
+    // ---- one song, one row (QWW-49) ----
+    async putSongCanonical(entries) {
+      for (const e of entries) songCanonical.set(e.key, clone(e));
+    },
+    async getSongCanonical(songKeys) {
+      const out = new Map<string, SongCanonical>();
+      for (const k of songKeys) {
+        const c = songCanonical.get(k);
+        if (c) out.set(k, clone(c));
+      }
+      return out;
+    },
+    async listSongCanonical() {
+      return new Map([...songCanonical].map(([k, v]) => [k, clone(v)]));
+    },
+    async listCanonicalInputs() {
+      // The most-viewed USDB row per key, as listCatalogue picks it.
+      const best = new Map<string, UsdbIndexEntry>();
+      for (const e of usdbSongs.values()) {
+        const b = best.get(e.key);
+        const more = (e.views ?? 0) - (b?.views ?? 0);
+        if (!b || more > 0 || (more === 0 && e.id < b.id)) best.set(e.key, e);
+      }
+      const out: CanonicalInput[] = [];
+      for (const [key, { range, log }] of songs) {
+        if (!range || !isMeasured(range)) continue;
+        const popularity = popularityOf(key);
+        out.push({ key, artist: log.artist, title: log.title, rank: catalogueRank(range, best.get(key), popularity), low: range.low, high: range.high });
+      }
+      return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    },
+
     // ---- Spotify rate-limit block (QWW-55) ----
     async getSpotifyBlock() {
       return spotifyBlock;
@@ -285,6 +328,22 @@ export function createMemoryStore(): Store {
     },
     async listSongTempos() {
       return new Map([...songTempo].map(([k, v]) => [k, clone(v)]));
+    },
+
+    // ---- feel labels (QWW-54) ----
+    async putSongFeel(entries) {
+      for (const e of entries) songFeel.set(e.key, clone(e));
+    },
+    async getSongFeels(songKeys) {
+      const out = new Map<string, SongFeelRecord>();
+      for (const k of songKeys) {
+        const f = songFeel.get(k);
+        if (f) out.set(k, clone(f));
+      }
+      return out;
+    },
+    async listSongFeels() {
+      return new Map([...songFeel].map(([k, v]) => [k, clone(v)]));
     },
   };
 }

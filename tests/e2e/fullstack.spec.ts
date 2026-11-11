@@ -10,6 +10,9 @@
 import { devices, expect, test } from '@playwright/test';
 import path from 'node:path';
 
+/** A row's song button, which opens the song page (the row's play button, QWW-48, comes first). */
+const SONG_BUTTON = 'button:not([data-preview])';
+
 const SCREENS = path.resolve('test-results/screens');
 
 test('no Spotify: catalogue songs with chips, then Connect Spotify for library songs, feedback, sources and the event log', async ({ browser, baseURL }) => {
@@ -70,7 +73,7 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-03-80s.png') });
 
   // Feedback without an account goes to the catalogue route with this device's id.
-  await songs.first().getByRole('button').first().click();
+  await songs.first().locator(SONG_BUTTON).click();
   await expect(page.getByRole('link', { name: 'Find on Spotify' })).toBeVisible();
   const catFeedback = page.waitForResponse((r) => r.url().includes('/api/catalogue/feedback'));
   await page.getByRole('button', { name: 'It went well' }).click();
@@ -97,7 +100,7 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   }
 
   // Open the first song, check the info line, leave feedback.
-  await songs.first().getByRole('button').first().click();
+  await songs.first().locator(SONG_BUTTON).click();
   // Spotify's player stands where the button was. The mock gives most songs a real track id; the few
   // without one keep the plain link.
   await expect(page.locator('iframe[src^="https://open.spotify.com/embed/track/"], a:has-text("Open in Spotify")')).toHaveCount(1);

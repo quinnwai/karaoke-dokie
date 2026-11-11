@@ -3,6 +3,7 @@ import type { SongRange, VocalRange } from '../../src/lib/contracts';
 import {
   CATALOGUE_SIZE,
   CATALOGUE_TTL_MS,
+  DEGRADED_TTL_MS,
   catalogueKey,
   catalogueTracks,
   createCatalogue,
@@ -10,9 +11,10 @@ import {
   recommendCatalogue,
 } from '../../src/lib/server/catalogue';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
-import type { CatalogueSong, SongPopularityRecord, UsdbIndexEntry } from '../../src/lib/server/store';
+import type { CatalogueSong, SongCanonical, SongPopularityRecord, UsdbIndexEntry } from '../../src/lib/server/store';
 import { MAX_ALL_MATCHES } from '../../src/lib/server/songService';
 import { productionSongDeps } from '../../src/lib/server/wiring';
+import { DEFAULT_VIEW, orderMatches } from '../../src/lib/songs/browse';
 import { CHART_FLOOR, UNKNOWN_POPULARITY } from '../../src/lib/songs/score';
 
 const user: VocalRange = { low: 48, high: 72, source: 'test' }; // C3-C5, centre C4
@@ -230,16 +232,131 @@ describe('karaoke popularity (QWW-6)', () => {
     const b = song('B', 'NoTempo', range(57, 63));
     await store.putSongRange(a.key, { range: a.range, log: a.log });
     await store.putSongRange(b.key, { range: b.range, log: b.log });
-    // Deezer 60 folds to 120; a key with no song row never reaches the catalogue
+    // Deezer 60 folds to 120, which with no label to vouch for it is squeezed into the mid band (QWW-54: 105.68);
+    // a key with no song row never reaches the catalogue
     await store.putSongTempo([{ key: a.key, deezerBpm: 60 }, { key: 'nobody|else', trackerBpm: 99 }]);
     const getSongTempos = vi.spyOn(store, 'getSongTempos');
     const loaded = await loadCatalogue(store);
     expect(getSongTempos).toHaveBeenCalledTimes(1);
-    expect(loaded.find((s) => s.key === a.key)!.tempo).toBe(120);
+    expect(loaded.find((s) => s.key === a.key)!.tempo).toBeCloseTo(105.68, 2);
     expect(loaded.find((s) => s.key === b.key)).not.toHaveProperty('tempo');
     const all = recommendCatalogue(catalogueTracks(loaded), user, deps, { all: true });
-    expect(all.matches.find((m) => m.track.title === 'Fast')!.tempo).toBe(120);
+    expect(all.matches.find((m) => m.track.title === 'Fast')!.tempo).toBeCloseTo(105.68, 2);
     expect(all.matches.find((m) => m.track.title === 'NoTempo')).not.toHaveProperty('tempo');
+  });
+
+  it("puts each song's Deezer track id on its match, for the row's play button (QWW-48)", async () => {
+    const store = createMemoryStore();
+    const a = song('A', 'Found', range(57, 63));
+    const b = song('B', 'Missed', range(57, 63));
+    const c = song('C', 'Never looked up', range(57, 63));
+    for (const s of [a, b, c]) await store.putSongRange(s.key, { range: s.range, log: s.log });
+    await store.putSongDeezer([
+      { key: a.key, rank: 500_000, deezerId: 3_135_556, checkedAt: '2026-11-06T00:00:00.000Z' },
+      { key: b.key, checkedAt: '2026-11-06T00:00:00.000Z' }, // Deezer had no matching track
+    ]);
+    const tracks = catalogueTracks(await loadCatalogue(store));
+    for (const page of [{ all: true } as const, { offset: 0, limit: 5 }]) {
+      const byTitle = Object.fromEntries(recommendCatalogue(tracks, user, deps, page).matches.map((m) => [m.track.title, m]));
+      expect(byTitle.Found!.deezerId).toBe(3_135_556);
+      expect(byTitle.Missed).not.toHaveProperty('deezerId');
+      expect(byTitle['Never looked up']).not.toHaveProperty('deezerId');
+    }
+  });
+
+  describe('feel labels (QWW-54)', () => {
+    /** Three songs: a really fast one, a ballad Deezer reads at double time, and one nobody labelled. */
+    async function withLabels(labels: 'none' | 'both') {
+      const store = createMemoryStore();
+      const fast = song('Fast', 'Really Fast', range(57, 63));
+      const ballad = song('Slow', 'Double Time Ballad', range(57, 63));
+      const plain = song('Plain', 'Unlabelled', range(57, 63));
+      for (const s of [fast, ballad, plain]) await store.putSongRange(s.key, { range: s.range, log: s.log });
+      await store.putSongTempo([
+        { key: fast.key, deezerBpm: 172 },
+        { key: ballad.key, deezerBpm: 170 },
+        { key: plain.key, deezerBpm: 100 },
+      ]);
+      if (labels === 'both') {
+        await store.putSongFeel([
+          { key: fast.key, feel: 'upbeat', source: 'test/v1' },
+          { key: ballad.key, feel: 'slow', source: 'test/v1' },
+        ]);
+      }
+      return { store, fast, ballad, plain };
+    }
+    const titles = (ms: { track: { title: string } }[]) => ms.map((m) => m.track.title);
+    const endOf = (loaded: Awaited<ReturnType<typeof loadCatalogue>>, tempo: 0 | 1) =>
+      titles(orderMatches(recommendCatalogue(catalogueTracks(loaded), user, deps, { all: true }).matches, { ...DEFAULT_VIEW, tempo }, user, 'catalogue'));
+
+    it('moves a labelled song into its label\'s band, says where its tempo came from, and leaves the others as measured', async () => {
+      const { store, fast, ballad, plain } = await withLabels('both');
+      const getSongFeels = vi.spyOn(store, 'getSongFeels');
+      const loaded = await loadCatalogue(store);
+      const by = (key: string) => loaded.find((s) => s.key === key)!;
+      expect(getSongFeels).toHaveBeenCalledTimes(1); // once for the whole catalogue
+      expect(by(fast.key)).toMatchObject({ tempo: 172, tempoSource: 'deezer' });
+      expect(by(ballad.key)).toMatchObject({ tempo: 85, tempoSource: 'deezer' }); // 170 halved
+      expect(by(plain.key)).toMatchObject({ tempoSource: 'deezer' });
+      expect(by(plain.key).tempo).toBeCloseTo(99.41, 2); // no label: 100 bpm squeezed into the mid band
+    });
+
+    it('keeps a double-time ballad off the upbeat end of the Tempo gear, and puts it first at the slow end', async () => {
+      const before = await loadCatalogue((await withLabels('none')).store);
+      // Without the labels the ballad is the second most upbeat song, above the song measured at 100.
+      expect(endOf(before, 1)).toEqual(['Really Fast', 'Double Time Ballad', 'Unlabelled']);
+      const after = await loadCatalogue((await withLabels('both')).store);
+      expect(endOf(after, 1)).toEqual(['Really Fast', 'Unlabelled', 'Double Time Ballad']);
+      expect(endOf(after, 0)).toEqual(['Double Time Ballad', 'Unlabelled', 'Really Fast']);
+    });
+
+    it('does no tempo work for a request: the tempos and labels are read once when the cache fills, and never again', async () => {
+      const { store } = await withLabels('both');
+      const getSongTempos = vi.spyOn(store, 'getSongTempos');
+      const getSongFeels = vi.spyOn(store, 'getSongFeels');
+      const catalogue = createCatalogue(() => loadCatalogue(store), deps);
+      for (const page of [{ all: true as const }, { all: true as const }, { offset: 0, limit: 2 }]) await catalogue.recommend(user, page);
+      expect(getSongTempos).toHaveBeenCalledTimes(1);
+      expect(getSongFeels).toHaveBeenCalledTimes(1);
+    });
+
+    it('carries the one tempo to the match and nothing else about it', async () => {
+      const loaded = await loadCatalogue((await withLabels('both')).store);
+      const m = recommendCatalogue(catalogueTracks(loaded), user, deps, { all: true }).matches.find((x) => x.track.title === 'Double Time Ballad')!;
+      expect(m.tempo).toBe(85);
+      expect(m).not.toHaveProperty('tempoSource');
+    });
+
+    it('works before the labels reach a database: a store with no feel methods, or no song_feel table, ranks on the measured tempo', async () => {
+      const { store, ballad } = await withLabels('both');
+      const { getSongFeels: _, ...withoutFeels } = store;
+      const measured = (await loadCatalogue(withoutFeels)).find((s) => s.key === ballad.key)!;
+      expect(measured.tempo).toBeCloseTo(121.36, 2); // 170 bpm, measured and unlabelled: squeezed into the mid band
+      expect(measured.tempo).toBeGreaterThanOrEqual(90); // never the 85 the label would give
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // Postgres' own words for it, with the code Neon sends, and pg-mem's wording without one
+      for (const err of [Object.assign(new Error('relation "song_feel" does not exist\nat somewhere'), { code: '42P01' }), new Error('relation "song_feel" does not exist')]) {
+        vi.spyOn(store, 'getSongFeels').mockRejectedValueOnce(err);
+        const loaded = await loadCatalogue(store);
+        expect(loaded.find((s) => s.key === ballad.key)).toMatchObject({ tempoSource: 'deezer' });
+        expect(loaded.find((s) => s.key === ballad.key)!.tempo).toBeCloseTo(121.36, 2);
+      }
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls[0]![0]).toContain('relation "song_feel" does not exist');
+      expect(warn.mock.calls[0]![0]).not.toContain('somewhere');
+      warn.mockRestore();
+    });
+
+    it('does not keep the measured tempos for a cache lifetime after a failed labels read: it fails like the other reads, and the next fill asks again', async () => {
+      const { store, ballad } = await withLabels('both');
+      vi.spyOn(store, 'getSongFeels').mockRejectedValueOnce(new Error('fetch failed (timeout)'));
+      let now = 0;
+      const catalogue = createCatalogue(() => loadCatalogue(store), deps, { now: () => now });
+      await expect(catalogue.get()).rejects.toThrow('fetch failed');
+      now += 1; // the failed fill was dropped, so this asks again and gets the labelled tempo
+      expect((await catalogue.get()).find((t) => t.key === ballad.key)!.tempo).toBe(85);
+    });
   });
 
   it('scores with it on every request, all=1 or a page, and returns the stored range', () => {
@@ -351,3 +468,156 @@ describe('all=1 size', () => {
   });
 });
 
+
+describe('one song, one row (QWW-49)', () => {
+  /** A store with a few measured songs: one song under two spellings, one with a tag on its title, one plain. */
+  const rawNames = new Map<string, { title: string; artist: string }>();
+  async function stocked() {
+    const store = createMemoryStore();
+    const raw = [
+      song('Aaliyah', "I Don't Wanna", range(55, 67)),
+      song('Aaliyah', 'I Don’t Wanna', range(55, 67)),
+      song('10cc', 'Dreadlock Holiday (Album Version)', range(55, 67)),
+      song('Toto', 'Africa', range(55, 67)),
+    ];
+    for (const s of raw) await store.putSongRange(s.key, { range: s.range, log: s.log });
+    for (const s of raw) rawNames.set(s.key, { title: s.title, artist: s.artist });
+    await store.putSongPopularity([
+      { key: raw[0]!.key, karaokeViews: 1_000, source: 'test' },
+      { key: raw[1]!.key, karaokeViews: 40_000_000, source: 'test' },
+    ]);
+    return { store, raw };
+  }
+  /** A record as the build writes it: the clean title to show, and the title the row had then (from `raw`, else its key's). */
+  const canonical = (key: string, canonicalKey: string, title: string, artist: string): SongCanonical => ({
+    key, canonicalKey, title, artist, method: 'titles-v1', reason: key === canonicalKey ? 'same' : 'folded',
+    sourceTitle: rawNames.get(key)?.title ?? '', sourceArtist: rawNames.get(key)?.artist ?? '',
+  });
+
+  it('shows the stored titles when the build has not run, exactly as before', async () => {
+    const { store } = await stocked();
+    const loaded = await loadCatalogue(store);
+    expect(loaded.map((s) => s.title).sort()).toEqual(['Africa', 'Dreadlock Holiday (Album Version)', "I Don't Wanna", 'I Don’t Wanna']);
+  });
+
+  it('loads one row per song with its clean title, and the list shows it once', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([
+      canonical(raw[0]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah'),
+      canonical(raw[1]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah'),
+      canonical(raw[2]!.key, raw[2]!.key, 'Dreadlock Holiday', '10cc'),
+    ]);
+    const getSongCanonical = vi.spyOn(store, 'getSongCanonical');
+    const loaded = await loadCatalogue(store, undefined, { canonical: true });
+    expect(getSongCanonical).toHaveBeenCalledTimes(1);
+    expect(getSongCanonical.mock.calls[0]![0]).toHaveLength(4); // all the songs the catalogue read, once
+    // Toto has no row yet: shown as stored.
+    expect(loaded.map((s) => `${s.artist} - ${s.title}`).sort()).toEqual(['10cc - Dreadlock Holiday', 'Aaliyah - I Don’t Wanna', 'Toto - Africa']);
+
+    const tracks = catalogueTracks(loaded);
+    const dreadlock = tracks.find((t) => t.key === raw[2]!.key)!.track;
+    expect(dreadlock).toMatchObject({ id: `cat:${raw[2]!.key}`, title: 'Dreadlock Holiday', spotifyUrl: 'https://open.spotify.com/search/10cc%20Dreadlock%20Holiday' });
+    const res = recommendCatalogue(tracks, user, deps, { all: true });
+    expect(res.matches.map((m) => m.track.title).sort()).toEqual(['Africa', 'Dreadlock Holiday', 'I Don’t Wanna']);
+    expect(ids(res.matches)).not.toContain(`cat:${raw[0]!.key}`); // the folded spelling is not a row of its own
+  });
+
+  it('keeps the song when the row it folds into ranked too low to load', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([canonical(raw[0]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah'), canonical(raw[1]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah')]);
+    // a cut of 1 loads only the most popular song: the other spelling of Aaliyah's song is not in it
+    const loaded = await loadCatalogue(store, 1, { canonical: true });
+    expect(loaded.map((s) => s.key)).toEqual([raw[1]!.key]);
+    // and the less popular spelling alone still shows, under the clean title, when it is the one loaded
+    const only = await loadCatalogue({ ...store, listCatalogue: async () => (await store.listCatalogue(10)).filter((s) => s.key === raw[0]!.key) }, undefined, { canonical: true });
+    expect(only.map((s) => `${s.key} ${s.title}`)).toEqual([`${raw[0]!.key} I Don’t Wanna`]);
+  });
+
+  it('shows the stored titles when the mapping cannot be read, and says so, instead of failing', async () => {
+    const { store } = await stocked();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const broken = { ...store, getSongCanonical: async () => { throw new Error('relation "song_canonical" does not exist'); } };
+      const loaded = await loadCatalogue(broken, undefined, { canonical: true });
+      expect(loaded).toHaveLength(4);
+      expect(loaded.degraded).toBe(true);
+      expect(loaded.map((s) => s.title)).toContain('Dreadlock Holiday (Album Version)');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('song_canonical'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('leaves the mapping alone unless it is asked for, so reports that look songs up by key see the catalogue as stored', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([canonical(raw[0]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah'), canonical(raw[1]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah')]);
+    const getSongCanonical = vi.spyOn(store, 'getSongCanonical');
+    const loaded = await loadCatalogue(store);
+    expect(getSongCanonical).not.toHaveBeenCalled();
+    expect(loaded).toHaveLength(4);
+    expect(loaded.map((s) => s.key)).toContain(raw[0]!.key);
+    expect(loaded.degraded).toBeUndefined();
+  });
+
+  it('applies a record only to the row it was made from: a row renamed since keeps its live title', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([canonical(raw[2]!.key, raw[2]!.key, 'Dreadlock Holiday', '10cc')]);
+    // a sync renames the row after the build ran
+    const renamed = raw[2]!;
+    await store.putSongRange(renamed.key, { range: renamed.range, log: { ...renamed.log, title: 'Dreadlock Holiday (Instrumental)' } });
+    const loaded = await loadCatalogue(store, undefined, { canonical: true });
+    // the stale record is not used: the row keeps the title it has now, so the list still hides it on that tag
+    expect(loaded.find((s) => s.key === renamed.key)!.title).toBe('Dreadlock Holiday (Instrumental)');
+    const titles = recommendCatalogue(catalogueTracks(loaded), user, deps, { all: true }).matches.map((m) => m.track.title);
+    expect(titles).not.toContain('Dreadlock Holiday');
+    expect(titles).not.toContain('Dreadlock Holiday (Instrumental)');
+  });
+
+  it('retries a failed mapping read once before giving up, and then applies it with no warning', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([canonical(raw[2]!.key, raw[2]!.key, 'Dreadlock Holiday', '10cc')]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      let calls = 0;
+      const flaky = { ...store, getSongCanonical: async (keys: string[]) => { if (++calls === 1) throw new Error('connection reset'); return store.getSongCanonical(keys); } };
+      const loaded = await loadCatalogue(flaky, undefined, { canonical: true });
+      expect(calls).toBe(2);
+      expect(loaded.degraded).toBeUndefined();
+      expect(loaded.map((s) => s.title)).toContain('Dreadlock Holiday');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps a degraded load for a minute, not an hour, so a failed read does not leave raw titles up all hour', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([canonical(raw[2]!.key, raw[2]!.key, 'Dreadlock Holiday', '10cc')]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      let broken = true;
+      const reads = vi.fn(async () => loadCatalogue({ ...store, getSongCanonical: async (keys: string[]) => { if (broken) throw new Error('down'); return store.getSongCanonical(keys); } }, undefined, { canonical: true }));
+      let at = 0;
+      const catalogue = createCatalogue(reads, deps, { now: () => at });
+      expect((await catalogue.get()).map((t) => t.track.title)).toContain('Dreadlock Holiday (Album Version)');
+      broken = false;
+      at = DEGRADED_TTL_MS - 1;
+      await catalogue.get();
+      expect(reads).toHaveBeenCalledTimes(1); // still the cached, degraded one
+      at = DEGRADED_TTL_MS;
+      expect((await catalogue.get()).map((t) => t.track.title)).toContain('Dreadlock Holiday'); // read again after a minute
+      expect(reads).toHaveBeenCalledTimes(2);
+      at = DEGRADED_TTL_MS + CATALOGUE_TTL_MS - 1;
+      await catalogue.get();
+      expect(reads).toHaveBeenCalledTimes(2); // a good load lasts the hour
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('works with a store that has no mapping method at all', async () => {
+    const { store } = await stocked();
+    const { listCatalogue, getSongPopularity, getSongTempos } = store;
+    expect(await loadCatalogue({ listCatalogue, getSongPopularity, getSongTempos }, undefined, { canonical: true })).toHaveLength(4);
+  });
+});

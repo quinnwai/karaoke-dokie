@@ -7,6 +7,7 @@
 
 import type { EventValue } from '../contracts';
 import { EVENT } from '../eventNames';
+import { browserLabel } from './browser';
 import { flowReducer, type FlowEvent, type FlowState, type Step } from './flow';
 
 export interface FunnelEvent {
@@ -51,9 +52,6 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
       else out.push({ name: step === 'low' ? EVENT.lowNoteDone : EVENT.highNoteDone, props: { midi: action.midi } });
       break;
     }
-    case 'micDenied':
-      if (prev.step === 'low' || prev.step === 'high') out.push({ name: EVENT.micDenied, props: { step: prev.step } });
-      break;
     case 'showCatalogue':
       out.push({ name: 'catalogue_chosen' });
       break;
@@ -116,8 +114,40 @@ export function eventsFor(prev: FlowState, action: FlowEvent): FunnelEvent[] {
     default:
       break;
   }
+  out.push(...micEvents(prev, next, action));
   if (next.step !== prev.step) out.push(...stepEvents(next.step, next));
   return out;
+}
+
+/**
+ * Events for the mic step (QWW-50). `mic_prompt_shown` is our own screen ahead of the browser's question, the closest
+ * we can get: the browser does not say when its own box appears. `mic_denied` is any way the answer was no (blocked,
+ * closed, no microphone, in use), told apart by `reason`. `mic_granted` is the yes itself: it goes straight on to the
+ * note, so there is no screen to arrive at, and it is logged on the grant, once per grant (a late answer the flow
+ * ignores logs nothing). `via` says whether a tap asked ('prompt') or the browser had already said ('already').
+ * `browser` is 'ios-safari', 'android-chrome', ...
+ */
+function micEvents(prev: FlowState, next: FlowState, action: FlowEvent): FunnelEvent[] {
+  if (prev.step !== 'mic') return [];
+  const { env, problem } = next.mic;
+  const browser = env ? browserLabel(env) : 'other';
+  const via = prev.mic.view === 'asking' ? 'prompt' : 'already';
+  // The flow takes a grant only on a screen that waits for one, and then leaves the mic step.
+  if (action.type === 'micGranted') return next.step === 'mic' ? [] : [{ name: EVENT.micGranted, props: { via, browser } }];
+  if (next.mic.view === prev.mic.view) return [];
+  switch (next.mic.view) {
+    case 'inapp':
+      return [{ name: EVENT.inappBrowserDetected, props: { app: env?.inApp ?? 'webview', browser } }];
+    case 'prompt':
+      return [{ name: EVENT.micPromptShown, props: { browser } }];
+    case 'recovery':
+      return [
+        { name: EVENT.micDenied, props: { reason: problem ?? 'denied', via, browser } },
+        { name: EVENT.micRecoveryShown, props: { reason: problem ?? 'denied', browser } },
+      ];
+    default:
+      return [];
+  }
 }
 
 /** Events for arriving at a step. */

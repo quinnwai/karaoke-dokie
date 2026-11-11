@@ -67,7 +67,7 @@ function fits(user: VocalRange, low: number, high: number): boolean {
 }
 
 /** The song's sung time by pitch, shifted by `semitones`. */
-function pitchTime(song: SongRange, semitones: number): [number, number][] {
+export function pitchTime(song: SongRange, semitones: number): [number, number][] {
   if (song.pitchShare?.length) return song.pitchShare.map(([m, share]) => [m + semitones, share]);
   return [
     [song.tessitura + semitones, 0.7],
