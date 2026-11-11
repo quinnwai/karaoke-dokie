@@ -88,11 +88,16 @@ export const DEEZER_HIGH_RANK = 600_000;
 const key = (m: Match) => m.track.id.replace(/^cat:/, '');
 const brief = (m: Match) => ({ id: m.track.id, artist: m.track.artist, title: m.track.title, year: m.year });
 
+/** Curly apostrophes as straight ones: "Livin’ la vida loca" and "Livin' La Vida Loca" are one song. */
+const straight = (s: string) => s.replace(/[‘’]/g, "'");
+/** songKey with apostrophes folded; the Billboard list writes them straight. */
+const foldedKey = (artist: string, title: string) => songKey(straight(artist), straight(title));
+
 // ---------- 1. recognisable ----------
 
 export function isRecognisable(m: Match, billboard: Set<string>, facts: SongFacts | undefined): 'billboard' | 'deezer' | null {
   const { artist, title } = m.track;
-  if (billboard.has(songKey(artist, title)) || billboard.has(songKey(leadArtist(artist), title))) return 'billboard';
+  if (billboard.has(foldedKey(artist, title)) || billboard.has(foldedKey(leadArtist(artist), title))) return 'billboard';
   if ((facts?.deezerRank ?? 0) >= DEEZER_HIGH_RANK) return 'deezer';
   return null;
 }
@@ -115,11 +120,8 @@ export function isVersionTitle(title: string): boolean {
   return tags.some((t) => VERSION_WORDS.test(t));
 }
 
-/** Curly apostrophes as straight ones: "Livin’ la vida loca" and "Livin' La Vida Loca" are one song. */
-const straight = (s: string) => s.replace(/[‘’]/g, "'");
-
 /** The same song twice: same lead artist and the same title once version tags are gone. */
-export const sameSongKey = (m: Match) => songKey(straight(leadArtist(m.track.artist)), straight(m.track.title));
+export const sameSongKey = (m: Match) => foldedKey(leadArtist(m.track.artist), m.track.title);
 
 // ---------- 2. tempo judge ----------
 
@@ -183,6 +185,17 @@ export function shuffled<T>(items: T[], seed: number): T[] {
     [copy[i], copy[j]] = [copy[j]!, copy[i]!];
   }
   return copy;
+}
+
+/** Songs per judge request. */
+export const JUDGE_BATCH = 40;
+
+/** What judge run `run` (0, 1, 2) sends: every song once, in the run's own shuffled order, JUDGE_BATCH a request. */
+export function judgeBatches<T>(songs: T[], run: number): T[][] {
+  const order = shuffled(songs, run + 1);
+  const out: T[][] = [];
+  for (let i = 0; i < order.length; i += JUDGE_BATCH) out.push(order.slice(i, i + JUDGE_BATCH));
+  return out;
 }
 
 /** The labels in one reply, by id; ids the reply skipped or mangled are left out (they count as unknown). */

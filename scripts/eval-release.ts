@@ -29,6 +29,7 @@ import {
   checkTempo,
   checkTitles,
   handCheck,
+  judgeBatches,
   judgeList,
   JUDGE_RUNS,
   JUDGE_SCHEMA,
@@ -36,7 +37,6 @@ import {
   judgePrompt,
   judgeSongs,
   parseJudgeReply,
-  shuffled,
   TEST_RANGES,
   tempoLists,
   toMarkdown,
@@ -56,7 +56,6 @@ import { neonQuery } from '../src/lib/server/getStore';
 import { createPostgresStore, type QueryFn } from '../src/lib/server/postgresStore';
 import { productionSongDeps } from '../src/lib/server/wiring';
 
-const JUDGE_BATCH = 40;
 const PARALLEL = 4;
 
 /**
@@ -145,7 +144,7 @@ async function main() {
     readFile(new URL('../data/billboard-year-end.csv', import.meta.url), 'utf8'),
   ]);
   // The app retries a failed read of the clean titles within a minute; a graded run must not use the stored ones.
-  if (entries.degraded) throw new Error('Could not read song_canonical, so the titles would be as stored, not as the app shows them. Run again.');
+  if (entries.degraded) throw new Error('Could not read song_canonical (the warning above says why), so the titles would be as stored, not as the app shows them.');
   const billboard = new Set(billboardCharts(billboardCsv).keys());
   const tracks = catalogueTracks(entries);
   const deps = productionSongDeps(store, false);
@@ -198,11 +197,8 @@ async function main() {
     // Ids the replies left out or mangled: they count as unknown, so this says how much the judge failed to answer.
     let missing = 0;
     // Each run sees the songs in its own shuffled order, never the lists' order (sorted by stored tempo).
-    const oneRun = (run: number) => {
-      const order = shuffled(songs, run + 1);
-      const batches: (typeof songs)[] = [];
-      for (let i = 0; i < order.length; i += JUDGE_BATCH) batches.push(order.slice(i, i + JUDGE_BATCH));
-      return pool(batches, PARALLEL, async (batch) => {
+    const oneRun = (run: number) =>
+      pool(judgeBatches(songs, run), PARALLEL, async (batch) => {
         const res = await ask({
           model,
           system: JUDGE_SYSTEM,
@@ -211,10 +207,9 @@ async function main() {
           schema: JUDGE_SCHEMA,
         });
         const got = parseJudgeReply(res.text);
-        missing += batch.length - batch.filter((_, id) => got.has(id)).length;
+        missing += batch.filter((_, id) => !got.has(id)).length;
         return batch.map((b, id): [string, JudgeLabel] => [b.key, got.get(id) ?? 'unknown']);
       }).then((parts) => new Map(parts.flat()));
-    };
     const runMaps = await Promise.all(Array.from({ length: JUDGE_RUNS }, (_, run) => oneRun(run)));
     const labels = new Map(songs.map((s) => [s.key, runMaps.map((r) => r.get(s.key) ?? 'unknown')]));
     const results = lists.map((l) => judgeList(l, labels));

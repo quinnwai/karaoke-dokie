@@ -10,6 +10,8 @@ import {
   handCheck,
   isRecognisable,
   isVersionTitle,
+  JUDGE_BATCH,
+  judgeBatches,
   judgeList,
   judgeSongs,
   parseJudgeReply,
@@ -113,6 +115,11 @@ describe('recognisable (criterion 1)', () => {
     expect(isRecognisable(song(2), billboard, { deezerRank: 100_000 })).toBeNull();
   });
 
+  it('finds a title with a curly apostrophe on the Billboard list, which writes it straight', () => {
+    const hits = new Set([songKey('Aerosmith', "I Don't Want to Miss a Thing")]);
+    expect(isRecognisable(song(0, { artist: 'Aerosmith', title: 'I Don’t Want to Miss a Thing' }), hits, undefined)).toBe('billboard');
+  });
+
   it('needs 15 of the top 20', () => {
     const ms = list(30);
     const facts = new Map<string, SongFacts>(ms.slice(0, 14).map((m) => [m.track.id, { deezerRank: 900_000 }]));
@@ -206,14 +213,19 @@ describe('tempo judge (criterion 2)', () => {
     expect(judgeList(l, votes(songs, ['slow', 'slow', 'slow'], (_, i) => (i < 3 ? ['mid', 'mid', 'mid'] : undefined)))).toMatchObject({ counted: 17, pass: false });
   });
 
-  it('sends each run the songs in its own order, not sorted by stored tempo', () => {
+  it('sends each run every song once, in its own order, not sorted by stored tempo', () => {
     const songs = judgeSongs(tempoLists(input(list(300))));
-    const runs = [1, 2, 3].map((seed) => shuffled(songs, seed));
-    for (const order of runs) expect([...order].sort((a, b) => a.key.localeCompare(b.key))).toEqual([...songs].sort((a, b) => a.key.localeCompare(b.key)));
-    expect(runs[0]).toEqual(shuffled(songs, 1));
-    expect(runs[0]).not.toEqual(songs);
-    expect(runs[0]).not.toEqual(runs[1]);
-    expect(runs[1]).not.toEqual(runs[2]);
+    const byKey = (xs: typeof songs) => [...xs].sort((a, b) => a.key.localeCompare(b.key));
+    const runs = [0, 1, 2].map((run) => judgeBatches(songs, run));
+    for (const batches of runs) {
+      expect(batches.every((b) => b.length <= JUDGE_BATCH)).toBe(true);
+      expect(byKey(batches.flat())).toEqual(byKey(songs));
+      expect(batches.flat()).not.toEqual(songs);
+    }
+    expect(judgeBatches(songs, 0)).toEqual(runs[0]);
+    expect(runs[0]!.flat()).not.toEqual(runs[1]!.flat());
+    expect(runs[1]!.flat()).not.toEqual(runs[2]!.flat());
+    expect(shuffled([1, 2, 3], 7)).toEqual(shuffled([1, 2, 3], 7));
   });
 
   it('grades an era whose pool is thin like the rest: it fails unless 18 songs count', () => {
