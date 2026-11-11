@@ -1,0 +1,14 @@
+{
+  "about": "Octave evidence a person set, kept apart from the generated data/octave-evidence.json so a rebuild cannot drop it. src/lib/songs/octaveFiles.ts merges the two when the evidence is loaded (scripts/octave-fix.ts does). An artist listed here takes the place of the measured typical note in the artist rule (same limit, ARTIST_MAX_DISTANCE), which also keeps the pitch rule off that artist, and the moves that rest on it are marked octaveFrom: 'hand'. A song under keep is never moved. To add an artist: the artist part of the song key, a typical note as a MIDI number (A#4 is 70) and where it came from; run scripts/octave-fix.ts with --dry-run first.",
+  "artists": {
+    "ac/dc": {
+      "typical": 70,
+      "source": "Quinn-Wai, by ear, 11 Nov 2026 (QWW-42): You Shook Me All Night Long is about G4 to C5 and Hells Bells is near C5. A#4 is the middle of You Shook Me."
+    }
+  },
+  "keep": {
+    "ac/dc|let there be rock": {
+      "source": "Its note file is C3 to E5, so the artist rule would move it to C4 to E6, which PLAUSIBLE_SONG (up to G6) does not catch."
+    }
+  }
+}

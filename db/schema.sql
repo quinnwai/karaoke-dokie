@@ -111,6 +111,15 @@ CREATE TABLE IF NOT EXISTS song_tempo (
   preview_url TEXT,
   checked_at TEXT
 );
+-- Feel label per song (QWW-54): slow, mid or upbeat, made offline and imported by npm run tempo:feel, never worked
+-- out while a page loads. The label decides which end of the Tempo gear a song sits at (src/lib/tempo/feel.ts); a
+-- song with no row keeps its measured tempo.
+CREATE TABLE IF NOT EXISTS song_feel (
+  song_key TEXT PRIMARY KEY,
+  feel TEXT NOT NULL,
+  source TEXT NOT NULL,
+  labeled_at TEXT
+);
 -- When Spotify said the app may call it again after a 429 (QWW-55): one row (id 1), shared by every server
 -- instance and script. Spotify's quota is the app's, so a 429 for one user stops calls for all of them until it passes.
 CREATE TABLE IF NOT EXISTS spotify_block (

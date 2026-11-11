@@ -132,8 +132,9 @@ export interface SongDeezerRecord {
   checkedAt: string;
 }
 
+import type { SongFeelRecord } from '../tempo/feel';
 import type { SongTempoRecord } from '../tempo/tempo';
-export type { SongTempoRecord };
+export type { SongFeelRecord, SongTempoRecord };
 
 export interface Store {
   getUser(id: string): Promise<UserRecord | null>;
@@ -154,6 +155,12 @@ export interface Store {
   listMeasuredRangesByArtist(artistKey: string): Promise<SongRange[]>;
   /** Every stored (not skipped) song range for one artist (the artist part of songKey), by song key; for the octave fix. */
   listSongRangesByArtist(artistKey: string): Promise<Map<string, SongRangeRecord>>;
+  /**
+   * Up to `limit` stored (not skipped) song ranges whose song key sorts after `afterKey`, in key
+   * order; pass the last key of one page to get the next. Empty when the table is done. For walking
+   * every range, such as the octave fix.
+   */
+  listSongRangesPage(afterKey: string, limit: number): Promise<Map<string, SongRangeRecord>>;
 
   /** Adds or updates songs in the USDB song index. */
   putUsdbSongs(entries: UsdbIndexEntry[]): Promise<void>;
@@ -251,6 +258,14 @@ export interface Store {
   getSongTempos(songKeys: string[]): Promise<Map<string, SongTempoRecord>>;
   /** Every row, for the fill script's skip list. */
   listSongTempos(): Promise<Map<string, SongTempoRecord>>;
+
+  // ---- feel labels (QWW-54) ----
+  /** Adds rows, or replaces a key's label: the last entry for a key wins. */
+  putSongFeel(entries: SongFeelRecord[]): Promise<void>;
+  /** Batch read; the map only has keys that have a row. */
+  getSongFeels(songKeys: string[]): Promise<Map<string, SongFeelRecord>>;
+  /** Every row, for the import script's comparison. */
+  listSongFeels(): Promise<Map<string, SongFeelRecord>>;
 }
 
 export const DEFAULT_LIST_LIMIT = 200;
