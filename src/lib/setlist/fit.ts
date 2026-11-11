@@ -45,16 +45,41 @@ export const SIGN_GAP = 8;
 /** The sign is 16 px where there is room. Short of room it shrinks to 13 px, the size of the range and redo beside it, before it goes. */
 export const SIGN_MAX_SIZE = 16;
 export const SIGN_MIN_SIZE = 13;
+/** How far, in px of type, the sign steps down when the size it was given does not keep the gap once it is laid out. */
+export const SIGN_STEP = 0.2;
 
 /**
- * The type size of the sign (QWW-57, R1): the largest, from SIGN_MAX_SIZE down to SIGN_MIN_SIZE px, at which it keeps `gap` px clear
- * of redo's right edge and of the Spotify button's left edge; null when even SIGN_MIN_SIZE does not (then it goes). It is centred on
- * the header's own `middle`, not in the room between its neighbours, so the room it has is twice the nearer neighbour's distance
- * from the middle, less a gap each side. `sign` is its box at SIGN_MAX_SIZE; its width is proportional to its type size (the
- * letter-spacing is in em). All of it is page coordinates of the same row.
+ * A first guess at the type size of the sign (QWW-57, R1): the largest, from SIGN_MAX_SIZE down to SIGN_MIN_SIZE px, at which it
+ * would keep `gap` px clear of redo's right edge and of the Spotify button's left edge; null when not even SIGN_MIN_SIZE would. It is
+ * centred on the header's own `middle`, not in the room between its neighbours, so the room it has is twice the nearer neighbour's
+ * distance from the middle, less a gap each side. `sign` is its box at SIGN_MAX_SIZE. It takes the width to be proportional to the
+ * type size (the letter-spacing is in em), which a font with hinted advances, as on Linux, is not exactly: `settleSignSize` checks the
+ * guess against the sign as laid out. All of it is page coordinates of the same row.
  */
 export function signSize(sign: { left: number; right: number }, middle: number, redoRight: number, spotifyLeft: number, gap: number = SIGN_GAP): number | null {
   const room = 2 * Math.min(middle - redoRight, spotifyLeft - middle) - 2 * gap;
   const size = (room * SIGN_MAX_SIZE) / (sign.right - sign.left);
   return size >= SIGN_MIN_SIZE ? Math.min(size, SIGN_MAX_SIZE) : null;
+}
+
+/** Whether the sign, as it is laid out, keeps `gap` px clear of redo's right edge and of the Spotify button's left edge. */
+export function signFits(sign: { left: number; right: number }, redoRight: number, spotifyLeft: number, gap: number = SIGN_GAP): boolean {
+  return sign.left - redoRight >= gap && spotifyLeft - sign.right >= gap;
+}
+
+/**
+ * The size the sign settles at: the `guess` (from `signSize`) floored to a tenth of a px, then down SIGN_STEP px at a time until
+ * `fits(size)` says it keeps the gap. `fits` is the real measurement: it lays the sign out at that size and checks it (`signFits`).
+ * Null when not even SIGN_MIN_SIZE passes, and the sign goes. A null guess is still tried at SIGN_MIN_SIZE, since the guess is only a
+ * guess. It tries at most 16 sizes, each a multiple of a tenth, from the guess to SIGN_MIN_SIZE, so it always ends.
+ */
+export function settleSignSize(guess: number | null, fits: (size: number) => boolean): number | null {
+  const min = Math.round(SIGN_MIN_SIZE * 10);
+  const step = Math.round(SIGN_STEP * 10);
+  let tenths = guess === null ? min : Math.floor(guess * 10);
+  for (;;) {
+    if (fits(tenths / 10)) return tenths / 10;
+    if (tenths <= min) return null;
+    tenths = Math.max(min, tenths - step);
+  }
 }

@@ -79,17 +79,34 @@ const sampled = (page: Page) =>
     return [...seen];
   });
 
+/**
+ * How far the sign would be from redo and from the logo at 13 px, laid out for real: it is put to 13 px for the reading and back.
+ * A hidden sign is hidden only because this is under 8 px.
+ */
+const gapsAt13 = (page: Page) =>
+  page.evaluate(() => {
+    const bar = document.querySelector('#app header > div') as HTMLElement;
+    const sign = bar.querySelector('[data-sign]') as HTMLElement;
+    const before = sign.style.fontSize;
+    sign.style.fontSize = '13px';
+    const s = sign.getBoundingClientRect();
+    const redo = bar.querySelector('button[aria-label="Redo the singing test"]')!.getBoundingClientRect();
+    const logo = bar.querySelector('button[aria-label="Connect to Spotify"], button[aria-label="Spotify account"]')!.getBoundingClientRect();
+    sign.style.fontSize = before;
+    return { redo: s.left - redo.right, logo: logo.left - s.right };
+  });
+
 const WHO = [
   [false, 'signed out'],
   [true, 'signed in'],
 ] as const;
 
 /** The sign is shown, its centre is the header's centre (within 1 px), and it keeps 8 px clear of redo and of the logo. */
-function expectCentredAndClear(h: Header) {
-  expect(h.signShown).toBe(true);
-  expect(Math.abs(h.sign!.cx - h.bar!.cx)).toBeLessThanOrEqual(1);
-  expect(h.sign!.x - h.redo!.r).toBeGreaterThanOrEqual(8);
-  expect(h.spotify!.x - h.sign!.r).toBeGreaterThanOrEqual(8);
+function expectCentredAndClear(h: Header, at = 'the sign') {
+  expect(h.signShown, at).toBe(true);
+  expect(Math.abs(h.sign!.cx - h.bar!.cx), at).toBeLessThanOrEqual(1);
+  expect(h.sign!.x - h.redo!.r, `${at}, from redo`).toBeGreaterThanOrEqual(8);
+  expect(h.spotify!.x - h.sign!.r, `${at}, from the logo`).toBeGreaterThanOrEqual(8);
 }
 
 for (const [signedIn, who] of WHO) {
@@ -141,8 +158,6 @@ for (const [signedIn, who] of WHO) {
       expectCentredAndClear(h);
       expect(h.size, 'smaller than full size').toBeLessThan(16);
       expect(h.size, 'and not smaller than 13 px').toBeGreaterThanOrEqual(13);
-      // The largest size that fits: redo, the nearer neighbour, is within half a px of the gap (a tenth of a px of type is 0.4 px of sign).
-      expect(h.sign!.x - h.redo!.r).toBeLessThan(8.5);
     });
   }
 }
@@ -154,10 +169,9 @@ for (const [signedIn, who] of WHO) {
     await expect(page.getByRole('group', { name: 'Your range C#2 to G#5' })).toBeVisible();
     const h = await headerBox(page);
     expect(h.signShown, 'the long range leaves even a 13 px sign no room at 360 px').toBe(false);
-    // Hidden because 13 px does not fit, not because the rule gave up early. The room a centred sign has is twice the nearer neighbour's
-    // distance from the middle, less 8 px each side; the hidden sign is still laid out, at 16 px, so its width at 13 px is known.
-    const room = 2 * Math.min(h.bar!.cx - h.redo!.r, h.spotify!.x - h.bar!.cx) - 2 * 8;
-    expect(room).toBeLessThan((h.sign!.w * 13) / 16);
+    // Hidden because 13 px, laid out, does not keep the gap, not because the rule gave up early.
+    const at13 = await gapsAt13(page);
+    expect(Math.min(at13.redo, at13.logo)).toBeLessThan(8);
     expect(h.size, 'a hidden sign is left at full size, not at a stale small one').toBe(16);
     expect(h.range!.r).toBeLessThanOrEqual(h.redo!.x);
     expect(h.redo!.r).toBeLessThanOrEqual(h.spotify!.x);
@@ -193,6 +207,30 @@ test('R1. the sign grows and shrinks with the room: 16 px on a bigger phone, and
   await expect.poll(async () => (await headerBox(page)).signShown).toBe(true);
   expect((await headerBox(page)).size, 'sized from scratch, so the same as the first time').toBe(shrunk);
   expect(await sampled(page)).toHaveLength(1);
+});
+
+// On Linux's hinted text the sign's width was not exactly proportional to its size, and a size worked out from its width at 16 px left it
+// 0.2 to 0.4 px inside the 8 px gap. The size is now checked on the sign as laid out, so the gap holds whatever the width does.
+test('R1. the 8 px gap holds when the sign\'s width is not proportional to its size, across every width from hidden to full size', async ({ page }) => {
+  await open(page, { range: { low: 49, high: 73 } }); // C#3 to C#5
+  // A letter-spacing in px does not scale with the type: the width is 4 x (type + 1.5 px), not proportional to it, so a size worked out
+  // from the width at 16 px comes out too big at every smaller size.
+  await page.addStyleTag({ content: '[data-sign] { letter-spacing: 1.5px !important; }' });
+  const phases = new Set<string>();
+  for (let width = 380; width <= 404; width++) {
+    await page.setViewportSize({ width, height: 844 });
+    const h = await headerBox(page);
+    if (h.signShown) {
+      expectCentredAndClear(h, `at ${width} px, ${h.size} px type`);
+      phases.add(h.size < 16 ? 'shrunk' : 'full');
+    } else {
+      const at13 = await gapsAt13(page);
+      expect(Math.min(at13.redo, at13.logo), `hidden at ${width} px only if 13 px does not keep the gap`).toBeLessThan(8);
+      expect(h.size).toBe(16);
+      phases.add('hidden');
+    }
+  }
+  expect([...phases].sort(), 'the sweep runs through all three').toEqual(['full', 'hidden', 'shrunk']);
 });
 
 test.describe('R1 on a desktop', () => {

@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 // R1 (QWW-57): the カラオケ sign is centred on the header's own middle. It shrinks from 16 px down to 13 px to keep 8 px clear of redo and
-// the Spotify button, and goes only when even 13 px does not fit. The rule is `signSize` (src/lib/setlist/fit.ts); `useSignFit` reads the
-// boxes from the page and sets the sign's font size and `data-hidden`. jsdom has no layout, so the boxes are stubbed here; the real
-// geometry is tests/e2e/setlist-frame.spec.ts.
+// the Spotify button, and goes only when even 13 px does not fit. `signSize` (src/lib/setlist/fit.ts) is a first guess from the sign's
+// width at 16 px, which holds if the width is proportional to the size; `useSignFit` applies it, reads the sign's box again (`signFits`)
+// and steps down (`settleSignSize`) until what is laid out keeps the gap, which a font with hinted advances (Linux) needs. It sets the
+// sign's font size and `data-hidden`. jsdom has no layout, so the boxes are stubbed here; the real geometry is
+// tests/e2e/setlist-frame.spec.ts.
 
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SetlistScreen } from '../../src/components/setlist/SetlistScreen';
-import { SIGN_GAP, SIGN_MAX_SIZE, SIGN_MIN_SIZE, signSize } from '../../src/lib/setlist/fit';
+import { SIGN_GAP, SIGN_MAX_SIZE, SIGN_MIN_SIZE, SIGN_STEP, settleSignSize, signFits, signSize } from '../../src/lib/setlist/fit';
 import { el, RANGE, rankedSong, setlistProps } from '../helpers/setlist';
 
 afterEach(cleanup);
@@ -70,11 +72,91 @@ describe('signSize', () => {
   });
 });
 
+describe('signFits', () => {
+  const sign = { left: 130, right: 200 };
+
+  it('is true when the sign keeps 8 px clear of redo and of the Spotify button', () => {
+    expect(signFits(sign, 100, 250)).toBe(true);
+  });
+
+  it('is true at exactly 8 px on either side, and false at 7.9', () => {
+    expect(signFits(sign, 122, 250)).toBe(true);
+    expect(signFits(sign, 122.1, 250)).toBe(false);
+    expect(signFits(sign, 100, 208)).toBe(true);
+    expect(signFits(sign, 100, 207.9)).toBe(false);
+  });
+
+  it('is false when it would touch or cover redo, or the Spotify button', () => {
+    expect(signFits(sign, 130, 250)).toBe(false);
+    expect(signFits(sign, 150, 250)).toBe(false);
+    expect(signFits(sign, 100, 200)).toBe(false);
+    expect(signFits(sign, 100, 180)).toBe(false);
+  });
+
+  it('takes a gap of its own', () => {
+    expect(signFits(sign, 125, 250, 4)).toBe(true);
+    expect(signFits(sign, 125, 250, 8)).toBe(false);
+  });
+});
+
+describe('settleSignSize', () => {
+  /** Asks `fits` about each size in turn, as the hook does; a size fits when it is at most `largest`. */
+  const settle = (guess: number | null, largest: number) => {
+    const asked: number[] = [];
+    const size = settleSignSize(guess, (s) => {
+      asked.push(s);
+      return s <= largest;
+    });
+    return { size, asked };
+  };
+
+  it('keeps the guess, floored to a tenth of a px, when it fits: one check and no step', () => {
+    expect(settle(14.376, 14.376)).toEqual({ size: 14.3, asked: [14.3] });
+    expect(settle(16, 16)).toEqual({ size: 16, asked: [16] });
+    expect(settle(13, 16)).toEqual({ size: 13, asked: [13] });
+  });
+
+  it('steps down 0.2 px at a time from the guess until the size fits', () => {
+    expect(SIGN_STEP).toBe(0.2);
+    expect(settle(14.37, 14)).toEqual({ size: 13.9, asked: [14.3, 14.1, 13.9] });
+    expect(settle(15.99, 15.6)).toEqual({ size: 15.5, asked: [15.9, 15.7, 15.5] });
+  });
+
+  it('stops at 13 px, tries it, and gives up when even that does not fit', () => {
+    expect(settle(14.37, 12.9)).toEqual({ size: null, asked: [14.3, 14.1, 13.9, 13.7, 13.5, 13.3, 13.1, 13] });
+    expect(settle(13.1, 12)).toEqual({ size: null, asked: [13.1, 13] }); // a step from 13.1 lands on 13, not under it
+    expect(settle(13, 12)).toEqual({ size: null, asked: [13] });
+  });
+
+  it('tries 13 px for real when the guess says nothing fits: it is only a guess', () => {
+    expect(settle(null, 13)).toEqual({ size: 13, asked: [13] });
+    expect(settle(null, 12.9)).toEqual({ size: null, asked: [13] });
+  });
+
+  it('always ends: at most 16 sizes, each a multiple of a tenth, falling, from 16 px down to 13 px', () => {
+    for (const guess of [16, 15.99, 14.37, 13.01]) {
+      const { size, asked } = settle(guess, 0);
+      expect(size).toBeNull();
+      expect(asked.length).toBeLessThanOrEqual(16);
+      expect(asked[asked.length - 1]).toBe(13);
+      asked.forEach((s, i) => {
+        expect(Math.round(s * 10) / 10).toBe(s);
+        expect(s).toBeLessThanOrEqual(16);
+        expect(s).toBeGreaterThanOrEqual(13);
+        if (i > 0) expect(s).toBeLessThan(asked[i - 1]!);
+      });
+    }
+    expect(settle(16, 0).asked).toHaveLength(16);
+  });
+});
+
 describe('the sign in the header', () => {
   // What the stubbed layout says, in page pixels. The header row is 0 to 328 (its middle is 164). The sign is centred on that and 69 px
-  // wide at 16 px, its width following the font size the hook gives it, as a browser's does. Redo and the Spotify button are where the
-  // test puts them. `seen` is the font size the sign had each time its box was read.
-  const layout = { redoRight: 110, spotifyLeft: 290 };
+  // wide at 16 px, its width following the font size the hook gives it, as a browser's does: in proportion, unless a test gives it a
+  // `signWidth` of its own. Redo and the Spotify button are where the test puts them. `seen` is the font size the sign had each time
+  // its box was read.
+  const proportional = (size: number) => (69 * size) / SIGN_MAX_SIZE;
+  const layout = { redoRight: 110, spotifyLeft: 290, signWidth: proportional };
   const seen: number[] = [];
   const box = (left: number, right: number) => ({ left, right, top: 0, bottom: 28, width: right - left, height: 28, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
 
@@ -88,7 +170,7 @@ describe('the sign in the header', () => {
       if (this.hasAttribute('data-sign')) {
         const size = Number.parseFloat((this as HTMLElement).style.fontSize) || SIGN_MAX_SIZE;
         seen.push(size);
-        const half = (69 * size) / SIGN_MAX_SIZE / 2;
+        const half = layout.signWidth(size) / 2;
         return box(164 - half, 164 + half);
       }
       if (this.hasAttribute('data-sign-left')) return box(layout.redoRight - 50, layout.redoRight);
@@ -103,6 +185,7 @@ describe('the sign in the header', () => {
     else delete (HTMLElement.prototype as unknown as { clientWidth?: number }).clientWidth;
     layout.redoRight = 110;
     layout.spotifyLeft = 290;
+    layout.signWidth = proportional;
     seen.length = 0;
   });
 
@@ -213,16 +296,64 @@ describe('the sign in the header', () => {
     expect(size()).toBe('13.4px');
   });
 
-  it('measures the sign at 16 px whatever size it was given last, so the answer is the same every time', () => {
+  it('starts every measure by reading the sign at 16 px, whatever size it was given last, so the same layout gives the same answer', () => {
     layout.redoRight = 125;
     draw();
-    resize();
-    resize();
-    resize();
-    expect(seen.length).toBeGreaterThan(3);
-    expect(new Set(seen)).toEqual(new Set([SIGN_MAX_SIZE]));
+    expect(seen).toEqual([16, 14.3]); // at 16 px, then the guess, which keeps the gap: no step
+    for (let i = 0; i < 3; i++) {
+      seen.length = 0;
+      resize(); // the sign is at 14.3 px now
+      expect(seen).toEqual([16, 14.3]);
+    }
     expect(size()).toBe('14.3px');
     expect(hidden()).toBe(false);
+  });
+
+  describe('when the width is not proportional to the size (hinted advances, as on Linux)', () => {
+    // The width is a fixed amount plus a part that follows the size, so a guess from the width at 16 px is wrong at every other size.
+    const wider = (size: number) => 4.3125 * size + 6; // 75 px at 16 px, and wider than a proportional 75 px sign at any smaller size
+    const narrower = (size: number) => 4.3125 * size - 4; // 65 px at 16 px, and narrower than a proportional 65 px sign at any smaller size
+
+    it('steps down until the sign as it is laid out keeps 8 px clear, where the first guess is too big', () => {
+      layout.signWidth = wider;
+      layout.redoRight = 121; // 43 px from the middle: 70 px of room, so the guess is 70 / 75 x 16 = 14.93, floored to 14.9
+      draw();
+      expect(seen).toEqual([16, 14.9, 14.7]); // at 16 px, the guess, one step down
+      expect(size()).toBe('14.7px');
+      expect(hidden()).toBe(false);
+      const { redo, spotify } = gaps();
+      expect(redo, 'the guess leaves 7.87 px; the step leaves 8.30').toBeGreaterThanOrEqual(SIGN_GAP);
+      expect(redo, 'a step is 0.2 px of type, which is under half a px of gap').toBeLessThan(SIGN_GAP + 0.5);
+      expect(spotify).toBeGreaterThanOrEqual(SIGN_GAP);
+    });
+
+    it('steps down for the Spotify button too', () => {
+      layout.signWidth = wider;
+      layout.spotifyLeft = 207; // 43 px from the middle, as above
+      draw();
+      expect(seen).toEqual([16, 14.9, 14.7]);
+      expect(gaps().spotify).toBeGreaterThanOrEqual(SIGN_GAP);
+      expect(gaps().spotify).toBeLessThan(SIGN_GAP + 0.5);
+    });
+
+    it('hides it when even 13 px fails the real measurement, though the guess said it fits, and leaves it at 16 px', () => {
+      layout.signWidth = wider;
+      layout.redoRight = 125.25; // 38.75 px from the middle: 61.5 px of room, so the guess is 13.12, floored to 13.1
+      draw();
+      expect(seen).toEqual([16, 13.1, 13]); // the guess, then 13 px, the last it tries
+      expect(hidden()).toBe(true);
+      expect(size()).toBe('16px');
+    });
+
+    it('tries 13 px for real when the guess says nothing fits, and shows it if it does', () => {
+      layout.signWidth = narrower;
+      layout.redoRight = 129.75; // 34.25 px from the middle: 52.5 px of room, a hair under the 52.8 that 13 px of a proportional 65 px sign needs
+      draw();
+      expect(seen).toEqual([16, 13]);
+      expect(hidden()).toBe(false);
+      expect(size()).toBe('13px');
+      expect(gaps().redo).toBeGreaterThanOrEqual(SIGN_GAP);
+    });
   });
 
   describe('what makes it measure again', () => {
