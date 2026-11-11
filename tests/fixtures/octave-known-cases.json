@@ -1,0 +1,969 @@
+{
+ "about": "Songs whose stored note-file range (as imported, before QWW-31) was an octave off a published range, checked by hand on 2026-11-10 (QWW-31). stored is the preview database row; published is what the source lists, as MIDI numbers (C4 = 60). Used by tests/songs/octave.test.ts.",
+ "songs": [
+  {
+   "key": "commodores|easy",
+   "stored": {
+    "low": 65,
+    "high": 78,
+    "tessitura": 71.15,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      65,
+      0.4
+     ],
+     [
+      72,
+      0.5
+     ],
+     [
+      78,
+      0.1
+     ]
+    ]
+   },
+   "published": {
+    "low": 51,
+    "high": 68,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=commodores-easy"
+   }
+  },
+  {
+   "key": "lost frequencies|are you with me",
+   "stored": {
+    "low": 67,
+    "high": 73,
+    "tessitura": 69.85912698412699,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      63,
+      0.04
+     ],
+     [
+      65,
+      0.01
+     ],
+     [
+      67,
+      0.093
+     ],
+     [
+      68,
+      0.278
+     ],
+     [
+      70,
+      0.139
+     ],
+     [
+      72,
+      0.3
+     ],
+     [
+      73,
+      0.141
+     ]
+    ]
+   },
+   "published": {
+    "low": 51,
+    "high": 61,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=lost-frequencies-are-you-with-me"
+   }
+  },
+  {
+   "key": "jason derulo|talk dirty",
+   "stored": {
+    "low": 66,
+    "high": 74,
+    "tessitura": 71.30062630480167,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": true,
+    "pitchShare": [
+     [
+      61,
+      0.008
+     ],
+     [
+      64,
+      0.006
+     ],
+     [
+      66,
+      0.127
+     ],
+     [
+      67,
+      0.002
+     ],
+     [
+      69,
+      0.134
+     ],
+     [
+      71,
+      0.19
+     ],
+     [
+      73,
+      0.374
+     ],
+     [
+      74,
+      0.123
+     ],
+     [
+      76,
+      0.013
+     ],
+     [
+      78,
+      0.023
+     ]
+    ]
+   },
+   "published": {
+    "low": 54,
+    "high": 71,
+    "source": "vocal-range pipeline: the recording measured at F#3 to B4, typical 59.9, from 11.5 s of tracked singing and flagged mostly-rap. Singing Carrots has no page for this song.",
+    "url": null
+   }
+  },
+  {
+   "key": "neil young|heart of gold",
+   "stored": {
+    "low": 64,
+    "high": 76,
+    "tessitura": 70.21830985915493,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      64,
+      0.097
+     ],
+     [
+      66,
+      0.008
+     ],
+     [
+      67,
+      0.214
+     ],
+     [
+      69,
+      0.088
+     ],
+     [
+      71,
+      0.347
+     ],
+     [
+      74,
+      0.131
+     ],
+     [
+      76,
+      0.115
+     ]
+    ]
+   },
+   "published": {
+    "low": 50,
+    "high": 64,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=neil-young-heart-of-gold"
+   }
+  },
+  {
+   "key": "soul asylum|runaway train",
+   "stored": {
+    "low": 62,
+    "high": 76,
+    "tessitura": 70.10265183917879,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      59,
+      0.002
+     ],
+     [
+      60,
+      0.031
+     ],
+     [
+      62,
+      0.081
+     ],
+     [
+      64,
+      0.083
+     ],
+     [
+      67,
+      0.072
+     ],
+     [
+      69,
+      0.016
+     ],
+     [
+      71,
+      0.053
+     ],
+     [
+      72,
+      0.508
+     ],
+     [
+      74,
+      0.093
+     ],
+     [
+      76,
+      0.062
+     ]
+    ]
+   },
+   "published": {
+    "low": 48,
+    "high": 64,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=soul-asylum-runaway-train"
+   }
+  },
+  {
+   "key": "the black keys|lonely boy",
+   "stored": {
+    "low": 64,
+    "high": 76,
+    "tessitura": 70.78666666666666,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      62,
+      0.009
+     ],
+     [
+      64,
+      0.061
+     ],
+     [
+      67,
+      0.063
+     ],
+     [
+      69,
+      0.058
+     ],
+     [
+      70,
+      0.058
+     ],
+     [
+      71,
+      0.565
+     ],
+     [
+      73,
+      0.007
+     ],
+     [
+      74,
+      0.1
+     ],
+     [
+      76,
+      0.077
+     ],
+     [
+      79,
+      0.003
+     ]
+    ]
+   },
+   "published": {
+    "low": 50,
+    "high": 64,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=the-black-keys-lonely-boy"
+   }
+  },
+  {
+   "key": "lost frequencies|reality",
+   "stored": {
+    "low": 64,
+    "high": 76,
+    "tessitura": 69.19407894736842,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      61,
+      0.01
+     ],
+     [
+      63,
+      0.036
+     ],
+     [
+      64,
+      0.266
+     ],
+     [
+      66,
+      0.01
+     ],
+     [
+      68,
+      0.146
+     ],
+     [
+      69,
+      0.117
+     ],
+     [
+      70,
+      0.005
+     ],
+     [
+      71,
+      0.069
+     ],
+     [
+      73,
+      0.12
+     ],
+     [
+      75,
+      0.168
+     ],
+     [
+      76,
+      0.053
+     ]
+    ]
+   },
+   "published": {
+    "low": 51,
+    "high": 64,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=lost-frequencies-reality"
+   }
+  },
+  {
+   "key": "bellamy brothers|let your love flow",
+   "stored": {
+    "low": 67,
+    "high": 75,
+    "tessitura": 70.6625641025641,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      63,
+      0.023
+     ],
+     [
+      65,
+      0.016
+     ],
+     [
+      67,
+      0.155
+     ],
+     [
+      68,
+      0.029
+     ],
+     [
+      70,
+      0.353
+     ],
+     [
+      72,
+      0.231
+     ],
+     [
+      74,
+      0.018
+     ],
+     [
+      75,
+      0.169
+     ],
+     [
+      77,
+      0.006
+     ]
+    ]
+   },
+   "published": {
+    "low": 48,
+    "high": 62,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=bellamy-brothers-let-your-love-flow"
+   }
+  },
+  {
+   "key": "ten sharp|you",
+   "stored": {
+    "low": 62,
+    "high": 78,
+    "tessitura": 71.26376440460947,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      57,
+      0.008
+     ],
+     [
+      59,
+      0.018
+     ],
+     [
+      62,
+      0.065
+     ],
+     [
+      64,
+      0.055
+     ],
+     [
+      66,
+      0.123
+     ],
+     [
+      67,
+      0.049
+     ],
+     [
+      69,
+      0.049
+     ],
+     [
+      70,
+      0.045
+     ],
+     [
+      71,
+      0.072
+     ],
+     [
+      72,
+      0.001
+     ],
+     [
+      73,
+      0.07
+     ],
+     [
+      74,
+      0.117
+     ],
+     [
+      76,
+      0.142
+     ],
+     [
+      78,
+      0.187
+     ]
+    ]
+   },
+   "published": {
+    "low": 45,
+    "high": 66,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=ten-sharp-you"
+   }
+  },
+  {
+   "key": "ac/dc|shoot to thrill",
+   "stored": {
+    "low": 67,
+    "high": 76,
+    "tessitura": 71.70858283433134,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      60,
+      0.008
+     ],
+     [
+      62,
+      0.002
+     ],
+     [
+      64,
+      0.004
+     ],
+     [
+      66,
+      0.015
+     ],
+     [
+      67,
+      0.034
+     ],
+     [
+      69,
+      0.304
+     ],
+     [
+      71,
+      0.019
+     ],
+     [
+      72,
+      0.301
+     ],
+     [
+      73,
+      0.015
+     ],
+     [
+      74,
+      0.068
+     ],
+     [
+      75,
+      0.008
+     ],
+     [
+      76,
+      0.22
+     ]
+    ]
+   },
+   "published": {
+    "low": 52,
+    "high": 68,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=ac-dc-shoot-to-thrill"
+   }
+  },
+  {
+   "key": "rihanna|rehab",
+   "stored": {
+    "low": 68,
+    "high": 78,
+    "tessitura": 71.93530419880034,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": true,
+    "pitchShare": [
+     [
+      66,
+      0.022
+     ],
+     [
+      68,
+      0.186
+     ],
+     [
+      70,
+      0.128
+     ],
+     [
+      71,
+      0.168
+     ],
+     [
+      73,
+      0.274
+     ],
+     [
+      75,
+      0.13
+     ],
+     [
+      78,
+      0.088
+     ],
+     [
+      80,
+      0.005
+     ]
+    ]
+   },
+   "published": {
+    "low": 53,
+    "high": 70,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=rihanna-rehab"
+   }
+  },
+  {
+   "key": "emf|unbelievable",
+   "stored": {
+    "low": 68,
+    "high": 74,
+    "tessitura": 70.5623188405797,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": true,
+    "pitchShare": [
+     [
+      68,
+      0.357
+     ],
+     [
+      69,
+      0.006
+     ],
+     [
+      70,
+      0.001
+     ],
+     [
+      71,
+      0.375
+     ],
+     [
+      72,
+      0.045
+     ],
+     [
+      73,
+      0.093
+     ],
+     [
+      74,
+      0.086
+     ],
+     [
+      75,
+      0.03
+     ],
+     [
+      76,
+      0.007
+     ]
+    ]
+   },
+   "published": {
+    "low": 53,
+    "high": 62,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=emf-unbelievable"
+   }
+  },
+  {
+   "key": "white town|your woman",
+   "stored": {
+    "low": 63,
+    "high": 74,
+    "tessitura": 68.67744252873563,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      62,
+      0.03
+     ],
+     [
+      63,
+      0.025
+     ],
+     [
+      65,
+      0.101
+     ],
+     [
+      66,
+      0.011
+     ],
+     [
+      67,
+      0.322
+     ],
+     [
+      68,
+      0.003
+     ],
+     [
+      69,
+      0.085
+     ],
+     [
+      70,
+      0.169
+     ],
+     [
+      72,
+      0.141
+     ],
+     [
+      73,
+      0.029
+     ],
+     [
+      74,
+      0.083
+     ]
+    ]
+   },
+   "published": {
+    "low": 48,
+    "high": 62,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=white-town-your-woman"
+   }
+  },
+  {
+   "key": "midnight oil|beds are burning",
+   "stored": {
+    "low": 64,
+    "high": 81,
+    "tessitura": 71.66984884645983,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      60,
+      0.003
+     ],
+     [
+      61,
+      0.004
+     ],
+     [
+      62,
+      0.03
+     ],
+     [
+      64,
+      0.207
+     ],
+     [
+      66,
+      0.014
+     ],
+     [
+      67,
+      0.049
+     ],
+     [
+      68,
+      0.047
+     ],
+     [
+      69,
+      0.088
+     ],
+     [
+      71,
+      0.042
+     ],
+     [
+      72,
+      0.02
+     ],
+     [
+      74,
+      0.09
+     ],
+     [
+      76,
+      0.226
+     ],
+     [
+      78,
+      0.005
+     ],
+     [
+      79,
+      0.1
+     ],
+     [
+      81,
+      0.053
+     ],
+     [
+      83,
+      0.022
+     ]
+    ]
+   },
+   "published": {
+    "low": 49,
+    "high": 71,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=midnight-oil-beds-are-burning"
+   }
+  },
+  {
+   "key": "blackstreet|no diggity",
+   "stored": {
+    "low": 66,
+    "high": 78,
+    "tessitura": 69.91579292267366,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": true,
+    "pitchShare": [
+     [
+      57,
+      0.003
+     ],
+     [
+      59,
+      0.002
+     ],
+     [
+      61,
+      0.022
+     ],
+     [
+      64,
+      0.015
+     ],
+     [
+      66,
+      0.261
+     ],
+     [
+      68,
+      0.003
+     ],
+     [
+      69,
+      0.202
+     ],
+     [
+      71,
+      0.243
+     ],
+     [
+      72,
+      0.004
+     ],
+     [
+      73,
+      0.154
+     ],
+     [
+      74,
+      0.002
+     ],
+     [
+      76,
+      0.018
+     ],
+     [
+      78,
+      0.048
+     ],
+     [
+      81,
+      0.007
+     ],
+     [
+      83,
+      0.003
+     ],
+     [
+      84,
+      0.004
+     ],
+     [
+      85,
+      0.009
+     ]
+    ]
+   },
+   "published": {
+    "low": 45,
+    "high": 69,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=blackstreet-no-diggity"
+   }
+  },
+  {
+   "key": "finger eleven|paralyzer",
+   "stored": {
+    "low": 64,
+    "high": 76,
+    "tessitura": 70.74448669201522,
+    "source": "note-file",
+    "confidence": "high",
+    "fastLyrics": false,
+    "pitchShare": [
+     [
+      64,
+      0.106
+     ],
+     [
+      66,
+      0.153
+     ],
+     [
+      67,
+      0.1
+     ],
+     [
+      69,
+      0.132
+     ],
+     [
+      70,
+      0.002
+     ],
+     [
+      71,
+      0.134
+     ],
+     [
+      73,
+      0.02
+     ],
+     [
+      74,
+      0.003
+     ],
+     [
+      76,
+      0.319
+     ],
+     [
+      79,
+      0.021
+     ],
+     [
+      81,
+      0.011
+     ]
+    ]
+   },
+   "published": {
+    "low": 47,
+    "high": 69,
+    "source": "Singing Carrots",
+    "url": "https://singingcarrots.com/song?song=finger-eleven-paralyzer"
+   }
+  }
+ ]
+}

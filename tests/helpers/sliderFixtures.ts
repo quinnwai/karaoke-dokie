@@ -113,12 +113,10 @@ function withSomeUnknownPopularity(matches: Match[], rand: () => number): Match[
 }
 
 /**
- * What the phone receives without Spotify: the catalogue matched to `user`, ranked by Top picks and
- * cut to the best 1,000. `songs` invented catalogue songs are read most-viewed first, as the store
- * lists them, so a song's play rank is its place in that order.
+ * `songs` invented catalogue songs, most-viewed first as the store lists them (so a song's play rank is its
+ * place in that order), before any singer is matched to them. `rand` is the generator they are drawn from.
  */
-export function catalogueMatches(user: VocalRange, seed = 7, songs = 4000): Match[] {
-  const rand = rng(seed);
+export function catalogueEntries(rand: () => number, songs = 4000): CatalogueEntry[] {
   const entries: CatalogueEntry[] = [];
   for (let i = 0; i < songs; i++) {
     const s = shape(rand);
@@ -144,6 +142,17 @@ export function catalogueMatches(user: VocalRange, seed = 7, songs = 4000): Matc
     entries.push(entry);
   }
   entries.sort((a, b) => (b.usdb?.views ?? -1) - (a.usdb?.views ?? -1));
+  return entries;
+}
+
+/**
+ * What the phone receives without Spotify: the catalogue matched to `user`, ranked by Top picks and
+ * cut to the best 1,000. `songs` invented catalogue songs are read most-viewed first, as the store
+ * lists them, so a song's play rank is its place in that order.
+ */
+export function catalogueMatches(user: VocalRange, seed = 7, songs = 4000): Match[] {
+  const rand = rng(seed);
+  const entries = catalogueEntries(rand, songs);
   return withSomeUnknownPopularity(recommendCatalogue(catalogueTracks(entries), user, deps, { all: true }).matches, rand);
 }
 
