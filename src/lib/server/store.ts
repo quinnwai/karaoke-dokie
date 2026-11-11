@@ -1,6 +1,7 @@
 // Persistence interface for the backend. Two implementations:
 // memoryStore.ts (dev, tests, e2e) and postgresStore.ts (Neon in production, pg-mem in tests).
 import type { AppEvent, DataSourceLogEntry, FeedbackEntry, Mood, SongRange, TimeRange, Track, VocalRange } from '../contracts';
+import type { CanonicalInput, SongCanonical } from '../songs/canonical';
 
 /**
  * What the sync knows about one user's stored library (QWW-55 PR 2). The liked songs are rows of their own;
@@ -135,6 +136,7 @@ export interface SongDeezerRecord {
 import type { SongFeelRecord } from '../tempo/feel';
 import type { SongTempoRecord } from '../tempo/tempo';
 export type { SongFeelRecord, SongTempoRecord };
+export type { CanonicalInput, SongCanonical };
 
 export interface Store {
   getUser(id: string): Promise<UserRecord | null>;
@@ -212,6 +214,19 @@ export interface Store {
   putSongDeezer(entries: SongDeezerRecord[]): Promise<void>;
   /** Every lookup, hits and misses, by song key. */
   listSongDeezer(): Promise<Map<string, SongDeezerRecord>>;
+
+  // ---- one song, one row (QWW-49) ----
+  /** Adds rows, or replaces a key's whole row; within one call the last entry for a key wins. */
+  putSongCanonical(entries: SongCanonical[]): Promise<void>;
+  /** Batch read; the map only has keys that have a row (the build has not seen the others). */
+  getSongCanonical(songKeys: string[]): Promise<Map<string, SongCanonical>>;
+  /** Every row, for the build to see what a run would change, and for joining feedback and events (`cat:<key>`) to their song. */
+  listSongCanonical(): Promise<Map<string, SongCanonical>>;
+  /**
+   * Every measured song (note file or recording; the catalogue's pool, not only the part of it the list
+   * loads) with what the build reads: its display title and artist, popularity rank and range.
+   */
+  listCanonicalInputs(): Promise<CanonicalInput[]>;
 
   // ---- Spotify rate-limit block (QWW-55) ----
   /**

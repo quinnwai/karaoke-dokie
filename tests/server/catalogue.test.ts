@@ -3,6 +3,7 @@ import type { SongRange, VocalRange } from '../../src/lib/contracts';
 import {
   CATALOGUE_SIZE,
   CATALOGUE_TTL_MS,
+  DEGRADED_TTL_MS,
   catalogueKey,
   catalogueTracks,
   createCatalogue,
@@ -10,7 +11,7 @@ import {
   recommendCatalogue,
 } from '../../src/lib/server/catalogue';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
-import type { CatalogueSong, SongPopularityRecord, UsdbIndexEntry } from '../../src/lib/server/store';
+import type { CatalogueSong, SongCanonical, SongPopularityRecord, UsdbIndexEntry } from '../../src/lib/server/store';
 import { MAX_ALL_MATCHES } from '../../src/lib/server/songService';
 import { productionSongDeps } from '../../src/lib/server/wiring';
 import { DEFAULT_VIEW, orderMatches } from '../../src/lib/songs/browse';
@@ -448,3 +449,156 @@ describe('all=1 size', () => {
   });
 });
 
+
+describe('one song, one row (QWW-49)', () => {
+  /** A store with a few measured songs: one song under two spellings, one with a tag on its title, one plain. */
+  const rawNames = new Map<string, { title: string; artist: string }>();
+  async function stocked() {
+    const store = createMemoryStore();
+    const raw = [
+      song('Aaliyah', "I Don't Wanna", range(55, 67)),
+      song('Aaliyah', 'I Don’t Wanna', range(55, 67)),
+      song('10cc', 'Dreadlock Holiday (Album Version)', range(55, 67)),
+      song('Toto', 'Africa', range(55, 67)),
+    ];
+    for (const s of raw) await store.putSongRange(s.key, { range: s.range, log: s.log });
+    for (const s of raw) rawNames.set(s.key, { title: s.title, artist: s.artist });
+    await store.putSongPopularity([
+      { key: raw[0]!.key, karaokeViews: 1_000, source: 'test' },
+      { key: raw[1]!.key, karaokeViews: 40_000_000, source: 'test' },
+    ]);
+    return { store, raw };
+  }
+  /** A record as the build writes it: the clean title to show, and the title the row had then (from `raw`, else its key's). */
+  const canonical = (key: string, canonicalKey: string, title: string, artist: string): SongCanonical => ({
+    key, canonicalKey, title, artist, method: 'titles-v1', reason: key === canonicalKey ? 'same' : 'folded',
+    sourceTitle: rawNames.get(key)?.title ?? '', sourceArtist: rawNames.get(key)?.artist ?? '',
+  });
+
+  it('shows the stored titles when the build has not run, exactly as before', async () => {
+    const { store } = await stocked();
+    const loaded = await loadCatalogue(store);
+    expect(loaded.map((s) => s.title).sort()).toEqual(['Africa', 'Dreadlock Holiday (Album Version)', "I Don't Wanna", 'I Don’t Wanna']);
+  });
+
+  it('loads one row per song with its clean title, and the list shows it once', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([
+      canonical(raw[0]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah'),
+      canonical(raw[1]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah'),
+      canonical(raw[2]!.key, raw[2]!.key, 'Dreadlock Holiday', '10cc'),
+    ]);
+    const getSongCanonical = vi.spyOn(store, 'getSongCanonical');
+    const loaded = await loadCatalogue(store, undefined, { canonical: true });
+    expect(getSongCanonical).toHaveBeenCalledTimes(1);
+    expect(getSongCanonical.mock.calls[0]![0]).toHaveLength(4); // all the songs the catalogue read, once
+    // Toto has no row yet: shown as stored.
+    expect(loaded.map((s) => `${s.artist} - ${s.title}`).sort()).toEqual(['10cc - Dreadlock Holiday', 'Aaliyah - I Don’t Wanna', 'Toto - Africa']);
+
+    const tracks = catalogueTracks(loaded);
+    const dreadlock = tracks.find((t) => t.key === raw[2]!.key)!.track;
+    expect(dreadlock).toMatchObject({ id: `cat:${raw[2]!.key}`, title: 'Dreadlock Holiday', spotifyUrl: 'https://open.spotify.com/search/10cc%20Dreadlock%20Holiday' });
+    const res = recommendCatalogue(tracks, user, deps, { all: true });
+    expect(res.matches.map((m) => m.track.title).sort()).toEqual(['Africa', 'Dreadlock Holiday', 'I Don’t Wanna']);
+    expect(ids(res.matches)).not.toContain(`cat:${raw[0]!.key}`); // the folded spelling is not a row of its own
+  });
+
+  it('keeps the song when the row it folds into ranked too low to load', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([canonical(raw[0]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah'), canonical(raw[1]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah')]);
+    // a cut of 1 loads only the most popular song: the other spelling of Aaliyah's song is not in it
+    const loaded = await loadCatalogue(store, 1, { canonical: true });
+    expect(loaded.map((s) => s.key)).toEqual([raw[1]!.key]);
+    // and the less popular spelling alone still shows, under the clean title, when it is the one loaded
+    const only = await loadCatalogue({ ...store, listCatalogue: async () => (await store.listCatalogue(10)).filter((s) => s.key === raw[0]!.key) }, undefined, { canonical: true });
+    expect(only.map((s) => `${s.key} ${s.title}`)).toEqual([`${raw[0]!.key} I Don’t Wanna`]);
+  });
+
+  it('shows the stored titles when the mapping cannot be read, and says so, instead of failing', async () => {
+    const { store } = await stocked();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const broken = { ...store, getSongCanonical: async () => { throw new Error('relation "song_canonical" does not exist'); } };
+      const loaded = await loadCatalogue(broken, undefined, { canonical: true });
+      expect(loaded).toHaveLength(4);
+      expect(loaded.degraded).toBe(true);
+      expect(loaded.map((s) => s.title)).toContain('Dreadlock Holiday (Album Version)');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('song_canonical'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('leaves the mapping alone unless it is asked for, so reports that look songs up by key see the catalogue as stored', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([canonical(raw[0]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah'), canonical(raw[1]!.key, raw[1]!.key, 'I Don’t Wanna', 'Aaliyah')]);
+    const getSongCanonical = vi.spyOn(store, 'getSongCanonical');
+    const loaded = await loadCatalogue(store);
+    expect(getSongCanonical).not.toHaveBeenCalled();
+    expect(loaded).toHaveLength(4);
+    expect(loaded.map((s) => s.key)).toContain(raw[0]!.key);
+    expect(loaded.degraded).toBeUndefined();
+  });
+
+  it('applies a record only to the row it was made from: a row renamed since keeps its live title', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([canonical(raw[2]!.key, raw[2]!.key, 'Dreadlock Holiday', '10cc')]);
+    // a sync renames the row after the build ran
+    const renamed = raw[2]!;
+    await store.putSongRange(renamed.key, { range: renamed.range, log: { ...renamed.log, title: 'Dreadlock Holiday (Instrumental)' } });
+    const loaded = await loadCatalogue(store, undefined, { canonical: true });
+    // the stale record is not used: the row keeps the title it has now, so the list still hides it on that tag
+    expect(loaded.find((s) => s.key === renamed.key)!.title).toBe('Dreadlock Holiday (Instrumental)');
+    const titles = recommendCatalogue(catalogueTracks(loaded), user, deps, { all: true }).matches.map((m) => m.track.title);
+    expect(titles).not.toContain('Dreadlock Holiday');
+    expect(titles).not.toContain('Dreadlock Holiday (Instrumental)');
+  });
+
+  it('retries a failed mapping read once before giving up, and then applies it with no warning', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([canonical(raw[2]!.key, raw[2]!.key, 'Dreadlock Holiday', '10cc')]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      let calls = 0;
+      const flaky = { ...store, getSongCanonical: async (keys: string[]) => { if (++calls === 1) throw new Error('connection reset'); return store.getSongCanonical(keys); } };
+      const loaded = await loadCatalogue(flaky, undefined, { canonical: true });
+      expect(calls).toBe(2);
+      expect(loaded.degraded).toBeUndefined();
+      expect(loaded.map((s) => s.title)).toContain('Dreadlock Holiday');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps a degraded load for a minute, not an hour, so a failed read does not leave raw titles up all hour', async () => {
+    const { store, raw } = await stocked();
+    await store.putSongCanonical([canonical(raw[2]!.key, raw[2]!.key, 'Dreadlock Holiday', '10cc')]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      let broken = true;
+      const reads = vi.fn(async () => loadCatalogue({ ...store, getSongCanonical: async (keys: string[]) => { if (broken) throw new Error('down'); return store.getSongCanonical(keys); } }, undefined, { canonical: true }));
+      let at = 0;
+      const catalogue = createCatalogue(reads, deps, { now: () => at });
+      expect((await catalogue.get()).map((t) => t.track.title)).toContain('Dreadlock Holiday (Album Version)');
+      broken = false;
+      at = DEGRADED_TTL_MS - 1;
+      await catalogue.get();
+      expect(reads).toHaveBeenCalledTimes(1); // still the cached, degraded one
+      at = DEGRADED_TTL_MS;
+      expect((await catalogue.get()).map((t) => t.track.title)).toContain('Dreadlock Holiday'); // read again after a minute
+      expect(reads).toHaveBeenCalledTimes(2);
+      at = DEGRADED_TTL_MS + CATALOGUE_TTL_MS - 1;
+      await catalogue.get();
+      expect(reads).toHaveBeenCalledTimes(2); // a good load lasts the hour
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('works with a store that has no mapping method at all', async () => {
+    const { store } = await stocked();
+    const { listCatalogue, getSongPopularity, getSongTempos } = store;
+    expect(await loadCatalogue({ listCatalogue, getSongPopularity, getSongTempos }, undefined, { canonical: true })).toHaveLength(4);
+  });
+});
