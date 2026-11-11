@@ -6,7 +6,7 @@
 // songs with both a note file and a recording, 21% of the note files sat an octave away from the
 // recording, nearly all of them too high (vocal-range pipeline, scripts/octave-pairs.py).
 //
-// Three kinds of evidence, in this order:
+// Three kinds of evidence, in this order (and a person's say over all of them, see "hand" below):
 //   songs:   this song's own recording (its typical note, tessitura, measured from the recording).
 //            Trusted at any distance: the note file moves by whole octaves to sit nearest it.
 //            A recording flagged mostly-rap is trusted too, but only when it agrees with the note
@@ -21,6 +21,12 @@
 //            that high is an octave too high far more often than not (TYPICAL_HIGH), so it moves
 //            down one octave.
 // Anything else stays as written.
+//
+// hand: data/octave-hand-checked.json, kept apart from the generated evidence so a rebuild cannot drop
+// it, and merged in by withHandChecked. An artist listed there takes the place of the measured one in
+// the artist rule (same limit), which also keeps the pitch rule off that artist; its moves are marked
+// 'hand'. A song listed under keep never moves. It exists because a typical note is only a guess at
+// who sings: AC/DC sings high, so the pitch rule moved 14 of their songs down an octave.
 // Only plain note-file ranges move. Duets with parts are left alone: the two singers may sit
 // an octave apart, and a recording measures neither part. Moving by evidence rather than by
 // a stored offset makes the fix idempotent.
@@ -53,6 +59,32 @@ export interface OctaveEvidence {
   songs: Record<string, number>;
   /** Artist part of songKey to the median typical note of the artist's recordings. */
   artists: Record<string, number>;
+  /** Set by withHandChecked: which entries of `artists` a person set, and the song keys that never move. */
+  hand?: { artists: string[]; keep: string[] };
+}
+
+/** data/octave-hand-checked.json: what a person set, each with where it came from. */
+export interface OctaveHandChecked {
+  /** Artist part of songKey to the typical note (MIDI) a person heard or looked up for the artist. */
+  artists: Record<string, { typical: number; source: string }>;
+  /** Song keys the fix must never move. */
+  keep: Record<string, { source: string }>;
+}
+
+/**
+ * The evidence with a person's entries merged in: a hand-checked artist takes the place of the measured
+ * one, and the moves that rest on it are marked 'hand'. Every entry has to say where it came from.
+ */
+export function withHandChecked(evidence: OctaveEvidence, hand: OctaveHandChecked): OctaveEvidence {
+  const artists = { ...evidence.artists };
+  for (const [artist, entry] of Object.entries(hand.artists)) {
+    if (!Number.isFinite(entry.typical) || !entry.source?.trim()) throw new Error(`Hand-checked artist "${artist}" needs a typical note and a source`);
+    artists[artist] = entry.typical;
+  }
+  for (const [key, entry] of Object.entries(hand.keep)) {
+    if (!entry.source?.trim()) throw new Error(`Hand-checked song to keep "${key}" needs a source`);
+  }
+  return { ...evidence, artists, hand: { artists: Object.keys(hand.artists), keep: Object.keys(hand.keep) } };
 }
 
 export interface OctaveMove {
@@ -77,15 +109,17 @@ export const artistOfKey = (songKey: string): string => songKey.split('|')[0] ??
  */
 export function octaveMove(songKey: string, range: SongRange, evidence: OctaveEvidence, typicalHigh = TYPICAL_HIGH): OctaveMove | null {
   if (range.source !== 'note-file' || range.duet || range.parts?.length) return null;
+  if (evidence.hand?.keep.includes(songKey)) return null;
+  const artist = artistOfKey(songKey);
   const own = Object.hasOwn(evidence.songs, songKey) ? evidence.songs[songKey]! : undefined;
-  const typical = Object.hasOwn(evidence.artists, artistOfKey(songKey)) ? evidence.artists[artistOfKey(songKey)]! : undefined;
+  const typical = Object.hasOwn(evidence.artists, artist) ? evidence.artists[artist]! : undefined;
   let semitones = 0;
   let from: OctaveMove['from'] = 'recording';
   if (own !== undefined) {
     semitones = octaveToward(range.tessitura, own);
   } else if (typical !== undefined) {
     semitones = octaveToward(range.tessitura, typical);
-    from = 'artist';
+    from = evidence.hand?.artists.includes(artist) ? 'hand' : 'artist';
     if (Math.abs(range.tessitura + semitones - typical) > ARTIST_MAX_DISTANCE) return null;
   } else if (range.tessitura >= typicalHigh) {
     // Down until it is below the line, so a row that was moved is not moved again.
@@ -121,6 +155,8 @@ export function octaveLogNote(move: OctaveMove): string {
       return `Moved ${by} ${dir} to match the register of the artist's other recordings.`;
     case 'pitch':
       return `Moved ${by} ${dir}: note files written this high are usually an octave too high.`;
+    case 'hand':
+      return `Moved ${by} ${dir} to match the artist's register, checked by hand.`;
   }
 }
 
@@ -188,6 +224,7 @@ export interface OctaveFixSummary {
   fromRecording: number;
   fromArtist: number;
   fromPitch: number;
+  fromHand: number;
   /** Moves not written because the row changed after it was read; the next run picks them up. */
   skippedChanged: number;
 }
@@ -217,8 +254,8 @@ const WRITE_BATCH = 10;
  */
 export async function fixStoredOctaves(store: Store, evidence: OctaveEvidence, opts: OctaveFixOptions = {}): Promise<OctaveFixSummary> {
   const pageSize = opts.pageSize ?? 1000;
-  const summary: OctaveFixSummary = { checked: 0, moved: 0, fromRecording: 0, fromArtist: 0, fromPitch: 0, skippedChanged: 0 };
-  const counter = { recording: 'fromRecording', artist: 'fromArtist', pitch: 'fromPitch' } as const;
+  const summary: OctaveFixSummary = { checked: 0, moved: 0, fromRecording: 0, fromArtist: 0, fromPitch: 0, fromHand: 0, skippedChanged: 0 };
+  const counter = { recording: 'fromRecording', artist: 'fromArtist', pitch: 'fromPitch', hand: 'fromHand' } as const;
   const same = (a: SongRangeRecord, b: SongRangeRecord | undefined) => b !== undefined && JSON.stringify(a) === JSON.stringify(b);
   let after = opts.after ?? '';
   for (;;) {

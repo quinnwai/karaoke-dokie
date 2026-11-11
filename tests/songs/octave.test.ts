@@ -301,7 +301,7 @@ describe('fixStoredOctaves', () => {
   it('fixes the plain note files the evidence or the pitch rule moves, notes why, and is a no-op the second time', async () => {
     const s = await seeded();
     const first = await fixStoredOctaves(s, ev);
-    expect(first).toEqual({ checked: 7, moved: 3, fromRecording: 1, fromArtist: 1, fromPitch: 1, skippedChanged: 0 });
+    expect(first).toEqual({ checked: 7, moved: 3, fromRecording: 1, fromArtist: 1, fromPitch: 1, fromHand: 0, skippedChanged: 0 });
     const fixed = await s.getSongRange('a|high');
     expect(fixed?.range).toMatchObject({ low: 53, high: 66, octaveFrom: 'recording' });
     expect(fixed?.log.reason).toBe('Used the note file. Moved an octave down to match the original recording.');
@@ -336,7 +336,7 @@ describe('fixStoredOctaves', () => {
     const pages: [string, number][] = [];
     const s = await seeded();
     const summary = await fixStoredOctaves(s, ev, { pageSize: 2, onPage: (lastKey, sofar) => pages.push([lastKey, sofar.checked]) });
-    expect(summary).toEqual({ checked: 7, moved: 3, fromRecording: 1, fromArtist: 1, fromPitch: 1, skippedChanged: 0 });
+    expect(summary).toEqual({ checked: 7, moved: 3, fromRecording: 1, fromArtist: 1, fromPitch: 1, fromHand: 0, skippedChanged: 0 });
     // Seven rows with a range, two per page; the skipped song is not read.
     expect(pages).toEqual([['a|duet', 2], ['a|high', 4], ['y|no-evidence-high', 6], ['z|no-evidence-lower', 7]]);
     // Moves on the first page and on a later one are both written.
