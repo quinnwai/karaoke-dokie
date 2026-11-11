@@ -132,8 +132,9 @@ export interface SongDeezerRecord {
   checkedAt: string;
 }
 
+import type { SongFeelRecord } from '../tempo/feel';
 import type { SongTempoRecord } from '../tempo/tempo';
-export type { SongTempoRecord };
+export type { SongFeelRecord, SongTempoRecord };
 
 export interface Store {
   getUser(id: string): Promise<UserRecord | null>;
@@ -257,6 +258,14 @@ export interface Store {
   getSongTempos(songKeys: string[]): Promise<Map<string, SongTempoRecord>>;
   /** Every row, for the fill script's skip list. */
   listSongTempos(): Promise<Map<string, SongTempoRecord>>;
+
+  // ---- feel labels (QWW-54) ----
+  /** Adds rows, or replaces a key's label: the last entry for a key wins. */
+  putSongFeel(entries: SongFeelRecord[]): Promise<void>;
+  /** Batch read; the map only has keys that have a row. */
+  getSongFeels(songKeys: string[]): Promise<Map<string, SongFeelRecord>>;
+  /** Every row, for the import script's comparison. */
+  listSongFeels(): Promise<Map<string, SongFeelRecord>>;
 }
 
 export const DEFAULT_LIST_LIMIT = 200;

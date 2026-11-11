@@ -251,7 +251,49 @@ every measured source (`tempoOf(record, key)`, `src/lib/tempo/reviewed.ts`). Pre
   downloads, stops after 20 failures in a row; finished songs are skipped. Never runs at page load.
 - `npm run tempo:ultrastar -- <name>=<folder> ...`: the note files' `#BPM`, numbers only.
 - `npm run tempo:report`: gold-set accuracy (`data/tempo-gold.json`), coverage and a spot check, from
-  saved data only.
+  saved data only. `-- --lists [--era 90s]` adds, per era and for F2 to C5 and E2 to E5, the 20 slowest and
+  20 fastest of the 300 most popular songs by the tempo the ranking uses, as plain text for a person to read.
+
+### Feel labels and the one tempo (QWW-54)
+
+A measured tempo puts a ballad at the upbeat end whenever a source reads it at double time (Hey Jude 148
+for 74; a beat tracker's 178 for Red Red Wine), and no rule on the numbers can tell that from Take On Me.
+So a song can carry a **feel label**: slow, mid or upbeat, made offline from what is known of the
+recording (`data/tempo-feel.md` says how), kept in `song_feel` (one additive table, `IF NOT EXISTS`) and
+never worked out while a page loads. The label decides which end of the Tempo gear the song sits at; the
+measurement only orders songs inside that end.
+
+`effectiveTempo` (`src/lib/tempo/feel.ts`) is the one tempo per song that the ranking reads, with its
+source (`deezer`, `tracker`, `ultrastar`, `reviewed`, or `feel` when only the label is known):
+
+- Without a label, a published tempo (`data/tempo-gold.json`) stands as written. A measured one (`combineTempo`) is squeezed in a
+  straight line onto the mid band, 90 to 125, which keeps its order and ties but means no song nobody vouched
+  for reaches either end of the gear (of 297 songs labelled slow that Deezer has a bpm for, 59% were read at
+  125 bpm or more). So a database with no labels ranks the measured songs in the order it did before, with
+  two exceptions: a song whose only reading is a beat-tracker value of 160 or more has no tempo (that reading
+  is left out unless Deezer or UltraStar agrees, since it doubles slow songs), and the songs with a published
+  tempo stand as written, so they can sit at an end.
+- With a label, each reading (the checked tempo alone, else Deezer, the tracker, UltraStar / 4) is tried as
+  it is, halved, doubled and by two octaves, and the cheapest value for the label's band wins: slow 40 to 90,
+  mid 90 to 125, upbeat 125 to 215 bpm. A value still outside its band goes into a thin strip just inside
+  the nearest edge, in the order it was measured, so a ballad read at 105 sits at the top of the slow band
+  and a disco song read at 101 at the bottom of the upbeat one, behind the songs whose numbers back the label
+  up (and when an end has too few labelled songs, the songs that fill it are the nearest to it by their
+  numbers). Every slow song is below every mid song, which is below every upbeat song; a labelled song with no
+  reading sits at the edge of its band facing the middle.
+- `loadCatalogue` works it out once per cache fill and puts it on `Match.tempo`, which is all the rankers
+  read: the Tempo slider's `sliderValue` today, and the Setlist ranking engine's `effectiveTempo(m) = m.tempo`
+  when QWW-47 lands, with no switch needed. `Match.tempo` is a position on the gear, not a bpm. A database with
+  no `song_feel` table, or a read that fails, gives no labels, and every song is ranked on its measured tempo.
+
+`npm run tempo:feel` imports `data/tempo-feel.json` into `song_feel`. It is a dry run that says what it would
+write and what that does to the Tempo gear; `-- --apply` writes to `karaoke_pr4_preview` and refuses any other
+database unless `--production --confirm-database <name>` are both given. It writes only rows that are missing or
+different, so it can be stopped and run again. `-- --unlabeled out.json [--top 3000 | --served]` lists the
+catalogue songs still without a label, for the labellers: the most popular N, or with `--served` every song shown in
+the release harness' five test ranges or in F2 to C5 and E2 to E5 (the best 1,000 of each), which are the only songs
+that can reach the top 20 at an end of the Tempo gear there. **Production data step:** `npm run tempo:feel`
+(dry run, read the output), then `npm run tempo:feel -- --apply --production --confirm-database neondb`.
 
 ## Beta event log
 

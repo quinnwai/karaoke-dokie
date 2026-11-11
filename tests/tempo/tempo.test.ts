@@ -84,6 +84,21 @@ describe('combineTempo', () => {
     expect(combineTempo({ deezerBpm: 120, trackerBpm: 60 })).toEqual({ tempo: 120, source: 'deezer' }); // 60 folds to 120, same thing
     expect(combineTempo({ deezerBpm: 125, trackerBpm: 62 })).toEqual({ tempo: 125, source: 'deezer' }); // 125 is below 130
   });
+  it('leaves out a fast beat-tracker reading unless Deezer or UltraStar agrees with it (QWW-54)', () => {
+    // The tracker doubles slow songs: on its own, or against a Deezer that says half, 172 is not used.
+    expect(combineTempo({ trackerBpm: 172 })).toBeNull();
+    expect(combineTempo({ trackerBpm: 172, deezerBpm: 86 })).toEqual({ tempo: 86, source: 'deezer' });
+    expect(combineTempo({ trackerBpm: 172, ultrastarBpm: 344 })).toEqual({ tempo: 86, source: 'ultrastar' }); // the grid says 86
+    // Agreement, from either source, keeps it.
+    expect(combineTempo({ trackerBpm: 172, ultrastarBpm: 688 })).toEqual({ tempo: 172, source: 'tracker' });
+    expect(combineTempo({ trackerBpm: 172, deezerBpm: 170 })).toEqual({ tempo: 170, source: 'deezer' });
+    // Below the line it is used as before; the line itself is left out.
+    expect(combineTempo({ trackerBpm: 159 })).toEqual({ tempo: 159, source: 'tracker' });
+    expect(combineTempo({ trackerBpm: 159.9 })).toEqual({ tempo: 159.9, source: 'tracker' });
+    expect(combineTempo({ trackerBpm: 160 })).toBeNull();
+    // 190 folds to 95 first, so it is not a fast reading.
+    expect(combineTempo({ trackerBpm: 190 })).toEqual({ tempo: 95, source: 'tracker' });
+  });
   it('tempoOf is the number only', () => {
     expect(tempoOf({ deezerBpm: 100 })).toBe(100);
     expect(tempoOf(undefined)).toBeUndefined();

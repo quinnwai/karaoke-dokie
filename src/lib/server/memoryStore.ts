@@ -8,6 +8,7 @@ import {
   type CatalogueSong,
   type SongMoodsRecord,
   type SongDeezerRecord,
+  type SongFeelRecord,
   type SongTempoRecord,
   type SongPopularityRecord,
   type SongRangeRecord,
@@ -33,6 +34,7 @@ export function createMemoryStore(): Store {
   const songPopularity = new Map<string, SongPopularityRecord>();
   const songDeezer = new Map<string, SongDeezerRecord>();
   const songTempo = new Map<string, SongTempoRecord>();
+  const songFeel = new Map<string, SongFeelRecord>();
   let spotifyBlock: number | null = null;
   const libraryStates = new Map<string, StoredLibraryState>();
   const savedTracks = new Map<string, Map<string, { track: Track; pos: number; gen: number }>>();
@@ -289,6 +291,22 @@ export function createMemoryStore(): Store {
     },
     async listSongTempos() {
       return new Map([...songTempo].map(([k, v]) => [k, clone(v)]));
+    },
+
+    // ---- feel labels (QWW-54) ----
+    async putSongFeel(entries) {
+      for (const e of entries) songFeel.set(e.key, clone(e));
+    },
+    async getSongFeels(songKeys) {
+      const out = new Map<string, SongFeelRecord>();
+      for (const k of songKeys) {
+        const f = songFeel.get(k);
+        if (f) out.set(k, clone(f));
+      }
+      return out;
+    },
+    async listSongFeels() {
+      return new Map([...songFeel].map(([k, v]) => [k, clone(v)]));
     },
   };
 }
