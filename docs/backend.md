@@ -219,10 +219,10 @@ Popularity on: a range with only a handful of Hard songs, all obscure, puts popu
 Quinn-Wai chose this (option A) on 11 Nov, and that the default list leans on popularity as it does (`GEAR_WEIGHTS`). Songs
 sung as written come first here too (QWW-58): the Hard songs sung as written lead, then the Easy and Medium ones sung as
 written, and only then the Hard songs that need a jump. On production's catalogue every voice type has hundreds of Hard
-songs it can sing as written (655 to 1,815 over the eight ranges of QWW-58), so with no era picked the first 10 are still
-all Hard. With one era picked, 15 of the 56 lists (eight ranges, seven eras) have fewer than 10 Hard songs in their first
-10, against 14 before this rule, and the worst has 6: with Popularity on a popular Medium song can still beat an obscure
-Hard one, as the paragraph above says.
+songs it can sing as written (637 to 1,742 over the eight ranges of QWW-58), so with no era picked the first 10 are still
+all Hard. With one era picked, 16 of the 56 lists (eight ranges, seven eras) have fewer than 10 Hard songs in their first
+10, as many as before this rule, and the worst has 5 (6 before): with Popularity on a popular Medium song can still beat
+an obscure Hard one, as the paragraph above says.
 
 **Not used by the ranking:** the fast-lyrics flag and the octave penalty of the Top picks score (the octave decides a
 group, rule 4, and is not a penalty; a song that needs a jump has its notes scored as sung). A singer whose range is so narrow that no song
