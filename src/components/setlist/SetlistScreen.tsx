@@ -11,6 +11,7 @@ import './setlist-global.css';
 import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
 import type { Match, ResultsMode, VocalRange } from '../../lib/contracts';
 import { midiToNoteName } from '../../lib/audio/notes';
+import { useSideways } from '../../lib/client/useSideways';
 import { toRows } from '../../lib/setlist/rows';
 import { HISTORY_HINT_LOGGED_OUT, HISTORY_HINT_UNREACHABLE } from '../../lib/setlist/gears';
 import type { TunerAction } from '../../lib/setlist/tuner';
@@ -109,17 +110,23 @@ export function SetlistScreen(props: SetlistScreenProps) {
   // How the expanded sheet fits this screen. On a short phone the first time it opens mini (decision 1); where the expanded
   // sheet is taller than the screen can hold at all (an iPhone SE with Safari's bars, a phone on its side), the handle keeps
   // it in mini. Before the first measure (and in jsdom, which has no layout) nothing is known and nothing is changed.
-  const fit = useSheetFit(root);
+  const { fit, measure } = useSheetFit(root);
   const canExpand = fit?.canExpand ?? true;
   const { openMiniIfShort, onSheetSized, onTuner } = props;
   const sized = useRef(false);
+  // The first sizing waits while the phone is on its side: the page under the "Turn your phone upright" message sees no room, and
+  // would be set to mini for good, where an upright 390x844 opens expanded. When the phone is turned upright it goes by a measure taken
+  // then, not by `fit`, which may still be the one from the page on its side.
+  const sideways = useSideways();
   useLayoutEffect(() => {
     // Once, for the first measure: a later one (the phone turned) only changes whether the handle can expand.
-    if (!fit || !openMiniIfShort || sized.current) return;
+    if (!fit || !openMiniIfShort || sized.current || sideways) return;
+    const now = measure();
+    if (!now) return;
     sized.current = true;
     onSheetSized?.();
-    if (fit.opensMini && !tuner.mini) onTuner({ type: 'mini', mini: true });
-  }, [fit]);
+    if (now.opensMini && !tuner.mini) onTuner({ type: 'mini', mini: true });
+  }, [fit, sideways]);
   const mini = tuner.mini || !canExpand;
   // The sign is centred on the header (R1) and goes when a long range or a narrow phone would put it on redo or the logo.
   useSignFit(bar, low, high, mode, props.libraryUnavailable);
