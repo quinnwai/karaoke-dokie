@@ -3,6 +3,7 @@ import { midiToNoteName } from '../lib/audio/notes';
 import { SCALE_HIGH, SCALE_LOW, scalePosition } from '../lib/client/display';
 import type { HoldStatus } from '../lib/client/flow';
 import { Lyric } from './Lyric';
+import { RoundButton } from './RoundButton';
 import styles from './screen.module.css';
 
 interface HoldStepProps {
@@ -22,8 +23,6 @@ function lyricFor(kind: 'low' | 'high', status: HoldStatus): string {
       return 'Try again and hold the note a little longer';
     case 'order':
       return kind === 'low' ? 'That was higher than your high note. Go lower' : 'That was lower than your low note. Go higher';
-    case 'denied':
-      return 'We need your mic to hear you';
     default:
       return kind === 'low' ? 'Hold the button and sing your lowest note' : 'Now hold and sing your highest note';
   }
@@ -70,15 +69,12 @@ export function HoldStep({ kind, status, live, lowNote, onPress, onRelease }: Ho
     <div className={styles.holdStep}>
       <div className={styles.holdText}>
         <Lyric text={lyricFor(kind, status)} />
-        {status === 'denied' && (
-          <p className={styles.hint}>Allow microphone access in your browser, then press again.</p>
-        )}
       </div>
 
       <div className={styles.holdCenter}>
-        <button
-          type="button"
-          className={`${styles.holdButton} ${holding ? styles.holding : ''}`}
+        <RoundButton
+          className={styles.holdPress}
+          active={holding}
           aria-label={label}
           aria-pressed={holding}
           onPointerDown={onPointerDown}
@@ -91,7 +87,7 @@ export function HoldStep({ kind, status, live, lowNote, onPress, onRelease }: Ho
           onContextMenu={(e) => e.preventDefault()}
         >
           <span className={styles.holdDot} aria-hidden />
-        </button>
+        </RoundButton>
         <p className={styles.holdCaption} aria-hidden>
           {holding ? 'listening' : 'hold'}
         </p>

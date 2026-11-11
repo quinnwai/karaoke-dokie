@@ -18,6 +18,7 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | GET | `/api/admin/log` | header `x-admin-token`, `limit` (1..1000, default 200) | `{ entries: DataSourceLogEntry[] }`, newest first; 403 on a wrong token or when `ADMIN_TOKEN` is unset |
 | GET | `/api/catalogue/recommendations` | `low`, `high` (the range: integers, 28 <= low < high <= 96, span 5..48), then `all=1` or `offset`/`limit`; no session | `RecommendationsResponse` from the public catalogue (QWW-2 Track B): every song with a note-file or recording range, most-viewed USDB row and karaoke popularity attached, cached per process for an hour (the 6,000 most popular, plus every Billboard Year-End song). Tracks have `cat:<songKey>` ids and Spotify search links, `known: false`, so no familiarity reasons. `all=1` sends at most the best 1,000 matches with year (USDB's, else the Year-End chart year) and genre; `complete: false` and `nextOffset: null` when trimmed. 400 on a bad range |
 | POST | `/api/catalogue/feedback` | `CatalogueFeedbackRequest`: the feedback fields plus `anonId` (8 to 64 of `[A-Za-z0-9-]`) and `range`; no session | `{ ok: true }`; stored with `user_id = 'anon:' + anonId`, the range, and the song's range snapshot looked up by key. 400 on bad input or a `trackId` that is not `cat:` |
+| POST | `/api/setlist` | `SetlistRequest` (QWW-47): `range` (`low`, `high`), `gears` (`difficulty`, `history`, `popularity`, `tempo`, whole numbers 0 to 100), `off` (parts that are reset: any of the four gears and `era`), `eras` (any of `pre`, `s70`, `s80`, `s90`, `s00`, `s10`, `s20`), optional `offset` (default 0) and `limit` (1 to 200, default 100); a session is optional | `SetlistResponse`: `songs` (best first; each `{ match, era, gears }`, where `gears` is the song's place on each gear, 0 to 100, or null when unknown), `total` (songs passing the range and Era filters), `nextOffset`, `sources` (data-source lines by track id), `applied` (the parts that counted), `empty` (`no-era-picked`, `no-songs-in-era` or `no-songs-in-range`, when there are no songs), `libraryUnavailable` and `libraryIncomplete` (the library is only partly in the list: ask again). Signed out it ranks the public catalogue; with a valid session it also adds the singer's library songs and the History gear counts. A signed-in singer whose Spotify library cannot be read gets the catalogue's list and `libraryUnavailable: true`, never a 5xx. A missing, stale or forged session counts as signed out, not a 401. 400 on a body that is not JSON or not this shape. See Setlist ranking |
 | POST | `/api/events` | `EventsRequest`, as JSON or as the `text/plain` body `navigator.sendBeacon` sends; no session | 204, storing nothing while `EVENTS` is off. 400 on bad input, checked even when off: `anonId` 8 to 64 of `[A-Za-z0-9-]`; 1 to 50 events; `name` matching `^[a-z][a-z0-9_]{1,48}$`; `at` an ISO time with a zone, within 7 days of the server clock (stored as UTC); at most 20 props named `^[a-zA-Z][a-zA-Z0-9_]{0,40}$`, each a string of up to 200 characters, a finite number, a boolean or null. Props named `trackId`, `spotifyId`, `userId`, `displayName` or `email` (any case, underscores ignored) are dropped before storing |
 | GET | `/api/admin/events` | header `x-admin-token`, `limit` (1..20000, default 5000) | `AdminEventsResponse` from the newest `limit` events (see Beta event log); 403 like `/api/admin/log` |
 
@@ -122,7 +123,7 @@ snapshot given with `--snapshot <file>` (or `SPOTIFY_SNAPSHOT`), unless they are
 --save-snapshot <file>` also writes the library out for later runs.
 
 **Request counts.** Every Web API request is counted in `spotify_calls` (day UTC, caller, calls) before it is sent
-(the token endpoint is not counted): callers are `site:/api/recommendations`, `site:/api/songs/known`,
+(the token endpoint is not counted): callers are `site:/api/recommendations`, `site:/api/songs/known`, `site:/api/setlist`,
 `site:/api/auth/callback`, `script:<name>`, else `unknown`. Read it with `SELECT * FROM spotify_calls ORDER BY day DESC, calls DESC`.
 
 **Measurement.** `npm run report:library -- [spotifyUserId] [--range 39:74] [--file library.json]` prints how many
@@ -132,6 +133,85 @@ Postgres tables are in `db/schema.sql` (an identical copy is inlined in
 `src/lib/server/schema.ts`). The Postgres store runs `migrate()` (idempotent `CREATE ... IF NOT
 EXISTS`, plus `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for columns added later, such as the
 feedback range columns) once before its first query, so there is no separate migration step.
+
+## Setlist ranking (QWW-47)
+
+The Setlist tuner (round 5 design, QWW-46) sends its state to `POST /api/setlist` and gets the ranked list back; the
+screen has no ranking math. The engine is `src/lib/songs/setlist.ts` (pure, deterministic, the same list in any input
+order); the types are in `src/lib/contracts.ts` and the defaults in `src/lib/songs/setlistConfig.ts`, which the screen may
+import. The model is the design's distance ranking (round 5 spec section 5), decided on 10 Nov (option A).
+
+1. **Hard range filter, first.** Only songs that fit the singer's range, as written or an octave away (`matchSong`). The
+   engine takes those songs; a gear never adds or removes one. The old whole-list route cut the list to the best 1,000
+   by Top picks before anything else, which left no Hard song for a wide range (0 of 497 on the synthetic F2 to C5
+   catalogue); the tuner ranks every song that fits and cuts afterwards.
+2. **A place on every gear.** Each song gets a place from 0 to 100 on each gear:
+   - *Difficulty* (Light work to Locked in): a song sits in the third of the track its label owns (Easy 0 to 33, Medium
+     33 to 67, Hard 67 to 100), whatever the share of songs in each, so a row's lane colour and its label agree; inside
+     its third the songs spread evenly by strain (below). On a wide range most songs are Easy, so most sit in the first third.
+   - *Listening history* (Rediscover to On repeat): how much the signed-in singer plays the song (familiarity), then
+     Spotify's order. A song that is not in their library has none.
+   - *Popularity* (Deep cuts to Pop hits): `popularityScore`, the score the old Pop hits slider used.
+   - *Tempo* (Slow jams to Upbeat tracks): the song's tempo, read through `effectiveTempo` in `setlist.ts`, the one
+     place QWW-54's effective tempo switches in (the old `browse.ts` sliders read `m.tempo` directly, and go with them).
+
+   Popularity, Tempo and History are by rank among the songs that fit the singer, so every tenth of the track holds about
+   a tenth of the songs (QWW-33), songs with the same score sharing their average place.
+3. **The sum.** Era first, a multi-select: Era off shows every era; Era on shows the songs of any of the picked eras (an OR,
+   so each pick adds songs and takes none away, and the songs keep the order they have in the whole list; a song with no
+   year is left out), and nothing picked is an empty list (`no-era-picked`). Every one of the 127 combinations of eras is
+   tested (`tests/songs/setlist.test.ts`, `tests/server/setlist.test.ts`). Then
+   `distance = sum over the active gears of weight × |song's place - gear value|`. An active gear is one not in `off`,
+   and History only when the singer is signed in and their library was read. An off gear adds nothing. Popularity's
+   weight is 2, the others 1 (`GEAR_WEIGHTS`). With the defaults that is a blend that leans on popularity, not a sort by
+   popularity with difficulty breaking ties: of two songs, the one 10 places less popular needs to be 20 places easier to
+   come first, so the single most popular song is first only if it is also easy. `GEAR_WEIGHTS` is the one knob if the top
+   of the default list needs to lean harder.
+4. **Order.** The Maybe songs (estimated ranges) come after all the others, as everywhere else. Within each group, a song
+   we do not know on an active gear (no tempo, a one-note range, not in the library) comes after every song we do. When
+   songs miss different gears the more specific control wins: History, then Tempo, then Popularity, then Difficulty (so a
+   song with no tempo is after every song that has one, whatever else either is missing). Then the closest sum first.
+   Exact ties go to the more popular song, the easier, the one sung as written, then artist and title (so a song keeps its
+   place whether it is the catalogue's track or the singer's own), then track id.
+
+**The curve (rule 2, easy leans low).** The strain of a song is the sung-time-weighted average of a note's cost, `t` being
+where the note sits in the singer's range (0 lowest, 1 highest, an octave shift applied): `((t - 0.35) / 0.65)²` from the
+ease point 0.35 up, and `0.6 × ((0.35 - t) / 0.35)²` below it. The ease point is the lower-middle of the range, the chest
+voice; the top climbs to 1 and the bottom only to 0.6, so a note near the top costs more than one the same distance from
+the bottom, at every distance (`tests/songs/setlist.test.ts` checks it). It orders songs within a label; the labels
+(Easy, Medium, Hard) and the song page are unchanged.
+
+| Note at | 0.00 | 0.10 | 0.20 | 0.35 | 0.50 | 0.65 | 0.80 | 0.90 | 1.00 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Cost | 0.60 | 0.31 | 0.11 | 0.00 | 0.05 | 0.21 | 0.48 | 0.72 | 1.00 |
+
+**Defaults** (spec section 11): Difficulty 0 on, Popularity 100 on, History 100 off, Tempo 50 off, Era off with no picks. Why
+each, and what a reset does, is in `setlistConfig.ts`.
+
+**A one-note range** ("Jump", C4 to C4: it fits everyone, so it won on "easy") has no difficulty: a song whose range spans
+fewer than 5 semitones (`MIN_PLAUSIBLE_SPAN`) has `gears.difficulty: null`, so while Difficulty is on it comes after every
+song with one. With Difficulty off it ranks on popularity like any song. Its label on the song page is unchanged (Easy).
+
+**Max difficulty, logged out** (Quinn-Wai's check of 10 Nov). Difficulty at 100 with the other gears as they load lists the
+most popular Hard songs first: the Hard third of the track is nearest to 100, and Popularity (on, double) chooses among
+them. On the synthetic catalogues in the tests (hundreds of Hard songs of every popularity) the first 10 are all Hard in
+every range. It is exact, the first songs being all Hard and the hardest first, when Popularity is off. It is not a law with
+Popularity on: a range with only a handful of Hard songs, all obscure, puts popular Medium and Easy ones among them.
+Quinn-Wai chose this (option A) on 11 Nov, and that the default list leans on popularity as it does (`GEAR_WEIGHTS`).
+
+**Not used by the ranking:** the fast-lyrics flag and the octave penalty of the Top picks score (a song an octave away
+only loses a tie to one sung as written; its notes are scored as sung). A singer whose range is so narrow that no song
+fits (5 to about 9 semitones) gets `no-songs-in-range`; Quinn-Wai (11 Nov) did not want a widening fallback, so the tests
+and the release checks use ranges of an octave or more.
+
+**Cost and Spotify.** A range's songs are matched and given their places once and kept (the last 6 ranges, dropped when
+the catalogue's hour is up), so moving a slider re-sorts a few thousand songs. A signed-in singer's library matches are kept
+per singer and range, 6 lists in all across singers, each for as long as the track cache hands out the same copy of that
+library, and not while the list is incomplete or failed (`libraryIncomplete` then tells the screen to ask again: lookups ran
+out of budget, or one failed). The tuner asks on every slider move, so a library that could not be read is not asked for
+again for 30 seconds (the catalogue's list and `libraryUnavailable` meanwhile); without that each move would retry
+Spotify's calls, against a quota that is shared and small. The first request of a signed-in singer with no stored library
+reads all of it from Spotify, like `/api/recommendations`.
 
 ## Song popularity
 
@@ -171,7 +251,49 @@ every measured source (`tempoOf(record, key)`, `src/lib/tempo/reviewed.ts`). Pre
   downloads, stops after 20 failures in a row; finished songs are skipped. Never runs at page load.
 - `npm run tempo:ultrastar -- <name>=<folder> ...`: the note files' `#BPM`, numbers only.
 - `npm run tempo:report`: gold-set accuracy (`data/tempo-gold.json`), coverage and a spot check, from
-  saved data only.
+  saved data only. `-- --lists [--era 90s]` adds, per era and for F2 to C5 and E2 to E5, the 20 slowest and
+  20 fastest of the 300 most popular songs by the tempo the ranking uses, as plain text for a person to read.
+
+### Feel labels and the one tempo (QWW-54)
+
+A measured tempo puts a ballad at the upbeat end whenever a source reads it at double time (Hey Jude 148
+for 74; a beat tracker's 178 for Red Red Wine), and no rule on the numbers can tell that from Take On Me.
+So a song can carry a **feel label**: slow, mid or upbeat, made offline from what is known of the
+recording (`data/tempo-feel.md` says how), kept in `song_feel` (one additive table, `IF NOT EXISTS`) and
+never worked out while a page loads. The label decides which end of the Tempo gear the song sits at; the
+measurement only orders songs inside that end.
+
+`effectiveTempo` (`src/lib/tempo/feel.ts`) is the one tempo per song that the ranking reads, with its
+source (`deezer`, `tracker`, `ultrastar`, `reviewed`, or `feel` when only the label is known):
+
+- Without a label, a published tempo (`data/tempo-gold.json`) stands as written. A measured one (`combineTempo`) is squeezed in a
+  straight line onto the mid band, 90 to 125, which keeps its order and ties but means no song nobody vouched
+  for reaches either end of the gear (of 297 songs labelled slow that Deezer has a bpm for, 59% were read at
+  125 bpm or more). So a database with no labels ranks the measured songs in the order it did before, with
+  two exceptions: a song whose only reading is a beat-tracker value of 160 or more has no tempo (that reading
+  is left out unless Deezer or UltraStar agrees, since it doubles slow songs), and the songs with a published
+  tempo stand as written, so they can sit at an end.
+- With a label, each reading (the checked tempo alone, else Deezer, the tracker, UltraStar / 4) is tried as
+  it is, halved, doubled and by two octaves, and the cheapest value for the label's band wins: slow 40 to 90,
+  mid 90 to 125, upbeat 125 to 215 bpm. A value still outside its band goes into a thin strip just inside
+  the nearest edge, in the order it was measured, so a ballad read at 105 sits at the top of the slow band
+  and a disco song read at 101 at the bottom of the upbeat one, behind the songs whose numbers back the label
+  up (and when an end has too few labelled songs, the songs that fill it are the nearest to it by their
+  numbers). Every slow song is below every mid song, which is below every upbeat song; a labelled song with no
+  reading sits at the edge of its band facing the middle.
+- `loadCatalogue` works it out once per cache fill and puts it on `Match.tempo`, which is all the rankers
+  read: the Tempo slider's `sliderValue` today, and the Setlist ranking engine's `effectiveTempo(m) = m.tempo`
+  when QWW-47 lands, with no switch needed. `Match.tempo` is a position on the gear, not a bpm. A database with
+  no `song_feel` table, or a read that fails, gives no labels, and every song is ranked on its measured tempo.
+
+`npm run tempo:feel` imports `data/tempo-feel.json` into `song_feel`. It is a dry run that says what it would
+write and what that does to the Tempo gear; `-- --apply` writes to `karaoke_pr4_preview` and refuses any other
+database unless `--production --confirm-database <name>` are both given. It writes only rows that are missing or
+different, so it can be stopped and run again. `-- --unlabeled out.json [--top 3000 | --served]` lists the
+catalogue songs still without a label, for the labellers: the most popular N, or with `--served` every song shown in
+the release harness' five test ranges or in F2 to C5 and E2 to E5 (the best 1,000 of each), which are the only songs
+that can reach the top 20 at an end of the Tempo gear there. **Production data step:** `npm run tempo:feel`
+(dry run, read the output), then `npm run tempo:feel -- --apply --production --confirm-database neondb`.
 
 ## One song, one row (QWW-49)
 
