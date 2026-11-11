@@ -309,8 +309,8 @@ source (`deezer`, `tracker`, `ultrastar`, `reviewed`, or `feel` when only the la
   numbers). Every slow song is below every mid song, which is below every upbeat song; a labelled song with no
   reading sits at the edge of its band facing the middle.
 - `loadCatalogue` works it out once per cache fill and puts it on `Match.tempo`, which is all the rankers
-  read: the Tempo slider's `sliderValue` today, and the Setlist ranking engine's `effectiveTempo(m) = m.tempo`
-  when QWW-47 lands, with no switch needed. `Match.tempo` is a position on the gear, not a bpm. A database with
+  read: the Tempo slider's `sliderValue`, and the Setlist ranking engine's `effectiveTempo(m) = m.tempo` (QWW-47),
+  with no switch needed. `Match.tempo` is a position on the gear, not a bpm. A database with
   no `song_feel` table, or a read that fails, gives no labels, and every song is ranked on its measured tempo.
 
 `npm run tempo:feel` imports `data/tempo-feel.json` into `song_feel`. It is a dry run that says what it would
@@ -320,7 +320,12 @@ different, so it can be stopped and run again. `-- --unlabeled out.json [--top 3
 catalogue songs still without a label, for the labellers: the most popular N, or with `--served` every song shown in
 the release harness' five test ranges or in F2 to C5 and E2 to E5 (the best 1,000 of each), which are the only songs
 that can reach the top 20 at an end of the Tempo gear there. **Production data step:** `npm run tempo:feel`
-(dry run, read the output), then `npm run tempo:feel -- --apply --production --confirm-database neondb`.
+(dry run, read the output), then `npm run tempo:feel -- --apply --production --confirm-database neondb`. When the
+rows are already there and the file changes some of them, copy `song_feel` first with
+`npm run tempo:feel -- --backup song_feel_bak_<name> --production --confirm-database neondb`: it makes the copy and
+stops, never overwrites a copy that exists, and is a write like `--apply`. To put the old labels back, for example:
+`UPDATE song_feel s SET feel = b.feel, source = b.source, labeled_at = b.labeled_at FROM song_feel_bak_<name> b
+WHERE s.song_key = b.song_key AND (s.feel, s.source) IS DISTINCT FROM (b.feel, b.source)`.
 
 ## One song, one row (QWW-49)
 
