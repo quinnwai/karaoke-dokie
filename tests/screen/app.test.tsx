@@ -1631,14 +1631,21 @@ describe('the Setlist tuner screen', () => {
     /** The difficulty word each row on screen ends its label with, top to bottom. */
     const words = () => rowIds().map((id) => el(`[data-id="${id}"] > button`).getAttribute('aria-label')!.split(', ').at(-1));
 
-    it('Difficulty puts the Easy songs first at 0 and the Hard songs first at 100, and the Maybe songs last either way', async () => {
+    it('Difficulty puts the Easy songs first at 0 and the Hard songs first at 100, the songs sung as written before the octave jumps, and the Maybe songs last either way', async () => {
       await withFacts();
-      // Difficulty alone: Popularity is reset. Each label has a third of the track, so the labels come in blocks.
+      // Difficulty alone: Popularity is reset. Each label has a third of the track, so the labels come in blocks, but a song that
+      // fits only an octave away (t1 Lemon, t2 Yoru ni Kakeru, t4 Dancing Queen) follows every song sung as written (QWW-58, #37).
       fireEvent.click(el(SEL.reset('popularity')));
-      await waitFor(() => expect(words()).toEqual(['Easy', 'Easy', 'Medium', 'Medium', 'Medium', 'Hard', 'Hard', 'Hard', 'Maybe', 'Maybe']));
+      await waitFor(() => expect(words()).toEqual(['Easy', 'Easy', 'Medium', 'Hard', 'Hard', 'Medium', 'Medium', 'Hard', 'Maybe', 'Maybe']));
+      expect(rowIds().slice(0, 5).sort()).toEqual(['t0', 't3', 't5', 't6', 't7']); // sung as written
+      expect(rowIds().slice(5, 8).sort()).toEqual(['t1', 't2', 't4']); // the octave jumps
+      expect(rowIds().slice(8).sort()).toEqual(['t8', 't9']); // the Maybe songs
 
       fireEvent.change(el(SEL.slider('difficulty')), { target: { value: '100' } });
-      await waitFor(() => expect(words()).toEqual(['Hard', 'Hard', 'Hard', 'Medium', 'Medium', 'Medium', 'Easy', 'Easy', 'Maybe', 'Maybe']));
+      await waitFor(() => expect(words()).toEqual(['Hard', 'Hard', 'Medium', 'Easy', 'Easy', 'Hard', 'Medium', 'Medium', 'Maybe', 'Maybe']));
+      expect(rowIds().slice(0, 5).sort()).toEqual(['t0', 't3', 't5', 't6', 't7']);
+      expect(rowIds().slice(5, 8).sort()).toEqual(['t1', 't2', 't4']);
+      expect(rowIds().slice(8).sort()).toEqual(['t8', 't9']);
     });
 
     it('Maybe songs come after the sure ones, and a Maybe row says so in its label', async () => {

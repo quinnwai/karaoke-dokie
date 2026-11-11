@@ -294,7 +294,10 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await expect(page.getByRole('button', { name: 'Where this came from' })).toHaveCount(0);
   const bar = page.getByRole('img', { name: /Song goes from/ });
   const legend = page.getByText('song range');
-  expect(await legend.evaluate((e) => getComputedStyle(e.parentElement!).opacity)).toBe('0');
+  // The pointer is where the row was clicked, which depends on where the ranking put it (QWW-58 moved the octave jumps down the
+  // list), and can be over the bar on the song page. Off it, the legend goes to rest (it fades, so it is waited for).
+  await page.mouse.move(1, 1);
+  await expect.poll(() => legend.evaluate((e) => getComputedStyle(e.parentElement!).opacity)).toBe('0');
   const before = await page.getByRole('button', { name: 'It went well' }).boundingBox();
   await bar.hover();
   await expect.poll(() => legend.evaluate((e) => getComputedStyle(e.parentElement!).opacity)).toBe('1');
