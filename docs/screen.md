@@ -11,7 +11,12 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
 its side is wider than 430 px and would get a 328 px TV with no room for songs, so on a touch screen in landscape under 500 px
 tall (`(hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 500px)`) a full-screen "Turn your
 phone upright" covers every step (`RotateNotice`, drawn by `Tv`). It is only drawn over the page, so turning the phone back
-finds the screen, the tuner and a running mic step as they were. A tablet (taller than 500 px) and a desktop never see it.
+finds the screen, the tuner and a running mic step as they were. While it is up the TV is `inert` (`Tv`; `useSideways` in
+`src/lib/client/useSideways.ts` asks the same query from script): Tab, Enter and the arrow keys reach nothing under it, the covered
+buttons are not in the accessibility tree, focus is on the message, and it goes back to the control that had it when the phone is
+turned upright. The page is not measured while it is up, and the tuner's first sizing (a short phone opens the sheet in mini) waits,
+so a page opened on its side opens expanded when turned upright at 390x844. A tablet (taller than 500 px) and a desktop never see it.
+Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape layout is a follow-up.
 
 ## Flow
 
@@ -300,7 +305,8 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/lib/client/spotifyEmbed.ts` | A song's `open.spotify.com/track/ID` link to the address of Spotify's player, or null. |
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `reload`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,SongDetail,PickSongs}.tsx` | The screen pieces. |
-| `src/components/RotateNotice.tsx` | "Turn your phone upright", over every step on a touch screen in landscape under 500 px tall (drawn by `Tv`; its media query is in `screen.module.css`). |
+| `src/components/RotateNotice.tsx`, `src/lib/client/useSideways.ts` | "Turn your phone upright", over every step on a touch screen in landscape under 500 px tall (drawn by `Tv`, which makes the TV `inert` while it is up; its media query is in `screen.module.css`, and `ROTATE_QUERY` is the same text for script). |
+| `src/lib/client/useOverlayHistory.ts`, `src/components/BackToSongs.tsx` | The browser's Back button for a song page and a redo's mic and note steps (one history entry each), and "Back to songs" on those steps. |
 | `src/components/setlist/` | The Setlist tuner: `SetlistScreen`, `Sheet`, `GearStrip`, `EraPanel`, `SongRows` (+ `flip.ts`), `GearArt`, and `setlist.module.css` (its tokens are `--sl-*`). |
 | `src/components/SpotifyAccount.tsx` | The signed-in Spotify logo and its "Logged in as ... · Log out" box. |
 | `src/components/RoundButton.tsx` | The round pink-ringed button, shared by the record button (`HoldStep.tsx`, a dot in it) and "Turn on microphone" (`MicStep.tsx`, a microphone in it), so the two keep one look. |
