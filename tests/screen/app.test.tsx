@@ -862,10 +862,10 @@ describe('KaraokeApp', () => {
     render(<KaraokeApp api={api} mic={fakeMic().mic} />);
 
     const song = await screen.findByRole('button', { name: /^Yoru ni Kakeru/ });
-    // The list fills the viewport; only the song page sits on the TV.
-    expect(screen.queryByRole('region', { name: 'Karaoke screen' })).toBeNull();
+    // The list is on the TV like every other step (Round 6A, QWW-57), and opening a song keeps the same one.
+    const tv = screen.getByRole('region', { name: 'Karaoke screen' });
     fireEvent.click(song);
-    expect(screen.getByRole('region', { name: 'Karaoke screen' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Karaoke screen' })).toBe(tv);
     expect(screen.getByRole('heading', { name: 'Yoru ni Kakeru' })).toBeTruthy();
     expect(screen.getByRole('img', { name: /Song goes from A#2 to F4 as you would sing it. You sing from A2 to C5/ })).toBeTruthy();
     expect(screen.getByText('Hard')).toBeTruthy();
@@ -889,7 +889,9 @@ describe('KaraokeApp', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to songs' }));
     expect(await screen.findByText('Plastic Love')).toBeTruthy();
-    expect(screen.queryByRole('region', { name: 'Karaoke screen' })).toBeNull();
+    // Back on the same TV, with the tuner on its screen.
+    expect(screen.getByRole('region', { name: 'Karaoke screen' })).toBe(tv);
+    expect(tv.contains(el(SEL.app))).toBe(true);
     // Leaving the page removes the player, which stops the song.
     expect(screen.queryByTitle(/^Spotify player/)).toBeNull();
   });
@@ -1088,7 +1090,7 @@ describe('KaraokeApp', () => {
 
 describe('the Setlist tuner screen', () => {
   describe('on the results', () => {
-    it('is the screen the results show: a heading, one ranked list and the sheet of gears, with no TV around it', async () => {
+    it('is the screen the results show: a heading, one ranked list and the sheet of gears, on the one TV every step is on', async () => {
       render(<KaraokeApp api={fakeApi(me({ low: 45, high: 72, source: 'test' }))} mic={fakeMic().mic} />);
       await screen.findByText('Plastic Love');
       expect(screen.getByRole('heading', { level: 1, name: 'Tune your setlist' })).toBeTruthy();
@@ -1097,7 +1099,9 @@ describe('the Setlist tuner screen', () => {
       expect(rowIds()).toHaveLength(10);
       for (const gear of GEAR_IDS) expect(el(SEL.strip(gear))).toBeTruthy();
       expect(el(SEL.eraPanel)).toBeTruthy();
-      expect(screen.queryByRole('region', { name: 'Karaoke screen' })).toBeNull();
+      // One TV, no second bezel: the tuner is inside the frame the title and mic steps use (QWW-57, decision 2).
+      expect(screen.getAllByRole('region', { name: 'Karaoke screen' })).toHaveLength(1);
+      expect(screen.getByRole('region', { name: 'Karaoke screen' }).contains(el(SEL.app))).toBe(true);
       // No sung title line over the list either: that belongs to the TV steps.
       expect(lyrics()).toEqual([]);
     });

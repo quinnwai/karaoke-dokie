@@ -8,8 +8,8 @@ import { cleanup, createEvent, fireEvent, render, screen, within } from '@testin
 import { useReducer, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SetlistScreen, type SetlistScreenProps } from '../../src/components/setlist/SetlistScreen';
+import { Sheet } from '../../src/components/setlist/Sheet';
 import type { Match, ResultsMode } from '../../src/lib/contracts';
-import { EASY, HARD, MID, rowLane } from '../../src/lib/setlist/art';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { initialTuner, tunerReducer, type TunerAction } from '../../src/lib/setlist/tuner';
 import { GEAR_IDS, TUNER_PARTS, type EmptyReason, type EraId, type GearId, type SetlistSong, type TunerState } from '../../src/lib/setlist/types';
@@ -91,10 +91,11 @@ const hidden = (selector: string) => el(selector).hasAttribute('hidden');
 // ---- the screen ----
 
 describe('the screen', () => {
-  it('is the main region, headed "Tune your setlist", with no TV frame around it', () => {
+  it('is headed "Tune your setlist", and draws no TV frame of its own (the TV is KaraokeApp\'s, around every step)', () => {
     draw();
-    expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['Tune your setlist']);
-    expect(el(SEL.app).tagName).toBe('MAIN');
+    const headings = screen.getAllByRole('heading', { level: 1 });
+    expect(headings.map((h) => h.textContent)).toEqual(['Tune your setlist']);
+    expect(el(SEL.app).contains(headings[0]!)).toBe(true);
     expect(screen.queryByRole('region', { name: 'Karaoke screen' })).toBeNull();
   });
 
@@ -223,6 +224,54 @@ describe('the tab bar', () => {
     fireEvent.click(el(SEL.tab(gear)));
     expect(calls(onTuner)).toEqual([{ type: 'open', gear }]);
   });
+
+  // Round 6A §9 and test 32: an English label under each icon, never Japanese.
+  it('labels each tab in English only', () => {
+    mini();
+    const labels = all(`${SEL.tabs} [data-tab]`).map((t) => t.textContent ?? '');
+    expect(labels).toEqual(['Difficulty', 'History', 'Popularity', 'Tempo', 'Era']);
+    for (const label of labels) expect(label).not.toMatch(/[぀-ヿ㐀-鿿]/);
+  });
+
+  // jsdom applies no CSS, so the selected tab's look (border, glow, label colour) is checked where it is decided: the
+  // colour each tab hands its stylesheet, and the alphas the design draws it at (§9: glow 33%, inner glow 13%).
+  const lit = (part: (typeof TUNER_PARTS)[number], name = '--sl-gear') => el(SEL.tab(part)).style.getPropertyValue(name);
+
+  it('hands each tab its gear\'s lit colour: Difficulty by its tier, the others fixed (§3.1)', () => {
+    mini({ difficulty: 50 });
+    expect(TUNER_PARTS.map((part) => lit(part))).toEqual(['#FFC24A', '#4FDDE8', '#FFC24A', '#B583FF', '#FF4FA0']);
+  });
+
+  it.each([
+    [0, '#4DE89A'],
+    [33, '#4DE89A'],
+    [34, '#FFC24A'],
+    [66, '#FFC24A'],
+    [67, '#FF5A8A'],
+    [100, '#FF5A8A'],
+  ])('Difficulty at %i lights its tab in %s, with the same 34 and 67 cut-offs as the strip', (difficulty, colour) => {
+    mini({ difficulty });
+    expect(lit('difficulty')).toBe(colour);
+    expect(lit('difficulty', '--sl-gear-glow')).toBe(`${colour}55`);
+    expect(lit('difficulty', '--sl-gear-inner')).toBe(`${colour}22`);
+  });
+
+  // README §7: a lit tab's icon glows (drop-shadow 0 0 3px, its colour); an off tab's is unlit, with no glow. The tab tells
+  // its art whether its gear is off, History before Spotify is connected and the Era tab included.
+  it('tells each tab\'s art whether its gear is off: an off tab\'s icon has no glow', () => {
+    mini({ off: ['tempo', 'era'] }, { mode: 'catalogue' });
+    const glow = (part: (typeof TUNER_PARTS)[number]) => el('svg', el(SEL.tab(part))).style.filter;
+    expect(offTabs()).toEqual(['history', 'tempo', 'era']);
+    expect(TUNER_PARTS.filter((part) => glow(part) === 'none')).toEqual(offTabs());
+    for (const part of TUNER_PARTS.filter((p) => !offTabs().includes(p))) expect(glow(part), part).toMatch(/^drop-shadow\(0 0 3px #[0-9A-F]{6}\)$/);
+  });
+
+  it('keeps an off tab\'s colour too: a selected tab shows its gear\'s colour on or off, and only the icon goes unlit (§7)', () => {
+    mini({ open: 'tempo', off: ['tempo', 'era'] });
+    expect(offTabs()).toContain('tempo');
+    expect(lit('tempo')).toBe('#B583FF');
+    expect(el(SEL.tab('tempo')).getAttribute('aria-pressed')).toBe('true');
+  });
 });
 
 describe('the handle', () => {
@@ -251,6 +300,11 @@ describe('the handle', () => {
     const { onTuner } = draw([rankedSong('a')], { tuner: tunerOf({ mini }) });
     fireEvent.click(el(SEL.handle));
     expect(calls(onTuner)).toEqual([{ type: 'mini', mini: !mini }]);
+  });
+
+  it('is not disabled while the sheet can expand', () => {
+    draw();
+    expect(el(SEL.handle).hasAttribute('aria-disabled')).toBe(false);
   });
 });
 
@@ -360,10 +414,107 @@ describe('dragging the handle', () => {
   });
 });
 
+// ---- a screen too short for the expanded sheet ----
+
+describe('the handle when the sheet cannot expand (QWW-57, decision 1)', () => {
+  /** The sheet on its own: whether the expanded sheet fits is the screen's measurement, and jsdom has no layout to measure. */
+  function drawSheet(over: Partial<Parameters<typeof Sheet>[0]> = {}) {
+    const onTuner = vi.fn<(action: TunerAction) => void>();
+    const props: Parameters<typeof Sheet>[0] = {
+      tuner: tunerOf(),
+      historyAvailable: true,
+      historyHint: 'Connect Spotify to use your listening history',
+      songCount: null,
+      canExpand: false,
+      onTuner,
+      onGearDone: () => {},
+      ...over,
+    };
+    const view = render(<Sheet {...props} />);
+    return { onTuner, update: (next: Partial<typeof props>) => view.rerender(<Sheet {...props} {...next} />) };
+  }
+  const rackHeight = () => el(SEL.rack).style.height;
+  const compact = () => el(SEL.sheet).hasAttribute('data-compact');
+  const gearsDrawn = () => GEAR_IDS.filter((g) => !hidden(SEL.strip(g)));
+
+  it.each([true, false])('draws the mini sheet whatever the tuner remembers (its mini is %s), and the handle says it is disabled', (mini) => {
+    drawSheet({ tuner: tunerOf({ mini }) });
+    expect(rackHeight()).toBe('164px');
+    expect(compact()).toBe(true);
+    expect(gearsDrawn()).toEqual(['difficulty']);
+    expect(hidden(SEL.eraPanel)).toBe(true);
+    expect(hidden(SEL.tabs)).toBe(false);
+    const handle = el(SEL.handle);
+    expect(handle.getAttribute('aria-disabled')).toBe('true');
+    expect(handle.getAttribute('aria-expanded')).toBe('false');
+    // Its name stays what it is in mini; it is still a button, so a keyboard user finds it.
+    expect(handle.getAttribute('aria-label')).toBe('Show all gears');
+    expect(handle.tagName).toBe('BUTTON');
+  });
+
+  // A click is what a tap, Enter and Space all send to a button.
+  it.each([true, false])('a click does nothing, again and again (the tuner\'s mini is %s)', (mini) => {
+    const { onTuner } = drawSheet({ tuner: tunerOf({ mini }) });
+    fireEvent.click(el(SEL.handle));
+    fireEvent.click(el(SEL.handle));
+    expect(onTuner).not.toHaveBeenCalled();
+    expect(rackHeight()).toBe('164px');
+    expect(compact()).toBe(true);
+  });
+
+  it('an upward drag does not grow the rack or draw the full layout, and asks for no mode', () => {
+    const { onTuner } = drawSheet({ tuner: tunerOf({ mini: true }) });
+    const handle = el(SEL.handle);
+    pointer('pointerDown', handle, 300);
+    pointer('pointerMove', handle, 220);
+    expect(rackHeight()).toBe('164px');
+    expect(compact()).toBe(true);
+    expect(gearsDrawn()).toEqual(['difficulty']);
+    expect(hidden(SEL.eraPanel)).toBe(true);
+    expect(hidden(SEL.tabs)).toBe(false);
+    pointer('pointerUp', handle, 220);
+    // The click that follows a drag does nothing either.
+    fireEvent.click(handle);
+    expect(onTuner).not.toHaveBeenCalled();
+    expect(rackHeight()).toBe('164px');
+  });
+
+  it('leaves the tuner\'s mode alone, so when the screen grows the sheet opens as the singer left it', () => {
+    const { onTuner, update } = drawSheet({ tuner: tunerOf({ mini: false }) });
+    const handle = el(SEL.handle);
+    // A drag down from what looks like mini must not write "mini" into the tuner.
+    pointer('pointerDown', handle, 300);
+    pointer('pointerMove', handle, 380);
+    pointer('pointerUp', handle, 380);
+    expect(onTuner).not.toHaveBeenCalled();
+    expect(rackHeight()).toBe('164px');
+
+    // A phone turned upright: the expanded sheet fits again.
+    update({ canExpand: true });
+    expect(rackHeight()).toBe('416px');
+    expect(compact()).toBe(false);
+    expect(gearsDrawn()).toEqual([...GEAR_IDS]);
+    expect(hidden(SEL.eraPanel)).toBe(false);
+    expect(hidden(SEL.tabs)).toBe(true);
+    expect(el(SEL.handle).hasAttribute('aria-disabled')).toBe(false);
+    expect(el(SEL.handle).getAttribute('aria-expanded')).toBe('true');
+    expect(el(SEL.handle).getAttribute('aria-label')).toBe('Show one gear');
+  });
+
+  // The control: the same sheet, able to expand, does what the handle always did.
+  it('when it can expand, the same handle works as usual', () => {
+    const { onTuner } = drawSheet({ canExpand: true, tuner: tunerOf({ mini: true }) });
+    expect(rackHeight()).toBe('164px');
+    fireEvent.click(el(SEL.handle));
+    expect(calls(onTuner)).toEqual([{ type: 'mini', mini: false }]);
+  });
+});
+
 // ---- the gears ----
 
 describe('gear strips', () => {
-  const NAME: Record<GearId, string> = { difficulty: 'DIFFICULTY', history: 'LISTENING HISTORY', popularity: 'POPULARITY', tempo: 'TEMPO' };
+  // Round 6A §5: History's label is "HISTORY" now (its reset button still says "listening history", see below).
+  const NAME: Record<GearId, string> = { difficulty: 'DIFFICULTY', history: 'HISTORY', popularity: 'POPULARITY', tempo: 'TEMPO' };
   const VALUE: Record<GearId, number> = { difficulty: 11, history: 22, popularity: 33, tempo: 44 };
   const label = (gear: GearId) => el<HTMLLabelElement>(`label[for="slider-${gear}"]`);
 
@@ -409,21 +560,116 @@ describe('gear strips', () => {
     // With QWW-47's defaults Difficulty and Popularity are the gears that count.
     expect(GEAR_IDS.filter((g) => !off.includes(g))).toEqual(['difficulty', 'popularity']);
   });
+
+  it.each([
+    ['difficulty', 'Light work', 'Locked in'],
+    ['history', 'Rediscover', 'On repeat'],
+    ['popularity', 'Deep cuts', 'Pop hits'],
+    ['tempo', 'Slow jams', 'Upbeat tracks'],
+  ] as const)('%s draws its end labels, %s and %s, under the track', (gear, left, right) => {
+    draw([rankedSong('a')], signedIn({ off: [] }));
+    const ends = within(el(SEL.strip(gear)));
+    expect(ends.getByText(left).nextElementSibling).toBe(ends.getByText(right));
+  });
+
+  // jsdom applies no CSS, so a strip's neon look is checked where it is decided: the colour the strip hands its stylesheet
+  // for its label, border, fill and glow (Round 6A §3.1, §5), and the alphas the design draws it at.
+  const litOf = (gear: GearId, name = '--sl-gear') => el(SEL.strip(gear)).style.getPropertyValue(name);
+
+  it('hands each strip its gear\'s lit colour, and that colour at 27% for its border', () => {
+    draw([rankedSong('a')], signedIn({ off: [], difficulty: 50, history: 90, popularity: 5, tempo: 95 }));
+    expect(GEAR_IDS.map((g) => litOf(g))).toEqual(['#FFC24A', '#4FDDE8', '#FFC24A', '#B583FF']);
+    expect(GEAR_IDS.map((g) => litOf(g, '--sl-gear-line'))).toEqual(['#FFC24A44', '#4FDDE844', '#FFC24A44', '#B583FF44']);
+  });
+
+  it.each([
+    [10, '#4DE89A'],
+    [33, '#4DE89A'],
+    [34, '#FFC24A'],
+    [66, '#FFC24A'],
+    [67, '#FF5A8A'],
+    [95, '#FF5A8A'],
+  ])('Difficulty at %i is lit in its tier\'s colour, %s, whatever the other gears say', (difficulty, colour) => {
+    draw([rankedSong('a')], signedIn({ off: [], difficulty, history: 0, popularity: 100, tempo: 50 }));
+    expect(litOf('difficulty')).toBe(colour);
+    expect(litOf('difficulty', '--sl-gear-line')).toBe(`${colour}44`);
+  });
+
+  // Stable names for the browser tests, which read computed styles and cannot name a CSS-module class.
+  it.each(GEAR_IDS)('%s has one data-knob, data-fill and data-ends in its track and under it, and a data-offtag only while it is off', (gear) => {
+    const { update } = draw([rankedSong('a')], signedIn({ off: [] }));
+    const strip = () => el(SEL.strip(gear));
+    for (const hook of ['[data-knob]', '[data-fill]', '[data-ends]']) expect(all(hook, strip()), hook).toHaveLength(1);
+    expect(el('[data-ends]', strip()).getAttribute('data-ends')).toBe('');
+    expect(strip().querySelector('[data-offtag]')).toBeNull();
+    // The fill and the knob are the track's two children, the end labels follow it.
+    const track = el('div[aria-hidden="true"]', strip());
+    expect(track.children[0]).toBe(el('[data-fill]', strip()));
+    expect(track.children[1]).toBe(el('[data-knob]', strip()));
+    expect(track.nextElementSibling).toBe(el('[data-ends]', strip()));
+
+    update({ tuner: tunerOf({ off: [gear] }) });
+    expect(all('[data-offtag]', strip())).toHaveLength(1);
+    expect(el('[data-offtag]', strip()).textContent).toBe(' · OFF');
+    // The label holds the tag, so the tag is not one the strip repeats elsewhere.
+    expect(el<HTMLLabelElement>(`label[for="slider-${gear}"]`).contains(el('[data-offtag]', strip()))).toBe(true);
+  });
+
+  it('puts the fill and the knob at the value, on or off: the strip body carries it in percent', () => {
+    draw([rankedSong('a')], signedIn({ off: ['tempo'], difficulty: 11, tempo: 50 }));
+    const pct = (gear: GearId) => el('div[aria-hidden="true"]', el(SEL.strip(gear))).parentElement?.style.getPropertyValue('--pct');
+    expect([pct('difficulty'), pct('tempo')]).toEqual(['11%', '50%']);
+  });
+
+  // Round 6A §7: an off gear is a switched-off sign, not a faded one. The art draws itself unlit, so the sheet puts no
+  // opacity and no grayscale on it, on or off.
+  // The art draws itself unlit when told its gear is off (tests/setlist/gearArt.test.tsx has how); this is the wiring. The
+  // turn-on flicker is the visible mark: README test 29 is `neonOn 0.7s` on a lit gear, and an off gear has none.
+  it('tells each strip\'s art whether its gear is off, History before Spotify is connected included', () => {
+    // History is on in the tuner here, but a signed-out singer cannot use it, so it is off all the same.
+    draw([rankedSong('a')], { mode: 'catalogue', tuner: tunerOf({ off: ['tempo', 'era'] }) });
+    const animation = (gear: GearId) => el('svg', el(SEL.strip(gear))).style.animation;
+    expect(GEAR_IDS.map((gear) => animation(gear))).toEqual(['neonOn 0.7s linear 1', 'none', 'neonOn 0.7s linear 1', 'none']);
+    expect(GEAR_IDS.filter((gear) => el(SEL.strip(gear)).hasAttribute('data-off'))).toEqual(['history', 'tempo']);
+  });
+
+  it('does not dim an off gear\'s art: no opacity and no filter on it', () => {
+    draw([rankedSong('a')], signedIn({ off: ['tempo', 'era'] }));
+    const offGears = GEAR_IDS.filter((g) => el(SEL.strip(g)).hasAttribute('data-off'));
+    expect(offGears).toEqual(['tempo']);
+    for (const gear of offGears) {
+      const art = el('svg', el(SEL.strip(gear)));
+      expect(art.style.opacity, gear).toBe('');
+      expect(art.style.filter, gear).toBe('');
+    }
+  });
 });
 
 describe('History', () => {
   const HINT = 'Connect Spotify to use your listening history';
   const strip = () => el(SEL.strip('history'));
 
-  it('is off and disabled while signed out, and says why in place of its track', () => {
+  it('is labelled HISTORY, with the OFF tag after it while it is off', () => {
+    draw();
+    const label = el<HTMLLabelElement>('label[for="slider-history"]');
+    expect(label.textContent).toBe('HISTORY · OFF');
+    expect(screen.getByRole('slider', { name: 'HISTORY' })).toBe(el(SEL.slider('history')));
+  });
+
+  it('is off and disabled while signed out, and says why in place of its end labels, under a track that is still drawn', () => {
     draw();
     const input = el<HTMLInputElement>(SEL.slider('history'));
     expect(input.disabled).toBe(true);
     const hint = within(strip()).getByText(HINT);
     expect(input.getAttribute('aria-describedby')).toBe(hint.id);
     expect(hint.id).not.toBe('');
-    // The track (the strip's one aria-hidden div; the art is an svg and the OFF tag a span) and its end labels are not drawn.
-    expect(strip().querySelector('div[aria-hidden="true"]')).toBeNull();
+    // The track (the strip's one aria-hidden div; the art is an svg and the OFF tag a span) is drawn, and the hint stands
+    // right under it, where the end labels would. The end labels are not drawn.
+    expect(strip().querySelectorAll('div[aria-hidden="true"]')).toHaveLength(1);
+    expect(el('div[aria-hidden="true"]', strip()).nextElementSibling).toBe(hint);
+    // The browser tests' hook for "the end labels' row" is on the hint here, and says so.
+    expect(all('[data-ends]', strip())).toEqual([hint]);
+    expect(hint.getAttribute('data-ends')).toBe('hint');
     expect(within(strip()).queryByText('Rediscover')).toBeNull();
     expect(within(strip()).queryByText('On repeat')).toBeNull();
     expect(strip().hasAttribute('data-off')).toBe(true);
@@ -666,13 +912,47 @@ describe('the Era panel', () => {
     expect(buttons().every((b) => b.tagName === 'BUTTON')).toBe(true);
   });
 
-  it('is a group labelled "ERA: PICK ANY"', () => {
+  // Round 6A §8: the header is "ERA" and then how many songs fit, or "· OFF · all eras"; it replaces "ERA: PICK ANY".
+  it('is a group named by its header: "ERA" and the count after it', () => {
     draw();
-    const group = screen.getByRole('group', { name: 'ERA: PICK ANY' });
+    const group = screen.getByRole('group', { name: 'ERA · OFF · all eras' });
     expect(group).toBe(el(SEL.eraPanel));
     const labelledBy = group.getAttribute('aria-labelledby');
-    expect(labelledBy).toBeTruthy();
-    expect(document.getElementById(labelledBy ?? '')?.firstChild?.textContent).toBe('ERA: PICK ANY');
+    expect(labelledBy).toBe('era-label');
+    expect(document.getElementById(labelledBy ?? '')?.firstChild?.textContent).toBe('ERA');
+  });
+
+  it.each([
+    [1204, 'ERA · 1,204 songs'],
+    [10, 'ERA · 10 songs'],
+    [1, 'ERA · 1 song'],
+    [0, 'ERA · 0 songs'],
+    // Before the engine has answered once there is nothing to count yet.
+    [null, 'ERA'],
+  ] as const)('with Era on and %s songs fitting, the header reads "%s"', (total, header) => {
+    draw([rankedSong('a')], { ...signedIn({ off: [], eras: ['s90'] }), total });
+    expect(el('#era-label').textContent).toBe(header);
+    expect(screen.getByRole('group', { name: header })).toBe(el(SEL.eraPanel));
+    // The browser tests' hook for the count is the span after "ERA", and there is none while there is nothing to say.
+    const count = el(SEL.eraPanel).querySelector('[data-count]');
+    expect(count?.textContent ?? '').toBe(header.slice('ERA'.length).trim());
+    expect(el(SEL.eraPanel).querySelectorAll('[data-count]')).toHaveLength(total === null ? 0 : 1);
+  });
+
+  it('with Era off the header says so, whatever the count, and the count is a span of its own for the CSS to set apart', () => {
+    draw([rankedSong('a')], { ...signedIn({ off: ['era'] }), total: 1204 });
+    expect(el('#era-label').textContent).toBe('ERA · OFF · all eras');
+    const count = el('#era-label > span');
+    expect(count.textContent).toBe('· OFF · all eras');
+    expect(count.hasAttribute('data-count')).toBe(true);
+    // It is part of the group's name, so a screen reader says what Era is doing.
+    expect(count.hasAttribute('aria-hidden')).toBe(false);
+  });
+
+  it('hands its stylesheet the pink, and the pink at 27% for the panel\'s border (§8)', () => {
+    draw();
+    expect(el(SEL.eraPanel).style.getPropertyValue('--sl-gear')).toBe('#FF4FA0');
+    expect(el(SEL.eraPanel).style.getPropertyValue('--sl-gear-line')).toBe('#FF4FA044');
   });
 
   it('Era off, as every singer starts: no era is pressed or outlined (the defaults have no picks), the panel says OFF and has nothing to reset', () => {
@@ -682,7 +962,7 @@ describe('the Era panel', () => {
     expect(buttons().map((b) => b.getAttribute('aria-pressed'))).toEqual(Array(7).fill('false'));
     expect(parked()).toEqual([...DEFAULTS.eras]);
     expect(el(SEL.eraPanel).hasAttribute('data-off')).toBe(true);
-    expect(el('#era-label [aria-hidden="true"]').textContent).toBe(' · OFF');
+    expect(el('#era-label').textContent).toBe('ERA · OFF · all eras');
     expect(hidden(SEL.reset('era'))).toBe(true);
   });
 
@@ -691,7 +971,7 @@ describe('the Era panel', () => {
     expect(buttons().map((b) => b.getAttribute('aria-pressed'))).toEqual(Array(7).fill('false'));
     expect(parked()).toEqual(['s90', 's00', 's10']);
     expect(el(SEL.eraPanel).hasAttribute('data-off')).toBe(true);
-    expect(el('#era-label [aria-hidden="true"]').textContent).toBe(' · OFF');
+    expect(el('#era-label').textContent).toBe('ERA · OFF · all eras');
     expect(hidden(SEL.reset('era'))).toBe(true);
   });
 
@@ -729,8 +1009,9 @@ describe('the ranked list', () => {
     rankedSong('b', { title: 'Bravo', artist: 'Bo', year: null, difficulty: 'maybe' }),
   ];
   const rows = () => all(SEL.row);
+  /** The button that opens the song: a direct child of the row, as the ▶ in the slot beside it is not. */
   const openButton = (row: HTMLElement): HTMLButtonElement => {
-    const button = row.querySelector('button');
+    const button = Array.from(row.children).find((c): c is HTMLButtonElement => c.tagName === 'BUTTON');
     if (!button) throw new Error('A row has no button');
     return button;
   };
@@ -803,108 +1084,6 @@ describe('the ranked list', () => {
   });
 });
 
-describe('the lane at the end of a row (spec §5)', () => {
-  /** jsdom writes an inline colour back as rgb(...), whatever it was given. */
-  const rgb = (hex: string) => {
-    const n = Number.parseInt(hex.slice(1), 16);
-    return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`;
-  };
-  const rowOf = (id: string) => el(`[data-id="${id}"]`);
-  const openButton = (row: HTMLElement) => el('button', row);
-  /** The elements of a row whose CSS-module class is `name` (vitest renames `lane` to something like `_lane_ab12cd`). */
-  const named = (row: HTMLElement, name: string) => all(`[class*="_${name}_"]`, row);
-
-  it.each([
-    [10, EASY],
-    [50, MID],
-    [90, HARD],
-  ])('a song at place %i on Difficulty draws a band and three dashes in %s', (place, color) => {
-    draw([rankedSong('x', {}, { difficulty: place })]);
-    const row = rowOf('x');
-    const [lane] = named(row, 'lane');
-    expect(named(row, 'lane')).toHaveLength(1);
-    expect(lane!.getAttribute('aria-hidden')).toBe('true');
-    const [band] = named(row, 'laneBand');
-    const dashes = named(row, 'laneDash');
-    expect(named(row, 'laneBand')).toHaveLength(1);
-    expect(dashes).toHaveLength(3);
-    expect(named(row, 'laneNone')).toHaveLength(0);
-
-    // The numbers come from rowLane (tests/setlist/art.test.ts has the spec's arithmetic for it).
-    const expected = rowLane(place);
-    expect(expected.color).toBe(color);
-    expect([band!.style.top, band!.style.height]).toEqual([`${expected.bandTop}px`, `${expected.bandHeight}px`]);
-    expect(dashes.map((d) => d.style.top)).toEqual(expected.dashTop.map((top) => `${top}px`));
-    expect(dashes.map((d) => [d.style.left, d.style.width])).toEqual([
-      ['3px', '10px'],
-      ['16px', '12px'],
-      ['31px', '10px'],
-    ]);
-    for (const part of [band!, ...dashes]) expect(part.style.background).toBe(rgb(color));
-  });
-
-  it('is drawn from the song\'s place, not from its label: a Hard song placed low is green', () => {
-    draw([rankedSong('h', { difficulty: 'hard' }, { difficulty: 10 })]);
-    const [band] = named(rowOf('h'), 'laneBand');
-    expect(band!.style.background).toBe(rgb(EASY));
-  });
-
-  it('a song with no place on Difficulty draws no lane, only a spacer where it would be, so the rows stay aligned', () => {
-    draw([rankedSong('a', {}, { difficulty: 40 }), rankedSong('n', {}, { difficulty: null })]);
-    const [withLane, without] = [rowOf('a'), rowOf('n')] as [HTMLElement, HTMLElement];
-
-    expect(named(without, 'lane')).toHaveLength(0);
-    expect(named(without, 'laneBand')).toHaveLength(0);
-    expect(named(without, 'laneDash')).toHaveLength(0);
-    const spacer = named(without, 'laneNone');
-    expect(spacer).toHaveLength(1);
-    expect(spacer[0]!.getAttribute('aria-hidden')).toBe('true');
-    expect(spacer[0]!.children).toHaveLength(0);
-    // It stands where the lane stands: last in the button that opens the song.
-    expect(openButton(without).lastElementChild).toBe(spacer[0]);
-    expect(openButton(withLane).lastElementChild).toBe(named(withLane, 'lane')[0]);
-    expect(named(withLane, 'laneNone')).toHaveLength(0);
-    // The rest of the row is as for any song: its words, its place in the list and its play slot.
-    expect(openButton(without).getAttribute('aria-label')).toBe('Song n by Artist n, ’90s, Easy');
-    expect(without.dataset.rank).toBe('2');
-    expect(without.querySelector(SEL.playSlot)).not.toBeNull();
-  });
-});
-
-describe('the lane of a Maybe song', () => {
-  const rowOf = (id: string) => el(`[data-id="${id}"]`);
-  const named = (row: HTMLElement, name: string) => all(`[class*="_${name}_"]`, row);
-
-  it('is not drawn, whatever place the engine gave the song on Difficulty: only the spacer stands where it would', () => {
-    // Its range is only an estimate, so no difficulty is shown anywhere. The sure song has the same place, and its lane.
-    draw([rankedSong('m', { difficulty: 'maybe' }, { difficulty: 60 }), rankedSong('s', { difficulty: 'hard' }, { difficulty: 60 })]);
-    const [maybe, sure] = [rowOf('m'), rowOf('s')] as [HTMLElement, HTMLElement];
-
-    expect(named(maybe, 'lane')).toHaveLength(0);
-    expect(named(maybe, 'laneBand')).toHaveLength(0);
-    expect(named(maybe, 'laneDash')).toHaveLength(0);
-    const spacer = named(maybe, 'laneNone');
-    expect(spacer).toHaveLength(1);
-    expect(spacer[0]!.getAttribute('aria-hidden')).toBe('true');
-    expect(spacer[0]!.children).toHaveLength(0);
-    expect(el('button', maybe).lastElementChild).toBe(spacer[0]);
-
-    expect(named(sure, 'lane')).toHaveLength(1);
-    expect(named(sure, 'laneBand')).toHaveLength(1);
-    expect(named(sure, 'laneNone')).toHaveLength(0);
-  });
-
-  it('keeps its words: the row still says Maybe, and a Maybe row lines up with the rows around it', () => {
-    draw([rankedSong('a', {}, { difficulty: 20 }), rankedSong('m', { difficulty: 'maybe' }, { difficulty: 20 }), rankedSong('b', {}, { difficulty: 20 })]);
-    expect(el('button', rowOf('m')).getAttribute('aria-label')).toBe('Song m by Artist m, ’90s, Maybe');
-    // Every row ends its button with exactly one lane-sized element, a lane or a spacer, so the rows stay aligned.
-    for (const id of ['a', 'm', 'b']) {
-      expect(named(rowOf(id), 'lane').length + named(rowOf(id), 'laneNone').length, `row ${id}`).toBe(1);
-    }
-    expect(all(SEL.row).map((li) => li.dataset.rank)).toEqual(['1', '2', '3']);
-  });
-});
-
 describe('the play slot', () => {
   const songs = [rankedSong('a'), rankedSong('b'), rankedSong('c')];
   const slots = () => all(SEL.playSlot);
@@ -914,7 +1093,7 @@ describe('the play slot', () => {
     expect(slots()).toHaveLength(3);
     for (const row of all(SEL.row)) {
       const slot = el(SEL.playSlot, row);
-      const open = el('button', row);
+      const open = Array.from(row.children).find((c) => c.tagName === 'BUTTON')!;
       expect(open.contains(slot)).toBe(false);
       expect(slot.closest('button')).toBeNull();
       expect(slot.parentElement).toBe(row);
@@ -953,7 +1132,7 @@ describe('the play slot', () => {
     fireEvent.click(slots()[2]!);
     expect(mounted.onSelect).not.toHaveBeenCalled();
     // The row's own button still opens it.
-    fireEvent.click(el('button', all(SEL.row)[1]!));
+    fireEvent.click(Array.from(all(SEL.row)[1]!.children).find((c) => c.tagName === 'BUTTON')!);
     expect(mounted.onSelect.mock.calls).toEqual([['b', 2]]);
   });
 });

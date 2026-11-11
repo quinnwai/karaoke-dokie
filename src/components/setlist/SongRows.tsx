@@ -12,15 +12,18 @@ interface SongRowsProps {
   /** `position` is the song's 1-based place in the list on screen. */
   onOpen(trackId: string, position: number): void;
   /**
-   * The ▶ at the end of each row. QWW-48 owns playback and mounts its button here; it sits beside the row's own
-   * button, never inside it, so a tap on ▶ cannot also open the song page. Without it the slot shows an inert ▶.
+   * The ▶ at the start of each row, where the rank number was (Round 6A, decision 3). QWW-48 owns playback and mounts its
+   * button here; it sits beside the row's own button, never inside it, so a tap on ▶ cannot also open the song page. Without
+   * it the slot shows an inert ▶.
    */
   renderPlay?(match: Match): ReactNode;
 }
 
 /**
- * The ranked list (spec §5). Rows stand in rank order, so a screen reader reads the ranking, and slide into place
- * when it changes (useFlip). A row is 58 px; tapping it opens the song page.
+ * The ranked list (Round 6A §4). A row is 66 px: the ▶ slot (44 px), the text (title over "Artist · Era" over the reason
+ * line) and the difficulty badge, 10 px apart. There is no rank number on screen: the list is an `<ol>`, so a screen reader
+ * still hears each position, and a row keeps its place in `data-rank`. Rows stand in rank order, and slide into place when
+ * it changes (useFlip). Tapping a row opens the song page.
  */
 export function SongRows({ rows, scroller, onOpen, renderPlay }: SongRowsProps) {
   const list = useRef<HTMLOListElement>(null);
@@ -30,51 +33,44 @@ export function SongRows({ rows, scroller, onOpen, renderPlay }: SongRowsProps) 
     <ol ref={list} id="list" className={styles.list} role="list" aria-label="Ranked songs">
       {rows.map((row, i) => (
         <li key={row.id} className={styles.row} data-row="" data-id={row.id} data-rank={i + 1}>
-          <button type="button" className={styles.rowOpen} onClick={() => onOpen(row.id, i + 1)} aria-label={row.label}>
-            <span className={styles.rank} aria-hidden>
-              {i + 1}
-            </span>
-            <span className={styles.rowText}>
-              <span className={styles.rowTitle} data-row-title="">
-                {row.title}
-              </span>
-              <span className={styles.rowSub}>{row.sub}</span>
-            </span>
-            <Lane lane={row.lane} />
-          </button>
           <span className={styles.playSlot} data-play-slot="">
             {renderPlay ? renderPlay(row.match) : <PlayPlaceholder />}
           </span>
+          <button type="button" className={styles.rowOpen} onClick={() => onOpen(row.id, i + 1)} aria-label={row.label} aria-describedby={`why-${row.id}`}>
+            <span className={styles.rowText} data-row-text="">
+              {/* The karaoke lyric wipe on the #1 title: a pink copy laid over the title and revealed left to right. It is drawn by
+                  CSS from `data-wipe` (the ::after of this box), not as a second piece of text: the title is read, found and
+                  copied once. It moves with the #1 spot. */}
+              <span className={styles.rowTitleBox} data-wipe={i === 0 ? row.title : undefined}>
+                <span className={styles.rowTitle} data-row-title="">
+                  {row.title}
+                </span>
+              </span>
+              <span className={styles.rowSub}>{row.sub}</span>
+              <span className={styles.rowWhy} id={`why-${row.id}`} data-row-why="">
+                {row.why}
+              </span>
+            </span>
+            {row.badge && (
+              <span className={styles.badge} data-badge="">
+                {row.badge}
+              </span>
+            )}
+          </button>
         </li>
       ))}
     </ol>
   );
 }
 
-/**
- * The song's mini difficulty lane: a band that grows with difficulty and three dashes, in the difficulty colour. A song
- * whose range cannot be trusted has no lane, only the space where it would be, so the rows stay aligned.
- */
-function Lane({ lane }: { lane: SetlistRow['lane'] }) {
-  if (lane === null) return <span className={styles.laneNone} aria-hidden />;
-  const dash = (left: number, width: number, top: number) => (
-    <i className={styles.laneDash} style={{ left, width, top, background: lane.color }} />
-  );
-  return (
-    <span className={styles.lane} aria-hidden>
-      <i className={styles.laneBand} style={{ top: lane.bandTop, height: lane.bandHeight, background: lane.color }} />
-      {dash(3, 10, lane.dashTop[0])}
-      {dash(16, 12, lane.dashTop[1])}
-      {dash(31, 10, lane.dashTop[2])}
-    </span>
-  );
-}
-
-/** Stands where QWW-48's ▶ goes until it is mounted: same size, disabled, so a row's layout is final. */
+/** Stands where QWW-48's ▶ goes until it is mounted: same size and look, disabled, so a row's layout is final. */
 function PlayPlaceholder() {
   return (
     <button type="button" className={styles.playButton} disabled aria-label="Play preview (not available yet)">
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden>
+      <svg className={styles.playRing} viewBox="0 0 36 36" aria-hidden focusable="false">
+        <circle cx="18" cy="18" r="16.5" />
+      </svg>
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden focusable="false">
         <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />
       </svg>
     </button>

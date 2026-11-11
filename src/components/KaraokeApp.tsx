@@ -103,6 +103,9 @@ export function KaraokeApp({
     [tracker],
   );
   const [live, setLive] = useState<number | null>(null);
+  // The tuner's sheet has been sized once (QWW-57, decision 1): the first time the singer reaches it, a short phone opens it
+  // in mini; after that it stays as they left it, through a song and back.
+  const sheetSized = useRef(false);
   // Spotify refused the sign-in the singer just tried: the server sends them back with ?authError=<reason> and nothing else.
   const [signInFailed, setSignInFailed] = useState(false);
   const recorder = useRef<MicRecorder | null>(null);
@@ -403,32 +406,41 @@ export function KaraokeApp({
 
   const selected = state.selectedId ? findMatch(state.selectedId) : undefined;
 
-  // The Setlist tuner fills the screen: no TV around it. Every other step, and the song page, stay on the TV.
+  // The Setlist tuner is on the TV like every other step (Round 6A, QWW-57): one frame for the whole flow, with no second
+  // bezel. It fills the TV's screen, and only its list scrolls.
   if (step === 'results' && state.range && !selected) {
     return (
-      <SetlistScreen
-        range={state.range}
-        mode={state.mode}
-        tuner={state.tuner}
-        songs={ranked.result?.songs ?? null}
-        empty={ranked.result?.empty}
-        shown={state.shown}
-        loading={state.loading}
-        error={state.error === 'load' || ranked.failed}
-        libraryUnavailable={ranked.result?.libraryUnavailable ?? state.libraryUnavailable}
-        signInFailed={signInFailed}
-        displayName={state.displayName}
-        onTuner={(action) => dispatch({ type: 'tuner', action })}
-        onGearDone={(gear) => dispatch({ type: 'gearDone', gear })}
-        onSelect={(trackId, position) => dispatch({ type: 'select', trackId, position })}
-        onMore={() => dispatch({ type: 'loadMore' })}
-        onRetry={() => dispatch({ type: 'retryLoad' })}
-        onRedo={redo}
-        onRedoEnd={(end) => dispatch({ type: 'redoEnd', end })}
-        onConnect={connectSpotify}
-        onLogout={logOut}
-        renderPlay={renderPlay}
-      />
+      <Tv>
+        <SetlistScreen
+          range={state.range}
+          mode={state.mode}
+          tuner={state.tuner}
+          songs={ranked.result?.songs ?? null}
+          empty={ranked.result?.empty}
+          total={ranked.result?.total}
+          nextOffset={ranked.result?.nextOffset}
+          shown={state.shown}
+          loading={state.loading}
+          error={state.error === 'load' || ranked.failed}
+          libraryUnavailable={ranked.result?.libraryUnavailable ?? state.libraryUnavailable}
+          signInFailed={signInFailed}
+          displayName={state.displayName}
+          openMiniIfShort={!sheetSized.current}
+          onSheetSized={() => {
+            sheetSized.current = true;
+          }}
+          onTuner={(action) => dispatch({ type: 'tuner', action })}
+          onGearDone={(gear) => dispatch({ type: 'gearDone', gear })}
+          onSelect={(trackId, position) => dispatch({ type: 'select', trackId, position })}
+          onMore={() => dispatch({ type: 'loadMore' })}
+          onRetry={() => dispatch({ type: 'retryLoad' })}
+          onRedo={redo}
+          onRedoEnd={(end) => dispatch({ type: 'redoEnd', end })}
+          onConnect={connectSpotify}
+          onLogout={logOut}
+          renderPlay={renderPlay}
+        />
+      </Tv>
     );
   }
 

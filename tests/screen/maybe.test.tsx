@@ -11,7 +11,8 @@ afterEach(cleanup);
 
 const range = { low: 45, high: 72, source: 'test' as const };
 /** The accessible name of each row's button that opens the song, top to bottom. */
-const labels = () => all(SEL.row).map((li) => li.querySelector('button')!.getAttribute('aria-label'));
+const labels = () =>
+  all(SEL.row).map((li) => Array.from(li.children).find((c) => c.tagName === 'BUTTON')!.getAttribute('aria-label'));
 
 describe('Maybe songs on the Setlist screen', () => {
   // The old list had a Maybe section after the main one, under its own heading. The ranking engine puts Maybe songs last
@@ -27,7 +28,9 @@ describe('Maybe songs on the Setlist screen', () => {
     ]);
     expect(screen.queryByRole('region', { name: 'Maybe' })).toBeNull();
     expect(screen.queryByText(/only have an estimate/)).toBeNull();
-    expect(screen.queryByText(/^(Easy|Medium|Hard)$/)).toBeNull();
+    // A sure song has its badge, the word of its label; a Maybe song has none, so no difficulty is shown for it anywhere.
+    const badges = all(SEL.row).map((li) => li.querySelector('[data-badge]')?.textContent ?? null);
+    expect(badges).toEqual(['Easy', 'Medium', null, null]);
   });
 
   it('keep the position the engine gave them, even when it is above a sure fit', () => {
