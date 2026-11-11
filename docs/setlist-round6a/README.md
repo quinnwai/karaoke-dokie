@@ -28,7 +28,7 @@ Quinn-Wai answered the open questions on 11 Nov (QWW-46 and QWW-57); the decisio
 | §2: `window.setlist` also has `viewModel()` | It has `getState`, `setState`, `ranking` and `songs`, as in Round 5, and only in the e2e build (`NEXT_PUBLIC_SETLIST_TEST_HOOK=1`) | The reference's `viewModel` is its view layer, which this build does not have |
 | Reference: the invisible `<input type="range">` spans the strip body | It also starts 7 px before the track and ends 7 px after it, with a 14 px thumb (the fader cap) | So the native thumb's centre travels exactly the drawn track: a tap lands on the value the knob shows. Round 5 did the same with 9 px and 18 |
 | §1: the metronome's period is unchanged from Round 5 | The period rounds the bpm first, `60 / round(50 + 1.5 × tempo)`, as the reference's script and §6 do. It differs from Round 5's by 0.01 or 0.02 s at a few tempos (1, 3, 5, 7, 15, 21, 25, 35, 49 and 63) and agrees at 0, 45, 50, 55 and 100, so test 28's `swing14` at 0.45 s holds either way | The reference wins for geometry and motion numbers (README §1) |
-| §10: every note, bolt and ray fades over 180 ms | The strip's notes and bolts fade; the tab's rays do not | That is what the reference draws |
+| §10: notes and bolts appear with a 180 ms opacity fade | The strip's notes and bolts fade; the tab icons' rays, which mirror them, switch without one | That is what the reference draws (`.fade` is on the strip's groups only) |
 
 Also changed on the way (QWW-57, from the review of #34): History follows the engine's `libraryUnavailable` as well as the mode;
 the list says "That’s every song that fits, for now." only when the engine's `nextOffset` is null; and the screen's defaults and
