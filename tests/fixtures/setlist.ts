@@ -4,7 +4,7 @@
 // is a bpm. The engine places songs on a gear by rank (QWW-47), so what the numbers decide is the ORDER of the songs
 // on each gear; the spec's expectations (which songs are in an era, what comes first) can be read off this list.
 
-import type { DataSourceLogEntry, Match, RecommendationsResponse, SongRange } from '../../src/lib/contracts';
+import type { DataSourceLogEntry, Match, OctaveShift, RecommendationsResponse, SongRange } from '../../src/lib/contracts';
 import type { EraId } from '../../src/lib/setlist/types';
 
 export interface MockSong {
@@ -15,6 +15,8 @@ export interface MockSong {
   history: number;
   popularity: number;
   tempo: number;
+  /** 'up' or 'down': the song fits only if sung an octave higher or lower than the artist (QWW-57, R13). Default 'none'. */
+  octave?: OctaveShift;
 }
 
 const s = (title: string, artist: string, era: EraId, difficulty: number, history: number, popularity: number, tempo: number): MockSong => ({
@@ -88,7 +90,7 @@ export function mockMatch(song: MockSong, i: number, idPrefix = 'cat:'): Match {
       playRank: i,
     },
     range,
-    octave: 'none',
+    octave: song.octave ?? 'none',
     ...difficultyFields(song.difficulty),
     year: YEAR[song.era],
     yearSource: 'usdb',

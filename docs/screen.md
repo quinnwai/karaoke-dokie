@@ -110,7 +110,7 @@ width, so a wide window shows the phone's type, not a bigger one. There is no wi
      of it), "Crowd favourite" or "Deep cut" (place on Popularity at least 85, or at most 35), "On repeat" or "Rediscover"
      (History at least 85, or at most 20), and when none holds "Gets the room moving" / "Slow burner" / "Solid pick"
      (Tempo at least 70, at most 25, or unknown). The places are the engine's, percentiles among the songs that fit the
-     singer; a place that is null skips its rule, so a signed-out singer never sees the History ones. The badge is the song's
+     singer; a place that is null skips its rule, so a signed-out singer never sees the History ones. A song that fits only an octave away says "Shifted down to fit range" or "Shifted up to fit range" first, in place of "In your sweet spot" (R13; its other reasons and its badge stay). The badge is the song's
      own label (what the song page shows); a Maybe song has none. Each title fills in once, left to right (about 0.6 s,
      `useFillIn`), as its row scrolls into view, and ends the normal white. It plays once per visit to the list: a row that
      scrolls out and back, or is re-ranked, does not replay it (R12; with reduced motion there is no fill). The ▶ slot is

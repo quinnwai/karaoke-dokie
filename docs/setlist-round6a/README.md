@@ -36,6 +36,7 @@ Quinn-Wai answered the open questions on 11 Nov (QWW-46 and QWW-57); the decisio
 | Not in 6A: a hover on a tab or an era button | On a pointer device (`@media (hover: hover)`) an idle mini tab gets a border in its gear's colour, and an unpicked Era button a pink border, in the expanded panel and in mini's Era view: no glow on either, which stays with the selected one. Nothing is left lit by a tap on a phone | QWW-57, R10 |
 | §5: the gears' order is Difficulty, History, Popularity, Tempo | The strips and the tabs go Difficulty, Popularity, Tempo, Listening History, and the tabs end with Era: the gear that has to be unlocked is last. Mini still opens on Difficulty. The contract's `GEAR_IDS` is unchanged; the sheet's order is `SHEET_GEARS` in `gears.ts` | QWW-57, R11 |
 | §4, §10: the #1 title has a pink lyric wipe that loops | Gone. Every title fills in once, left to right (about 0.6 s, a CSS transition of a copy of the title clipped to its filled part, so the text is in the page once), as its row scrolls into view, and ends the normal white, not pink. It plays once per visit to the list, so a row that scrolls out and back, or is re-ranked, does not replay it. With reduced motion there is no fill | QWW-57, R12 |
+| §4: the reason rules (sweet spot, popularity, history, then a tempo word) | A song that fits the singer's range only an octave away (`match.octave` `down` or `up`) says "Shifted down to fit range" or "Shifted up to fit range" first in its reason line, in place of "In your sweet spot", which a shifted song never says. Its other reasons ("Crowd favourite" and the rest) and its Easy, Medium or Hard badge stay; a song sung as written keeps its reasons. The shift is the first of the two reasons, so on a 390 px phone a second reason can be cut with an ellipsis ("Shifted down to fit range · Crowd fa…"), the shift never. The song page is unchanged | QWW-57, R13, from QWW-58: Quinn-Wai chose the wording on 11 Nov. `SHIFT_REASON` and `whyOf` in `src/lib/setlist/rows.ts` |
 | Not in 6A: the song page's Spotify link | "Find on Spotify" (signed out) and "Open in Spotify" end with an external-link icon (about 0.8 em, in the link's colour, hidden from a screen reader); the link's name is unchanged | QWW-57, R4 |
 
 Also changed on the way (QWW-57, from the review of #34): History follows the engine's `libraryUnavailable` as well as the mode;
@@ -46,8 +47,8 @@ Acceptance tests: `tests/e2e/setlist.spec.ts` runs README §12, Round 5's tests 
 22 to 32, at 390×844, plus a run of the mode rule at 390×664, 412×780 and 375×553. Where a test names a mock default, it is
 rewritten for the real one; the header of that file says how.
 
-Quinn-Wai's review of the 6A preview (QWW-57, R1 to R12, 11 Nov) has one Playwright check per item, in three files:
+Quinn-Wai's review of the 6A preview (QWW-57, R1 to R13, 11 Nov) has one Playwright check per item, in three files:
 `tests/e2e/setlist-frame.spec.ts` (R1 the sign's centre, R2 the phone-shaped frame on every step, R4 the link icon, R9 the
-header's hover), `tests/e2e/setlist-rows.spec.ts` (R3 the ▶ and the rank number, R12 the title fill) and
+header's hover), `tests/e2e/setlist-rows.spec.ts` (R3 the ▶ and the rank number, R12 the title fill, R13 the shift in the reason line) and
 `tests/e2e/setlist-sheet.spec.ts` (R5 borders, R6 the label, R7 unlit tubes, R8 the top edge, R10 hover borders, R11 the
 order). Hover is always a pointer device's (`@media (hover: hover)`); a test with touch checks that nothing is left behind.

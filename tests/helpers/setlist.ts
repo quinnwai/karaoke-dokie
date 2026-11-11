@@ -1,7 +1,7 @@
 // Props for rendering <SetlistScreen> on its own in screen tests, the selectors of its DOM contract (spec §9 and the
 // QWW-46 screen), and builders for songs: a Match as the server sends it (what the ranking engine takes in) and a
 // SetlistSong as the engine sends it back (what the screen draws).
-import type { Label, Match, ScoreParts, VocalRange } from '../../src/lib/contracts';
+import type { Label, Match, OctaveShift, ScoreParts, VocalRange } from '../../src/lib/contracts';
 import type { SetlistScreenProps } from '../../src/components/setlist/SetlistScreen';
 import { SHOW_STEP } from '../../src/lib/client/flow';
 import { eraOf } from '../../src/lib/setlist/eras';
@@ -103,6 +103,8 @@ export interface SongOptions {
   range?: { low: number; high: number };
   /** The play rank, lower = played more. It breaks ties between songs that score the same on a gear. Default 0. */
   playRank?: number;
+  /** 'up' or 'down': the song fits only if sung an octave higher or lower than the artist (R13). Default 'none', as written. */
+  octave?: OctaveShift;
 }
 
 /** A match whose year, difficulty, popularity, listening history and tempo are exactly what the options say. */
@@ -132,7 +134,7 @@ export function song(id: string, o: SongOptions = {}): Match {
     },
     range: { low, high, tessitura: Math.round((low + high) / 2), source: 'note-file', confidence: 'high', fastLyrics: false },
     difficulty: o.difficulty ?? 'easy',
-    octave: 'none',
+    octave: o.octave ?? 'none',
     strain: o.strain ?? 0,
     parts,
     ...(year === null ? {} : { year }),

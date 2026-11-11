@@ -1,10 +1,12 @@
-// Review items R3 and R12 of QWW-57 (Quinn-Wai's review of the 6A preview, 11 Nov), the song list's rows, one check each as the
-// ticket asks:
+// Review items R3, R12 and R13 of QWW-57 (Quinn-Wai's review of the 6A preview, 11 Nov), the song list's rows, one check each as
+// the ticket asks:
 //   R3   the rank number is back in the row's slot; hovering the row, or focusing its ▶ with the keyboard, swaps it for the ▶
 //        glyph alone (no ring or circle in any state); a ▶ that cannot play is the faded pink; a loading, playing or paused
 //        preview keeps its glyph without hover; on a touch screen, which cannot hover, the ▶ stands in the number's place
 //   R12  each title fills in once, left to right, when its row scrolls into view, and ends in its normal white; not again on
 //        scrolling back or on a re-rank; with reduced motion the titles simply show; each title's text is in the page once
+//   R13  a song that fits only an octave away says "Shifted down/up to fit range" first in its reason line, in place of "In your
+//        sweet spot"; its other reasons and its badge stay (QWW-58's wording; the rule is `whyOf` in src/lib/setlist/rows.ts)
 // The tuner is reached the way tests/e2e/setlist.spec.ts reaches it (tests/helpers/tunerE2e.ts). QWW-48's play button (PR #28) is
 // not in this tree, so the slot holds the disabled placeholder; where a test needs what QWW-48 draws (a button with data-preview,
 // a ring of two circles, then the glyph) it mounts a button of that shape by hand (mountPreview).
@@ -16,6 +18,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { centre, css, DEFAULT_RANKING, eraButton, open, openButton, pressKey, resetButton, rgb, rows, TEXT_3, titles } from '../helpers/tunerE2e';
+import type { MockSong } from '../fixtures/setlist';
 
 const SCREENS = path.resolve('test-results/screens');
 test.beforeAll(() => mkdirSync(SCREENS, { recursive: true }));
@@ -590,3 +593,77 @@ test.describe('R12, with reduced motion', () => {
     await expectEachTitleOnce(page);
   });
 });
+
+// ============================================================================================================
+// R13: a song that fits only an octave away says so in its reason line
+// ============================================================================================================
+
+/**
+ * Three songs the 25 do not have, all easy and among the best known, so they lead the list under the defaults (Difficulty 0 and
+ * Popularity 100): one that fits an octave lower, one an octave higher, and one sung as written.
+ */
+const OCTAVE_SONGS: MockSong[] = [
+  { title: 'Low Road', artist: 'Down Under', era: 's90', difficulty: 3, history: 50, popularity: 100, tempo: 50, octave: 'down' },
+  { title: 'High Road', artist: 'Up Above', era: 's90', difficulty: 4, history: 50, popularity: 99, tempo: 50, octave: 'up' },
+  { title: 'Plain Road', artist: 'As Written', era: 's90', difficulty: 2, history: 50, popularity: 98, tempo: 50 },
+];
+const rowOf = (page: Page, title: string) => rows(page).filter({ hasText: title });
+const whyLine = (page: Page, title: string) => rowOf(page, title).locator('[data-row-why]');
+
+test('R13. a shifted row\'s reason line starts with the shift and never says "In your sweet spot"; a song sung as written still does; the badge stays', async ({ page }) => {
+  await open(page, { extra: OCTAVE_SONGS });
+  await expect(whyLine(page, 'Low Road')).toHaveText('Shifted down to fit range · Crowd favourite');
+  await expect(whyLine(page, 'High Road')).toHaveText('Shifted up to fit range · Crowd favourite');
+  await expect(whyLine(page, 'Plain Road')).toHaveText('In your sweet spot · Crowd favourite');
+  for (const title of ['Low Road', 'High Road']) {
+    const line = (await whyLine(page, title).textContent()) ?? '';
+    expect(line.startsWith('Shifted '), `${title} starts with the shift`).toBe(true);
+    expect(line, `${title} does not claim a sweet spot`).not.toContain('In your sweet spot');
+  }
+  // Only the two shifted songs say it: the 25 songs sung as written do not.
+  await expect(page.locator('[data-row-why]', { hasText: 'Shifted' })).toHaveCount(2);
+  // The badge is the song's own label as for any song, and the reason line is the row button's description, as for any row.
+  await expect(rowOf(page, 'Low Road').locator('[data-badge]')).toHaveText('Easy');
+  await expect(page.getByRole('button', { name: /^Low Road by Down Under/ })).toHaveAccessibleDescription('Shifted down to fit range · Crowd favourite');
+  // Nothing about the row's size changes: it is the 66 px row of any song.
+  expect((await rowOf(page, 'Low Road').boundingBox())!.height).toBe(66);
+  // The row at 390 px, for the review: the three songs side by side.
+  await page.screenshot({ path: path.join(SCREENS, 'setlist-r13-shifted-rows.png') });
+});
+
+test('R13. the shift stays on its song when the tuner moves, and the song sung as written loses its sweet spot', async ({ page }) => {
+  await open(page, { extra: OCTAVE_SONGS });
+  await expect(whyLine(page, 'Plain Road')).toContainText('In your sweet spot');
+  await page.evaluate(() => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ difficulty: 100 }));
+  await expect(whyLine(page, 'Plain Road')).not.toContainText('In your sweet spot');
+  await expect(whyLine(page, 'Low Road')).toContainText('Shifted down to fit range');
+  await expect(whyLine(page, 'High Road')).toContainText('Shifted up to fit range');
+  await expect(page.locator('[data-row-why]', { hasText: 'Shifted' })).toHaveCount(2);
+});
+
+/** A Medium and a Hard song that are shifted too: their badges are the widest, so they leave the reason line the least room. */
+const WIDE_BADGES: MockSong[] = [
+  { title: 'Mid Road', artist: 'Halfway', era: 's90', difficulty: 50, history: 50, popularity: 60, tempo: 50, octave: 'down' },
+  { title: 'Hard Road', artist: 'Steep', era: 's90', difficulty: 90, history: 50, popularity: 60, tempo: 50, octave: 'up' },
+];
+
+for (const width of [360, 375, 390]) {
+  test(`R13. at ${width} px the shift itself is never cut off, beside an Easy, a Medium or a Hard badge (a second reason may be, with an ellipsis)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await open(page, { extra: [...OCTAVE_SONGS, ...WIDE_BADGES] });
+    const lines = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-row-why]')]
+        .filter((w) => (w.textContent ?? '').startsWith('Shifted '))
+        .map((w) => {
+          const phrase = (w.textContent ?? '').split(' · ')[0]!;
+          const text = w.firstChild as Text;
+          const range = document.createRange();
+          range.setStart(text, 0);
+          range.setEnd(text, phrase.length);
+          return { line: w.textContent, phrase, phraseRight: range.getBoundingClientRect().right, boxRight: w.getBoundingClientRect().right };
+        }),
+    );
+    expect(lines.map((l) => l.phrase).sort()).toEqual(['Shifted down to fit range', 'Shifted down to fit range', 'Shifted up to fit range', 'Shifted up to fit range']);
+    for (const l of lines) expect(l.phraseRight, `${l.line}: the shift ends inside the line's box`).toBeLessThanOrEqual(l.boxRight + 0.5);
+  });
+}

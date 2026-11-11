@@ -96,6 +96,24 @@ describe('a row', () => {
     expect(rows().map((r) => r.querySelector('[data-row-why]')?.textContent)).toEqual(['Crowd favourite', 'In your sweet spot · Deep cut', 'Gets the room moving']);
   });
 
+  it('says a shifted song fits an octave away in its reason line, in place of the sweet spot, and keeps its badge (R13)', () => {
+    draw([
+      rankedSong('d', { title: 'Down', octave: 'down', difficulty: 'hard' }, { difficulty: 3, popularity: 95 }),
+      rankedSong('u', { title: 'Up', octave: 'up', difficulty: 'easy' }, { difficulty: 3 }),
+      rankedSong('w', { title: 'Written', difficulty: 'easy' }, { difficulty: 3, popularity: 95 }),
+    ]);
+    // Difficulty is on at 0, so all three sit in the sweet spot; the two shifted ones do not say so, and the third does.
+    expect(rows().map((r) => r.querySelector('[data-row-why]')?.textContent)).toEqual([
+      'Shifted down to fit range · Crowd favourite',
+      'Shifted up to fit range',
+      'In your sweet spot · Crowd favourite',
+    ]);
+    expect(rows().map((r) => r.querySelector('[data-badge]')?.textContent)).toEqual(['Hard', 'Easy', 'Easy']);
+    // A screen reader hears it as the button's description, as it hears any reason line.
+    const described = button(rows()[0]!).getAttribute('aria-describedby')!;
+    expect(document.getElementById(described)?.textContent).toBe('Shifted down to fit range · Crowd favourite');
+  });
+
   it('names the button "title by artist, era, difficulty" and describes it with the reason line, so both are read with the row', () => {
     draw(songs);
     expect(rows().map((r) => button(r).getAttribute('aria-label'))).toEqual(['Cello by Cara, ’00s, Hard', 'Alpha by Ada, Pre-’70s, Easy', 'Bravo by Bo, Maybe']);

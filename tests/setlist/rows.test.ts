@@ -4,9 +4,9 @@
 // real data (QWW-57): the engine's places are percentiles among the songs that fit the singer, a null place skips its rule.
 
 import { describe, expect, it } from 'vitest';
-import type { Label } from '../../src/lib/contracts';
+import type { Label, OctaveShift } from '../../src/lib/contracts';
 import { ERA_LABEL } from '../../src/lib/setlist/eras';
-import { badgeOf, SWEET_SPOT, toRow, toRows, whyOf, type WhyTuner } from '../../src/lib/setlist/rows';
+import { badgeOf, SHIFT_REASON, SWEET_SPOT, toRow, toRows, whyOf, type WhyTuner } from '../../src/lib/setlist/rows';
 import { ERA_IDS, type EraId, type SetlistSong } from '../../src/lib/setlist/types';
 import { ranked, rankedSong, song, type Places } from '../helpers/setlist';
 
@@ -238,6 +238,64 @@ describe('whyOf: nothing else to say', () => {
 
   it('is a solid pick for a song we know nothing about', () => {
     expect(whyOf(placed({ difficulty: null, history: null, popularity: null, tempo: null }), START)).toBe('Solid pick');
+  });
+});
+
+describe('whyOf: a song that fits an octave away says so (QWW-57 R13)', () => {
+  /** A returned song with exactly these places, sung as the artist sings it ('none') or an octave away. */
+  const shifted = (octave: OctaveShift, places: Places = {}, label: Label = 'easy'): SetlistSong => ranked(song('s', { difficulty: label, octave }), { difficulty: null, ...places });
+
+  it('has the two sentences Quinn-Wai chose', () => {
+    expect(SHIFT_REASON).toEqual({ up: 'Shifted up to fit range', down: 'Shifted down to fit range' });
+  });
+
+  it('says "Shifted down to fit range" for a song that fits an octave lower, and "Shifted up to fit range" for one an octave higher', () => {
+    expect(whyOf(shifted('down'), START)).toBe('Shifted down to fit range');
+    expect(whyOf(shifted('up'), START)).toBe('Shifted up to fit range');
+  });
+
+  it('is the only reason when nothing else holds: no tempo line follows it', () => {
+    expect(whyOf(shifted('down', { tempo: 99 }), START)).toBe('Shifted down to fit range');
+    expect(whyOf(shifted('up', { tempo: 1 }), START)).toBe('Shifted up to fit range');
+  });
+
+  it('goes first and keeps the other reasons: Crowd favourite, Deep cut, On repeat, Rediscover', () => {
+    expect(whyOf(shifted('down', { popularity: 95 }), START)).toBe('Shifted down to fit range · Crowd favourite');
+    expect(whyOf(shifted('up', { popularity: 10 }), START)).toBe('Shifted up to fit range · Deep cut');
+    expect(whyOf(shifted('down', { history: 95 }), START)).toBe('Shifted down to fit range · On repeat');
+    expect(whyOf(shifted('up', { history: 5 }), START)).toBe('Shifted up to fit range · Rediscover');
+  });
+
+  it('keeps the first two when more hold: the shift, then the first of the rest', () => {
+    expect(whyOf(shifted('down', { popularity: 95, history: 95 }), START)).toBe('Shifted down to fit range · Crowd favourite');
+    expect(whyOf(shifted('up', { popularity: 10, history: 5 }), START)).toBe('Shifted up to fit range · Deep cut');
+  });
+
+  it('never says "In your sweet spot", even where the song\'s place on Difficulty is exactly the slider', () => {
+    for (const place of [0, 10, 15, 50]) {
+      expect(whyOf(shifted('down', { difficulty: place }), sweetAt(place)), `place ${place}`).toBe('Shifted down to fit range');
+      expect(whyOf(shifted('up', { difficulty: place, popularity: 95 }), sweetAt(place)), `place ${place}, popular`).toBe('Shifted up to fit range · Crowd favourite');
+    }
+  });
+
+  it('says it whether or not Difficulty counts, and for a Maybe song as for any other', () => {
+    expect(whyOf(shifted('up'), { difficulty: 0, off: ['difficulty'] })).toBe('Shifted up to fit range');
+    expect(whyOf(shifted('down', {}, 'maybe'), START)).toBe('Shifted down to fit range');
+  });
+
+  it('leaves a song sung as written as it was: the same places say the same things', () => {
+    expect(whyOf(shifted('none', { difficulty: 50, popularity: 95 }), sweetAt(50))).toBe('In your sweet spot · Crowd favourite');
+    expect(whyOf(shifted('none', { popularity: 95 }), START)).toBe('Crowd favourite');
+    expect(whyOf(shifted('none', { history: 5 }), START)).toBe('Rediscover');
+    expect(whyOf(shifted('none'), START)).toBe('Solid pick');
+    expect(whyOf(shifted('none', { tempo: 99 }), START)).toBe('Gets the room moving');
+  });
+
+  it('is what the row carries, and the badge and the button\'s name are the song\'s own, as for any song', () => {
+    const row = toRow(ranked(song('s', { title: 'Torn', artist: 'Natalie Imbruglia', year: 1997, difficulty: 'hard', octave: 'down' }), { difficulty: null, popularity: 95 }), START);
+    expect(row.why).toBe('Shifted down to fit range · Crowd favourite');
+    expect(row.badge).toBe('Hard');
+    expect(row.label).toBe('Torn by Natalie Imbruglia, ’90s, Hard');
   });
 });
 

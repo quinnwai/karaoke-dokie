@@ -3,7 +3,8 @@
 //
 // The reason line is README §4's `whyOf`, run on real data. The engine's places are percentiles among the songs that fit
 // the singer, 0 to 100, so the rules read them as they are written. A place that is null (we do not know it, or the song is
-// not in the singer's library) skips its rule, which is why a signed-out singer never sees "On repeat" or "Rediscover".
+// not in the singer's library) skips its rule, which is why a signed-out singer never sees "On repeat" or "Rediscover". A song
+// that fits only an octave up or down says "Shifted up/down to fit range" first (R13).
 
 import { difficultyLabel } from '../client/display';
 import type { Match } from '../contracts';
@@ -44,12 +45,24 @@ export type WhyTuner = Pick<TunerState, 'difficulty' | 'off'>;
 /** How far the song's place on Difficulty may be from the slider and still be "in your sweet spot". */
 export const SWEET_SPOT = 15;
 
-/** The reason line of a song (README §4): the first two reasons that hold, in this order, joined by " · ". */
+/**
+ * What the reason line says of a song that fits the singer's range only an octave away from the artist's (QWW-57, R13, from
+ * QWW-58; Quinn-Wai chose the words, 11 Nov). `up` is a song that fits if sung an octave higher, `down` one an octave lower.
+ */
+export const SHIFT_REASON = { up: 'Shifted up to fit range', down: 'Shifted down to fit range' } as const;
+
+/**
+ * The reason line of a song (README §4): the first two reasons that hold, in this order, joined by " · ". A song that fits
+ * only an octave away says so in the first place, instead of "In your sweet spot" (R13); its other reasons and its badge stay.
+ */
 export function whyOf(song: SetlistSong, tuner: WhyTuner): string {
   const { difficulty, popularity, history, tempo } = song.gears;
+  const { octave } = song.match;
   const reasons: string[] = [];
-  // 1. Difficulty counts, and the song sits near where it is set.
-  if (!tuner.off.includes('difficulty') && difficulty !== null && Math.abs(difficulty - tuner.difficulty) <= SWEET_SPOT) reasons.push('In your sweet spot');
+  // 1. About the song's range. Shifted: it fits after the shift, so it does not claim a sweet spot. Else Difficulty counts,
+  //    and the song sits near where it is set.
+  if (octave !== 'none') reasons.push(SHIFT_REASON[octave]);
+  else if (!tuner.off.includes('difficulty') && difficulty !== null && Math.abs(difficulty - tuner.difficulty) <= SWEET_SPOT) reasons.push('In your sweet spot');
   // 2. Among the best known songs, or the least known.
   if (popularity !== null) {
     if (popularity >= 85) reasons.push('Crowd favourite');
