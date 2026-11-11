@@ -157,6 +157,8 @@ export interface RankedSetlist {
 /**
  * Which missing gear counts most when songs miss different ones, as bits of a sum: a song missing History sorts after
  * every song that has it, then one missing Tempo after every song that has it, then Popularity, then Difficulty.
+ * All of it inside a group: songs sung as written come before songs that need an octave jump (QWW-58), so a song that
+ * misses a gear still comes before a jump song that has it.
  * The gears the singer chose to switch on (History, Tempo) outrank the ones that are on from the start.
  */
 const MISSING_RANK: Readonly<Record<GearId, number>> = Object.freeze({ difficulty: 1, popularity: 2, tempo: 4, history: 8 });

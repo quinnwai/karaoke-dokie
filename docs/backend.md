@@ -208,7 +208,8 @@ each, and what a reset does, is in `setlistConfig.ts`.
 
 **A one-note range** ("Jump", C4 to C4: it fits everyone, so it won on "easy") has no difficulty: a song whose range spans
 fewer than 5 semitones (`MIN_PLAUSIBLE_SPAN`) has `gears.difficulty: null`, so while Difficulty is on it comes after every
-song with one. With Difficulty off it ranks on popularity like any song. Its label on the song page is unchanged (Easy).
+song with one that is sung the same way (one sung as written still comes before the songs that need a jump). With
+Difficulty off it ranks on popularity like any song. Its label on the song page is unchanged (Easy).
 
 **Max difficulty, logged out** (Quinn-Wai's check of 10 Nov). Difficulty at 100 with the other gears as they load lists the
 most popular Hard songs first: the Hard third of the track is nearest to 100, and Popularity (on, double) chooses among
@@ -218,7 +219,10 @@ Popularity on: a range with only a handful of Hard songs, all obscure, puts popu
 Quinn-Wai chose this (option A) on 11 Nov, and that the default list leans on popularity as it does (`GEAR_WEIGHTS`). Songs
 sung as written come first here too (QWW-58): the Hard songs sung as written lead, then the Easy and Medium ones sung as
 written, and only then the Hard songs that need a jump. On production's catalogue every voice type has hundreds of Hard
-songs it can sing as written (655 to 1,815 over the eight ranges of QWW-58), so the first 10 are still all Hard.
+songs it can sing as written (655 to 1,815 over the eight ranges of QWW-58), so with no era picked the first 10 are still
+all Hard. With one era picked, 15 of the 56 lists (eight ranges, seven eras) have fewer than 10 Hard songs in their first
+10, against 14 before this rule, and the worst has 6: with Popularity on a popular Medium song can still beat an obscure
+Hard one, as the paragraph above says.
 
 **Not used by the ranking:** the fast-lyrics flag and the octave penalty of the Top picks score (the octave decides a
 group, rule 4, and is not a penalty; a song that needs a jump has its notes scored as sung). A singer whose range is so narrow that no song
