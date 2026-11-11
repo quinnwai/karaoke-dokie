@@ -3,9 +3,11 @@
 The whole app is one karaoke TV centered on a dark page. Every step happens on its
 screen, with instructions sung in like karaoke lyrics. One accent color: hot pink.
 
-On a phone (up to 430 px wide) the TV is the whole screen (Round 6A §3.3, QWW-57): page padding 14 10 12 (or the
-safe-area insets, if larger), bezel padding 9 9 0, bezel radius 30, screen radius 22, a 34 px chin with the LED, no height
-cap. Wider than that it is the TV of before, 880 px at most and 660 px tall at most.
+The TV is phone-shaped on every screen and every step (Round 6A §3.3, QWW-57, review item R2): 390 px wide and
+min(844 px, the window less 32 px) tall, centred, with the bezel padding 9 9 0, bezel radius 30, screen radius 22 and a
+34 px chin with the LED. On a phone (up to 430 px wide) it is the whole screen instead: page padding 14 10 12 (or the
+safe-area insets, if larger), no height cap. Text that scales with the window width (`--vw`) stops growing at a phone's
+width, so a wide window shows the phone's type, not a bigger one. There is no wider TV and no column inside one.
 
 ## Flow
 
@@ -83,8 +85,8 @@ cap. Wider than that it is the TV of before, 880 px at most and 660 px tall at m
    singer pressing Cancel on Spotify's page, which is their answer, so nothing is said.
 7. **Results: the Setlist tuner** (QWW-46, the round 5 design, spec and reference in `docs/setlist-round5/`; reskinned in
    QWW-57 as Round 6A, "neon signs", in `docs/setlist-round6a/`, which also lists where production differs from it).
-   It is on the TV like every other step, with no second bezel; it fills the TV's screen and only its list scrolls. On a
-   phone (up to 430 px wide) the TV takes 6A's numbers and fills the viewport (see step 1). One request for every
+   It is on the TV like every other step, with no second bezel; it fills the TV's screen and only its list scrolls. The
+   TV is phone-shaped and fills the viewport on a phone (see the top of this file). One request for every
    match (`/api/catalogue/recommendations?...&all=1` without Spotify, `/api/recommendations?all=1` with it); then
    the screen sends what is set on the sheet to the ranking engine (`src/lib/setlist/engine.ts`, asked through
    `useRankedSetlist`) and draws the ranked list it gets back (`SetlistResponse`, the shape of QWW-47's
@@ -93,25 +95,40 @@ cap. Wider than that it is the TV of before, 880 px at most and 660 px tall at m
    request may ask for; the screen shows 40 at a time). A slider drag asks once the thumb has rested 120 ms, and a request
    a newer one replaced is aborted. The list keeps the last answer until its own arrives. `libraryUnavailable` comes in the answer.
    - **The header**: a 28 px row with the singer's range (each note re-sings that end), **redo** (re-sings both), the
-     カラオケ sign and the Spotify logo at the far right; the sign sits in the room between redo and the logo, and is
-     hidden when that room is too small for it. The notes and redo are 44 px tall to tap. The heading is below the row.
-   - **The list**: a row (66 px) is the ▶ slot where the rank number was (the rank lives in `data-rank` and the `<ol>`), the
-     title over "Artist · Era" (`’90s`) over a **reason line**, and a **difficulty badge**. The reason line is
+     カラオケ sign and the Spotify logo at the far right. The sign is centred on the row's own middle (R1: the row's
+     centre, to a pixel, not the room between redo and the logo) and is hidden, not moved, when that would put it within
+     8 px of redo or the logo (`signFits` in `fit.ts`, measured by `useSignFit`; a long range on a 360 px phone). The notes
+     and redo are 44 px tall to tap, and turn pink on hover and on keyboard focus (R9). The heading is below the row.
+   - **The list**: a row (66 px) is the slot (44 px) with the rank number, the title over "Artist · Era" (`’90s`) over a
+     **reason line**, and a **difficulty badge**. The slot holds the rank number and the ▶ on top of each other (R3): on a
+     pointer device the number shows and a hover on the row, or keyboard focus on the ▶, swaps it for the ▶ (the glyph
+     alone, no ring or circle); on a touch screen, which cannot hover, the ▶ stands in the number's place and the number
+     is not drawn. A ▶ that cannot play yet is faded and disabled; a preview that is loading, playing or paused shows its
+     ⏸ or ▶ with no hover. The number is hidden from a screen reader (the list is an `<ol>`) and the rank is also in
+     `data-rank`. The reason line is
      `whyOf` in `src/lib/setlist/rows.ts`: the first two of "In your sweet spot" (Difficulty on, the song's place within 15
      of it), "Crowd favourite" or "Deep cut" (place on Popularity at least 85, or at most 35), "On repeat" or "Rediscover"
      (History at least 85, or at most 20), and when none holds "Gets the room moving" / "Slow burner" / "Solid pick"
      (Tempo at least 70, at most 25, or unknown). The places are the engine's, percentiles among the songs that fit the
      singer; a place that is null skips its rule, so a signed-out singer never sees the History ones. The badge is the song's
-     own label (what the song page shows); a Maybe song has none. The #1 title carries a pink lyric wipe. The ▶ slot is
+     own label (what the song page shows); a Maybe song has none. Each title fills in once, left to right (about 0.6 s,
+     `useFillIn`), as its row scrolls into view, and ends the normal white. It plays once per visit to the list: a row that
+     scrolls out and back, or is re-ranked, does not replay it (R12; with reduced motion there is no fill). The ▶ slot is
      filled by QWW-48 (until then a disabled ▶). Rows are in rank order in the DOM, and slide to their new place when
      the order changes (`flip.ts`; reduced motion turns it off). Tapping a row opens the song page; the ▶ does not.
      40 songs show at first, then "Load more". Songs with no year are in the list while Era is off and out of it
      while Era is on. When there are no songs the engine says why (`empty`): "Pick an era to see songs." (Era on,
      nothing picked), or a line saying none of the picked eras fit the range.
-   - **The sheet**: four gears (Difficulty, Listening history, Popularity, Tempo) and a multi-select Era. **Reset** on
+   - **The sheet**: four gears (Difficulty, Popularity, Tempo, Listening history: the one that has to be unlocked is last,
+     in the strips and in the tabs, R11; `SHEET_GEARS` in `gears.ts`) and a multi-select Era. The History strip reads
+     "LISTENING HISTORY" (its tab says "History") and sets its type by the strip's width so it is never cut off (R6). Every
+     strip and the Era panel have a grey border (`--sl-rail`) in every state; only the selected mini tab has a gear-coloured
+     border and glow, and on a pointer device an idle tab shows its border when hovered and an unpicked era button a pink
+     one, with no glow (R5, R10). The top of the sheet has no pink (R8). **Reset** on
      a gear puts it back to its default (`src/lib/setlist/defaults.ts`, the one place) and turns it **off**: it
      counts for nothing, its art goes dark (unlit neon tubes; no dimming), and touching it again turns it on from the
-     default, with a short neon flicker. Era off means every era. The Era panel's header counts the songs that fit
+     default, with a short neon flicker. The History notes, the Popularity bolts and the tabs' rays that the value has not
+     reached are drawn unlit rather than hidden, and light as it reaches them (R7). Era off means every era. The Era panel's header counts the songs that fit
      (`SetlistResponse.total`, every song that fits the range and the picked eras, not the loaded page): "ERA · 1,204 songs".
      **Defaults** (QWW-47's decision): Popularity 100 and Difficulty 0 on; History 100, Tempo 50 and Era off, and Era
      has no default picks (the first tap on an era picks just that era). Signed out, History is also disabled and says
@@ -163,7 +180,9 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 - **Address**: `https://open.spotify.com/embed/track/<id>`. The ID comes from the song's `spotifyUrl`
   (`spotifyEmbed.ts`) and only letters and digits are copied, so the frame can only point at
   Spotify's player. A link that is not a track link (the offline mock only has search links) shows
-  the plain "Open in Spotify" link instead.
+  the plain "Open in Spotify" link instead. That link and the "Find on Spotify" one end with an external-link icon
+  (a box with an arrow leaving it, about 0.8 em, in the link's own colour and hidden from a screen reader; R4): the
+  names a screen reader hears are unchanged.
 - **Size**: 152px tall, Spotify's compact size for one song. Spotify wants at least 280px of width.
   A 360px phone leaves the screen 264px, so the player reaches 12px into the screen's padding
   (288px); a page narrower than 352px gets less than 280px.

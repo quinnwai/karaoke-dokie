@@ -11,6 +11,7 @@ import { SetlistScreen, type SetlistScreenProps } from '../../src/components/set
 import { Sheet } from '../../src/components/setlist/Sheet';
 import type { Match, ResultsMode } from '../../src/lib/contracts';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
+import { SHEET_GEARS, SHEET_PARTS } from '../../src/lib/setlist/gears';
 import { initialTuner, tunerReducer, type TunerAction } from '../../src/lib/setlist/tuner';
 import { GEAR_IDS, TUNER_PARTS, type EmptyReason, type EraId, type GearId, type SetlistSong, type TunerState } from '../../src/lib/setlist/types';
 import { all, el, RANGE, rankedSong, rowIds, SEL, setlistProps } from '../helpers/setlist';
@@ -175,6 +176,28 @@ describe('what the sheet draws', () => {
     expect(hidden(SEL.tabs)).toBe(false);
   });
 
+  // QWW-57, R11: Listening History needs unlocking, so it goes last of the four; the contract's order is the server's, not the sheet's.
+  it('draws the strips as Difficulty, Popularity, Tempo, then Listening History, and the tabs as those four and then Era', () => {
+    draw();
+    expect(all('[data-strip]').map((strip) => strip.dataset.gear)).toEqual(['difficulty', 'popularity', 'tempo', 'history']);
+    expect(all(`${SEL.tabs} [data-tab]`).map((tab) => tab.dataset.gear)).toEqual(['difficulty', 'popularity', 'tempo', 'history', 'era']);
+    expect(all('[data-strip]').map((strip) => strip.dataset.gear)).toEqual([...SHEET_GEARS]);
+    expect(all(`${SEL.tabs} [data-tab]`).map((tab) => tab.dataset.gear)).toEqual([...SHEET_PARTS]);
+    // The strips are in the strips' box, the Era panel after it, then the tab bar: the order a screen reader and the Tab key follow.
+    const order = all('#strips, #era-panel, #tabs').map((part) => part.id);
+    expect(order).toEqual(['strips', 'era-panel', 'tabs']);
+  });
+
+  it('keeps the sheet\'s order in mini too, and mini still opens on Difficulty, the first strip and the first tab', () => {
+    draw([rankedSong('a')], { tuner: initialTuner({ mini: true }) });
+    expect(all(`${SEL.tabs} [data-tab]`).map((tab) => tab.dataset.gear)).toEqual([...SHEET_PARTS]);
+    expect(all('[data-strip]').map((strip) => strip.dataset.gear)).toEqual([...SHEET_GEARS]);
+    expect(el(SEL.app).dataset.open).toBe('difficulty');
+    expect(SHEET_GEARS[0]).toBe('difficulty');
+    expect(all(`${SEL.tabs} [data-tab]`)[0]?.getAttribute('aria-pressed')).toBe('true');
+    expect(gearsDrawn()).toEqual(['difficulty']);
+  });
+
   it('is a region of its own that holds the handle, the rack and the tab bar', () => {
     draw();
     const sheet = screen.getByRole('region', { name: 'Setlist controls' });
@@ -189,9 +212,9 @@ describe('the tab bar', () => {
     draw([rankedSong('a')], { tuner: tunerOf({ mini: true, ...over }), ...overrides });
   const offTabs = () => TUNER_PARTS.filter((g) => el(SEL.tab(g)).hasAttribute('data-off'));
 
-  it('has a tab for each gear and for Era, in sheet order', () => {
+  it('has a tab for each gear and for Era, in sheet order (History after Tempo, R11)', () => {
     mini();
-    expect(all(`${SEL.tabs} [data-tab]`).map((t) => t.dataset.gear)).toEqual(['difficulty', 'history', 'popularity', 'tempo', 'era']);
+    expect(all(`${SEL.tabs} [data-tab]`).map((t) => t.dataset.gear)).toEqual(['difficulty', 'popularity', 'tempo', 'history', 'era']);
     expect(el(SEL.tabs).getAttribute('role')).toBe('group');
   });
 
@@ -229,7 +252,7 @@ describe('the tab bar', () => {
   it('labels each tab in English only', () => {
     mini();
     const labels = all(`${SEL.tabs} [data-tab]`).map((t) => t.textContent ?? '');
-    expect(labels).toEqual(['Difficulty', 'History', 'Popularity', 'Tempo', 'Era']);
+    expect(labels).toEqual(['Difficulty', 'Popularity', 'Tempo', 'History', 'Era']);
     for (const label of labels) expect(label).not.toMatch(/[぀-ヿ㐀-鿿]/);
   });
 
@@ -513,8 +536,8 @@ describe('the handle when the sheet cannot expand (QWW-57, decision 1)', () => {
 // ---- the gears ----
 
 describe('gear strips', () => {
-  // Round 6A §5: History's label is "HISTORY" now (its reset button still says "listening history", see below).
-  const NAME: Record<GearId, string> = { difficulty: 'DIFFICULTY', history: 'HISTORY', popularity: 'POPULARITY', tempo: 'TEMPO' };
+  // Round 6A §5 shortened History's label to "HISTORY"; QWW-57's review (R6) put "LISTENING HISTORY" back (its tab is still "History").
+  const NAME: Record<GearId, string> = { difficulty: 'DIFFICULTY', history: 'LISTENING HISTORY', popularity: 'POPULARITY', tempo: 'TEMPO' };
   const VALUE: Record<GearId, number> = { difficulty: 11, history: 22, popularity: 33, tempo: 44 };
   const label = (gear: GearId) => el<HTMLLabelElement>(`label[for="slider-${gear}"]`);
 
@@ -573,13 +596,23 @@ describe('gear strips', () => {
   });
 
   // jsdom applies no CSS, so a strip's neon look is checked where it is decided: the colour the strip hands its stylesheet
-  // for its label, border, fill and glow (Round 6A §3.1, §5), and the alphas the design draws it at.
+  // for its label, fill and glow (Round 6A §3.1, §5). Its border is not one of them: it is the rail's grey whatever the state (R5).
   const litOf = (gear: GearId, name = '--sl-gear') => el(SEL.strip(gear)).style.getPropertyValue(name);
 
-  it('hands each strip its gear\'s lit colour, and that colour at 27% for its border', () => {
+  it('hands each strip its gear\'s lit colour', () => {
     draw([rankedSong('a')], signedIn({ off: [], difficulty: 50, history: 90, popularity: 5, tempo: 95 }));
     expect(GEAR_IDS.map((g) => litOf(g))).toEqual(['#FFC24A', '#4FDDE8', '#FFC24A', '#B583FF']);
-    expect(GEAR_IDS.map((g) => litOf(g, '--sl-gear-line'))).toEqual(['#FFC24A44', '#4FDDE844', '#FFC24A44', '#B583FF44']);
+  });
+
+  it('hands no strip, and not the Era panel, the gear\'s colour for a border: no --sl-gear-line, lit or off (R5)', () => {
+    const { update } = draw([rankedSong('a')], signedIn({ off: [], eras: ['s90'] }));
+    for (const off of [[], [...TUNER_PARTS]]) {
+      update({ tuner: tunerOf({ off, eras: ['s90'] }) });
+      for (const part of [...all('[data-strip]'), el(SEL.eraPanel)]) expect(part.style.getPropertyValue('--sl-gear-line'), part.id || part.dataset.gear).toBe('');
+    }
+    // The strip's colour is for its label and fill and the panel's for its header: those are still handed over.
+    expect(litOf('history')).toBe('#4FDDE8');
+    expect(el(SEL.eraPanel).style.getPropertyValue('--sl-gear')).toBe('#FF4FA0');
   });
 
   it.each([
@@ -592,7 +625,6 @@ describe('gear strips', () => {
   ])('Difficulty at %i is lit in its tier\'s colour, %s, whatever the other gears say', (difficulty, colour) => {
     draw([rankedSong('a')], signedIn({ off: [], difficulty, history: 0, popularity: 100, tempo: 50 }));
     expect(litOf('difficulty')).toBe(colour);
-    expect(litOf('difficulty', '--sl-gear-line')).toBe(`${colour}44`);
   });
 
   // Stable names for the browser tests, which read computed styles and cannot name a CSS-module class.
@@ -633,6 +665,25 @@ describe('gear strips', () => {
     expect(GEAR_IDS.filter((gear) => el(SEL.strip(gear)).hasAttribute('data-off'))).toEqual(['history', 'tempo']);
   });
 
+  // QWW-57, R7: the notes, bolts and rays a value does not reach are drawn unlit, not hidden; an off gear lights none of them.
+  // tests/setlist/gearArt.test.tsx has the art itself; this is the wiring, through the strip and the tab.
+  it('lights the notes and bolts a gear\'s value reaches, on the strip and as rays on the tab, and none of an off gear\'s, History before Spotify is connected included', () => {
+    const litIn = (selector: string) => all(`${selector} [data-lit]`).filter((part) => part.dataset.lit === 'true').length;
+    const drawnIn = (selector: string) => all(`${selector} [data-lit]`).length;
+    // Signed in: History is on at 65 and Popularity at 30.
+    const { update } = draw([rankedSong('a')], signedIn({ off: ['tempo', 'era'], history: 65, popularity: 30 }));
+    expect([litIn(SEL.strip('history')), litIn(SEL.tab('history')), litIn(SEL.strip('popularity')), litIn(SEL.tab('popularity'))]).toEqual([5, 5, 2, 2]);
+    // Every one is drawn all the same: seven notes or bolts on the strip, seven rays on the tab.
+    expect([drawnIn(SEL.strip('history')), drawnIn(SEL.tab('history')), drawnIn(SEL.strip('popularity')), drawnIn(SEL.tab('popularity'))]).toEqual([7, 7, 7, 7]);
+    // Signed out, History is off whatever the tuner says, so none of its notes or rays is lit; Popularity is untouched.
+    update({ mode: 'catalogue' });
+    expect([litIn(SEL.strip('history')), litIn(SEL.tab('history')), litIn(SEL.strip('popularity')), litIn(SEL.tab('popularity'))]).toEqual([0, 0, 2, 2]);
+    expect(drawnIn(SEL.strip('history'))).toBe(7);
+    // Popularity reset: all seven bolts and rays are drawn, none lit.
+    update({ tuner: tunerOf({ off: ['popularity', 'tempo', 'era'], popularity: 30 }) });
+    expect([litIn(SEL.strip('popularity')), litIn(SEL.tab('popularity')), drawnIn(SEL.strip('popularity'))]).toEqual([0, 0, 7]);
+  });
+
   it('does not dim an off gear\'s art: no opacity and no filter on it', () => {
     draw([rankedSong('a')], signedIn({ off: ['tempo', 'era'] }));
     const offGears = GEAR_IDS.filter((g) => el(SEL.strip(g)).hasAttribute('data-off'));
@@ -649,11 +700,48 @@ describe('History', () => {
   const HINT = 'Connect Spotify to use your listening history';
   const strip = () => el(SEL.strip('history'));
 
-  it('is labelled HISTORY, with the OFF tag after it while it is off', () => {
+  // QWW-57, R6: the strip says "LISTENING HISTORY" (the tab and the reset button's name are as they were). A History that cannot be
+  // used at all says why under its track, so it does not also say " · OFF"; one that is off but usable (signed in) does.
+  const label = () => el<HTMLLabelElement>('label[for="slider-history"]');
+
+  it('is labelled LISTENING HISTORY, and the slider is named by it', () => {
     draw();
-    const label = el<HTMLLabelElement>('label[for="slider-history"]');
-    expect(label.textContent).toBe('HISTORY · OFF');
-    expect(screen.getByRole('slider', { name: 'HISTORY' })).toBe(el(SEL.slider('history')));
+    expect(label().textContent).toBe('LISTENING HISTORY');
+    expect(screen.getByRole('slider', { name: 'LISTENING HISTORY' })).toBe(el(SEL.slider('history')));
+    // The reset button keeps its name (it is hidden while History is off, so it is read from its attribute).
+    expect(el(SEL.reset('history')).getAttribute('aria-label')).toBe('Reset listening history (stop factoring it in)');
+  });
+
+  it('has the OFF tag after its label while it is off but usable (signed in), and no tag once it is on', () => {
+    const { update } = draw([rankedSong('a')], signedIn());
+    expect(label().textContent).toBe('LISTENING HISTORY · OFF');
+    expect(el('[data-offtag]', label()).textContent).toBe(' · OFF');
+    // The tag is aria-hidden, so the slider's name is the words alone.
+    expect(screen.getByRole('slider', { name: 'LISTENING HISTORY' })).toBe(el(SEL.slider('history')));
+    update({ tuner: tunerOf({ off: ['tempo', 'era'] }) });
+    expect(label().textContent).toBe('LISTENING HISTORY');
+    expect(label().querySelector('[data-offtag]')).toBeNull();
+  });
+
+  it.each([
+    ['signed out', {}, HINT],
+    ['signed in, with Spotify unreachable', { mode: 'library', libraryUnavailable: true }, 'Spotify could not be reached, so listening history is off'],
+  ] as const)('has no OFF tag while it is disabled, %s: the hint under the track says why', (_who, over, hint) => {
+    draw([rankedSong('a')], { ...over, tuner: tunerOf({ off: [...DEFAULTS.off] }) });
+    expect(el<HTMLInputElement>(SEL.slider('history')).disabled).toBe(true);
+    expect(strip().hasAttribute('data-off')).toBe(true);
+    expect(label().textContent).toBe('LISTENING HISTORY');
+    expect(strip().querySelector('[data-offtag]')).toBeNull();
+    expect(within(strip()).getByText(hint)).toBeTruthy();
+    // The other gears are untouched: Tempo is off and usable, so it says so.
+    expect(el<HTMLLabelElement>('label[for="slider-tempo"]').textContent).toBe('TEMPO · OFF');
+  });
+
+  it('has no OFF tag while it is disabled even with History on in the tuner (a signed-out singer\'s tuner can have it on)', () => {
+    draw([rankedSong('a')], { tuner: tunerOf({ off: ['tempo', 'era'] }) });
+    expect(el<HTMLInputElement>(SEL.slider('history')).disabled).toBe(true);
+    expect(label().textContent).toBe('LISTENING HISTORY');
+    expect(strip().querySelector('[data-offtag]')).toBeNull();
   });
 
   it('is off and disabled while signed out, and says why in place of its end labels, under a track that is still drawn', () => {
@@ -663,7 +751,7 @@ describe('History', () => {
     const hint = within(strip()).getByText(HINT);
     expect(input.getAttribute('aria-describedby')).toBe(hint.id);
     expect(hint.id).not.toBe('');
-    // The track (the strip's one aria-hidden div; the art is an svg and the OFF tag a span) is drawn, and the hint stands
+    // The track (the strip's one aria-hidden div; the art is an svg) is drawn, and the hint stands
     // right under it, where the end labels would. The end labels are not drawn.
     expect(strip().querySelectorAll('div[aria-hidden="true"]')).toHaveLength(1);
     expect(el('div[aria-hidden="true"]', strip()).nextElementSibling).toBe(hint);
@@ -949,10 +1037,10 @@ describe('the Era panel', () => {
     expect(count.hasAttribute('aria-hidden')).toBe(false);
   });
 
-  it('hands its stylesheet the pink, and the pink at 27% for the panel\'s border (§8)', () => {
+  it('hands its stylesheet the pink, for its header (§8); its border is the rail\'s grey in every state, so it gets no colour for one (R5)', () => {
     draw();
     expect(el(SEL.eraPanel).style.getPropertyValue('--sl-gear')).toBe('#FF4FA0');
-    expect(el(SEL.eraPanel).style.getPropertyValue('--sl-gear-line')).toBe('#FF4FA044');
+    expect(el(SEL.eraPanel).style.getPropertyValue('--sl-gear-line')).toBe('');
   });
 
   it('Era off, as every singer starts: no era is pressed or outlined (the defaults have no picks), the panel says OFF and has nothing to reset', () => {
@@ -1026,9 +1114,21 @@ describe('the ranked list', () => {
     expect(rowIds()).toEqual(['c', 'a', 'b']);
   });
 
-  it('numbers the rows from 1 in that order', () => {
+  it('numbers the rows from 1 in that order, in data-rank and in the number the slot shows (R3), which a screen reader skips', () => {
     draw(songs);
     expect(rows().map((li) => li.dataset.rank)).toEqual(['1', '2', '3']);
+    const numbers = rows().map((li) => el('[data-rank-number]', li));
+    expect(numbers.map((n) => n.textContent)).toEqual(['1', '2', '3']);
+    expect(numbers.every((n) => n.getAttribute('aria-hidden') === 'true' && n.closest(SEL.playSlot) !== null)).toBe(true);
+  });
+
+  it('gives each row\'s title its own text once, with the copy the fill draws held in data-fill-text and not as a second node (R12)', () => {
+    draw(songs);
+    expect(all('[data-row-title]').map((t) => t.textContent)).toEqual(['Cello', 'Alpha', 'Bravo']);
+    expect(rows().map((li) => el('[data-fill-text]', li).getAttribute('data-fill-text'))).toEqual(['Cello', 'Alpha', 'Bravo']);
+    expect(screen.getAllByText('Cello')).toHaveLength(1);
+    // The #1 title's looping wipe is gone: nothing marks a row by its place.
+    expect(all('[data-wipe]')).toHaveLength(0);
   });
 
   it('names each row\'s button "title by artist, era, difficulty", with no era part for a song with no year', () => {
@@ -1097,6 +1197,15 @@ describe('the play slot', () => {
       expect(open.contains(slot)).toBe(false);
       expect(slot.closest('button')).toBeNull();
       expect(slot.parentElement).toBe(row);
+    }
+  });
+
+  it('holds the row\'s rank number first and the ▶ after it, one over the other in the slot (R3), and the ▶ is the glyph with no ring', () => {
+    draw(songs);
+    for (const slot of slots()) {
+      expect(Array.from(slot.children).map((c) => (c.hasAttribute('data-rank-number') ? 'number' : c.tagName))).toEqual(['number', 'BUTTON']);
+      expect(slot.querySelectorAll('svg')).toHaveLength(1);
+      expect(slot.querySelectorAll('circle')).toHaveLength(0);
     }
   });
 

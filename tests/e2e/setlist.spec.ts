@@ -383,7 +383,9 @@ test('signed out, Listening history is off and disabled with its hint, and Conne
   await expect(strip(page, 'history')).toHaveAttribute('data-off', 'true');
   await expect(slider(page, 'history')).toBeDisabled();
   await expect(strip(page, 'history')).toContainText('Connect Spotify to use your listening history');
-  await expect(strip(page, 'history').locator('label')).toContainText('· OFF');
+  // R6: the label is "LISTENING HISTORY", and a gear that cannot be used says why under its track instead of " · OFF" after its label.
+  await expect(strip(page, 'history').locator('label')).toHaveText('LISTENING HISTORY');
+  await expect(strip(page, 'history').locator('[data-offtag]')).toHaveCount(0);
   const connect = page.getByRole('button', { name: 'Connect to Spotify' }).first();
   const box = (await connect.boundingBox())!;
   const heading = (await page.getByRole('heading', { name: 'Tune your setlist' }).boundingBox())!;
@@ -469,17 +471,22 @@ test('the sheet bleeds to the TV screen\'s edges and rests on its bottom: the ch
 test.describe('on a desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false, isMobile: false });
 
-  test('the tuner is in today\'s TV, as a column of at most 480 px, centred', async ({ page }) => {
+  // R2 (QWW-57): the TV is phone-shaped on every screen. The title, the mic and the note steps are in tests/e2e/setlist-frame.spec.ts.
+  test('the tuner is in a phone-shaped TV: 390 px wide, 768 tall (the window less 32 px), centred, with the phone\'s bezel, and no column inside it', async ({ page }) => {
     await open(page);
     const f = await frame(page);
     expect(f.frames).toBe(1);
-    expect(f.tv.w).toBe(880);
-    expect(f.tv.h).toBe(660);
-    // Not the phone's numbers: the TV of before (padding 16 16 0 and radius 32 from 700 px up).
-    expect(f.tv.padding).toBe('16px 16px 0px');
-    expect(f.tv.radius).toBe('32px');
-    expect(f.app.w).toBeLessThanOrEqual(480);
-    expect(Math.abs(f.app.x + f.app.w / 2 - (f.tv.x + f.tv.w / 2))).toBeLessThanOrEqual(1);
+    expect(f.tv.w).toBe(390);
+    expect(f.tv.h).toBe(768);
+    expect(Math.abs(f.tv.x + f.tv.w / 2 - 1280 / 2)).toBeLessThanOrEqual(1);
+    expect(Math.abs(f.tv.y + f.tv.h / 2 - 800 / 2)).toBeLessThanOrEqual(1);
+    // The phone's numbers (6A's bezel 9 9 0, radii 30 and 22), not the wide TV's of before (16 16 0, radius 32).
+    expect(f.tv.padding).toBe('9px 9px 0px');
+    expect(f.tv.radius).toBe('30px');
+    expect(f.screen.radius).toBe('22px');
+    // The tuner fills the TV's screen: no 480 px column in it.
+    expect(f.app.w).toBe(f.inner.w);
+    expect(f.app.w).toBe(372);
     expect(f.inner.scrolls).toBe(false);
   });
 });
@@ -904,7 +911,7 @@ test('turning a phone on its side while the sheet is expanded keeps it from bein
 
 // ---- the header (6A §3.4; QWW-57, decisions 4 and the hit areas) ----
 
-/** The header row's parts, in page pixels; the sign is null when it is hidden. */
+/** The header row's parts, in page pixels; the sign is null while it is hidden (R1: `visibility: hidden`, so it can be measured again). */
 const headerBox = (page: Page) =>
   page.evaluate(() => {
     const bar = document.querySelector('#app header > div') as HTMLElement;
@@ -915,11 +922,12 @@ const headerBox = (page: Page) =>
     };
     const sign = bar.querySelector('[lang="ja"]') as HTMLElement;
     const heading = document.querySelector('#app header h1') as HTMLElement;
+    const signStyle = getComputedStyle(sign);
     return {
       bar: box(bar),
       range: box(bar.querySelector('[role="group"]')),
       redo: box(bar.querySelector('button[aria-label="Redo the singing test"]')),
-      sign: getComputedStyle(sign).display === 'none' ? null : box(sign),
+      sign: signStyle.display === 'none' || signStyle.visibility === 'hidden' ? null : box(sign),
       spotify: box(bar.querySelector('button[aria-label="Connect to Spotify"], button[aria-label="Spotify account"]')),
       heading: { ...box(heading)!, cut: heading.scrollWidth > heading.clientWidth, fontSize: getComputedStyle(heading).fontSize },
     };
@@ -945,40 +953,38 @@ for (const width of [360, 375, 390]) {
   });
 }
 
-test('the Spotify logo is at the far right of the row, and the カラオケ sign is centred in the room between redo and the logo, not on the row\'s own middle', async ({ page }) => {
+test('the Spotify logo is at the far right of the row, and the カラオケ sign is on the row\'s own middle, not in the room between redo and the logo (R1)', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 740 });
   await open(page, { range: { low: 41, high: 69 } }); // F2 to A4: not the shortest range
   const h = await headerBox(page);
   expect(h.sign).not.toBeNull();
   expect(h.spotify!.r).toBeGreaterThan(h.bar!.r - 6);
-  // The room is between redo's right edge and the logo's left edge.
+  // The sign's middle is the row's middle, within a pixel: 6A centred it in the room between redo and the logo, which is not.
+  const middle = h.bar!.x + h.bar!.w / 2;
+  expect(Math.abs(h.sign!.x + h.sign!.w / 2 - middle)).toBeLessThanOrEqual(1);
   const room = (h.redo!.r + h.spotify!.x) / 2;
-  expect(Math.abs(h.sign!.x + h.sign!.w / 2 - room)).toBeLessThanOrEqual(1);
+  expect(Math.abs(room - middle), 'the room between redo and the logo is not the row\'s middle, so this test tells the two apart').toBeGreaterThan(8);
+  // And it still keeps 8 px clear of both neighbours.
   expect(h.sign!.x).toBeGreaterThanOrEqual(h.redo!.r + 8);
   expect(h.sign!.r).toBeLessThanOrEqual(h.spotify!.x - 8);
-  // Which is not where the row's exact middle is.
-  const middle = h.bar!.x + h.bar!.w / 2;
-  expect(Math.abs(room - middle)).toBeGreaterThan(8);
 });
 
-test('when the row is too tight, the sign goes first: it is hidden once the room between redo and the logo is smaller than the sign, and nothing else shrinks', async ({ page }) => {
-  // The longest range, D#2 to D#5, on a 360 px phone: there is still room (about 126 px for a 69 px sign), so it stays.
+test('when the row is too tight, the sign goes first: it is hidden once it would come within 8 px of redo or the logo, and nothing else shrinks', async ({ page }) => {
+  // The longest range, C#2 to G#5, on a 360 px phone: the sign at the row's middle would touch redo, so it is hidden.
   await page.setViewportSize({ width: 360, height: 740 });
-  await open(page, { range: { low: 39, high: 75 } });
-  const fits = await headerBox(page);
-  expect(fits.sign).not.toBeNull();
-  const wide = { redo: fits.redo!.w, range: fits.range!.w, spotify: fits.spotify!.w };
-  // Narrower than any phone, the room runs out (under 70 px): the sign is hidden, and redo, the range and the logo are what they were.
-  await page.setViewportSize({ width: 300, height: 740 });
+  await open(page, { range: { low: 37, high: 80 } });
   await expect.poll(async () => (await headerBox(page)).sign).toBeNull();
   const tight = await headerBox(page);
-  expect({ redo: tight.redo!.w, range: tight.range!.w, spotify: tight.spotify!.w }).toEqual(wide);
   expect(tight.bar!.h).toBe(28);
   expect(tight.range!.r).toBeLessThanOrEqual(tight.redo!.x);
   expect(tight.redo!.r).toBeLessThanOrEqual(tight.spotify!.x);
-  // Roomier again: the sign is back.
-  await page.setViewportSize({ width: 360, height: 740 });
+  // Roomier again (a phone turned, a bigger phone): the sign is back, clear of both by 8 px, and redo, the range and the logo are what they were.
+  await page.setViewportSize({ width: 430, height: 740 });
   await expect.poll(async () => (await headerBox(page)).sign !== null).toBe(true);
+  const roomy = await headerBox(page);
+  expect({ redo: roomy.redo!.w, range: roomy.range!.w, spotify: roomy.spotify!.w }).toEqual({ redo: tight.redo!.w, range: tight.range!.w, spotify: tight.spotify!.w });
+  expect(roomy.sign!.x - roomy.redo!.r).toBeGreaterThanOrEqual(8);
+  expect(roomy.spotify!.x - roomy.sign!.r).toBeGreaterThanOrEqual(8);
 });
 
 test('the range notes and redo look as they did and are 44 px tall to tap', async ({ page }) => {
@@ -1048,7 +1054,7 @@ test('22. row geometry: ranks 1, 2, 3 at top 0, 66, 132; every row 66 px tall; t
   expect(await page.locator('#list').evaluate((el) => el.getBoundingClientRect().height)).toBe(4 * 66);
 });
 
-test('23. the default rows: title, reason line and badge of the top 4 for the real defaults, and only rank 1 has the lyric wipe', async ({ page }) => {
+test('23. the default rows: title, reason line and badge of the top 4 for the real defaults, and no row has the lyric wipe (R12 took it away)', async ({ page }) => {
   await open(page);
   await expect.poll(async () => (await titles(page)).slice(0, 4)).toEqual(TOP_ROWS.map((r) => r.title));
   const top = await rows(page).evaluateAll((els) =>
@@ -1059,24 +1065,24 @@ test('23. the default rows: title, reason line and badge of the top 4 for the re
     })),
   );
   expect(top).toEqual(TOP_ROWS);
-  const wipes = await rows(page).evaluateAll((els) => els.map((el, i) => (el.querySelector('[data-wipe]') ? i + 1 : 0)).filter(Boolean));
-  expect(wipes).toEqual([1]);
-  // The pink copy is drawn from data-wipe by CSS, so the title is in the page once: it is read, found and copied once.
-  expect(await page.locator('[data-wipe]').getAttribute('data-wipe')).toBe(TOP_ROWS[0]!.title);
+  // R12 took the looping #1 wipe away: no row carries it. Each title fills in once as its row scrolls into view instead
+  // (tests/e2e/setlist-rows.spec.ts). The copy that fill draws is made by CSS from data-fill-text, so the title is in the page
+  // once: it is read, found and copied once.
+  await expect(page.locator('[data-wipe]')).toHaveCount(0);
+  expect(await page.locator('[data-row-title]').evaluateAll((els) => els.every((el) => el.closest('[data-fill-text]')?.getAttribute('data-fill-text') === el.textContent))).toBe(true);
   await expect(page.getByText(TOP_ROWS[0]!.title, { exact: true })).toHaveCount(1);
-  expect(await page.locator('[data-wipe]').evaluate((el) => getComputedStyle(el, '::after').content)).toContain(TOP_ROWS[0]!.title);
   await page.screenshot({ path: path.join(SCREENS, 'setlist-23-rows.png') });
 });
 
-test('23b. the lyric wipe follows the #1 spot when the ranking changes', async ({ page }) => {
+test('23b. the #1 spot has no mark of its own any more (R12): when the ranking changes, still no row has a wipe, and the new #1 is just the first row', async ({ page }) => {
   await open(page);
   const first = async () => rows(page).first().locator('[data-row-title]').textContent();
   expect(await first()).toBe('Mr. Brightside');
-  await expect(page.locator('[data-wipe]')).toHaveCount(1);
+  await expect(page.locator('[data-wipe]')).toHaveCount(0);
   await pressKey(page, 'tempo', 'ArrowLeft', 40); // Tempo on, toward Slow jams: another song comes first
   await expect.poll(first).not.toBe('Mr. Brightside');
-  await expect(page.locator('[data-wipe]')).toHaveCount(1);
-  expect(await rows(page).first().locator('[data-wipe]').count()).toBe(1);
+  await expect(page.locator('[data-wipe]')).toHaveCount(0);
+  expect(await rows(page).first().getAttribute('data-rank')).toBe('1');
 });
 
 test('24. the Era header counts the songs that fit: "OFF · all eras" with Era off, and the total, with a thousands comma, with it on', async ({ page }) => {
@@ -1143,15 +1149,21 @@ test('25b. an off gear\'s end labels are the raised grey too, and a gear that is
   expect(await css(page.locator('#era-label'), 'color')).toBe(PINK);
 });
 
-test('26. the notes and bolts show by the thresholds: at History 65 five notes, at Popularity 80 six bolts; at the real defaults all seven of each', async ({ page }) => {
+test('26. the notes and bolts light by the thresholds: at History 65 five notes, at Popularity 80 six bolts, the rest drawn unlit and not gone (R7); at the real defaults the seven bolts are lit and the seven notes are not, History being off', async ({ page }) => {
   await open(page, { loggedIn: true });
-  const shown = (sel: string) => page.locator(sel).evaluateAll((els) => els.filter((el) => getComputedStyle(el).opacity === '1').length);
-  // The real defaults are History 100 and Popularity 100: every note and bolt is drawn (History is off, so unlit).
-  expect(await shown('[data-strip][data-gear="history"] [data-note]')).toBe(7);
-  expect(await shown('[data-strip][data-gear="popularity"] [data-bolt]')).toBe(7);
-  await page.evaluate(() => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ history: 65, popularity: 80 }));
-  await expect.poll(() => shown('[data-strip][data-gear="history"] [data-note]')).toBe(5);
-  expect(await shown('[data-strip][data-gear="popularity"] [data-bolt]')).toBe(6);
+  // R7: a note or bolt the value does not reach is drawn unlit at full opacity, not hidden, so all seven are always drawn (their
+  // computed opacity is 1) and `data-lit` says which of them are lit. A gear that is off lights none.
+  const state = (sel: string) =>
+    page.locator(sel).evaluateAll((els) => ({
+      drawn: els.filter((el) => getComputedStyle(el).opacity === '1').length,
+      lit: els.filter((el) => el.getAttribute('data-lit') === 'true').length,
+    }));
+  // The real defaults are History 100 (off) and Popularity 100 (on): every bolt is lit, every note is drawn and unlit.
+  expect(await state('[data-strip][data-gear="history"] [data-note]')).toEqual({ drawn: 7, lit: 0 });
+  expect(await state('[data-strip][data-gear="popularity"] [data-bolt]')).toEqual({ drawn: 7, lit: 7 });
+  await page.evaluate(() => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ history: 65, popularity: 80, off: ['tempo', 'era'] }));
+  await expect.poll(() => state('[data-strip][data-gear="history"] [data-note]')).toEqual({ drawn: 7, lit: 5 });
+  expect(await state('[data-strip][data-gear="popularity"] [data-bolt]')).toEqual({ drawn: 7, lit: 6 });
 });
 
 test('27. the Era tab\'s jukebox: Era off is an unlit body with both lights dark; one era lights the left; two or more light both; none picked is dark again', async ({ page }) => {
@@ -1224,19 +1236,19 @@ test.describe('motion', () => {
     expect(await animation()).toBeNull();
   });
 
-  test('the sign buzzes and the #1 title\'s wipe sweeps, when motion is allowed', async ({ page }) => {
+  test('the sign buzzes when motion is allowed, and nothing in the list loops: the #1 wipe is gone (R12; the titles\' one-time fill is tests/e2e/setlist-rows.spec.ts)', async ({ page }) => {
     await open(page);
     expect(await css(page.locator('[lang="ja"]'), 'animation-name')).not.toBe('none');
-    const wipe = (prop: string) => page.locator('[data-wipe]').evaluate((el, p) => getComputedStyle(el, '::after').getPropertyValue(p), prop);
-    expect(await wipe('animation-name')).not.toBe('none');
-    expect(await wipe('animation-duration')).toBe('3.4s');
     expect(await css(page.locator('[lang="ja"]'), 'animation-duration')).toBe('3.2s');
     // The notes and bolts bob.
     expect(await css(strip(page, 'popularity').locator('[data-bolt] > *').first(), 'animation-name')).not.toBe('none');
+    // The list has no looping animation of its own: no wipe, and nothing else that never ends.
+    expect(await page.locator('[data-wipe]').count()).toBe(0);
+    expect(await page.locator('#list-scroll').evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.effect?.getComputedTiming().iterations === Infinity).length)).toBe(0);
   });
 });
 
-test('30. with reduced motion, the pendulum, the bob, the sign\'s buzz, the wipe and the art\'s flicker are all off', async ({ page }) => {
+test('30. with reduced motion, the pendulum, the bob, the sign\'s buzz, the titles\' fill and the art\'s flicker are all off', async ({ page }) => {
   await open(page);
   await pressKey(page, 'tempo', 'ArrowRight', 3); // so the pendulum would swing, and the flicker would play
   const names = {
@@ -1246,12 +1258,13 @@ test('30. with reduced motion, the pendulum, the bob, the sign\'s buzz, the wipe
     bob: await css(strip(page, 'popularity').locator('[data-bolt] > *').first(), 'animation-name'),
     noteBob: await css(strip(page, 'history').locator('[data-note] > *').first(), 'animation-name'),
     sign: await css(page.locator('[lang="ja"]'), 'animation-name'),
-    wipe: await page.locator('[data-wipe]').evaluate((el) => getComputedStyle(el, '::after').animationName),
   };
-  expect(names).toEqual({ pendulum: 'none', flicker: 'none', flickerDifficulty: 'none', bob: 'none', noteBob: 'none', sign: 'none', wipe: 'none' });
-  // The #1 title shows fully pink: no sweep.
-  expect(await page.locator('[data-wipe]').evaluate((el) => getComputedStyle(el, '::after').clipPath)).toBe('inset(0px)');
-  expect(await page.locator('[data-wipe]').evaluate((el) => getComputedStyle(el, '::after').color)).toBe(rgb('#FF6FB1'));
+  expect(names).toEqual({ pendulum: 'none', flicker: 'none', flickerDifficulty: 'none', bob: 'none', noteBob: 'none', sign: 'none' });
+  // The titles show, white, with no fill drawn over them (R12: tests/e2e/setlist-rows.spec.ts has the rest).
+  const colours = await page.locator('[data-row-title]').evaluateAll((els) => [...new Set(els.map((el) => getComputedStyle(el).color))]);
+  expect(colours).toEqual([rgb('#F3EFF7')]);
+  const copy = await page.locator('[data-fill-text]').first().evaluate((el) => getComputedStyle(el, '::after').content);
+  expect(copy).not.toContain(await page.locator('[data-row-title]').first().innerText());
   const running = await page.locator('#app').evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length);
   expect(running).toBe(0);
 });
@@ -1278,7 +1291,8 @@ test('31b. the same, opened with ?mini=1', async ({ page }) => {
 test('32. no tab label has Japanese in it, and the カラオケ sign is decoration', async ({ page }) => {
   await open(page, { mini: true });
   const labels = await page.locator('[data-tab]').allTextContents();
-  expect(labels).toEqual(['Difficulty', 'History', 'Popularity', 'Tempo', 'Era']);
+  // R11: Listening History goes last of the four gears; its tab still says "History".
+  expect(labels).toEqual(['Difficulty', 'Popularity', 'Tempo', 'History', 'Era']);
   for (const label of labels) expect(label).not.toMatch(/[぀-ヿ一-鿿]/);
   const sign = page.locator('[lang="ja"]');
   await expect(sign).toHaveText('カラオケ');
@@ -1331,22 +1345,27 @@ test('the era labels fit their buttons without wrapping on every phone from 360 
   expect(sizes.at(-1)).toBe(10.5);
 });
 
-test('the ▶ stands where the rank number was: first in the row, and the number is gone', async ({ page }) => {
+test('the slot stands where the rank number was: first in the row, 44 px, 10 px before the text; on a touch screen it holds the ▶ glyph, with no ring, and the number is not drawn', async ({ page }) => {
   await open(page);
+  // This context is a touch phone, which cannot hover: R3 puts the ▶ in the number's place there (tests/e2e/setlist-rows.spec.ts
+  // has the pointer side, where the number shows and hovering the row swaps it for the ▶).
+  expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
   const m = await rows(page).first().evaluate((li) => {
     const row = li.getBoundingClientRect();
     const slot = li.querySelector('[data-play-slot]')!.getBoundingClientRect();
     const text = li.querySelector('[data-row-text]')!.getBoundingClientRect();
-    return { slotLeft: slot.left - row.left, slotW: slot.width, slotH: slot.height, gap: text.left - slot.right, firstChild: (li.firstElementChild as HTMLElement).hasAttribute('data-play-slot'), digits: /^\s*1\b/.test(li.textContent ?? '') };
+    return { slotLeft: slot.left - row.left, slotW: slot.width, slotH: slot.height, gap: text.left - slot.right, firstChild: (li.firstElementChild as HTMLElement).hasAttribute('data-play-slot'), digits: /^\s*1\b/.test((li as HTMLElement).innerText) };
   });
   expect(m.firstChild).toBe(true);
   expect(m.slotLeft).toBeCloseTo(0, 0);
   expect([m.slotW, m.slotH]).toEqual([44, 44]);
   expect(m.gap).toBeCloseTo(10, 0);
+  // The number is in the slot for a pointer device (and for data-rank's sake) but is not drawn here: what is read has no digit first.
   expect(m.digits).toBe(false);
-  // The ▶ is a ring button in --pink-line with a --pink-text glyph (the placeholder until the play button is mounted).
-  const ring = await rows(page).first().locator('[data-play-slot] svg').first().evaluate((el) => getComputedStyle(el.querySelector('circle')!).stroke);
-  expect(ring).toBe(rgb('#F0509A'));
+  expect(await rows(page).first().locator('[data-rank-number]').textContent()).toBe('1');
+  // The ▶ is the glyph alone, in --pink-text (the placeholder until the play button is mounted): no ring, no circle.
+  expect(await css(rows(page).first().locator('[data-play-slot] button'), 'color')).toBe(rgb('#FF6FB1'));
+  expect(await rows(page).first().locator('[data-play-slot] circle').count()).toBe(0);
 });
 
 test('the badge is the song\'s own label, pink for all three, and a Maybe song has none', async ({ page }) => {

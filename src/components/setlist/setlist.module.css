@@ -29,7 +29,7 @@
   --sl-reset: #8e8a99; /* the reset icon (hover --sl-text) */
   --sl-unlit: #34313d; /* an unlit neon tube */
   --sl-pink: #ff4fa0; /* Era, lit selections, the mic */
-  --sl-pink-text: #ff6fb1; /* badge text, the lyric wipe */
+  --sl-pink-text: #ff6fb1; /* badge text, and the range notes and redo while hovered or focused (R9) */
   --sl-pink-line: #f0509a; /* badge border, reason line */
   --sl-cyan: #4fdde8; /* History */
   --sl-amber: #ffc24a; /* Popularity, the Era jukebox lights, Difficulty's middle tier */
@@ -225,5 +225,10 @@
 @media (prefers-reduced-motion: reduce) {
   .sign {
     animation: none !important;
+  }
+
+  .noteMark,
+  .redo {
+    transition: none;
   }
 }
