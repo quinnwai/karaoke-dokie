@@ -112,7 +112,8 @@ finds the screen, the tuner and a running mic step as they were. A tablet (talle
      alone, no ring or circle); on a touch screen, which cannot hover, the ▶ stands in the number's place and the number
      is not drawn. A ▶ that cannot play (the song has no preview) is faded and disabled; a preview that is loading, playing or
      paused shows its ⏸ or ▶ with no hover. The number is hidden from a screen reader (the list is an `<ol>`) and the rank is also in
-     `data-rank`. The reason line is
+     `data-rank`. The row's button is described by its reason line (`aria-describedby`), by an id made from the row's place, not
+     its track id: a catalogue id has spaces ("cat:michael jackson|beat it"), which split the list of ids. The reason line is
      `whyOf` in `src/lib/setlist/rows.ts`: the first two of "In your sweet spot" (Difficulty on, the song's place within 15
      of it), "Crowd favourite" or "Deep cut" (place on Popularity at least 85, or at most 35), "On repeat" or "Rediscover"
      (History at least 85, or at most 20), and when none holds "Gets the room moving" / "Slow burner" / "Solid pick"
@@ -137,13 +138,14 @@ finds the screen, the tuner and a running mic step as they were. A tablet (talle
      one, with no glow (R5, R10). The top of the sheet has no pink (R8). **Reset** on
      a gear puts it back to its default (`src/lib/setlist/defaults.ts`, the one place) and turns it **off**: it
      counts for nothing, its art goes dark (unlit neon tubes; no dimming), and touching it again turns it on from the
-     default, with a short neon flicker. The History notes, the Popularity bolts and the tabs' rays that the value has not
+     default, with a short neon flicker (0.7 s; it also plays on the page's first load, and nowhere else: showing a strip
+     again, as a mini tab switch, expanding the sheet or Back from a song page does, plays nothing). The History notes, the Popularity bolts and the tabs' rays that the value has not
      reached are drawn unlit rather than hidden, and light as it reaches them (R7). Era off means every era. The Era panel's header counts the songs that fit
      (`SetlistResponse.total`, every song that fits the range and the picked eras, not the loaded page): "ERA · 1,204 songs".
      **Defaults** (QWW-47's decision): Popularity 100 and Difficulty 0 on; History 100, Tempo 50 and Era off, and Era
      has no default picks (the first tap on an era picks just that era). Signed out, History is also disabled and says
      "Connect Spotify to use your listening history" (or the unreachable line, when the engine says the library could
-     not be read), drawn as an off gear in place of its end labels; signed in, it can be switched on. **Expanded** shows
+     not be read), drawn as an off gear in place of its end labels, 11 px and shown whole (two lines, three in a narrow strip); signed in, it can be switched on. **Expanded** shows
      every gear (rack 416 px); **mini** shows one gear and a tab bar (164 px). The grab handle switches by tap, Enter or
      Space, or by a vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live.
      **Which mode it opens in** (`src/lib/setlist/fit.ts`, measured in `useSheetFit`): mini when the expanded sheet
@@ -152,8 +154,22 @@ finds the screen, the tuner and a running mic step as they were. A tablet (talle
      keeps it mini. `?mini=1` always starts in mini mode.
    - **Type**: Inter 400, 500, 600 and 700, self-hosted (`@fontsource/inter`, SIL OFL 1.1), and Noto Sans JP 700
      subset to the four characters of the sign (`src/components/setlist/fonts/`). The earlier steps keep the system font.
-   - **Events**: `gear_change` (gear, value, on) when a thumb is let go or a gear is reset, `era_change` (era, picked,
-     on, eras) on an era tap or reset. `song_opened` and the like carry each gear's target (null when off).
+   - **Events**: `gear_change` (gear, value, on, mode) when a thumb is let go or a gear is reset, `era_change` (era, picked,
+     on, eras, mode) on an era tap or reset. Both take their names from `EVENT` in `src/lib/eventNames.ts` (#29's), as the rest
+     of the release funnel does, and reach PostHog with the environment tag and only the props on its allowlist (`picked` is on
+     it); `tests/screen/posthogApp.test.tsx` drives a tuner through the real sink. `song_open` and the like carry each gear's
+     target (null when off).
+   - **Back** (the second adversarial review of #38): a song page, and the quiet, mic and note steps of a redo (which only a
+     singer who already has a range reaches from the list), are one history entry each (`useOverlayHistory`; `overlayOf` in
+     `flow.ts` says what is open). Opening one pushes an entry and leaves the address alone, and the system Back (a phone's back
+     button or swipe) pops it and closes what was opened, like the page's own ‹ Back, with the range, the tuning (gears, eras,
+     sheet mode) and the list as they were. When the app closes it itself, the entry is taken off with `history.back()`, so the
+     next Back press leaves the page as it did before. On the mic and note steps of a redo, and only there, every screen has
+     "Back to songs" in the top-left corner (`BackToSongs`, `backToSongs` in `flow.ts`): it keeps the old range, which only a
+     finished test replaces, drops the half-finished test's saved progress, and loads the list again if the redo emptied it (a
+     whole redo does, one end does not). The very first test has no range to go back to: no button, no entry. The song page keeps
+     the match it was opened with (`KaraokeApp`), so a re-rank that lands under it and leaves the song out of the new list no
+     longer closes it; only Back does.
    - **Tests**: `window.setlist` (`getState`, `setState`, `ranking`, `songs`) exists only in a build made with
      `NEXT_PUBLIC_SETLIST_TEST_HOOK=1`, which is the e2e build (`playwright.config.ts`); production has none.
    In catalogue mode "Connect Spotify" saves the range for the sign-in round trip; back from Spotify,
@@ -208,7 +224,8 @@ button and must stay on screen (spike QWW-44).
   button never opens the song page, and the rest of the row still does. Opening the song page (or a filter taking the song off
   the list) stops the preview.
 - **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly, so a line under the list reads
-  "Previews from [logo] Deezer" whenever a song on it has a preview. It links to the credits page, which says the
+  "Previews from [logo] Deezer" whenever a song on it has a preview. It links to the credits page (in a new tab, as the book
+  icon's link is, so reading it does not cost the singer their range and tuning), which says the
   previews stream from Deezer for private, non-commercial listening and that no audio is kept, as the terms ask
   listeners to be told.
 - **Event log (QWW-51).** When a preview a tap started makes its first sound, the player tells `KaraokeApp`
