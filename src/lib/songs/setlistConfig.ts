@@ -3,7 +3,8 @@
 //
 // Why each value (QWW-47, ranking model A, Quinn-Wai 10 Nov): the default view is "most popular
 // first, then easiest" for someone who is logged out, and the engine's weights (Popularity counts
-// double) turn these values into exactly that.
+// double) turn these values into exactly that, among the songs they can sing as written, which come
+// before any song that needs an octave jump (QWW-58).
 //
 //   Difficulty  0    on   "Light work" end: among equally popular songs the easiest comes first. Zero rather
 //                         than a low-ish 15, because a song easier than the target would otherwise lose to one

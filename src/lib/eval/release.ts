@@ -1,18 +1,22 @@
-// Release eval (QWW-52): the pass/fail checks for the QWW-42 success criteria 1 to 4 and 6, on five
+// Release eval (QWW-52): the pass/fail checks for the QWW-42 success criteria 1 to 4, 6 and 9, on nine
 // fixed test ranges. Everything here is pure: it takes the ranked matches and the facts the script
 // looked up (Billboard, Deezer, the tempo judge's labels) and returns structured results. It asserts
 // on ranked ids and labels only, never on model prose. scripts/eval-release.ts does the reading.
 //
 // How the list is cut for each check lives in VIEWS, the one place that knows the results view's
 // shape. When the tuner changes it (QWW-46: multi-select era, gears; QWW-47: the ranking), update
-// VIEWS and the checks keep working.
+// VIEWS and the checks keep working. Criterion 9 (QWW-58) does not read VIEWS: "default gears" and "sung
+// as written first" belong to the Setlist tuner, so it reads the tuner's own list (tunerDefaultList, the
+// engine in songs/setlist.ts). Criteria 1 to 4 and 6 still grade the old results view.
 
 import type { Decade, Match, ResultsView, VocalRange } from '../contracts';
 import { DECADES, DEFAULT_VIEW, viewMatches } from '../songs/browse';
 import { songKey } from '../songs/resolve';
+import { rankPrepared, type PreparedSetlist } from '../songs/setlist';
+import { DEFAULTS, DEFAULT_OFF } from '../songs/setlistConfig';
 import { leadArtist } from '../popularity/import';
 
-// ---------- the five test ranges ----------
+// ---------- the test ranges ----------
 
 export interface TestRange {
   id: string;
@@ -21,14 +25,21 @@ export interface TestRange {
 }
 
 /**
- * Low male is Quinn-Wai's own range (F2 to C5, QWW-3 and QWW-31). The other four are typical
- * ranges (no tester recordings yet): tenor, alto, soprano, and a beginner's octave and a bit.
+ * One range per voice type, from the lowest to the highest (QWW-58 added bass, baritone, soprano and F2 to F4,
+ * and named every range by its voice type; MIDI, C4 = 60). F2 to F4 is the range Quinn-Wai tested on 11 Nov and
+ * low male is his own full range (F2 to C5, QWW-3 and QWW-31). The others are typical ranges (no tester
+ * recordings yet), and a beginner's octave and a bit. Most span two octaves, which is what shows whether the
+ * ranking tells voice types apart; a range of two and a half octaves, like low male, hides it.
  */
 export const TEST_RANGES: TestRange[] = [
-  { id: 'low-male', label: 'Low male (Quinn-Wai, F2-C5)', range: { low: 41, high: 72, source: 'test' } },
-  { id: 'high-male', label: 'High male (C3-C5)', range: { low: 48, high: 72, source: 'test' } },
-  { id: 'low-female', label: 'Low female (F3-F5)', range: { low: 53, high: 77, source: 'test' } },
-  { id: 'high-female', label: 'High female (A3-A5)', range: { low: 57, high: 81, source: 'test' } },
+  { id: 'bass', label: 'Bass (E2-E4)', range: { low: 40, high: 64, source: 'test' } },
+  { id: 'f2-f4', label: "Bass-baritone, Quinn-Wai's test (F2-F4)", range: { low: 41, high: 65, source: 'test' } },
+  { id: 'baritone', label: 'Baritone (A2-A4)', range: { low: 45, high: 69, source: 'test' } },
+  { id: 'tenor', label: 'Tenor (C3-C5)', range: { low: 48, high: 72, source: 'test' } },
+  { id: 'alto', label: 'Alto (F3-F5)', range: { low: 53, high: 77, source: 'test' } },
+  { id: 'mezzo', label: 'Mezzo (A3-A5)', range: { low: 57, high: 81, source: 'test' } },
+  { id: 'soprano', label: 'Soprano (C4-C6)', range: { low: 60, high: 84, source: 'test' } },
+  { id: 'low-male', label: 'Low male, Quinn-Wai (F2-C5)', range: { low: 41, high: 72, source: 'test' } },
   { id: 'beginner', label: 'Narrow beginner (G3-A4)', range: { low: 55, high: 69, source: 'test' } },
 ];
 
@@ -55,6 +66,21 @@ export const VIEWS = {
   eraGear: (ms: Match[], r: VocalRange, era: Era | null, gear: Gear, at: 0 | 1) =>
     viewMatches(ms, view({ decade: era, [gear]: at }), r, 'catalogue'),
 };
+
+/**
+ * What the Setlist tuner lists for a logged-out singer who has not touched it (QWW-58): the engine
+ * (songs/setlist.ts) with the defaults (songs/setlistConfig.ts), as POST /api/setlist answers it. `prepared` is
+ * the range's songs with their places on the gears (prepareCatalogue in server/catalogue.ts).
+ */
+export function tunerDefaultList(prepared: PreparedSetlist): Match[] {
+  const state = {
+    gears: { difficulty: DEFAULTS.difficulty, history: DEFAULTS.history, popularity: DEFAULTS.popularity, tempo: DEFAULTS.tempo },
+    off: [...DEFAULT_OFF],
+    eras: [...DEFAULTS.eras],
+    loggedIn: false,
+  };
+  return rankPrepared(prepared, state).songs.map((s) => s.match);
+}
 
 // ---------- facts the script looks up ----------
 
@@ -170,7 +196,7 @@ export function fitsEnd(labels: JudgeLabel[], end: TempoEnd): { fits: boolean; f
 // ---------- the checks ----------
 
 export interface Check {
-  criterion: 1 | 2 | 3 | 4 | 6;
+  criterion: 1 | 2 | 3 | 4 | 6 | 9;
   range: string;
   pass: boolean;
   /** The number the criterion is judged on, e.g. "17/20". */
@@ -259,6 +285,27 @@ export function checkPlay(t: RangeInput, facts: Map<string, SongFacts>): Check {
   };
 }
 
+// ---------- 9. sung as written (QWW-58) ----------
+
+/**
+ * Songs you can sing as written come first: at least 15 of the tuner's top 20 for a logged-out singer with the
+ * defaults have no octave shift (`match.octave === 'none'`). `tuner` is tunerDefaultList for the range. Like
+ * criterion 1, a list of fewer than 20 songs fails. Structured output only.
+ */
+export function checkSungAsWritten(test: TestRange, tuner: Match[]): Check {
+  const top = tuner.slice(0, 20);
+  const jumps = top.filter((m) => m.octave !== 'none');
+  const written = top.length - jumps.length;
+  return {
+    criterion: 9,
+    range: test.id,
+    pass: top.length >= 20 && written >= 15,
+    value: `${written}/${top.length}`,
+    want: '>=15/20',
+    notes: jumps.map((m) => `sung an octave ${m.octave}: ${m.track.artist} - ${m.track.title}`),
+  };
+}
+
 /** One tempo list: the top 20 of one range, one era (or none) and one end of the tempo gear. */
 export interface TempoList {
   range: string;
@@ -330,6 +377,7 @@ const CRITERIA: Record<Check['criterion'], string> = {
   3: '3. Never empty',
   4: '4. Titles (top 50)',
   6: '6. Play (top 20 with a Deezer preview)',
+  9: '9. Sung as written (top 20)',
 };
 
 export interface Report {
@@ -381,7 +429,7 @@ export function toMarkdown(r: Report): string {
     `|---|${ranges.map(() => '---').join('|')}|`,
     ...crits.map((c) => `| ${CRITERIA[c]} | ${ranges.map((id) => cell(r.checks.find((x) => x.criterion === c && x.range === id))).join(' | ')} |`),
     '',
-    'Targets: 1 at least 15/20; 2 every era and end at 10/10 of the top 10 and 18/20 of the top 20; 3 max difficulty at least 10 and no empty era + gear combination; 4 zero version titles and duplicates; 6 at least 90%.',
+    'Targets: 1 at least 15/20; 2 every era and end at 10/10 of the top 10 and 18/20 of the top 20; 3 max difficulty at least 10 and no empty era + gear combination; 4 zero version titles and duplicates; 6 at least 90%; 9 at least 15 of the top 20 sung as written (the tuner\'s list, logged out, default gears).',
   ];
   const failed = r.checks.filter((c) => !c.pass && c.notes.length);
   if (failed.length) {
