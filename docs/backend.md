@@ -157,8 +157,10 @@ import. The model is the design's distance ranking (round 5 spec section 5), dec
 
    Popularity, Tempo and History are by rank among the songs that fit the singer, so every tenth of the track holds about
    a tenth of the songs (QWW-33), songs with the same score sharing their average place.
-3. **The sum.** Era first: Era off shows every era; Era on shows the picked eras only (a song with no year is left out),
-   and nothing picked is an empty list (`no-era-picked`). Then
+3. **The sum.** Era first, a multi-select: Era off shows every era; Era on shows the songs of any of the picked eras (an OR,
+   so each pick adds songs and takes none away, and the songs keep the order they have in the whole list; a song with no
+   year is left out), and nothing picked is an empty list (`no-era-picked`). Every one of the 127 combinations of eras is
+   tested (`tests/songs/setlist.test.ts`, `tests/server/setlist.test.ts`). Then
    `distance = sum over the active gears of weight × |song's place - gear value|`. An active gear is one not in `off`,
    and History only when the singer is signed in and their library was read. An off gear adds nothing. Popularity's
    weight is 2, the others 1 (`GEAR_WEIGHTS`). With the defaults that is a blend that leans on popularity, not a sort by
@@ -195,10 +197,12 @@ most popular Hard songs first: the Hard third of the track is nearest to 100, an
 them. On the synthetic catalogues in the tests (hundreds of Hard songs of every popularity) the first 10 are all Hard in
 every range. It is exact, the first songs being all Hard and the hardest first, when Popularity is off. It is not a law with
 Popularity on: a range with only a handful of Hard songs, all obscure, puts popular Medium and Easy ones among them.
+Quinn-Wai chose this (option A) on 11 Nov, and that the default list leans on popularity as it does (`GEAR_WEIGHTS`).
 
 **Not used by the ranking:** the fast-lyrics flag and the octave penalty of the Top picks score (a song an octave away
 only loses a tie to one sung as written; its notes are scored as sung). A singer whose range is so narrow that no song
-fits (5 to about 9 semitones) gets `no-songs-in-range`.
+fits (5 to about 9 semitones) gets `no-songs-in-range`; Quinn-Wai (11 Nov) did not want a widening fallback, so the tests
+and the release checks use ranges of an octave or more.
 
 **Cost and Spotify.** A range's songs are matched and given their places once and kept (the last 6 ranges, dropped when
 the catalogue's hour is up), so moving a slider re-sorts a few thousand songs. A signed-in singer's library matches are kept

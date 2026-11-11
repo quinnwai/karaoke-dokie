@@ -6,6 +6,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as login from '../../app/api/auth/login/route';
 import * as callback from '../../app/api/auth/callback/route';
 import * as setlistRoute from '../../app/api/setlist/route';
+import { ERA_IDS } from '../../src/lib/contracts';
 import type { EraId, GearValues, Match, SetlistRequest, SetlistResponse, SongRange, TunerPart } from '../../src/lib/contracts';
 import { catalogueTracks, createCatalogue, prepareCatalogue, SETLIST_RANGES_KEPT } from '../../src/lib/server/catalogue';
 import { LIBRARY_LISTS_KEPT, LIBRARY_RETRY_MS } from '../../src/lib/server/handlers';
@@ -243,6 +244,80 @@ describe('POST /api/setlist, signed out', () => {
     const on = await post(body({ off: ['history', 'tempo', 'era'] }));
     expect(ids(on.body)).toEqual(ids(off.body));
     expect(on.body.songs.some((s) => s.match.range.duet === true)).toBe(true);
+  });
+});
+
+describe('POST /api/setlist, multi-select Era', () => {
+  const eraOff: TunerPart[] = ['history', 'tempo', 'era'];
+  const eraOn: TunerPart[] = ['history', 'tempo'];
+  /** The whole page for these picks (the placeholder catalogue is small enough for one). */
+  const ask = (eras: EraId[], off: TunerPart[] = eraOn, jar?: Jar) => post(body({ off, eras, limit: SETLIST_PAGE.max }), jar);
+
+  it('lists the songs of every picked era, no more and no fewer, in the order the whole list has them', async () => {
+    const whole = await ask([], eraOff); // Era off: every era
+    const eighties = await ask(['s80']);
+    const nineties = await ask(['s90']);
+    const both = await ask(['s80', 's90']);
+    expect(eighties.body.total).toBeGreaterThan(0);
+    expect(nineties.body.total).toBeGreaterThan(0);
+    expect(both.body.total).toBe(eighties.body.total + nineties.body.total);
+    expect(both.body.songs.every((s) => s.era === 's80' || s.era === 's90')).toBe(true);
+    expect(new Set(both.body.songs.map((s) => s.era))).toEqual(new Set(['s80', 's90'])); // both are really there
+    expect(ids(both.body)).toEqual(whole.body.songs.filter((s) => s.era === 's80' || s.era === 's90').map((s) => s.match.track.id));
+    expect(both.body.applied).toEqual(['difficulty', 'popularity', 'era']);
+    expect(both.body.empty).toBeUndefined();
+  });
+
+  it('picks any number of eras, up to all seven, which is every song with a year', async () => {
+    const whole = await ask([], eraOff);
+    const dated = whole.body.songs.filter((s) => s.era !== null);
+    expect(dated.length).toBeLessThan(whole.body.songs.length); // one placeholder song has no year, and drops out
+    const three = await ask(['pre', 's00', 's20']);
+    expect(three.body.songs.every((s) => ['pre', 's00', 's20'].includes(s.era!))).toBe(true);
+    expect(new Set(three.body.songs.map((s) => s.era))).toEqual(new Set(['pre', 's00', 's20']));
+    const all = await ask([...ERA_IDS]);
+    expect(ids(all.body)).toEqual(dated.map((s) => s.match.track.id));
+  });
+
+  it('is the same list whatever order the eras are sent in, and however often', async () => {
+    const a = await ask(['s70', 's10', 's90']);
+    expect(ids((await ask(['s90', 's70', 's10'])).body)).toEqual(ids(a.body));
+    expect(ids((await ask(['s10', 's10', 's90', 's70', 's90'])).body)).toEqual(ids(a.body));
+  });
+
+  it('follows the tuner\'s taps: the first pick is one era, each tap adds or takes away one, none left is the empty state, reset is every era', async () => {
+    const total = async (eras: EraId[], off: TunerPart[] = eraOn) => (await ask(eras, off)).body.total;
+    const [s80, s90, s00] = [await total(['s80']), await total(['s90']), await total(['s00'])];
+    expect(await total(['s80', 's90'])).toBe(s80 + s90); // tap '80s, then '90s
+    expect(await total(['s80', 's90', 's00'])).toBe(s80 + s90 + s00);
+    expect(await total(['s80', 's00'])).toBe(s80 + s00); // tap '90s again: it goes
+    expect(await total(['s00'])).toBe(s00);
+    expect((await ask([])).body).toMatchObject({ songs: [], total: 0, empty: 'no-era-picked' }); // "Pick an era to see songs."
+    expect(await total(['s80'], eraOff)).toBe((await ask([], eraOff)).body.total); // reset: Era is off, so the picks left behind count for nothing
+    expect((await ask(['s80'], eraOff)).body.applied).toEqual(['difficulty', 'popularity']);
+  });
+
+  it('pages through a selection of several eras without a gap or a repeat', async () => {
+    const full = await ask(['s70', 's80', 's10']);
+    const pages: string[] = [];
+    for (let offset: number | null = 0; offset !== null; ) {
+      const page: Awaited<ReturnType<typeof post>> = await post(body({ off: eraOn, eras: ['s80', 's10', 's70'], limit: 4, offset }));
+      expect(page.body.total).toBe(full.body.total);
+      pages.push(...ids(page.body));
+      offset = page.body.nextOffset;
+    }
+    expect(pages).toEqual(ids(full.body));
+    expect(new Set(pages).size).toBe(pages.length);
+  });
+
+  it('applies to a signed-in singer\'s library songs too, and the History gear still counts', async () => {
+    const jar = await signIn();
+    const res = await ask(['s70', 's80'], ['tempo'], jar);
+    expect(res.body.applied).toEqual(['difficulty', 'history', 'popularity', 'era']);
+    expect(res.body.songs.length).toBeGreaterThan(0);
+    expect(res.body.songs.every((s) => s.era === 's70' || s.era === 's80')).toBe(true);
+    expect(res.body.songs.some((s) => !s.match.track.id.startsWith('cat:'))).toBe(true); // the singer's own songs are in it
+    expect(res.body.songs.every((s) => s.match.year !== undefined && s.match.year >= 1970 && s.match.year < 1990)).toBe(true);
   });
 });
 

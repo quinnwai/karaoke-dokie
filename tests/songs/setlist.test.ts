@@ -513,6 +513,70 @@ describe('the Era filter (rule 5)', () => {
   });
 });
 
+describe('multi-select Era (rule 5): every combination of eras', () => {
+  // The 127 non-empty subsets of the seven eras, each as the list of eras in it.
+  const COMBINATIONS: EraId[][] = Array.from({ length: 127 }, (_, i) => ERA_IDS.filter((_, k) => ((i + 1) >> k) & 1));
+  const eraOff: TunerPart[] = ['history', 'tempo', 'era'];
+  const eraOn: TunerPart[] = ['history', 'tempo'];
+
+  it('has all 127 combinations, from one era to all seven', () => {
+    expect(new Set(COMBINATIONS.map((c) => c.join())).size).toBe(127);
+    expect(Math.min(...COMBINATIONS.map((c) => c.length))).toBe(1);
+    expect(Math.max(...COMBINATIONS.map((c) => c.length))).toBe(7);
+  });
+
+  it.each(TEST_RANGES)('%s: any combination of eras lists exactly the songs of those eras, in the order the whole list has them', (_name, range) => {
+    const { prepared } = prepareCatalogue(CATALOGUE, range, deps);
+    const whole = rankPrepared(prepared, state({ off: eraOff })).songs; // Era off: every era, whatever is picked
+    const byEra = new Map<EraId | null, number>();
+    for (const s of whole) byEra.set(s.era, (byEra.get(s.era) ?? 0) + 1);
+    // The catalogue has songs in every era and some with no year, so each combination below is a real selection.
+    for (const era of ERA_IDS) expect(byEra.get(era) ?? 0, era).toBeGreaterThan(10);
+    expect(byEra.get(null) ?? 0).toBeGreaterThan(0);
+
+    for (const picked of COMBINATIONS) {
+      const r = rankPrepared(prepared, state({ off: eraOn, eras: picked }));
+      const inOrder = whole.filter((s) => s.era !== null && picked.includes(s.era)).map((s) => s.match.track.id);
+      expect(ids(r), picked.join()).toEqual(inOrder); // OR, and the same relative order as with every era
+      expect(r.songs.every((s) => s.era !== null && picked.includes(s.era))).toBe(true);
+      expect(r.songs.length, picked.join()).toBe(picked.reduce((n, era) => n + (byEra.get(era) ?? 0), 0)); // the eras are disjoint
+      expect(r.empty).toBeUndefined();
+      expect(r.applied).toEqual(['difficulty', 'popularity', 'era']);
+    }
+  });
+
+  it('does not care in which order, or how often, the eras were picked', () => {
+    const { prepared } = prepareCatalogue(CATALOGUE, TEST_RANGES[1]![1], deps);
+    const a = ids(rankPrepared(prepared, state({ off: eraOn, eras: ['s80', 's00', 'pre'] })));
+    expect(ids(rankPrepared(prepared, state({ off: eraOn, eras: ['pre', 's80', 's00'] })))).toEqual(a);
+    expect(ids(rankPrepared(prepared, state({ off: eraOn, eras: ['s00', 'pre', 's80', 's80', 'pre'] })))).toEqual(a);
+  });
+
+  it('follows the tuner\'s taps: the first pick is that era alone, each tap adds or takes away one, none left is the empty state, reset is every era', () => {
+    const { prepared } = prepareCatalogue(CATALOGUE, TEST_RANGES[0]![1], deps);
+    const total = (eras: EraId[], off: TunerPart[] = eraOn) => rankPrepared(prepared, state({ off, eras })).songs.length;
+    const s80 = total(['s80']);
+    const s90 = total(['s90']);
+    const s00 = total(['s00']);
+    expect(total(['s80', 's90'])).toBe(s80 + s90); // tap '80s, then '90s: both
+    expect(total(['s80', 's90', 's00'])).toBe(s80 + s90 + s00);
+    expect(total(['s80', 's00'])).toBe(s80 + s00); // tap '90s again: it goes
+    expect(total(['s00'])).toBe(s00);
+    const none = rankPrepared(prepared, state({ off: eraOn, eras: [] }));
+    expect(none).toMatchObject({ songs: [], empty: 'no-era-picked' }); // "Pick an era to see songs."
+    expect(total([], eraOff)).toBe(total([...ERA_IDS]) + prepared.songs.filter((s) => s.era === null).length); // reset: every era, undated songs too
+  });
+
+  it('applies to the Maybe songs as well, which still come last', () => {
+    const sure = [song('s80', { low: 50, high: 60, year: 1984 }), song('s90', { low: 50, high: 60, year: 1994 }), song('s00', { low: 50, high: 60, year: 2004 })];
+    const maybe = [song('m80', { low: 42, high: 68, confidence: 'low', year: 1983 }), song('m10', { low: 42, high: 68, confidence: 'low', year: 2012 })];
+    const list = prepareSetlist(cands(...sure, ...maybe), USER);
+    const r = rankPrepared(list, state({ off: eraOn, eras: ['s80', 's90'] }));
+    expect(ids(r).sort()).toEqual(['m80', 's80', 's90']);
+    expect(ids(r).at(-1)).toBe('m80');
+  });
+});
+
 describe('the Maybe songs come last (as everywhere else)', () => {
   it('sort after every other song, whatever the gears say, and are laid out on their own', () => {
     const maybe = song('maybe', { low: 40, high: 70, confidence: 'low', popularity: 0.99 });
