@@ -1,0 +1,41 @@
+// Which mode a phone opens the sheet in, and whether the expanded sheet fits at all (QWW-57, Quinn-Wai's decision 1, 11 Nov).
+//
+// The expanded sheet is 451 px tall (416 of rack) and the rest of the screen is fixed, so on a short phone it leaves the
+// song list almost nothing: 3 rows on a 390x844, 0 on the 390x664 that iPhone Safari shows, and on a 375x553 (an iPhone SE
+// with Safari's bars) it does not fit inside the screen at all. So:
+//
+// - A screen that would be left with fewer than 3 whole rows opens in MINI. Expanded stays one drag up.
+// - A screen that cannot hold the expanded sheet at all keeps it in mini: the handle does not expand it.
+//
+// The numbers are measured in the browser (the layout is the browser's, and safe areas and fonts are in it), then
+// reduced to the answers here, which are pure and tested.
+
+import { RACK_FULL } from './sheet';
+
+/** A song row is 66 px tall (Round 6A §4). */
+export const ROW_HEIGHT = 66;
+/** A phone opens expanded only if that leaves at least this many whole rows. */
+export const MIN_OPENING_ROWS = 3;
+
+export interface ExpandedFit {
+  /** How tall the song list would be with the sheet expanded, px. Negative: the expanded sheet is taller than the room for it. */
+  listHeight: number;
+  /** Whole rows that list shows. */
+  rows: number;
+  /** The expanded sheet fits inside the screen. */
+  canExpand: boolean;
+  /** The sheet should open in mini: expanded would leave fewer than MIN_OPENING_ROWS whole rows. */
+  opensMini: boolean;
+}
+
+/**
+ * What the expanded sheet would leave, from what is on screen now. `list` is the song list's height, `rack` the sheet's
+ * rack height (416 expanded, 164 mini, anything in between mid-drag), and `overflow` how far the screen's content runs past
+ * its bottom edge (0 when everything fits; an expanded sheet that is too tall squeezes the list to nothing and spills
+ * over). The list and the rack always add up to the same room, so the answer does not depend on the mode it is read in.
+ */
+export function expandedFit({ list, rack, overflow = 0 }: { list: number; rack: number; overflow?: number }): ExpandedFit {
+  const listHeight = list + (rack - RACK_FULL) - overflow;
+  const rows = Math.max(0, Math.floor(listHeight / ROW_HEIGHT));
+  return { listHeight, rows, canExpand: listHeight >= 0, opensMini: rows < MIN_OPENING_ROWS };
+}

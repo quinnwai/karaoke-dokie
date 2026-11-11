@@ -3,6 +3,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createNetworkEngine, NETWORK_LIMIT } from '../../src/lib/setlist/engine';
+import { SETLIST_PAGE } from '../../src/lib/songs/setlistConfig';
 import type { SetlistRequest, SetlistResponse } from '../../src/lib/setlist/types';
 
 const REQUEST: SetlistRequest = {
@@ -12,6 +13,14 @@ const REQUEST: SetlistRequest = {
   range: { low: 45, high: 72 },
 };
 const ANSWER: SetlistResponse = { songs: [], total: 0, nextOffset: null, sources: {}, applied: ['difficulty', 'popularity'], empty: 'no-songs-in-range' };
+
+describe('NETWORK_LIMIT', () => {
+  it('is the server\'s page maximum itself, imported and not repeated (QWW-57)', () => {
+    expect(NETWORK_LIMIT).toBe(SETLIST_PAGE.max);
+    // Pinned as well, so a change to the page size is read before it ships: the screen slices these 40 at a time.
+    expect(NETWORK_LIMIT).toBe(200);
+  });
+});
 
 describe('createNetworkEngine', () => {
   it('posts the request as JSON, asking for the most songs one request may, and returns the answer', async () => {
