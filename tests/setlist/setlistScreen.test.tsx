@@ -6,16 +6,19 @@
 // animation are tests/e2e's, not these.
 import { cleanup, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import { useReducer, type ReactNode } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SetlistScreen, type SetlistScreenProps } from '../../src/components/setlist/SetlistScreen';
 import { Sheet } from '../../src/components/setlist/Sheet';
 import type { Match, ResultsMode } from '../../src/lib/contracts';
+import { resetFlickerSession } from '../../src/lib/setlist/art';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { SHEET_GEARS, SHEET_PARTS } from '../../src/lib/setlist/gears';
 import { initialTuner, tunerReducer, type TunerAction } from '../../src/lib/setlist/tuner';
 import { GEAR_IDS, TUNER_PARTS, type EmptyReason, type EraId, type GearId, type SetlistSong, type TunerState } from '../../src/lib/setlist/types';
 import { all, el, RANGE, rankedSong, rowIds, SEL, setlistProps } from '../helpers/setlist';
 
+// Every test is a page's first load as far as the strips' turn-on flicker goes (it plays once per page).
+beforeEach(resetFlickerSession);
 afterEach(() => {
   cleanup();
   vi.unstubAllEnvs();

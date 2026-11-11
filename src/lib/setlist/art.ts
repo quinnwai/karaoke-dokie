@@ -163,12 +163,28 @@ export function jukeboxArt(picked: number, off: boolean): JukeboxArt {
   return { body: tube(PINK, off), lights: [light(1), light(2)] };
 }
 
+/** How long the strip art's turn-on flicker takes, ms: the 0.7 s of `neonFlicker`. */
+export const FLICKER_MS = 700;
+
 /**
  * The strip art's turn-on flicker (Round 6A §7), as an `animation` value: once, 0.7 s, linear, on first load and each time
- * the gear goes from off to on. The art sets it as an inline style, so the browser restarts it exactly when the value
- * changes from `none`, and not when only the gear's own value changes. The keyframes are global, in setlist-global.css.
+ * the gear goes from off to on, and at no other time. The art sets it as an inline style, so the browser restarts it exactly
+ * when the value changes from `none`, and not when only the gear's own value changes. `armed` is whether the flicker is due
+ * (GearArt.tsx, StripSvg, says when); it is not due once it has played, because a browser also plays a CSS animation again
+ * each time its element goes from `display: none` to shown, and the mini sheet does that to a strip on every tab switch
+ * and every expand. The keyframes are global, in setlist-global.css.
  */
-export const neonFlicker = (off: boolean): string => (off ? 'none' : 'neonOn 0.7s linear 1');
+export const neonFlicker = (off: boolean, armed: boolean): string => (!off && armed ? `neonOn ${FLICKER_MS / 1000}s linear 1` : 'none');
+
+/**
+ * Whether the page has drawn its first strip art. Every strip drawn in the page's first commit flickers (those that are on);
+ * one drawn after it does not: the singer coming back from a song, or doing the singing test again, is not a first load. The
+ * page's life is this module's, so a new page starts it over. Tests start it over between cases.
+ */
+export const flickerSession = { done: false };
+export const resetFlickerSession = (): void => {
+  flickerSession.done = false;
+};
 
 /** A tab icon is drawn 34 px wide on a 28 unit grid (GearArt.tsx, TAB). */
 export const TAB_PX_PER_UNIT = 34 / 28;

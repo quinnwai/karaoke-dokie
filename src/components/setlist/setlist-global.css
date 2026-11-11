@@ -1,7 +1,7 @@
 /* The gear art's global keyframes (Round 6A §6, §7, §10): the metronome's swings, one per amplitude, +/-20 degrees (slow)
    down to +/-8 (fast), and the flicker a strip's art plays when its gear is turned on. Copied from the reference.
 
-   These are global on purpose. Both animations are inline styles (metronome(value).animation and neonFlicker(off) in
+   These are global on purpose. Both animations are inline styles (metronome(value).animation and neonFlicker(off, armed) in
    src/lib/setlist/art.ts, for example "swing14 0.45s ease-in-out infinite alternate" and "neonOn 0.7s linear 1"), and an
    inline style can only name a keyframes rule by its plain name. A rule inside GearArt.module.css would be renamed by CSS
    Modules and the inline name would no longer match it. Import this file once, in the screen. */

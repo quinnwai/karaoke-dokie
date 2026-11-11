@@ -3,17 +3,19 @@
 // tests/setlist/gearArt.test.tsx checks it against that file, element by element.
 //
 // What moves with a value, what an off gear looks like, which notes, bolts and rays are lit and which jukebox lights are on
-// come from src/lib/setlist/art.ts; this file only applies it. Presentational: no state, no effects. The parent sizes the
-// strip art and draws the box behind it (the svg has no background, width or height of its own), and passes the gear's
-// default as `value` while it is off.
+// come from src/lib/setlist/art.ts; this file only applies it. Presentational, but for the one thing a strip's root keeps: whether
+// its turn-on flicker is due (StripSvg). The parent sizes the strip art and draws the box behind it (the svg has no background,
+// width or height of its own), and passes the gear's default as `value` while it is off.
 
-import { useId, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactElement, type ReactNode } from 'react';
 import {
   AMBER,
   CYAN,
+  FLICKER_MS,
   PINK,
   TAB_GLOW_DEVIATION,
   VIOLET,
+  flickerSession,
   itemArt,
   jukeboxArt,
   laneArt,
@@ -79,14 +81,33 @@ function Glow({ id, y, height }: { id: string; y: string; height: string }) {
  * The strip art's root. The flicker is an inline style so that it restarts exactly when the gear goes from off to on, when
  * its value changes from `none`; a change of the gear's own value leaves it alone (§7). The `flick` class is only the hook
  * the reduced-motion rule needs to switch it off.
+ *
+ * It plays on first load and when the gear goes from off to on, and not when the strip is shown again. The mini sheet keeps
+ * all four strips mounted and hides three (`display: none`), and a browser plays an animation again each time its element is
+ * shown, so a style that stayed set would flicker the art on every tab switch and every expand. So the style is only there
+ * while the flicker is `armed`, and a timer takes it away when the flicker is over; not `animationend`, which a strip that was
+ * hidden at first load never gets. Armed: from the start on the page's first load (every strip in its first commit), while the
+ * gear is off (so its next turn-on plays), and for no longer than FLICKER_MS once the gear is on.
  */
 function StripSvg({ off, className, children }: { off: boolean; className?: string; children: ReactNode }) {
+  const [armed, setArmed] = useState(() => !flickerSession.done);
+  if (off && !armed) setArmed(true);
+  // After every art of the first commit has read the flag, and in an effect: render may run twice before anything commits.
+  useEffect(() => {
+    flickerSession.done = true;
+  }, []);
+  const flickering = armed && !off;
+  useEffect(() => {
+    if (!flickering) return;
+    const over = setTimeout(() => setArmed(false), FLICKER_MS);
+    return () => clearTimeout(over);
+  }, [flickering]);
   return (
     <svg
       viewBox="0 0 150 80"
       aria-hidden="true"
       className={rootClass(styles.flick, className)}
-      style={{ animation: neonFlicker(off) }}
+      style={{ animation: neonFlicker(off, armed) }}
     >
       {children}
     </svg>

@@ -23,12 +23,12 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanup, render } from '@testing-library/react';
-import type { ReactElement } from 'react';
+import { act, cleanup, render } from '@testing-library/react';
+import { StrictMode, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EraIcon, EraTabArt, GearArt, type GearArtVariant } from '../../src/components/setlist/GearArt';
-import { TAB_PX_PER_UNIT, metronome, neonFlicker } from '../../src/lib/setlist/art';
+import { FLICKER_MS, TAB_PX_PER_UNIT, flickerSession, metronome, neonFlicker, resetFlickerSession } from '../../src/lib/setlist/art';
 import { ERA_IDS, GEAR_IDS, type EraId, type GearId } from '../../src/lib/setlist/types';
 
 const REFERENCE = join(__dirname, '../../docs/setlist-round6a/setlist-round6a.html');
@@ -52,6 +52,8 @@ const COLOR = {
   grid: '#1F1D26',
 };
 
+// Every case is a page's first load: the flicker remembers, for the life of the page, that a strip has been drawn (art.ts, flickerSession).
+beforeEach(resetFlickerSession);
 afterEach(cleanup);
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1042,7 +1044,7 @@ describe('GearArt: the turn-on flicker (README §7, test 29)', () => {
       expect(styleProp('animation')(art(gear, 'strip', 50, false)), gear).toBe('neonOn 0.7s linear 1');
       expect(styleProp('animation')(art(gear, 'strip', 50, true)), gear).toBe('none');
     }
-    expect(neonFlicker(false)).toBe('neonOn 0.7s linear 1');
+    expect(neonFlicker(false, true)).toBe('neonOn 0.7s linear 1');
   });
 
   it('is not on a tab icon: its root carries a glow (not History\'s or Popularity\'s, R7), and for Difficulty a colour, and no animation', () => {
@@ -1086,6 +1088,157 @@ describe('GearArt: the turn-on flicker (README §7, test 29)', () => {
     // The same svg throughout: it was updated, not replaced.
     expect(view.container.querySelector('svg')).toBe(svg);
     observer.disconnect();
+  });
+});
+
+// QWW-57, adversarial review of PR #38, the flicker finding: it played whenever a strip was shown, not only on first load and on a
+// turn-on. A strip is not drawn again when the singer switches tab or expands the sheet (it is hidden and shown, and a browser plays
+// an animation again each time its element is shown), so the style must be gone once the flicker has played: tests/e2e/setlist-flicker.spec.ts
+// has that in a browser. What is checked here is the part that does not need one: when the art says `neonOn` and when it says `none`.
+describe('GearArt: the flicker plays on first load and on a turn-on, and at no other time (PR 38 review)', () => {
+  const NEON = 'neonOn 0.7s linear 1';
+  const draw = (gear: GearId, off: boolean, value = 50) => <GearArt key={gear} gear={gear} variant="strip" value={value} off={off} />;
+  const rootOf = (container: HTMLElement) => must(container.querySelector('svg'), 'the strip svg');
+  const animation = (svg: Element) => styleOf(svg).animation;
+  const elapse = (ms: number) =>
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  /** Not the first load: a strip has been drawn on this page already. */
+  const notFirstLoad = () => {
+    flickerSession.done = true;
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('plays on first load for every strip of the first commit that is on, whichever gear, and not for one that is off', () => {
+    const { container } = render(
+      <>
+        {GEAR_IDS.map((gear) => (
+          <GearArt key={gear} gear={gear} variant="strip" value={50} off={gear === 'tempo'} />
+        ))}
+      </>,
+    );
+    expect(GEAR_IDS).toEqual(['difficulty', 'history', 'popularity', 'tempo']);
+    expect([...container.querySelectorAll('svg')].map(animation)).toEqual([NEON, NEON, NEON, 'none']);
+  });
+
+  it('plays for each of them in React StrictMode too, which renders twice and runs its effects twice before anything is on screen', () => {
+    const { container } = render(
+      <StrictMode>
+        <GearArt gear="difficulty" variant="strip" value={50} off={false} />
+        <GearArt gear="popularity" variant="strip" value={50} off={false} />
+      </StrictMode>,
+    );
+    expect([...container.querySelectorAll('svg')].map(animation)).toEqual([NEON, NEON]);
+    expect(flickerSession.done).toBe(true);
+    elapse(FLICKER_MS);
+    expect([...container.querySelectorAll('svg')].map(animation)).toEqual(['none', 'none']);
+  });
+
+  it('does not play for a strip drawn after the first load: coming back from a song, or doing the singing test again', () => {
+    const first = render(draw('tempo', false));
+    expect(animation(rootOf(first.container))).toBe(NEON);
+    expect(flickerSession.done).toBe(true);
+    first.unmount();
+    // The sheet is drawn again, at once, in whatever mode: the same art, on, a moment after the first one went.
+    const again = render(<>{GEAR_IDS.map((gear) => draw(gear, false))}</>);
+    expect([...again.container.querySelectorAll('svg')].map(animation)).toEqual(['none', 'none', 'none', 'none']);
+  });
+
+  it('does not play for a second strip drawn beside one that is still flickering, if it is not drawn in the same commit', () => {
+    const first = render(draw('difficulty', false));
+    const second = render(draw('popularity', false));
+    expect(animation(rootOf(first.container))).toBe(NEON);
+    expect(animation(rootOf(second.container))).toBe('none');
+  });
+
+  it('plays when a gear that was drawn off goes on, on the first load and after it', () => {
+    for (const firstLoad of [true, false]) {
+      resetFlickerSession();
+      if (!firstLoad) notFirstLoad();
+      const view = render(draw('tempo', true));
+      const svg = rootOf(view.container);
+      expect(animation(svg), `drawn off, first load ${firstLoad}`).toBe('none');
+      view.rerender(draw('tempo', false));
+      expect(animation(svg), `turned on, first load ${firstLoad}`).toBe(NEON);
+      cleanup();
+    }
+  });
+
+  it('is over after 0.7 s: the style goes back to none, so showing the strip again does not play it again', () => {
+    const view = render(draw('tempo', false));
+    const svg = rootOf(view.container);
+    elapse(FLICKER_MS - 1);
+    expect(animation(svg)).toBe(NEON);
+    elapse(1);
+    expect(animation(svg)).toBe('none');
+    // Nothing brings it back: not a new value, not another render, not more time. A strip that was hidden at first load (the mini
+    // sheet's other three) is in the same case: no one saw it play, and it is not due once its 0.7 s have passed.
+    view.rerender(draw('tempo', false, 70));
+    elapse(5000);
+    expect(animation(svg)).toBe('none');
+  });
+
+  it('plays again each time the gear goes from off to on, and is left alone while only its value changes', () => {
+    const view = render(draw('tempo', false));
+    const svg = rootOf(view.container);
+    elapse(FLICKER_MS);
+    expect(animation(svg)).toBe('none');
+    for (const value of [51, 52, 53]) {
+      view.rerender(draw('tempo', true, value));
+      expect(animation(svg), `reset at ${value}`).toBe('none');
+      view.rerender(draw('tempo', false, value));
+      expect(animation(svg), `on at ${value}`).toBe(NEON);
+      elapse(FLICKER_MS - 1);
+      view.rerender(draw('tempo', false, value + 10));
+      expect(animation(svg), `a new value inside the flicker, at ${value}`).toBe(NEON);
+      elapse(1);
+      expect(animation(svg), `over, at ${value}`).toBe('none');
+    }
+  });
+
+  it('restarts for a gear turned off and on again inside the flicker, and gives the new one its whole 0.7 s', () => {
+    const view = render(draw('tempo', false));
+    const svg = rootOf(view.container);
+    elapse(300);
+    view.rerender(draw('tempo', true));
+    expect(animation(svg)).toBe('none');
+    elapse(100);
+    view.rerender(draw('tempo', false));
+    expect(animation(svg)).toBe(NEON);
+    // 300 + 100 + 699 ms: past the end of the first flicker, which the reset ended, and inside the second.
+    elapse(FLICKER_MS - 1);
+    expect(animation(svg)).toBe(NEON);
+    elapse(1);
+    expect(animation(svg)).toBe('none');
+  });
+
+  it('keeps no timer while the gear is off or once the flicker is over, and none after the art is removed', () => {
+    const none = vi.getTimerCount();
+    const off = render(draw('tempo', true));
+    expect(vi.getTimerCount() - none, 'off').toBe(0);
+    off.unmount();
+    notFirstLoad();
+    const afterFirstLoad = render(draw('tempo', false));
+    expect(vi.getTimerCount() - none, 'on, not due').toBe(0);
+    afterFirstLoad.unmount();
+    resetFlickerSession();
+    const on = render(draw('tempo', false));
+    expect(vi.getTimerCount() - none, 'on, due').toBe(1);
+    elapse(FLICKER_MS);
+    expect(vi.getTimerCount() - none, 'over').toBe(0);
+    on.rerender(draw('tempo', true));
+    on.rerender(draw('tempo', false));
+    expect(vi.getTimerCount() - none, 'on again').toBe(1);
+    on.unmount();
+    expect(vi.getTimerCount() - none, 'removed').toBe(0);
   });
 });
 
@@ -1592,7 +1745,7 @@ describe('setlist-global.css', () => {
   });
 
   it('has a keyframes rule for every animation name the art can ask for', () => {
-    const asked = new Set([...VALUES.map((tempo) => metronome(tempo).keyframes), neonFlicker(false).split(' ')[0]]);
+    const asked = new Set([...VALUES.map((tempo) => metronome(tempo).keyframes), neonFlicker(false, true).split(' ')[0]]);
     const defined = rulesOf(globalCss).map(([prelude]) => prelude.replace('@keyframes ', ''));
     expect([...asked].sort()).toEqual(defined.sort());
   });

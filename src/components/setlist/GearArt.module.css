@@ -33,7 +33,7 @@
 }
 
 /* !important so it also beats the inline animations: the pendulum's, and the strip's turn-on flicker (`.flick`, the strip's
-   root, has no other rule; its flicker is an inline style so that it restarts exactly when the gear goes from off to on). */
+   root, has no other rule; its flicker is an inline style that is set only while a flicker is due: on first load and when the gear goes from off to on). */
 @media (prefers-reduced-motion: reduce) {
   .pend,
   .pendTab,

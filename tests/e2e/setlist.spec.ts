@@ -1232,9 +1232,8 @@ test.describe('motion', () => {
 
   test('29. turning a reset gear back on (ArrowRight) plays the neon flicker once: neonOn, 0.7 s', async ({ page }) => {
     await open(page);
-    // At first load the gears that are on flicker once; Tempo is off, so it does not.
+    // Tempo is off, so it does not flicker at first load (the gears that are on do, once: tests/e2e/setlist-flicker.spec.ts times that).
     expect(await css(art(page, 'tempo'), 'animation-name')).toBe('none');
-    expect(await css(art(page, 'difficulty'), 'animation-name')).toBe('neonOn');
     await pressKey(page, 'tempo', 'ArrowRight');
     expect(await css(art(page, 'tempo'), 'animation-name')).toBe('neonOn');
     expect(await css(art(page, 'tempo'), 'animation-duration')).toBe('0.7s');

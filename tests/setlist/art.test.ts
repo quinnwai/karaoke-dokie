@@ -7,6 +7,7 @@ import {
   BAND_OPACITY,
   CYAN,
   EASY,
+  FLICKER_MS,
   HARD,
   ITEM_COUNT,
   LIGHT_OFF,
@@ -18,6 +19,7 @@ import {
   TAB_PX_PER_UNIT,
   UNLIT,
   VIOLET,
+  flickerSession,
   gearColor,
   itemArt,
   itemLit,
@@ -27,6 +29,7 @@ import {
   metronome,
   neonFlicker,
   noteColor,
+  resetFlickerSession,
   tabGlow,
   tube,
 } from '../../src/lib/setlist/art';
@@ -247,9 +250,29 @@ describe('the Era tab jukebox (Round 6A §9, test 27)', () => {
 });
 
 describe('the turn-on flicker and the tab glow (Round 6A §7, §9)', () => {
-  it('plays neonOn once for 0.7 s, linear, while a gear is on, and not at all while it is off', () => {
-    expect(neonFlicker(false)).toBe('neonOn 0.7s linear 1');
-    expect(neonFlicker(true)).toBe('none');
+  it('plays neonOn once for 0.7 s, linear, while a gear is on and the flicker is due, and not at all otherwise', () => {
+    expect(neonFlicker(false, true)).toBe('neonOn 0.7s linear 1');
+    // Off: unlit, nothing plays, whether or not the next turn-on is due.
+    expect(neonFlicker(true, true)).toBe('none');
+    expect(neonFlicker(true, false)).toBe('none');
+    // On but not due: it has played, so showing the strip again must not play it again.
+    expect(neonFlicker(false, false)).toBe('none');
+  });
+
+  it('is as long as the animation it asks for: FLICKER_MS is the 0.7 s of its duration', () => {
+    const [name, duration, easing, count] = neonFlicker(false, true).split(' ');
+    expect([name, easing, count]).toEqual(['neonOn', 'linear', '1']);
+    expect(Number.parseFloat(duration ?? '') * 1000).toBe(FLICKER_MS);
+    expect(FLICKER_MS).toBe(700);
+  });
+
+  it('remembers that the page has drawn its first strip art, until it is told to start over', () => {
+    resetFlickerSession();
+    expect(flickerSession).toEqual({ done: false });
+    flickerSession.done = true;
+    expect(flickerSession.done).toBe(true);
+    resetFlickerSession();
+    expect(flickerSession.done).toBe(false);
   });
 
   it('glows a tab icon with a 3 px drop-shadow in its colour while on, and not at all while off', () => {
