@@ -221,7 +221,9 @@ describe('KaraokeApp', () => {
       window.history.replaceState(null, '', '/?authError=spotify');
       render(<KaraokeApp api={fakeApi(me({ low: 45, high: 72, source: 'test' }))} mic={fakeMic().mic} />);
       await screen.findByText('Plastic Love');
-      expect(screen.queryByText('Couldn’t sign in. Spotify sign-in is for invited testers only right now.')).toBeNull();
+      expect(screen.queryByRole('status')).toBeNull();
+      // Signed in, there is no invite note under the list either.
+      expect(screen.queryByText('Invited testers only for now.')).toBeNull();
     });
   });
 

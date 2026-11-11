@@ -169,6 +169,8 @@ describe('sign-in flow', () => {
       expect(r2.headers.get('location')).toBe(`${BASE}/?authError=spotify`);
       expect(r2.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(false);
       expect(String(spy.mock.calls[0]![0])).toContain('(403) | Check settings on developer.spotify.com/dashboard, the user may not be registered.');
+      // Only a 429 starts Spotify's wait. A 403 is this one account, and must not lock the other testers out.
+      expect(await getAppContext().store.getSpotifyBlock()).toBeNull();
     } finally {
       spy.mockRestore();
     }
@@ -186,6 +188,20 @@ describe('sign-in flow', () => {
       const cancelled = await callback.GET(new Request(`${BASE}/api/auth/callback?error=access_denied&state=s`, cookie));
       expect(cancelled.headers.get('location')).toBe(`${BASE}/?authError=access_denied`);
       expect(spy).toHaveBeenCalledTimes(1);
+
+      // A request we didn't start (no or wrong state) is sent back the same way, but leaves no line in the log.
+      const stray = await callback.GET(new Request(`${BASE}/api/auth/callback?error=server_error&state=x`, cookie));
+      expect(stray.headers.get('location')).toBe(`${BASE}/?authError=server_error`);
+      expect((await callback.GET(new Request(`${BASE}/api/auth/callback?error=server_error`))).headers.get('location')).toBe(`${BASE}/?authError=server_error`);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      // Spotify's value is cut to 100 characters and escaped, so it can't forge a second log line.
+      const odd = encodeURIComponent(`x\n[auth] forged${'y'.repeat(200)}`);
+      await callback.GET(new Request(`${BASE}/api/auth/callback?error=${odd}&state=s`, cookie));
+      expect(spy).toHaveBeenCalledTimes(2);
+      const line = String(spy.mock.calls[1]![0]);
+      expect(line).not.toContain('\n');
+      expect(line).toBe(`[auth] Spotify refused the sign-in on its own page: error=${JSON.stringify(`x\n[auth] forged${'y'.repeat(200)}`.slice(0, 100))}`);
     } finally {
       spy.mockRestore();
     }
