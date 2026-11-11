@@ -175,6 +175,11 @@ export interface Match {
   partSinger?: string;
   /** Moods that passed the label gate, for the mood chips. Unset when the song has no shipped label. */
   moods?: Mood[];
+  /**
+   * The song's Deezer track id (song_deezer), for the play button in its row (QWW-48): it plays the track's 30 s
+   * preview through GET /api/preview/<deezerId>. Unset when Deezer had no matching track, and the button is disabled.
+   */
+  deezerId?: number;
 }
 
 // ---------- results view (QWW-9, QWW-13, QWW-22, QWW-23) ----------
@@ -345,6 +350,9 @@ export interface FeedbackEntry {
 // Beta event log (QWW-16, QWW-20):
 // POST /api/events     body EventsRequest -> 204 (also 204 when collection is switched off)
 // GET  /api/admin/events (header x-admin-token) -> AdminEventsResponse
+// Row play button (QWW-48), no session needed:
+// GET  /api/preview/<deezerId>         -> 302 to the track's 30 s Deezer preview (an MP3 link that expires after
+//   15 minutes, so it is never stored), 404 when Deezer has no preview, 502 when Deezer cannot be reached
 
 export interface MeResponse {
   userId: string;

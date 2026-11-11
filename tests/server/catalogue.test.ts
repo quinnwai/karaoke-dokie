@@ -245,6 +245,25 @@ describe('karaoke popularity (QWW-6)', () => {
     expect(all.matches.find((m) => m.track.title === 'NoTempo')).not.toHaveProperty('tempo');
   });
 
+  it("puts each song's Deezer track id on its match, for the row's play button (QWW-48)", async () => {
+    const store = createMemoryStore();
+    const a = song('A', 'Found', range(57, 63));
+    const b = song('B', 'Missed', range(57, 63));
+    const c = song('C', 'Never looked up', range(57, 63));
+    for (const s of [a, b, c]) await store.putSongRange(s.key, { range: s.range, log: s.log });
+    await store.putSongDeezer([
+      { key: a.key, rank: 500_000, deezerId: 3_135_556, checkedAt: '2026-11-06T00:00:00.000Z' },
+      { key: b.key, checkedAt: '2026-11-06T00:00:00.000Z' }, // Deezer had no matching track
+    ]);
+    const tracks = catalogueTracks(await loadCatalogue(store));
+    for (const page of [{ all: true } as const, { offset: 0, limit: 5 }]) {
+      const byTitle = Object.fromEntries(recommendCatalogue(tracks, user, deps, page).matches.map((m) => [m.track.title, m]));
+      expect(byTitle.Found!.deezerId).toBe(3_135_556);
+      expect(byTitle.Missed).not.toHaveProperty('deezerId');
+      expect(byTitle['Never looked up']).not.toHaveProperty('deezerId');
+    }
+  });
+
   describe('feel labels (QWW-54)', () => {
     /** Three songs: a really fast one, a ballad Deezer reads at double time, and one nobody labelled. */
     async function withLabels(labels: 'none' | 'both') {
