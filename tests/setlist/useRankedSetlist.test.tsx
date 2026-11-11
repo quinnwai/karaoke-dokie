@@ -506,4 +506,39 @@ describe('an engine that throws before it returns a promise (a bad song in its l
     expect(fake.engine.rank).toHaveBeenCalledTimes(2);
     expect(result.current).toEqual({ result: fresh, failed: false });
   });
+
+  describe('debounce and abort', () => {
+    it('asks at once the first time, then waits for the last of a burst of requests and aborts the one it replaced', async () => {
+      vi.useFakeTimers();
+      try {
+        const { engine, calls } = fakeEngine();
+        const signals: AbortSignal[] = [];
+        vi.mocked(engine.rank).mockImplementation((request, signal) => {
+          if (signal) signals.push(signal);
+          const answer = deferred<SetlistResponse>();
+          calls.push({ request, answer });
+          return answer.promise;
+        });
+        const view = renderHook((p: Props & { wait: number }) => useRankedSetlist(p.engine, p.request, p.wait), { initialProps: { engine, request: ask(20), wait: 100 } });
+        // The first question of a screen is not held back.
+        expect(calls).toHaveLength(1);
+        await act(async () => calls[0]!.answer.resolve(answer('a')));
+
+        // A burst of requests, as a slider drag sends them: nothing is asked until it rests.
+        view.rerender({ engine, request: ask(30), wait: 100 });
+        view.rerender({ engine, request: ask(40), wait: 100 });
+        view.rerender({ engine, request: ask(50), wait: 100 });
+        expect(calls).toHaveLength(1);
+        await act(async () => void vi.advanceTimersByTime(100));
+        expect(calls).toHaveLength(2);
+        expect(calls[1]!.request.gears.difficulty).toBe(50);
+
+        // A newer request aborts the one still waiting for its answer.
+        view.rerender({ engine, request: ask(60), wait: 100 });
+        expect(signals[1]!.aborted).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

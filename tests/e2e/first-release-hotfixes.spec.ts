@@ -7,8 +7,9 @@
 import { devices, expect, test, type BrowserContext } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { Match, RecommendationsResponse } from '../../src/lib/contracts';
+import type { Match, RecommendationsResponse, SetlistRequest } from '../../src/lib/contracts';
 import { shapeOf } from '../../src/lib/songs/score';
+import { setlistAnswer } from '../helpers/setlistServer';
 import { areYouWithMe, USER_D2_TO_D5 } from '../songs/rangeBarFixture';
 
 const SCREENS = path.resolve('test-results/screens');
@@ -116,6 +117,8 @@ test('a signed-in singer whose Spotify library could not be read sees catalogue 
     asked++;
     return route.fulfill({ json: { ...catalogue, libraryUnavailable: true } });
   });
+  // The tuner asks the server for its ranking: a library it cannot read comes back as the catalogue's list and the flag.
+  await context.route('**/api/setlist', (route) => route.fulfill({ json: setlistAnswer(catalogue, route.request().postDataJSON() as SetlistRequest, false, { libraryUnavailable: true }) }));
 
   const page = await context.newPage();
   await page.goto('/');
@@ -166,9 +169,9 @@ test('song page: no bar for an empty bin and none outside the pink range (Are Yo
   };
   const context = await browser.newContext({ ...PHONE_375, baseURL: OFF, reducedMotion: 'reduce' });
   await withRange(context, USER_D2_TO_D5.low, USER_D2_TO_D5.high);
-  await context.route('**/api/catalogue/recommendations**', (route) =>
-    route.fulfill({ json: { matches: [are], nextOffset: null, sources: {}, complete: true } satisfies RecommendationsResponse }),
-  );
+  const only: RecommendationsResponse = { matches: [are], nextOffset: null, sources: {}, complete: true };
+  await context.route('**/api/catalogue/recommendations**', (route) => route.fulfill({ json: only }));
+  await context.route('**/api/setlist', (route) => route.fulfill({ json: setlistAnswer(only, route.request().postDataJSON() as SetlistRequest, false) }));
   const page = await context.newPage();
   await page.goto('/');
   await page.getByRole('button', { name: 'Continue' }).click();

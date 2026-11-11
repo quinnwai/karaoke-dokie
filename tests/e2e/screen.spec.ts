@@ -7,11 +7,12 @@
 import { chromium, devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { CatalogueFeedbackRequest, FeedbackRequest, Match, MeResponse, RecommendationsResponse, SongRange, VocalRange } from '../../src/lib/contracts';
+import type { CatalogueFeedbackRequest, FeedbackRequest, Match, MeResponse, RecommendationsResponse, SetlistRequest, SongRange, VocalRange } from '../../src/lib/contracts';
 import { matchSong, toMatch } from '../../src/lib/songs/match';
 import { correctOctave, type OctaveEvidence } from '../../src/lib/songs/octave';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { allMatches, knownSongs, longList, match, me } from '../fixtures/screen';
+import { setlistAnswer } from '../helpers/setlistServer';
 
 const SCREENS = path.resolve('test-results/screens');
 const AUDIO = path.resolve('test-results/audio');
@@ -103,6 +104,8 @@ async function mockApi(context: BrowserContext, state: ApiState) {
       case 'GET /api/catalogue/recommendations':
         state.recommendationCalls.push(`catalogue ${url.search}`);
         return json(state.long ? longList() : allMatches());
+      case 'POST /api/setlist':
+        return json(setlistAnswer(state.response ?? (state.long ? longList() : allMatches()), req.postDataJSON() as SetlistRequest, state.user !== null));
       case 'POST /api/catalogue/feedback':
         state.catalogueFeedback.push(req.postDataJSON() as CatalogueFeedbackRequest);
         return json({ ok: true });
@@ -453,6 +456,7 @@ for (const width of [375, 1280]) {
     const showcase = allMatches();
     showcase.matches = REASON_SHOWCASE.map(([song, reasons]) => ({ ...match(song), reasons }));
     await context.route('**/api/recommendations*', (route) => route.fulfill({ json: showcase }));
+    await context.route('**/api/setlist', (route) => route.fulfill({ json: setlistAnswer(showcase, route.request().postDataJSON() as SetlistRequest, true) }));
     const page = await context.newPage();
     await page.goto('/');
     await expect(page.locator('[data-row]')).toHaveCount(REASON_SHOWCASE.length);
@@ -500,6 +504,8 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
       }
       return before;
     };
+    // Difficulty alone: Popularity, on by default, counts double and would lead with its own songs.
+    await page.locator('button[data-reset="popularity"]').click();
     const slider = page.locator('#slider-difficulty');
     const lists: string[] = [];
     const labels: (string | undefined)[] = [];
@@ -510,11 +516,13 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
       labels.push(await leadLabel());
       await shot(page, `qww33-difficulty-${percent}-${viewport.width}px`);
     }
-    // The label leads where the target is: Easy at the low end, Medium in the middle, Hard at the top.
-    expect([labels[0], labels[2], labels[4]]).toEqual(['Easy', 'Medium', 'Hard']);
-    expect(['Medium', 'Hard']).toContain(labels[3]);
-    // Each of those three leads with different songs, and the control changes the list more than once along its length.
-    expect(new Set([lists[0], lists[2], lists[4]]).size).toBe(3);
+    // The label leads where the target is: Easy at the low end and Hard at the top. QWW-47's ranking leans easy (a song
+    // easier than the target costs little), so the middle may still lead with an Easy song or a Medium one.
+    expect([labels[0], labels[4]]).toEqual(['Easy', 'Hard']);
+    expect(['Easy', 'Medium']).toContain(labels[2]);
+    expect(['Easy', 'Medium', 'Hard']).toContain(labels[3]);
+    // The ends lead with different songs, and the control changes the list more than once along its length.
+    expect(new Set([lists[0], lists[4]]).size).toBe(2);
     expect(new Set(lists).size).toBeGreaterThanOrEqual(4);
 
     // The keys keep the ends' meaning: Home is Light work, End is Locked in.

@@ -66,7 +66,8 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
   await era('s80').click();
   await expect(era('s80')).toHaveAttribute('aria-pressed', 'true');
   await expect(songs.first()).toBeVisible();
-  for (const li of await songs.all()) await expect(li).toContainText('’80s');
+  // The list is re-ranked by the server a moment after the tap: wait until every row on screen is of the 80s.
+  await expect.poll(async () => (await songs.allTextContents()).every((t) => t.includes('’80s'))).toBe(true);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-03-80s.png') });
   await page.locator('button[data-reset="era"]').click();
   await expect(songs).toHaveCount(Math.min(catAll.matches.length, 40));
@@ -98,8 +99,9 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
     expect(['easy', 'medium', 'hard']).toContain(m.difficulty);
   }
 
-  // Open the first song, check the info line, leave feedback.
-  await songs.first().getByRole('button').first().click();
+  // Open the first song of the singer's own library (the list also holds catalogue songs, whose id starts with cat:), check
+  // the info line, leave feedback.
+  await page.locator('[data-row]:not([data-id^="cat:"])').first().getByRole('button').first().click();
   // Spotify's player stands where the button was. The mock gives most songs a real track id; the few
   // without one keep the plain link.
   await expect(page.locator('iframe[src^="https://open.spotify.com/embed/track/"], a:has-text("Open in Spotify")')).toHaveCount(1);

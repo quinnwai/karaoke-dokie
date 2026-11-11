@@ -8,6 +8,7 @@ import { MicError, type Mic, type MicPermission, type MicRecorder } from '../../
 import type { Match, MeResponse, RecommendationsResponse, SongRange, VocalRange } from '../../src/lib/contracts';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import type { SetlistEngine } from '../../src/lib/setlist/engine';
+import { libraryCandidate, rankSetlist } from '../../src/lib/songs/setlist';
 import { ERA_IDS, GEAR_IDS, type SetlistRequest, type SetlistResponse } from '../../src/lib/setlist/types';
 import { noise, SAMPLE_RATE, voice } from '../helpers/synth';
 import { all, el, ranked, response, rowIds, SEL } from '../helpers/setlist';
@@ -75,6 +76,8 @@ async function startTest(permission: MicPermission = 'prompt') {
   return screen.findByRole('button', { name: /lowest note/ });
 }
 
+let lastApi: ReturnType<typeof fakeApi> | null = null;
+
 function fakeApi(user: MeResponse | null) {
   let current = user;
   const api = {
@@ -92,6 +95,7 @@ function fakeApi(user: MeResponse | null) {
     feedback: vi.fn(async () => {}),
     catalogueFeedback: vi.fn(async () => {}),
   } satisfies Api;
+  lastApi = api;
   return api;
 }
 
@@ -169,12 +173,57 @@ const defaultView = () => ({
 
 const HISTORY_HINT = 'Connect Spotify to use your listening history';
 
+/**
+ * POST /api/setlist, as the server answers it, for a test that gives the screen no engine of its own: the real ranking
+ * (src/lib/songs/setlist.ts) of the songs the fake API served last, paged as the server pages. Signed in, the library counts.
+ */
+const landed = new WeakMap<object, RecommendationsResponse | null | undefined>();
+
+async function serveSetlist(_url: string, init?: RequestInit): Promise<Response> {
+  const api = lastApi;
+  const req = JSON.parse(String(init?.body)) as SetlistRequest & { limit?: number; offset?: number };
+  const calls = api
+    ? [api.allRecommendations, api.catalogue, api.recommendations].flatMap((f) => f.mock.results.map((r, i) => ({ r, order: f.mock.invocationCallOrder[i]! })))
+    : [];
+  calls.sort((a, b) => a.order - b.order);
+  // The pages that have landed so far, as one list: a page still on its way is not there yet.
+  for (const { r } of calls) if (r.type === 'return' && !landed.has(r.value)) landed.set(r.value, undefined), r.value.then((v: RecommendationsResponse) => landed.set(r.value, v), () => landed.set(r.value, null));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const pages = calls.flatMap(({ r }) => (r.type === 'return' ? [landed.get(r.value)] : [])).filter((p): p is RecommendationsResponse => !!p);
+  if (!pages.length) return new Response('{}', { status: 500 });
+  // One load: the last page and the pages before it that said more were coming.
+  const load = [pages.at(-1)!];
+  for (let k = pages.length - 2; k >= 0 && pages[k]!.complete === false; k--) load.unshift(pages[k]!);
+  const byId = new Map<string, Match>();
+  for (const p of load) for (const m of p.matches) byId.set(m.track.id, m);
+  const page: RecommendationsResponse = { ...pages.at(-1)!, matches: [...byId.values()] };
+  const signedIn = ((await api!.me.mock.results.at(-1)?.value) ?? null) !== null;
+  const matches = page.matches.filter((m) => m.range.low <= req.range.high && m.range.high >= req.range.low);
+  const ranked = rankSetlist(matches.map((match) => (signedIn ? libraryCandidate(match) : { match })), { ...req, loggedIn: signedIn });
+  const offset = req.offset ?? 0;
+  const songs = ranked.songs.slice(offset, offset + (req.limit ?? 100));
+  const end = offset + songs.length;
+  const body: SetlistResponse = {
+    songs,
+    total: ranked.songs.length,
+    nextOffset: end < ranked.songs.length ? end : null,
+    sources: page.sources ?? {},
+    applied: ranked.applied,
+    ...(ranked.empty ? { empty: ranked.empty } : {}),
+  };
+  return new Response(JSON.stringify(body), { status: 200 });
+}
+
 beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(serveSetlist));
   sessionStorage.clear();
   localStorage.clear();
   window.history.replaceState(null, '', '/');
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('KaraokeApp', () => {
   it('runs the singing test, then shows catalogue songs with no sign-in', async () => {
@@ -1133,6 +1182,7 @@ describe('the Setlist tuner screen', () => {
 
       // A new range, and this time Spotify will not give the library.
       fireEvent.click(screen.getByRole('button', { name: 'Redo your high note, C5' }));
+      await throughMic();
       await screen.findByRole('button', { name: /highest note/ });
       sing(440); // A4
       await hold(/highest note/);
@@ -1313,6 +1363,7 @@ describe('the Setlist tuner screen', () => {
       const tuned = requests[1]!;
 
       fireEvent.click(screen.getByRole('button', { name: 'Redo your high note, C5' }));
+      await throughMic();
       await screen.findByRole('button', { name: /highest note/ });
       sing(440); // A4
       await hold(/highest note/);
@@ -1467,23 +1518,6 @@ describe('the Setlist tuner screen', () => {
       expect(screen.getByText('Loading…')).toBeTruthy();
     });
 
-    it('re-ranks the whole library when the last page lands: the new songs find their places among the first ones', async () => {
-      const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
-      const second = deferred<RecommendationsResponse>();
-      api.allRecommendations.mockImplementationOnce(async () => firstPage()).mockImplementationOnce(() => second.promise);
-      render(<KaraokeApp api={api} mic={fakeMic().mic} />);
-      await waitFor(() => expect(rowIds()).toHaveLength(5));
-      // Take Difficulty out and put Popularity at 100 alone: the order is the server's (every popularity is unknown).
-      fireEvent.click(el(SEL.reset('difficulty')));
-      fireEvent.click(el(SEL.reset('popularity')));
-      await waitFor(() => expect(rowIds()).toEqual(['t0', 't1', 't2', 't3', 't4']));
-
-      await act(async () => second.resolve(allMatches()));
-      await waitFor(() => expect(rowIds()).toHaveLength(10));
-      // The Maybe songs (t8 and t9) are last, as in any list; the sure songs keep the server's order, now with the rest.
-      expect(rowIds()).toEqual(['t0', 't1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);
-    });
-
     it('a page that fails to come keeps the rows that arrived, with the error under the tuner', async () => {
       const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
       api.allRecommendations.mockImplementationOnce(async () => firstPage()).mockRejectedValueOnce(new Error('offline'));
@@ -1566,9 +1600,8 @@ describe('the Setlist tuner screen', () => {
     });
   });
 
-  // No fake: the interim engine (src/lib/setlist/engine.ts) ranks the matches the server sent, on the phone. A song's place
-  // on a gear is its rank among the songs, and Difficulty gives Easy, Medium and Hard a third each; Maybe songs are laid out
-  // on their own and come last.
+  // No fake engine: the default network engine asks a stand-in for POST /api/setlist (serveSetlist above) that ranks the
+  // songs the fake API served with the server's own engine. The ranking maths is tests/songs/setlist.test.ts's.
   describe('the ranking on the phone', () => {
     // Popularity of the fixture songs t0 to t9 (allMatchesWithFacts): .55 .8 .7 .6 .95 .85 .9 .75 .4 .5. t8 and t9 are the Maybe songs.
     /** Ranked on Popularity alone at 100: the sure songs, most popular first, then the Maybe songs the same way. */
@@ -1591,31 +1624,6 @@ describe('the Setlist tuner screen', () => {
     /** The difficulty word each row on screen ends its label with, top to bottom. */
     const words = () => rowIds().map((id) => el(`[data-id="${id}"] > button`).getAttribute('aria-label')!.split(', ').at(-1));
 
-    it('a gear reorders the songs without asking the server again, and Reset takes it out of the ranking', async () => {
-      const api = await withFacts();
-      // Difficulty (at 0) and Popularity (at 100) count together to begin with, so the Easy t3 comes ahead of the more
-      // popular Hard t2: the order is neither gear's alone.
-      const both = rowIds();
-      expect(both.indexOf('t3')).toBeLessThan(both.indexOf('t2'));
-      expect(POPULAR_FIRST.indexOf('t2')).toBeLessThan(POPULAR_FIRST.indexOf('t3'));
-
-      // Leave only Popularity in the ranking: History, Tempo and Era start off.
-      fireEvent.click(el(SEL.reset('difficulty')));
-      await waitFor(() => expect(rowIds()).toEqual(POPULAR_FIRST));
-
-      fireEvent.change(el(SEL.slider('popularity')), { target: { value: '0' } });
-      await waitFor(() => expect(rowIds()).toEqual(OBSCURE_FIRST));
-
-      // Back at 100: the earlier order again.
-      fireEvent.change(el(SEL.slider('popularity')), { target: { value: '100' } });
-      await waitFor(() => expect(rowIds()).toEqual(POPULAR_FIRST));
-
-      // Reset takes Popularity out as well; with no gear left, the songs stay as the server sent them.
-      fireEvent.click(el(SEL.reset('popularity')));
-      await waitFor(() => expect(rowIds()).toEqual(SERVER_ORDER));
-      expect(api.allRecommendations).toHaveBeenCalledTimes(1);
-    });
-
     it('Difficulty puts the Easy songs first at 0 and the Hard songs first at 100, and the Maybe songs last either way', async () => {
       await withFacts();
       // Difficulty alone: Popularity is reset. Each label has a third of the track, so the labels come in blocks.
@@ -1633,44 +1641,6 @@ describe('the Setlist tuner screen', () => {
       expect(label('t8')).toBe('Linda Linda by The Blue Hearts, ’80s, Maybe');
       expect(label('t9')).toBe('Sukiyaki by Kyu Sakamoto, Pre-’70s, Maybe');
       for (const id of SERVER_ORDER.slice(0, 8)) expect(label(id).endsWith(', Maybe')).toBe(false);
-    });
-
-    it('listening history ranks by what the singer plays once it is switched on, for a signed-in singer', async () => {
-      await withFacts();
-      // History starts off, though a signed-in singer can use it. Take Difficulty and Popularity out so it is the only gear.
-      fireEvent.click(el(SEL.reset('difficulty')));
-      fireEvent.click(el(SEL.reset('popularity')));
-      await waitFor(() => expect(rowIds()).toEqual(SERVER_ORDER));
-
-      // Rediscover (0): the songs played least come first, the Maybe songs after them on their own.
-      fireEvent.change(el(SEL.slider('history')), { target: { value: '0' } });
-      await waitFor(() => expect(rowIds()).toEqual(LEAST_PLAYED_FIRST));
-
-      // Reset puts it out of the ranking again.
-      fireEvent.click(el(SEL.reset('history')));
-      await waitFor(() => expect(rowIds()).toEqual(SERVER_ORDER));
-    });
-
-    it('a History the singer switched on counts for nothing after logging out, though the tuner keeps it: the catalogue has no listening data', async () => {
-      const api = await withFacts();
-      // History is the only gear that counts: Difficulty and Popularity are reset, and History is switched on at Rediscover (0).
-      fireEvent.click(el(SEL.reset('difficulty')));
-      fireEvent.click(el(SEL.reset('popularity')));
-      fireEvent.change(el(SEL.slider('history')), { target: { value: '0' } });
-      await waitFor(() => expect(rowIds()).toEqual(LEAST_PLAYED_FIRST));
-
-      fireEvent.click(screen.getByRole('button', { name: 'Spotify account' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
-      await waitFor(() => expect(api.catalogue).toHaveBeenCalledTimes(1));
-      // The songs the catalogue sent carry listening figures in this fixture, but without a library the engine leaves History
-      // out: with no other gear counting, they stay in the server's order.
-      await waitFor(() => expect(rowIds()).toEqual(SERVER_ORDER));
-      // The sheet still has what was set, since logging out rewrites nothing: the slider is at 0, and it is off and disabled.
-      const history = el<HTMLInputElement>(SEL.slider('history'));
-      expect(history.value).toBe('0');
-      expect(history.disabled).toBe(true);
-      expect(history.getAttribute('aria-valuetext')).toBe('Off');
-      expect(screen.getByText(HISTORY_HINT)).toBeTruthy();
     });
 
     it('era buttons filter the list, Era with nothing picked is empty, and Reset shows every song again', async () => {
@@ -1868,6 +1838,7 @@ describe('the Setlist tuner screen', () => {
       expect(rowIds()).toHaveLength(10);
 
       fireEvent.click(screen.getByRole('button', { name: 'Redo your low note, A2' }));
+      await throughMic();
       await screen.findByRole('button', { name: /lowest note/ });
       sing(98); // G2
       await hold(/lowest note/);
@@ -1959,7 +1930,7 @@ describe('the Setlist tuner screen', () => {
       expect(screen.queryByText('Couldn’t load songs.')).toBeNull();
     });
 
-    // The same retry with the interim engine, which is rebuilt from the new matches.
+    // The same retry with the default engine: the stand-in server throws on a song with no range.
     it('a bad song in the list the server sent makes the engine throw on the spot: the error shows, and Try again with a good list recovers', async () => {
       const api = fakeApi(me({ low: 45, high: 72, source: 'test' }));
       const bad = { ...allMatches(), matches: allMatches().matches.map((m, i) => (i === 3 ? { ...m, range: undefined as unknown as SongRange } : m)) };

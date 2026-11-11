@@ -82,11 +82,10 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    match (`/api/catalogue/recommendations?...&all=1` without Spotify, `/api/recommendations?all=1` with it); then
    the screen sends what is set on the sheet to the ranking engine (`src/lib/setlist/engine.ts`, asked through
    `useRankedSetlist`) and draws the ranked list it gets back (`SetlistResponse`, the shape of QWW-47's
-   `POST /api/setlist`). The screen holds no ranking. Until QWW-47's server engine replaces it, the interim engine
-   ranks the loaded matches: each song has a place on each gear, 0 to 100, by its rank among the songs that fit (browse.ts
-   `sliderPlaces`); nearest to the targets of the gears that count first (Popularity counts double), in the picked
-   eras, ties in the server's order, Maybe songs last. A song whose range spans under 5 semitones has no Difficulty
-   place (QWW-43's one-note "Jump"), so it cannot win on "easy".
+   `POST /api/setlist`). The screen holds no ranking: the server's engine
+   (QWW-47, `src/lib/songs/setlist.ts`) ranks, and `createNetworkEngine` asks it with the request (`limit` 200, the most one
+   request may ask for; the screen shows 40 at a time). A slider drag asks once the thumb has rested 120 ms, and a request
+   a newer one replaced is aborted. The list keeps the last answer until its own arrives. `libraryUnavailable` comes in the answer.
    - **The list**: a row is its rank, the title over "Artist · Era" (`’90s`), a 44×30 difficulty lane, and a ▶ slot
      that QWW-48 fills (until then a disabled ▶). Rows are in rank order in the DOM, and slide to their new place when
      the order changes (`flip.ts`; reduced motion turns it off). Tapping a row opens the song page; the ▶ does not.
@@ -184,7 +183,7 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/lib/client/browser.ts` | The browser and OS from the user agent, and which app's built-in browser it is (`detectBrowser`); the Android Chrome intent link. |
 | `src/lib/audio/level.ts` | `isDigitalSilence`: a take of only zeros, which is a microphone the system muted, not a quiet singer; `MIN_MUTED_SAMPLES`, below which a take is a tap. |
 | `src/lib/client/storage.ts` | Guarded `sessionStorage` for test progress and the pick-songs intent; `localStorage` for a range kept on the device. |
-| `src/lib/setlist/` | The Setlist tuner without React: `types.ts`, `defaults.ts` (every default), `tuner.ts` (reducer, request), `sheet.ts` (geometry, drag rules), `art.ts` (gear art and lane maths), `engine.ts` (the ranking port and the interim engine), `rows.ts`, `eras.ts`, `gears.ts` (labels). |
+| `src/lib/setlist/` | The Setlist tuner without React: `types.ts`, `defaults.ts` (every default), `tuner.ts` (reducer, request), `sheet.ts` (geometry, drag rules), `art.ts` (gear art and lane maths), `engine.ts` (the ranking port and the network engine), `rows.ts`, `eras.ts`, `gears.ts` (labels). |
 | `src/lib/client/useRankedSetlist.ts` | Asks the engine for the list that goes with the tuner, drops answers that arrive after a newer request. |
 | `src/lib/songs/browse.ts` | The old sliders, chips and counts (no longer used by the screen; QWW-47 owns what becomes of them), and `difficultyBand` and `decadeOf`, which the tuner reads. |
 | `src/lib/client/funnel.ts`, `events.ts` | What each action records in the beta event log, and the batching tracker that sends it. |

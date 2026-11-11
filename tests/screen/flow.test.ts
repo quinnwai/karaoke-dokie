@@ -406,7 +406,7 @@ describe('the Setlist tuner in the flow', () => {
     const tuned = run(tune({ type: 'input', gear: 'difficulty', value: 80 }, { type: 'era', era: 's80' }, { type: 'reset', gear: 'popularity' }), loaded);
 
     it('keeps what the singer set when one end of the range is sung again and saved', () => {
-      const s = run([{ type: 'redoEnd', end: 'low' }, { type: 'holdEnd', midi: 48 }, { type: 'rangeSaved' }], tuned);
+      const s = run([{ type: 'redoEnd', end: 'low' }, ...micOn, { type: 'holdEnd', midi: 48 }, { type: 'rangeSaved' }], tuned);
       expect(s).toMatchObject({ step: 'results', matches: [], loading: true, range: { low: 48, high: 72 } });
       expect(s.tuner).toEqual(tuned.tuner);
     });

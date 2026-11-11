@@ -5,13 +5,13 @@
 // The spec's expectations are for its mock defaults (Difficulty 30, History 65, Popularity 80, Tempo 45, everything on,
 // Era 90s/00s/10s picked). The real defaults (src/lib/setlist/defaults.ts, QWW-47's decision) differ: Difficulty 0 and
 // Popularity 100 on (Popularity weighs double), History, Tempo and Era off, and Era has no default picks. So the expected
-// rankings below are for those, for the 25 mock songs of the spec (tests/fixtures/setlist.ts) as the interim engine ranks
-// them (place on each gear by rank among the songs, distance = 1 x difficulty place + 2 x (100 - popularity place),
-// ties in catalogue order). They are literals on purpose: when QWW-47's engine replaces the interim one they are what
-// changes, and they are meant to be re-read. Ranking maths is covered by tests/setlist/engine.test.ts; here the point
-// is what the screen does with the list it gets.
+// rankings below are for those, for the 25 mock songs of the spec (tests/fixtures/setlist.ts) as QWW-47's engine
+// (src/lib/songs/setlist.ts) ranks them. They are literals on purpose, so a change to the engine's order is read before it
+// ships. Ranking maths is covered by tests/songs/setlist.test.ts; here the point is what the screen does with the list it
+// gets. The list comes back from the server a moment after each change, so the specs poll for it.
 //
-// The API is mocked with contract-shaped fixtures, as in the other e2e specs. `window.setlist` (the spec's test hook,
+// The API is mocked with contract-shaped fixtures, as in the other e2e specs; POST /api/setlist answers with the server's own
+// ranking of them (tests/helpers/setlistServer.ts). `window.setlist` (the spec's test hook,
 // built only into this e2e build, see NEXT_PUBLIC_SETLIST_TEST_HOOK in playwright.config.ts) reads the state back.
 //
 // Selector map from the spec's reference to this build: `.strip[data-gear]` is `[data-strip][data-gear]`, `.tab` is
@@ -22,10 +22,11 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { AppEvent, EventsRequest, MeResponse, VocalRange } from '../../src/lib/contracts';
+import type { AppEvent, EventsRequest, MeResponse, SetlistRequest, VocalRange } from '../../src/lib/contracts';
 import { easeProgress, SLIDE_MS } from '../../src/components/setlist/flip';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import type { GearId, TunerPart, TunerState } from '../../src/lib/setlist/types';
+import { setlistAnswer } from '../helpers/setlistServer';
 import { MOCK_SONGS, mockPage, titlesOf, type MockSong } from '../fixtures/setlist';
 
 const SCREENS = path.resolve('test-results/screens');
@@ -35,20 +36,26 @@ test.beforeAll(() => mkdirSync(SCREENS, { recursive: true }));
 // "stable" for Playwright otherwise).
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, contextOptions: { reducedMotion: 'reduce' }, screenshot: 'off' });
 
-const CATALOGUE_ORDER = titlesOf(MOCK_SONGS);
 
 /** The 25 songs ranked for the real defaults, signed out (see the header). */
 const DEFAULT_RANKING = [
-  'Dancing Queen',
   'Mr. Brightside',
-  'Sweet Caroline',
   "Don't Stop Believin'",
+  'Dancing Queen',
   'Bohemian Rhapsody',
+  'Sweet Caroline',
+  'Rolling in the Deep',
   "Livin' on a Prayer",
   'Stand by Me',
-  'I Will Survive',
-  'Rolling in the Deep',
-  'Africa',
+  'I Will Always Love You',
+  'I Want It That Way',
+];
+/** Test 18: every gear reset. The engine has nothing to rank by, so the songs come most popular first. */
+const ALL_RESET_RANKING = [
+  "Don't Stop Believin'", 'Bohemian Rhapsody', 'Mr. Brightside', 'Dancing Queen', 'Rolling in the Deep', "Livin' on a Prayer", 'I Will Always Love You',
+  'Sweet Caroline', 'I Want It That Way', 'Africa', 'I Will Survive', 'good 4 u', 'Shallow', 'Stand by Me', 'Levitating', 'Wannabe',
+  "Can't Help Falling in Love", 'Respect', 'Since U Been Gone', 'Valerie', "These Boots Are Made for Walkin'", 'Bizarre Love Triangle', 'Harvest Moon',
+  'Motion Sickness', 'A Case of You',
 ];
 /** Test 6: only the 80s, for the real defaults. */
 const ONLY_80S = ["Don't Stop Believin'", "Livin' on a Prayer", 'Africa', 'Bizarre Love Triangle'];
@@ -74,6 +81,8 @@ async function mockApi(context: BrowserContext, opts: { loggedIn: boolean; extra
       case 'GET /api/recommendations':
       case 'GET /api/catalogue/recommendations':
         return json(page);
+      case 'POST /api/setlist':
+        return json(setlistAnswer(page, req.postDataJSON() as SetlistRequest, opts.loggedIn));
       case 'POST /api/events':
         opts.events.push(...(JSON.parse(req.postData() ?? '{"events":[]}') as EventsRequest).events);
         return route.fulfill({ status: 204 });
@@ -162,7 +171,7 @@ test('1. default load: expanded, rack 416 px, four strips and the era panel, no 
   for (const g of ['difficulty', 'history', 'popularity', 'tempo'] as GearId[]) await expect(strip(page, g)).toBeVisible();
   await expect(page.locator('#era-panel')).toBeVisible();
   await expect(page.locator('#tabs')).toBeHidden();
-  expect((await titles(page)).slice(0, 10)).toEqual(DEFAULT_RANKING);
+  await expect.poll(async () => (await titles(page)).slice(0, 10)).toEqual(DEFAULT_RANKING);
   expect(await rows(page).count()).toBe(25);
   await page.screenshot({ path: path.join(SCREENS, 'setlist-01-expanded.png') });
 });
@@ -238,7 +247,7 @@ test('6. only the 80s picked ranks the four 80s songs, for the real defaults', a
   // Era starts off with no picks, so the first tap picks just the 80s.
   await eraButton(page, 's80').click();
   expect(await tuner(page).then((t) => t.eras)).toEqual(['s80']);
-  expect(await titles(page)).toEqual(ONLY_80S);
+  await expect.poll(() => titles(page)).toEqual(ONLY_80S);
 });
 
 test('7. moving a slider sets its value, makes it the open gear and re-ranks the list', async ({ page }) => {
@@ -368,7 +377,7 @@ test('14. Tempo to 90, then reset: back to the default, off, hollow thumb, focus
   await open(page);
   await slider(page, 'tempo').fill('90');
   expect(await value(page, 'tempo')).toBe(90);
-  expect((await titles(page)).slice(0, 3)).not.toEqual(DEFAULT_RANKING.slice(0, 3));
+  await expect.poll(async () => (await titles(page)).slice(0, 10)).not.toEqual(DEFAULT_RANKING);
   await resetButton(page, 'tempo').click();
   const t = await tuner(page);
   expect(t.tempo).toBe(DEFAULTS.tempo);
@@ -382,19 +391,19 @@ test('14. Tempo to 90, then reset: back to the default, off, hollow thumb, focus
   const pct = await slider(page, 'tempo').locator('xpath=..').evaluate((el) => getComputedStyle(el).getPropertyValue('--pct').trim());
   expect(pct).toBe(`${DEFAULTS.tempo}%`);
   // Tempo counts for nothing again: the list is the default one.
-  expect((await titles(page)).slice(0, 10)).toEqual(DEFAULT_RANKING);
+  await expect.poll(async () => (await titles(page)).slice(0, 10)).toEqual(DEFAULT_RANKING);
 });
 
 test('15. changing the eras, then resetting Era: the default picks (none), off, every song, none outlined, none pressed', async ({ page }) => {
   await open(page);
   await eraButton(page, 's80').click();
   await eraButton(page, 's70').click();
-  expect((await titles(page)).length).toBeLessThan(25);
+  await expect.poll(async () => (await titles(page)).length).toBeLessThan(25);
   await resetButton(page, 'era').click();
   const t = await tuner(page);
   expect(t.eras).toEqual([...DEFAULTS.eras]);
   expect(t.off).toContain('era');
-  expect(await rows(page).count()).toBe(25);
+  await expect(rows(page)).toHaveCount(25);
   await expect(page.locator('#era-panel')).toHaveAttribute('data-off', 'true');
   // The default has no picks, so there is nothing to outline; the outline itself (the spec's "parked" picks) is
   // covered with the screen's other states in tests/setlist/setlistScreen.test.tsx.
@@ -440,11 +449,11 @@ test('17. with Era reset, tapping the 80s picks just the 80s (the default picks 
   expect((await tuner(page)).eras).toEqual(['s80', 's90']);
 });
 
-test('18. every gear reset: all 25 songs in catalogue order, every value its default', async ({ page }) => {
+test('18. every gear reset: all 25 songs, most popular first, every value its default', async ({ page }) => {
   await open(page);
   await resetButton(page, 'difficulty').click();
   await resetButton(page, 'popularity').click();
-  expect(await titles(page)).toEqual(CATALOGUE_ORDER);
+  await expect.poll(() => titles(page)).toEqual(ALL_RESET_RANKING);
   const t = await tuner(page);
   expect([t.difficulty, t.history, t.popularity, t.tempo]).toEqual([DEFAULTS.difficulty, DEFAULTS.history, DEFAULTS.popularity, DEFAULTS.tempo]);
   expect(t.eras).toEqual([...DEFAULTS.eras]);
@@ -552,7 +561,7 @@ test('a song row opens the song page; the play button does not; back keeps what 
   await page.getByRole('button', { name: 'Back to songs' }).click();
   await expect(page.locator('#app')).toBeVisible();
   expect(await value(page, 'tempo')).toBe(55);
-  expect(await titles(page)).toEqual(before);
+  await expect.poll(() => titles(page)).toEqual(before);
 });
 
 test('the list is in rank order in the DOM, with ranks 1 to n, however it was re-ranked', async ({ page }) => {

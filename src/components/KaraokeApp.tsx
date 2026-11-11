@@ -9,7 +9,7 @@ import { frequencyToMidi, midiToNoteName } from '../lib/audio/notes';
 import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
 import { detectBrowser } from '../lib/client/browser';
 import { createTracker, flushWhenHidden, loadAnonId, sendEvents, type Tracker } from '../lib/client/events';
-import { flowReducer, historyAvailable, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
+import { flowReducer, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
 import { eventsFor, feedbackView, viewProps } from '../lib/client/funnel';
 import { browserMic, classifyMicError, MicError, type Mic, type MicRecorder } from '../lib/client/mic';
 import {
@@ -22,7 +22,7 @@ import {
   takeWantsPick,
 } from '../lib/client/storage';
 import { useRankedSetlist } from '../lib/client/useRankedSetlist';
-import { createLocalEngine, type SetlistEngine } from '../lib/setlist/engine';
+import { createNetworkEngine, type SetlistEngine } from '../lib/setlist/engine';
 import { toRequest } from '../lib/setlist/tuner';
 import { HoldStep } from './HoldStep';
 import { Lyric } from './Lyric';
@@ -52,8 +52,8 @@ export interface KaraokeAppProps {
    */
   pickSongs?: boolean;
   /**
-   * The ranking engine behind the Setlist tuner. By default the interim engine ranks the matches the server sent
-   * (src/lib/setlist/engine.ts); QWW-47's server engine replaces it here. Tests pass one that records its requests.
+   * The ranking engine behind the Setlist tuner. By default it asks the server (POST /api/setlist, QWW-47;
+   * src/lib/setlist/engine.ts). Tests pass one that records its requests.
    */
   setlistEngine?: SetlistEngine;
   /** The ▶ of a list row, mounted by QWW-48. Without it each row shows an inert ▶. */
@@ -64,6 +64,9 @@ const LIVE_FRAME = 2048;
 /** A press shorter than this is a tap. */
 const TAP_MS = 400;
 const LIVE_EVERY_MS = 50; // ~20 times a second
+
+/** A slider drag asks on every input event; the server is asked once the thumb has rested this long (an engine passed in is asked at once). */
+const SETLIST_DEBOUNCE_MS = 120;
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 const defaultReload = () => window.location.reload();
@@ -201,19 +204,17 @@ export function KaraokeApp({
 
   // The Setlist tuner sends what is set to the ranking engine and gets the ranked list back. Nothing is asked until the
   // songs have loaded; a new request keeps the last list on screen until its own answer arrives.
-  const history = historyAvailable(state);
-  const engine = useMemo(
-    () => setlistEngine ?? createLocalEngine(state.matches, { loggedIn: history, sources: state.sources, libraryUnavailable: state.libraryUnavailable }),
-    [setlistEngine, state.matches, state.sources, history, state.libraryUnavailable],
-  );
-  // A big library arrives in pages (loading stays true between them): rank what is there as each page lands, and
-  // the list shows "Loading…" under its rows until the last one. Nothing is asked while there are no songs of this load
-  // yet: `attempt` counts the pages that have landed in it, and starts again at 0 for a first load and for Try again, so a
-  // retry clears the request (the old songs are not asked about again) and the engine is asked anew once the songs land,
-  // whether it is rebuilt from them (the interim engine) or not (a server engine).
+  // The server ranks (POST /api/setlist) and decides for itself whether the singer's library counts, from the session. The
+  // engine is made again when the songs the screen holds change (a page of a big library landed, so the server's
+  // list may have grown), when the singer signs in or out, and so on: a new engine is a new question for the hook.
+  const engine = useMemo(() => setlistEngine ?? createNetworkEngine(), [setlistEngine, state.mode, state.matches]);
+  // A big library arrives in pages (loading stays true between them): ask as each page lands, and the list shows
+  // "Loading…" under its rows until the last one. Nothing is asked while there are no songs of this load yet:
+  // `attempt` counts the pages that have landed in it, and starts again at 0 for a first load and for Try again, so a
+  // retry clears the request and the server is asked anew once the songs land.
   const hasSongs = !state.loading || (state.attempt > 0 && state.matches.length > 0);
-  const ranked = useRankedSetlist(engine, step === 'results' && range && hasSongs && state.error !== 'load' ? toRequest(state.tuner, range) : null);
-  // A song the singer taps is looked up in the engine's own answer first: a server engine sends the songs it ranked,
+  const ranked = useRankedSetlist(engine, step === 'results' && range && hasSongs && state.error !== 'load' ? toRequest(state.tuner, range) : null, setlistEngine ? 0 : SETLIST_DEBOUNCE_MS);
+  // A song the singer taps is looked up in the engine's own answer first: the server sends the songs it ranked,
   // which need not be in the list the screen loaded.
   const findMatch = (trackId: string): Match | undefined =>
     ranked.result?.songs.find((s) => s.match.track.id === trackId)?.match ?? state.matches.find((m) => m.track.id === trackId);
@@ -414,7 +415,7 @@ export function KaraokeApp({
         shown={state.shown}
         loading={state.loading}
         error={state.error === 'load' || ranked.failed}
-        libraryUnavailable={state.libraryUnavailable}
+        libraryUnavailable={ranked.result?.libraryUnavailable ?? state.libraryUnavailable}
         signInFailed={signInFailed}
         displayName={state.displayName}
         onTuner={(action) => dispatch({ type: 'tuner', action })}
