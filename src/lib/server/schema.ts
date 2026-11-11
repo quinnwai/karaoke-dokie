@@ -113,6 +113,15 @@ CREATE TABLE IF NOT EXISTS song_tempo (
   preview_url TEXT,
   checked_at TEXT
 );
+-- Feel label per song (QWW-54): slow, mid or upbeat, made offline and imported by npm run tempo:feel, never worked
+-- out while a page loads. The label decides which end of the Tempo gear a song sits at (src/lib/tempo/feel.ts); a
+-- song with no row keeps its measured tempo.
+CREATE TABLE IF NOT EXISTS song_feel (
+  song_key TEXT PRIMARY KEY,
+  feel TEXT NOT NULL,
+  source TEXT NOT NULL,
+  labeled_at TEXT
+);
 -- When Spotify said the app may call it again after a 429 (QWW-55): one row (id 1), shared by every server
 -- instance and script. Spotify's quota is the app's, so a 429 for one user stops calls for all of them until it passes.
 CREATE TABLE IF NOT EXISTS spotify_block (
@@ -142,4 +151,19 @@ CREATE TABLE IF NOT EXISTS spotify_calls (
   calls INTEGER NOT NULL,
   PRIMARY KEY (day, caller)
 );
+-- Which row is shown for a song, with its clean title and artist line (QWW-49), written by npm run titles:build. Every
+-- measured song has a row once the build has run; a variant folded into another song points at the row shown
+-- (canonical_key). source_title and source_artist are what the row had when the record was worked out: the app uses the
+-- record only while the row still has them. A song with no usable row is shown as it is stored, so the table may be empty or half written.
+CREATE TABLE IF NOT EXISTS song_canonical (
+  song_key TEXT PRIMARY KEY,
+  canonical_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  artist TEXT NOT NULL,
+  method TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  source_title TEXT NOT NULL,
+  source_artist TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS song_canonical_canonical ON song_canonical (canonical_key);
 `;
