@@ -33,7 +33,8 @@
     "tempo:report": "tsx scripts/tempo-report.ts",
     "titles:build": "tsx scripts/song-titles.ts",
     "tempo:feel": "tsx scripts/tempo-feel.ts",
-    "smoke:live": "tsx scripts/smoke-live.ts"
+    "smoke:live": "tsx scripts/smoke-live.ts",
+    "eval:release": "tsx scripts/eval-release.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
