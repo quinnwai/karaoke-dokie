@@ -40,6 +40,18 @@ const TEST_RANGES: [string, Pick<VocalRange, 'low' | 'high'>][] = [
   ['narrow beginner, D3 to D4', { low: 50, high: 62 }],
 ];
 
+/** One range per voice type, named by it (QWW-58; MIDI, C4 = 60): the ranges the as-written rule is checked on. */
+const VOICE_RANGES: [string, Pick<VocalRange, 'low' | 'high'>][] = [
+  ['bass, E2 to E4', { low: 40, high: 64 }],
+  ["Quinn-Wai's test, F2 to F4", { low: 41, high: 65 }],
+  ['baritone, A2 to A4', { low: 45, high: 69 }],
+  ['tenor, C3 to C5', { low: 48, high: 72 }],
+  ['alto, F3 to F5', { low: 53, high: 77 }],
+  ['mezzo, A3 to A5', { low: 57, high: 81 }],
+  ['soprano, C4 to C6', { low: 60, high: 84 }],
+  ['low male, F2 to C5', { low: 41, high: 72 }],
+];
+
 /** The tuner as it loads (setlistConfig.ts), logged out, with some of it changed. */
 function state(over: { gears?: Partial<Record<GearId, number>>; off?: TunerPart[]; eras?: EraId[]; loggedIn?: boolean } = {}): SetlistState & { loggedIn: boolean } {
   return {
@@ -69,8 +81,14 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 const ERA_SHARE: [EraId, number][] = [['pre', 0.08], ['s70', 0.1], ['s80', 0.16], ['s90', 0.2], ['s00', 0.2], ['s10', 0.19], ['s20', 0.07]];
 const YEAR_OF: Record<EraId, number> = { pre: 1962, s70: 1976, s80: 1985, s90: 1995, s00: 2005, s10: 2015, s20: 2022 };
 
-/** The sliderFixtures catalogue with a year (95% of songs) and a tempo (96%), so the Era and Tempo gears have something to work on. */
-function catalogue(seed = 7): CatalogueTrack[] {
+/**
+ * The sliderFixtures catalogue with a year (95% of songs) and a tempo (96%), so the Era and Tempo gears have something to work on.
+ * With `hits`, the songs whose typical note is in that range and that span at least `minSpan` semitones are the catalogue's
+ * biggest hits (3.5 to 5.5 million karaoke views). The real catalogue's are, mostly: wide-ranging tenor and female pop around B3
+ * to G4 as written, and that is why the low voices' lists were full of songs sung an octave down (QWW-58). Without it,
+ * popularity does not depend on pitch.
+ */
+function catalogue(seed = 7, hits?: { from: number; to: number; minSpan: number }): CatalogueTrack[] {
   const entries = catalogueEntries(rng(seed), 4000);
   const facts = rng(seed + 1000);
   const gauss = () => Math.sqrt(-2 * Math.log(1 - facts())) * Math.cos(2 * Math.PI * facts());
@@ -84,9 +102,18 @@ function catalogue(seed = 7): CatalogueTrack[] {
     }
     if (facts() < 0.96) e.tempo = Math.round(clamp(118 + 25 * gauss(), 70, 179));
   }
+  if (hits) {
+    const views = rng(seed + 2000);
+    for (const e of entries) {
+      if (e.range.tessitura < hits.from || e.range.tessitura > hits.to || e.range.high - e.range.low < hits.minSpan) continue;
+      e.popularity = { ...(e.popularity ?? { key: e.key, source: 'karafun+billboard' }), karaokeViews: Math.round(3_500_000 + 2_000_000 * views()) };
+    }
+  }
   return catalogueTracks(entries);
 }
 const CATALOGUE = catalogue();
+/** Hits typically sung from B3 (59) to G4 (67), an octave wide or more: the tenor's and the alto's register, above a bass's. */
+const HIT_CATALOGUE = catalogue(7, { from: 59, to: 67, minSpan: 12 });
 
 // ---------- hand-built songs ----------
 
@@ -336,17 +363,12 @@ describe('the distance (spec §5, model A)', () => {
     }
   });
 
-  it('breaks ties in order: the more popular song, then the easier, then the one sung as written, then artist and title, then id', () => {
-    // Nothing is active, so every song is tied on distance and only the tie-breaks speak.
+  it('breaks ties in order: the more popular song, then the easier, then artist and title, then id', () => {
+    // Nothing is active, so every song is tied on distance and only the tie-breaks speak. (The octave is not one of them:
+    // songs sung as written come before songs that need a jump whatever the gears say, QWW-58, tested below.)
     const allOff = state({ off: [...GEAR_IDS, 'era'] });
     const popularFirst = [placed('t1', {}, { popularity: 0.5 }), placed('t2', {}, { popularity: 0.9 }), placed('t3', { difficulty: 20 }, { popularity: 0.5 })];
     expect(ids(rankPrepared(preparedOf(...popularFirst), allOff))).toEqual(['t2', 't3', 't1']); // t3 is as popular as t1 but easier
-
-    const octave = (id: string, o: 'none' | 'down'): PreparedSetlist['songs'][number] => {
-      const p = placed(id, {}, { popularity: 0.5 });
-      return { ...p, candidate: { match: { ...p.candidate.match, octave: o } } };
-    };
-    expect(ids(rankPrepared(preparedOf(octave('a-down', 'down'), octave('b-none', 'none')), allOff))).toEqual(['b-none', 'a-down']);
 
     const named = (id: string, artist: string, title: string): PreparedSetlist['songs'][number] => {
       const p = placed(id, {}, { popularity: 0.5 });
@@ -597,6 +619,111 @@ describe('the Maybe songs come last (as everywhere else)', () => {
   });
 });
 
+describe('songs sung as written come before songs that need an octave jump (QWW-58, decision A)', () => {
+  // The same notes as the singer sings them, 46 to 62 (t 0.2 to 0.73 of USER's range), got three ways: written there, written an
+  // octave above (58 to 74, too high as written) or an octave below (34 to 50, too low as written). On every gear the three are equal.
+  const AS_SUNG = { none: [46, 62], down: [58, 74], up: [34, 50] } as const;
+  const sung = (id: string, how: keyof typeof AS_SUNG, popularity = 0.5) => {
+    const [low, high] = AS_SUNG[how];
+    return song(id, { low, high, shares: flat(low, high), popularity });
+  };
+  /** Written at 56 to 70, the top of USER's range: a Hard song, and one a song of the same popularity sung lower beats on Difficulty. */
+  const hardAsWritten = (id: string, popularity = 0.5) => song(id, { low: 56, high: 70, shares: flat(56, 70), popularity });
+  const order = (ms: Match[], over: Parameters<typeof state>[0] = {}) => ids(rankPrepared(prepareSetlist(cands(...ms), USER), state(over)));
+
+  it('puts a song sung as written first even when the octave-jump song is more popular and easier, an octave down or up', () => {
+    const written = hardAsWritten('written', 0.4);
+    const down = sung('down', 'down', 0.9);
+    const up = sung('up', 'up', 0.9);
+    expect([written.octave, down.octave, up.octave]).toEqual(['none', 'down', 'up']);
+    expect([written.difficulty, down.difficulty, up.difficulty]).toEqual(['hard', 'easy', 'easy']);
+    expect(order([down, up, written])).toEqual(['written', 'down', 'up']);
+    expect(order([up, down, written])).toEqual(['written', 'down', 'up']);
+  });
+
+  it('puts a song sung as written first when it is only as popular, and the jump makes the other song easier (the cause measured on 11 Nov)', () => {
+    // A song too high for you lands in the lower half of your range an octave down, where Easy is kindest: it reads Easy, the same
+    // song sung as written reads Hard. With equal popularity the old order took the easy one.
+    for (const how of ['down', 'up'] as const) {
+      expect(order([sung('jump', how, 0.6), hardAsWritten('written', 0.6)]), how).toEqual(['written', 'jump']);
+    }
+  });
+
+  it('puts it first for every setting of the gears, all off included', () => {
+    const written = hardAsWritten('written', 0.2);
+    const jumps = [sung('down', 'down', 0.95), sung('up', 'up', 0.95)];
+    const settings = [state(), state({ gears: { difficulty: 0, popularity: 100 } }), state({ gears: { difficulty: 100, popularity: 0 } }), state({ off: [...GEAR_IDS, 'era'] })];
+    for (const s of settings) {
+      expect(ids(rankPrepared(prepareSetlist(cands(...jumps, written), USER), s))[0]).toBe('written');
+    }
+  });
+
+  it('still orders the songs inside each group by popularity, whichever way they jump', () => {
+    const songs = [sung('w1', 'none', 0.9), sung('w2', 'none', 0.6), sung('w3', 'none', 0.3), sung('d1', 'down', 0.95), sung('u1', 'up', 0.7), sung('d2', 'down', 0.4)];
+    const expected = ['w1', 'w2', 'w3', 'd1', 'u1', 'd2'];
+    expect(order(songs)).toEqual(expected);
+    for (const seed of [1, 2, 3]) expect(order(shuffled(songs, seed)), `shuffle ${seed}`).toEqual(expected);
+  });
+
+  it('does not prefer an octave up to an octave down, or the other way round: a jump is a jump', () => {
+    expect(order([sung('down', 'down', 0.6), sung('up', 'up', 0.8)])).toEqual(['up', 'down']);
+    expect(order([sung('down', 'down', 0.8), sung('up', 'up', 0.6)])).toEqual(['down', 'up']);
+  });
+
+  it('still orders the songs inside each group by Difficulty, the groups staying in their order', () => {
+    const easyWritten = sung('easy-written', 'none');
+    const hardWritten = hardAsWritten('hard-written');
+    const easyJump = sung('easy-jump', 'down');
+    const hardJump = song('hard-jump', { low: 68, high: 82, shares: flat(68, 82), popularity: 0.5 }); // 56 to 70 once sung an octave down
+    expect([hardJump.octave, hardJump.difficulty]).toEqual(['down', 'hard']);
+    const all = [hardJump, easyJump, hardWritten, easyWritten];
+    const only: TunerPart[] = ['history', 'tempo', 'era', 'popularity']; // Difficulty is the only gear left
+    expect(order(all, { off: only })).toEqual(['easy-written', 'hard-written', 'easy-jump', 'hard-jump']); // Light work
+    expect(order(all, { gears: { difficulty: 100 }, off: only })).toEqual(['hard-written', 'easy-written', 'hard-jump', 'easy-jump']); // Locked in
+  });
+
+  it('still lists the songs that need a jump, after the others, so a range whose popular songs all need one is never empty', () => {
+    const jumps = Array.from({ length: 12 }, (_, n) => sung(`jump-${n}`, n % 2 ? 'down' : 'up', 0.95 - n / 100));
+    const quiet = [sung('quiet-a', 'none', 0.2), sung('quiet-b', 'none', 0.1)];
+    const list = prepareSetlist(cands(...jumps, ...quiet), USER);
+    for (const s of [state(), state({ gears: { difficulty: 100, popularity: 0 } }), state({ off: [...GEAR_IDS, 'era'] })]) {
+      const r = rankPrepared(list, s);
+      expect(r.songs).toHaveLength(14);
+      expect(r.empty).toBeUndefined();
+      expect(ids(r, 2)).toEqual(['quiet-a', 'quiet-b']);
+    }
+    // With nothing sung as written at all, the jumps are the list, in popularity order as before.
+    const onlyJumps = rankPrepared(prepareSetlist(cands(...jumps), USER), state());
+    expect(onlyJumps.songs).toHaveLength(12);
+    expect(ids(onlyJumps, 3)).toEqual(['jump-0', 'jump-1', 'jump-2']);
+  });
+
+  it('keeps the Maybe songs after all the others, and sorts them the same way among themselves', () => {
+    const sure = sung('sure-jump', 'down', 0.1); // the least popular song, but a sure one
+    const maybeWritten = song('maybe-written', { low: 40, high: 70, confidence: 'low', popularity: 0.5 });
+    const maybeJump = song('maybe-jump', { low: 58, high: 74, confidence: 'low', popularity: 0.99 });
+    expect([maybeWritten.octave, maybeJump.octave]).toEqual(['none', 'down']);
+    expect(order([maybeJump, maybeWritten, sure])).toEqual(['sure-jump', 'maybe-written', 'maybe-jump']);
+  });
+
+  it('comes before "not known on an active gear" too, so the rule has no exception while Tempo or History is on', () => {
+    // Decision A says every song sung as written comes before any that needs a jump. A song with no tempo still sorts after the
+    // songs that have one, but only among songs that are sung the same way.
+    const noTempo = sung('written-no-tempo', 'none', 0.2);
+    const jumpWithTempo = song('jump-with-tempo', { low: 58, high: 74, shares: flat(58, 74), popularity: 0.9, tempo: 100 });
+    expect(effectiveTempo(noTempo)).toBeUndefined();
+    const tempoOnly: TunerPart[] = ['history', 'era', 'difficulty', 'popularity'];
+    expect(order([jumpWithTempo, noTempo], { off: tempoOnly, gears: { tempo: 100 } })).toEqual(['written-no-tempo', 'jump-with-tempo']);
+    // The same for the singer's own songs: a song of theirs that needs a jump follows the catalogue's songs sung as written.
+    const own = { match: sung('own-jump', 'down', 0.3), listening: 0.9 };
+    const catalogueWritten = { match: sung('catalogue-written', 'none', 0.3) };
+    const historyOnly: TunerPart[] = ['tempo', 'era', 'difficulty', 'popularity'];
+    const r = rankPrepared(prepareSetlist([own, catalogueWritten], USER), state({ off: historyOnly, loggedIn: true }));
+    expect(r.applied).toEqual(['history']);
+    expect(ids(r)).toEqual(['catalogue-written', 'own-jump']);
+  });
+});
+
 describe('History (rule 3): the singer\'s own songs, only when logged in', () => {
   const a = { match: song('a', { low: 50, high: 60, popularity: 0.5 }), listening: 0.9 };
   const b = { match: song('b', { low: 50, high: 60, popularity: 0.5 }), listening: 0.15 };
@@ -743,6 +870,53 @@ describe.each(TEST_RANGES)('%s', (_name, range) => {
       for (let v = 10; v <= 100; v += 10) if (top(v).some((id, i) => id !== top(v - 10)[i])) moved++;
       expect(moved, g).toBeGreaterThanOrEqual(9);
     }
+  });
+});
+
+// Criterion 9 (QWW-58): logged out with the default gears, at least 15 of the top 20 are sung as written. One range for every
+// voice type, on a catalogue whose hits sit in the tenor's register, which is what put octave jumps at the top of a bass's list.
+describe.each(VOICE_RANGES)('%s: songs sung as written first (criterion 9)', (_name, range) => {
+  const { prepared, matches } = prepareCatalogue(HIT_CATALOGUE, range, deps);
+  const written = matches.filter((m) => m.octave === 'none');
+  const sungAsWritten = (s: { match: Match }) => s.match.octave === 'none';
+
+  it('has songs sung as written to fill a top 20, and songs that need a jump behind them (or this proves nothing)', () => {
+    expect(written.length).toBeGreaterThanOrEqual(20);
+    expect(matches.length - written.length).toBeGreaterThanOrEqual(20);
+  });
+
+  it('puts at least 15 of the top 20 sung as written, logged out with the default gears', () => {
+    const top = rankPrepared(prepared, state()).songs.slice(0, 20);
+    expect(top).toHaveLength(20);
+    expect(top.filter(sungAsWritten).length).toBeGreaterThanOrEqual(15);
+  });
+
+  it('lists every song sung as written before any song that needs a jump, whatever the gears and eras say', () => {
+    const settings = [
+      state(),
+      state({ gears: { difficulty: 100 } }),
+      state({ gears: { difficulty: 20 }, off: ['history', 'tempo'], eras: ['s80'] }), // Quinn-Wai's list of 11 Nov: F2 to F4, '80s, Difficulty about 20
+      state({ gears: { popularity: 0, tempo: 100 }, off: ['history', 'era'] }),
+      state({ off: [...GEAR_IDS, 'era'] }),
+      ...ERA_IDS.map((era) => state({ off: ['history', 'tempo'], eras: [era] })),
+    ];
+    for (const [i, s] of settings.entries()) {
+      const { songs } = rankPrepared(prepared, s);
+      // The Maybe songs come after all the others (tested above); the rule holds inside each of the two blocks.
+      for (const maybe of [false, true]) {
+        const block = songs.filter((x) => (x.match.difficulty === 'maybe') === maybe).map(sungAsWritten);
+        const firstJump = block.indexOf(false);
+        expect(firstJump < 0 || !block.slice(firstJump).includes(true), `setting ${i}, ${maybe ? 'Maybe' : 'sure'} songs: a song sung as written after a jump`).toBe(true);
+      }
+    }
+  });
+
+  it('still lists every song that fits, and is never empty (criterion 3): the jumps follow, they are not dropped', () => {
+    for (const s of [state(), state({ gears: { difficulty: 100 } }), state({ off: [...GEAR_IDS, 'era'] })]) {
+      expect(rankPrepared(prepared, s).songs).toHaveLength(matches.length);
+    }
+    expect(matches.length).toBeGreaterThanOrEqual(10);
+    for (const era of ERA_IDS) expect(rankPrepared(prepared, state({ off: ['history', 'tempo'], eras: [era] })).songs.length, era).toBeGreaterThan(0);
   });
 });
 
