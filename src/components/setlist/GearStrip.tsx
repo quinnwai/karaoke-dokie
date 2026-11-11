@@ -1,17 +1,22 @@
 import { useEffect, useId, useRef, type CSSProperties } from 'react';
+import { gearColor } from '../../lib/setlist/art';
 import { GEAR_META, RESET_TITLE } from '../../lib/setlist/gears';
+import { neonVars } from '../../lib/setlist/sheet';
 import type { GearId } from '../../lib/setlist/types';
 import { GearArt } from './GearArt';
-import styles from './setlist.module.css';
+import styles from './sheet.module.css';
 
 interface GearStripProps {
   gear: GearId;
-  /** The gear's value. While it is off this is the default, drawn dimmed. */
+  /** The gear's value. While it is off this is the default, drawn unlit. */
   value: number;
   off: boolean;
   /** Not drawn (the mini sheet shows one gear). */
   hidden: boolean;
-  /** Set when the gear cannot be used at all (History before Spotify is connected): shown in place of the track. */
+  /**
+   * Set when the gear cannot be used at all (History before Spotify is connected, or when the library could not be read):
+   * the gear is drawn off, with its track, and this says why in the place of the end labels.
+   */
   unavailable?: string;
   onInput(value: number): void;
   /** A press landed on the slider while it was off. */
@@ -32,8 +37,9 @@ export function ResetIcon() {
 }
 
 /**
- * One slider gear: its art, its label with a reset button, a custom track, and the real `<input type="range">` laid
- * over the track, invisible (spec §8). Off, the gear shows its default value in a disabled style until it is touched.
+ * One slider gear: its neon art, its label with a reset button, a custom track, and the real `<input type="range">` laid
+ * over the track, invisible (spec §8). Off, the gear is a switched-off sign (Round 6A §7): unlit art, a dark knob at the
+ * default value and no fill, until it is touched.
  */
 export function GearStrip(props: GearStripProps) {
   const { gear, value, off, hidden, unavailable } = props;
@@ -70,14 +76,22 @@ export function GearStrip(props: GearStripProps) {
   };
 
   return (
-    <div className={styles.strip} data-strip="" data-gear={gear} data-off={off || undefined} hidden={hidden}>
-      <GearArt gear={gear} variant="strip" value={value} className={styles.gearArt} />
+    // The strip carries the gear's lit colour for its label, border, fill and glow (an off strip ignores it, §7).
+    <div
+      className={styles.strip}
+      data-strip=""
+      data-gear={gear}
+      data-off={off || undefined}
+      hidden={hidden}
+      style={neonVars(gearColor(gear, value)) as CSSProperties}
+    >
+      <GearArt gear={gear} variant="strip" value={value} off={off} className={styles.gearArt} />
       <div className={styles.stripBody} style={{ '--pct': `${value}%` } as CSSProperties}>
         <div className={styles.gearHead}>
           <label className={styles.eyebrow} htmlFor={`slider-${gear}`}>
             {meta.eyebrow}
             {off && (
-              <span className={styles.offTag} aria-hidden="true">
+              <span className={styles.offTag} data-offtag="" aria-hidden="true">
                 {' · OFF'}
               </span>
             )}
@@ -97,21 +111,20 @@ export function GearStrip(props: GearStripProps) {
             <ResetIcon />
           </button>
         </div>
+        {/* The data-* hooks are stable names for the browser tests, which read computed styles and cannot see CSS-module classes. */}
+        <div className={styles.track} aria-hidden="true">
+          <div className={styles.trackFill} data-fill="" />
+          <div className={styles.knob} data-knob="" />
+        </div>
         {unavailable ? (
-          <p className={styles.unavailable} id={hintId}>
+          <p className={styles.unavailable} id={hintId} data-ends="hint">
             {unavailable}
           </p>
         ) : (
-          <>
-            <div className={styles.track} aria-hidden="true">
-              <div className={styles.trackFill} />
-              <div className={styles.trackThumb} />
-            </div>
-            <div className={styles.ends}>
-              <span>{meta.left}</span>
-              <span>{meta.right}</span>
-            </div>
-          </>
+          <div className={styles.ends} data-ends="">
+            <span>{meta.left}</span>
+            <span>{meta.right}</span>
+          </div>
         )}
         <input
           ref={input}

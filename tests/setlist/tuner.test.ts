@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { eraOf, ERA_LABEL } from '../../src/lib/setlist/eras';
-import { modeAfterDrag, RACK_FULL, RACK_MINI, sheetLayout } from '../../src/lib/setlist/sheet';
+import { modeAfterDrag, neonVars, RACK_FULL, RACK_MINI, sheetLayout } from '../../src/lib/setlist/sheet';
 import { initialTuner, isOn, toRequest, tunerReducer } from '../../src/lib/setlist/tuner';
 import type { TunerAction } from '../../src/lib/setlist/tuner';
 import { GEAR_IDS, type EraId, type TunerState } from '../../src/lib/setlist/types';
@@ -270,6 +270,64 @@ describe('sheet geometry (spec §3)', () => {
     // Pulling the wrong way changes nothing.
     expect(modeAfterDrag(false, -80)).toBe(false);
     expect(modeAfterDrag(true, 80)).toBe(true);
+  });
+});
+
+// QWW-57, Quinn-Wai's decision 1 (11 Nov): where the expanded sheet cannot fit inside the screen at all, the handle keeps
+// the sheet in mini. The screen measures that (src/lib/setlist/fit.ts) and tells the sheet as `canExpand`.
+describe('sheet geometry when the sheet cannot expand', () => {
+  const MINI_LAYOUT = { dragging: false, rackHeight: RACK_MINI, compact: true };
+
+  it('stays at the mini rack and the compact layout, whether or not the tuner is in mini', () => {
+    expect(sheetLayout(true, null, false)).toEqual(MINI_LAYOUT);
+    // The full layout is never drawn: not even for a tuner that says expanded.
+    expect(sheetLayout(false, null, false)).toEqual(MINI_LAYOUT);
+  });
+
+  it('an upward drag does not grow the rack, and does not leave the compact layout either', () => {
+    expect(sheetLayout(true, -80, false)).toEqual({ dragging: true, rackHeight: RACK_MINI, compact: true });
+    expect(sheetLayout(true, -9, false)).toEqual({ dragging: true, rackHeight: RACK_MINI, compact: true });
+    expect(sheetLayout(true, -900, false).rackHeight).toBe(RACK_MINI);
+    expect(sheetLayout(false, -900, false)).toEqual({ dragging: true, rackHeight: RACK_MINI, compact: true });
+  });
+
+  it('a drag down does not shrink it below the mini rack', () => {
+    expect(sheetLayout(true, 40, false).rackHeight).toBe(RACK_MINI);
+    expect(sheetLayout(false, 900, false).rackHeight).toBe(RACK_MINI);
+  });
+
+  it('the rack never exceeds RACK_MINI, whatever the drag', () => {
+    for (const mini of [true, false]) {
+      for (const dragY of [null, -900, -300, -80, -9, -1, 0, 1, 40, 80, 900]) {
+        const { rackHeight, compact } = sheetLayout(mini, dragY, false);
+        expect(rackHeight, `mini ${mini}, drag ${dragY}`).toBe(RACK_MINI);
+        expect(compact, `mini ${mini}, drag ${dragY}`).toBe(true);
+      }
+    }
+  });
+
+  it('is the layout it always was when it can expand, and when nothing is said', () => {
+    for (const mini of [true, false]) {
+      for (const dragY of [null, -900, -80, -9, 0, 40, 900]) {
+        expect(sheetLayout(mini, dragY, true), `mini ${mini}, drag ${dragY}`).toEqual(sheetLayout(mini, dragY));
+      }
+    }
+    expect(sheetLayout(true, -80)).toEqual({ dragging: true, rackHeight: 244, compact: false });
+    expect(sheetLayout(false, null)).toEqual({ dragging: false, rackHeight: RACK_FULL, compact: false });
+  });
+});
+
+// Round 6A §5, §8, §9: how a part's lit colour reaches the sheet's CSS.
+describe('neonVars', () => {
+  it('is the colour, and the colour at 27% (border), 33% (glow) and 13% (inner glow), as hex alphas', () => {
+    expect(neonVars('#4FDDE8')).toEqual({
+      '--sl-gear': '#4FDDE8',
+      '--sl-gear-line': '#4FDDE844',
+      '--sl-gear-glow': '#4FDDE855',
+      '--sl-gear-inner': '#4FDDE822',
+    });
+    // 0x44 = 68/255, 0x55 = 85/255, 0x22 = 34/255.
+    expect([0x44, 0x55, 0x22].map((alpha) => Math.round((alpha / 255) * 100))).toEqual([27, 33, 13]);
   });
 });
 

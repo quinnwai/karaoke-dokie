@@ -14,14 +14,17 @@ export interface GearMeta {
   resetLabel: string;
 }
 
+// Round 6A (§5): History's label on the strip is "HISTORY" (it was "LISTENING HISTORY"); its reset button still says
+// "listening history" to a screen reader.
 export const GEAR_META: Record<GearId, GearMeta> = {
   difficulty: { eyebrow: 'DIFFICULTY', tab: 'Difficulty', left: 'Light work', right: 'Locked in', resetLabel: 'Reset difficulty (stop factoring it in)' },
-  history: { eyebrow: 'LISTENING HISTORY', tab: 'History', left: 'Rediscover', right: 'On repeat', resetLabel: 'Reset listening history (stop factoring it in)' },
+  history: { eyebrow: 'HISTORY', tab: 'History', left: 'Rediscover', right: 'On repeat', resetLabel: 'Reset listening history (stop factoring it in)' },
   popularity: { eyebrow: 'POPULARITY', tab: 'Popularity', left: 'Deep cuts', right: 'Pop hits', resetLabel: 'Reset popularity (stop factoring it in)' },
   tempo: { eyebrow: 'TEMPO', tab: 'Tempo', left: 'Slow jams', right: 'Upbeat tracks', resetLabel: 'Reset tempo (stop factoring it in)' },
 };
 
-export const ERA_META = { eyebrow: 'ERA: PICK ANY', tab: 'Era', resetLabel: 'Reset era (stop factoring it in)' } as const;
+// The Era panel's header is "ERA" and then a count (§8, `eraCountText` in eras.ts), which replaces "ERA: PICK ANY".
+export const ERA_META = { eyebrow: 'ERA', tab: 'Era', resetLabel: 'Reset era (stop factoring it in)' } as const;
 
 /** The reset button's tooltip. */
 export const RESET_TITLE = "Reset: don't factor in";

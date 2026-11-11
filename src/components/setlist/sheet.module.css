@@ -1,0 +1,458 @@
+/* The Setlist tuner's bottom sheet: the handle, the rack, the gear strips, the Era panel and the mini tab bar, in Round 6A's
+   neon look (docs/setlist-round6a, README §3.1, §5, §7 to §9; ported from the reference's .sheet, .handle, .strip, .track,
+   .knob, .era-panel and .tab rules). Split from setlist.module.css; the tokens (--sl-*) are defined on the screen's root
+   there and inherited here.
+
+   The colour a lit part is drawn in comes in through custom properties that the component sets on the strip, the Era panel
+   and each tab (neonVars in src/lib/setlist/sheet.ts): --sl-gear, and that colour at the alphas the design uses,
+   --sl-gear-line, --sl-gear-glow and --sl-gear-inner. An off part (data-off) ignores them (README §7: a switched-off sign,
+   not a faded one; no opacity or grayscale anywhere, the art draws itself unlit). */
+
+/* ===== Bottom sheet ===== */
+
+.sheet {
+  flex-shrink: 0;
+  margin: 0 -12px;
+  box-sizing: border-box;
+  padding: 0 12px 12px;
+  background: linear-gradient(180deg, #1b1a21 0%, #131218 100%);
+  border-top: 1px solid rgba(255, 79, 160, 0.28);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.55), 0 -1px 14px rgba(255, 79, 160, 0.1);
+  /* Dragging the handle or a slider must not select the labels or open iOS's long-press callout. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.handleRow {
+  position: relative;
+  height: 22px;
+}
+
+/* 140×44 touch area centred on the sheet's top edge, with a 44×5 bar. touch-action: none keeps a drag on the handle
+   from scrolling or pulling the page. */
+.handle {
+  position: absolute;
+  left: 50%;
+  top: -11px;
+  width: 140px;
+  height: 44px;
+  margin-left: -70px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.handle:active {
+  cursor: grabbing;
+}
+
+/* A screen too short for the expanded sheet keeps it in mini: the handle does nothing, and says so (aria-disabled). */
+.handle[aria-disabled='true'],
+.handle[aria-disabled='true']:active {
+  cursor: default;
+}
+
+.handle span {
+  width: 44px;
+  height: 5px;
+  border-radius: 3px;
+  background: #4a4654;
+}
+
+.rack {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: height 260ms ease;
+}
+
+.rack[data-dragging] {
+  transition: none;
+}
+
+/* ===== Gear strips ===== */
+
+.strips {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* The border is the gear's colour at 27% while it is on, the rail's grey while it is off (README §5, §7). */
+.strip {
+  display: flex;
+  flex-shrink: 0;
+  height: 76px;
+  box-sizing: border-box;
+  padding: 0 10px 0 6px;
+  background: var(--sl-panel);
+  border: 1px solid var(--sl-gear-line, var(--sl-rail));
+  border-radius: 10px;
+  align-items: center;
+  gap: 10px;
+}
+
+.strip[data-off] {
+  border-color: var(--sl-rail);
+}
+
+/* The art's own size and the box it sits in (README §5): 120×64, and 140×75 in the mini sheet. The art brings its colours,
+   its glow and its turn-on flicker; this only sizes it. */
+.gearArt {
+  flex-shrink: 0;
+  width: 120px;
+  height: 64px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.sheet[data-compact] .strip {
+  height: 94px;
+  padding-left: 7px;
+}
+
+.sheet[data-compact] .gearArt {
+  width: 140px;
+  height: 75px;
+}
+
+.stripBody {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gearHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* A gear's label: its colour while it is on. Off, it is --sl-off (QWW-57, Quinn-Wai, 11 Nov), which is 4.8:1 where 6A's
+   #6e6a78 was 3.7:1. The Era panel's header is the same label in pink. */
+.eyebrow {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--sl-gear, var(--sl-text-2));
+}
+
+.strip[data-off] .eyebrow,
+.eraPanel[data-off] .eyebrow {
+  color: var(--sl-off);
+}
+
+.offTag {
+  color: var(--sl-off);
+}
+
+/* 44×26 touch area. The negative margins keep the head row 14 px tall, so the rack's height does not change, and put
+   the icon's right edge on the track's right edge. It sits above the invisible slider, which a tap on the track's
+   right end must still move. */
+.resetButton {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 44px;
+  height: 26px;
+  margin: -8px -8px -4px 0;
+  box-sizing: border-box;
+  padding: 4px 8px 0 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sl-reset);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.resetButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.resetButton:hover {
+  color: var(--sl-text);
+}
+
+.resetButton:focus-visible {
+  outline: 2px solid var(--sl-text);
+  outline-offset: -2px;
+}
+
+/* ===== The track: a 4 px rail, the gear's glowing fill and a fader-cap knob (README §5) ===== */
+
+.track {
+  position: relative;
+  height: 20px;
+}
+
+.track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--sl-rail);
+}
+
+.trackFill {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  height: 4px;
+  border-radius: 2px;
+  width: var(--pct, 0%);
+  background: var(--sl-gear);
+  box-shadow: 0 0 8px var(--sl-gear);
+}
+
+/* 14×20 with a 1 px border: the grey fader cap with a 2 px dark line down its middle (the 12 px inside it puts the line at
+   5 to 7). Centred on the value. */
+.knob {
+  position: absolute;
+  top: 0;
+  left: var(--pct, 0%);
+  width: 14px;
+  height: 20px;
+  margin-left: -7px;
+  box-sizing: border-box;
+  border: 1px solid #cfcad8;
+  border-radius: 3px;
+  background: linear-gradient(90deg, transparent 5px, rgba(0, 0, 0, 0.45) 5px, rgba(0, 0, 0, 0.45) 7px, transparent 7px),
+    linear-gradient(180deg, #bdb8c7 0%, #77727f 100%);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
+/* Off: no fill, and the knob is a flat dark cap at the default value (README §7). */
+.strip[data-off] .trackFill {
+  display: none;
+}
+
+.strip[data-off] .knob {
+  background: #1e1d24;
+  border-color: #4a4654;
+}
+
+.stripBody:has(.sliderInput:focus-visible) .knob {
+  outline: 2px solid var(--sl-text);
+  outline-offset: 2px;
+}
+
+.ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  line-height: 14px;
+  font-weight: 500;
+  color: var(--sl-text-3);
+}
+
+.strip[data-off] .ends {
+  color: var(--sl-off);
+}
+
+/* What the strip says in the place of its end labels when the gear cannot be used (History without Spotify). Up to two
+   lines: the strip's height is fixed (76, 94 in the mini sheet), so a longer hint is cut off, not left to push the rack
+   out. (max-height is the fallback if a build drops the -webkit- clamp.) */
+.unavailable {
+  margin: 0;
+  max-height: 28px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 14px;
+  font-weight: 500;
+  color: var(--sl-text-3);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* The real <input type="range">, laid invisibly over the whole strip body. It starts 7 px before the track and ends 7 px
+   after it, and its thumb is 14 px wide (the drawn knob's width), so the thumb's centre travels exactly the track's
+   length: a tap lands on the value the drawn knob shows. */
+.sliderInput {
+  position: absolute;
+  left: -7px;
+  top: -6px;
+  width: calc(100% + 14px);
+  height: calc(100% + 12px);
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: ew-resize;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  /* A drag that drifts up or down must stay with the thumb, not scroll or pull the page. */
+  touch-action: none;
+}
+
+.sliderInput:disabled {
+  cursor: default;
+}
+
+.sliderInput::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+
+.sliderInput::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 20px;
+}
+
+.sliderInput::-moz-range-track {
+  height: 100%;
+  background: transparent;
+}
+
+.sliderInput::-moz-range-thumb {
+  width: 14px;
+  height: 20px;
+  border: none;
+}
+
+/* ===== Era (README §8) ===== */
+
+/* The font size of an era button's label is set here, in one place. "Pre-’70s" is the widest label (about 4 px per px of font
+   size with this tracking, so 43 px at 6A's 10.5 px) and a button is only (100vw - 102px) / 7 wide: 37 px on a 360 px phone,
+   39 px on a 375 and 41 px on a 390, minus its 1 px borders. The size is the largest that fits, up to 6A's 10.5 px:
+   9 px on a 360, about 9.4 on a 375, about 10 on a 390, and 10.5 from about 405 px up. Measured in a browser (QWW-57). */
+.eraPanel {
+  --sl-era-label-size: clamp(9px, calc((100vw - 116px) / 27.5), 10.5px);
+  display: flex;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 7px;
+  background: var(--sl-panel);
+  border: 1px solid var(--sl-gear-line, var(--sl-rail));
+  border-radius: 10px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eraPanel[data-off] {
+  border-color: var(--sl-rail);
+}
+
+/* The count after "ERA": "· 1,204 songs", or "· OFF · all eras". */
+.eraCount {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--sl-text-3);
+}
+
+.eraGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+/* Idle. The three states of README §8: lit (aria-pressed), parked (an off default pick, dashed) and idle. */
+.eraButton {
+  height: 52px;
+  padding: 0;
+  border: 1px solid #2a2833;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  color: #8a8596;
+  font-family: inherit;
+  font-size: var(--sl-era-label-size);
+  line-height: 12px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.eraButton[aria-pressed='true'] {
+  border-color: var(--sl-pink);
+  color: #ff8cc3;
+  box-shadow: 0 0 12px rgba(255, 79, 160, 0.35), inset 0 0 10px rgba(255, 79, 160, 0.12);
+}
+
+.eraButton[aria-pressed='true'] svg {
+  filter: drop-shadow(0 0 3px var(--sl-pink));
+}
+
+/* A default pick while Era is off. (The app's defaults pick no era, so it does not show today; the style is the design's.) */
+.eraButton[data-parked] {
+  border-style: dashed;
+  border-color: #6a4459;
+  color: #a57891;
+}
+
+.sheet[data-compact] .eraButton {
+  height: 60px;
+}
+
+/* ===== Tab bar (mini only; README §9) ===== */
+
+.tabs {
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+/* The icon brings its own 34×27 and its own glow; the selected tab's border and glow are the gear's colour, on or off. */
+.tab {
+  height: 62px;
+  padding: 5px 2px 4px;
+  box-sizing: border-box;
+  border: 1px solid var(--sl-rail);
+  border-radius: 8px;
+  background: var(--sl-panel);
+  color: var(--sl-text-3);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.tab[aria-pressed='true'] {
+  border-color: var(--sl-gear);
+  box-shadow: 0 0 12px var(--sl-gear-glow), inset 0 0 8px var(--sl-gear-inner);
+  color: var(--sl-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rack {
+    transition: none !important;
+  }
+}
