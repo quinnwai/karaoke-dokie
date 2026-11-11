@@ -32,8 +32,8 @@
   list-style: none;
 }
 
-/* A row (README §4): the ▶ slot, the text and the badge, 10 px apart, 66 px tall. There is no rank number: the ▶ stands
-   where it was, and the position lives in data-rank and in the list being an <ol>. */
+/* A row (README §4): the slot, the text and the badge, 10 px apart, 66 px tall. The slot is where the rank number was
+   (decision 3), and holds the number and the ▶ in turn (R3). The position also lives in data-rank and in the list being an <ol>. */
 .row {
   height: 66px;
   box-sizing: border-box;
@@ -44,9 +44,10 @@
   /* A row that changes place slides there: flip.ts animates it (README §4: 280 ms, as in Round 5). */
 }
 
-/* The ▶ slot: a 44 px target at the start of the row, beside the row's own button, never inside it. QWW-48's play button
-   is styled with the app's colours (--ink, --faint, --pink); the slot hands it the tuner's, so its ring is --pink-line, its
-   glyph --pink-text, and it glows like the badge while it plays. */
+/* The slot (R3): a 44 px target at the start of the row, beside the row's own button, never inside it. It holds the row's
+   rank number and its ▶ in the same place, one at a time, and draws no ring or circle in any state, only the glyph. QWW-48's
+   play button is styled with the app's colours (--ink, --faint, --pink); the slot hands it the tuner's, so its glyph is
+   --pink-text and it glows like the badge while it plays. */
 .playSlot {
   --ink: var(--sl-pink-text);
   --faint: var(--sl-pink-line);
@@ -59,41 +60,93 @@
   place-items: center;
 }
 
-.playSlot > button {
+/* The number and the ▶ share the slot's one cell. */
+.playSlot > * {
+  grid-area: 1 / 1;
+}
+
+/* 6A's rank style, centred in the slot. It is not drawn here: a touch screen cannot hover, so the ▶ stands in the number's
+   place there (below, under hover: hover, is where the number comes back). --sl-text-4 is 6A's #7C7887 (4.5:1), which the
+   screen's token list does not carry, so it is given here as the fallback. */
+.rankNumber {
+  display: none;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--sl-text-4, #7c7887);
+  text-align: center;
+}
+
+/* The ▶ is whatever button the slot holds: the placeholder's, or QWW-48's, which brings its own sizes and a margin-left of
+   -4px, so the slot sets them again. The radius is not a circle: it shapes only the keyboard focus outline, which is drawn
+   inside the 44 px so the list's scroller does not cut it off at the row's edge. Nothing else here has a border or a
+   background (R3: no ring in any state). */
+.playSlot button {
+  position: relative;
+  width: 44px;
+  height: 44px;
   margin: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--sl-pink-text);
+  cursor: pointer;
+}
+
+.playSlot button:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Not playable (the placeholder until QWW-48 is wired in, and later a song with no preview): the glyph in a faded pink. */
+.playSlot button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* QWW-48's button is a ring (its first svg: two circles) round a glyph (its second). There is no ring in the slot, so it goes
+   and QWW-48 needs no change when it is wired in. */
+.playSlot [data-preview] > svg:first-child {
+  display: none;
 }
 
 .playSlot [data-preview='playing'] {
   filter: drop-shadow(0 0 5px rgba(240, 80, 154, 0.55));
 }
 
-.playButton {
-  position: relative;
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: none;
-  color: var(--sl-pink-text);
-  cursor: pointer;
+/* A pointer device: the number shows at rest and the ▶ does not (its glyph is hidden, not the button, so the button keeps its
+   44 px target and its place in the Tab order). Hovering the row, or keyboard focus on the ▶, swaps them. Hover is only
+   ever for pointer devices, so nothing sticks after a tap on a phone. */
+@media (hover: hover) {
+  .rankNumber {
+    display: block;
+  }
+
+  .playSlot button svg {
+    visibility: hidden;
+  }
+
+  .row:hover .rankNumber,
+  .playSlot:has(:focus-visible) .rankNumber {
+    display: none;
+  }
+
+  .row:hover .playSlot button svg,
+  .playSlot:has(:focus-visible) button svg {
+    visibility: visible;
+  }
 }
 
-.playButton:disabled {
-  opacity: 0.4;
-  cursor: default;
+/* A preview that is loading, playing or paused (QWW-48 marks its button with data-preview) keeps its glyph in the number's place
+   without hover, on any device, so the row that is sounding shows. */
+.playSlot:has([data-preview='loading'], [data-preview='playing'], [data-preview='paused']) .rankNumber {
+  display: none;
 }
 
-.playRing {
-  position: absolute;
-  inset: 4px;
-  width: 36px;
-  height: 36px;
-  fill: none;
-  stroke: var(--sl-pink-line);
-  stroke-width: 1.5;
+.playSlot:has([data-preview='loading'], [data-preview='playing'], [data-preview='paused']) button svg {
+  visibility: visible;
 }
 
 .rowOpen {
@@ -121,6 +174,8 @@
 }
 
 .rowTitleBox {
+  /* How long one title takes to fill in (R12, below). */
+  --fill-ms: 600ms;
   position: relative;
   display: block;
   min-width: 0;
@@ -156,36 +211,54 @@
   color: var(--sl-pink-line);
 }
 
-/* The karaoke lyric wipe on the #1 title: a pink copy laid over the title and revealed left to right, over the first 70% of
-   3.4 s and then held. It is on the row at rank 1 only. With reduced motion the title is simply pink (no sweep). The copy is
-   generated from data-wipe, so the page holds the title once: a screen reader, find-in-page and a copy all see one title (the
-   second `content` is the alt-text form, for the browsers that have it, which tells a screen reader there is nothing to say). */
-.rowTitleBox[data-wipe]::after {
-  content: attr(data-wipe);
-  content: attr(data-wipe) / '';
-  position: absolute;
-  inset: 0;
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 16px;
-  line-height: 20px;
-  font-weight: 600;
-  color: var(--sl-pink-text);
-  text-shadow: 0 0 8px rgba(255, 79, 160, 0.7);
-  clip-path: inset(0 0 0 0);
-  animation: wipe 3.4s ease-in-out infinite;
-  pointer-events: none;
-}
-
-@keyframes wipe {
-  0% {
-    clip-path: inset(0 100% 0 0);
+/* The title's karaoke fill (R12, in place of the looping #1 wipe): when a row first comes into view its title fills in once,
+   left to right, in about 0.6 s, and ends in its normal white. Until then the title is dim, and a white copy of it, clipped
+   to nothing, waits on top of it; the transition opens the clip from the left.
+   It is a transition, not an animation, because React moves a row's DOM node when the list is re-ranked, and that restarts or
+   cancels an animation. A node that is moved and inserted again already holding data-filled is drawn in its last state, with
+   no transition, which is what a title that has filled needs. SongRows puts data-filled on a row once (useFillIn) and never takes
+   it off; --fill-delay is the row's place in the batch of rows that came into view together (60 ms each, for the first few).
+   The copy is generated from data-fill-text, so the page holds the title once: a screen reader, find-in-page and a copy all see one
+   title (the second `content` is the alt-text form, for the browsers that have it, which tells a screen reader there is
+   nothing to say). The copy is as wide as the title's own text, up to the box, so the sweep covers the text and not the room
+   after a short title. With reduced motion none of this is drawn: the titles simply show, white. */
+@media (prefers-reduced-motion: no-preference) {
+  .rowTitleBox[data-fill-text] .rowTitle {
+    color: var(--sl-text-3);
   }
-  70%,
-  100% {
+
+  .rowTitleBox[data-fill-text]::after {
+    content: attr(data-fill-text);
+    content: attr(data-fill-text) / '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    max-width: 100%;
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 16px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--sl-text);
+    clip-path: inset(0 100% 0 0);
+    pointer-events: none;
+  }
+
+  /* Filled: the clip opens. When it is open the title itself turns white and the copy is put away, each by a zero-length
+     transition that waits out the fill, so the settled title is one crisp line of text and not two laid over each other. */
+  .rowTitleBox[data-filled] .rowTitle {
+    color: var(--sl-text);
+    transition: color 0s linear calc(var(--fill-delay, 0ms) + var(--fill-ms));
+  }
+
+  .rowTitleBox[data-filled]::after {
     clip-path: inset(0 0 0 0);
+    visibility: hidden;
+    transition:
+      clip-path var(--fill-ms) ease-out var(--fill-delay, 0ms),
+      visibility 0s linear calc(var(--fill-delay, 0ms) + var(--fill-ms));
   }
 }
 
@@ -269,10 +342,4 @@
   padding: 6px 0 0;
   color: var(--sl-text-3);
   opacity: 0.6;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .rowTitleBox[data-wipe]::after {
-    animation: none !important;
-  }
 }
