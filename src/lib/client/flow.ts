@@ -189,6 +189,8 @@ export type FlowEvent =
   | { type: 'feedback'; trackId: string; thumbs: 'up' | 'down' }
   | { type: 'redo' }
   | { type: 'redoEnd'; end: 'low' | 'high' }
+  /** "Back to songs" on the quiet, mic and note steps of a redo (or the browser's Back button there): the old range, the tuning and the list stay as they were. */
+  | { type: 'backToSongs' }
   | { type: 'pickStart' }
   | { type: 'knownLoaded'; songs: KnownSong[] }
   | { type: 'togglePick'; trackId: string }
@@ -350,6 +352,14 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       const keep = event.end === 'low' ? { low: null, high: state.range.high } : { low: state.range.low, high: null };
       return enterMic({ ...state, ...keep, redoing: event.end, selectedId: null }, event.end);
     }
+    case 'backToSongs': {
+      // Only a singer who already has a range can leave a redo this way (the first test has nothing to go back to). `redoEnd` kept
+      // the list; `redo` emptied it, so that one loads again.
+      if (!state.range || overlayOf(state) !== 'redo') return state;
+      const { range } = state;
+      const reload = state.matches.length === 0;
+      return { ...state, step: 'results', hold: 'ready', low: range.low, high: range.high, redoing: null, selectedId: null, ...(reload ? { loading: true, error: null, attempt: 0 } : {}) };
+    }
     case 'pickStart':
       return { ...state, step: 'pick', picks: [], selectedId: null };
     case 'knownLoaded':
@@ -369,6 +379,20 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
 
 function isHoldStep(state: FlowState): boolean {
   return state.step === 'low' || state.step === 'high';
+}
+
+/** What can be open on top of the song list. */
+export type Overlay = 'song' | 'redo';
+
+/**
+ * What is open on top of the song list, which the browser's Back button closes (QWW-57): a song's page, or the quiet, mic and note
+ * steps of a redo, which only a singer who already has a range reaches from the list. The first test, with no range yet, has nothing
+ * to go back to.
+ */
+export function overlayOf(state: Pick<FlowState, 'step' | 'selectedId' | 'range'>): Overlay | null {
+  if (state.step === 'results') return state.selectedId !== null ? 'song' : null;
+  const inRedo = state.step === 'quiet' || state.step === 'mic' || state.step === 'low' || state.step === 'high';
+  return state.range !== null && inRedo ? 'redo' : null;
 }
 
 /** Lowest low and highest high of the picked songs. */

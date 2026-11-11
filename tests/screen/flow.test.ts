@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { flowReducer, historyAvailable, initialState, rangeFromPicks, SHOW_STEP, type FlowEvent, type FlowState } from '../../src/lib/client/flow';
+import { flowReducer, historyAvailable, initialState, overlayOf, rangeFromPicks, SHOW_STEP, type FlowEvent, type FlowState } from '../../src/lib/client/flow';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { initialTuner, isOn, type TunerAction } from '../../src/lib/setlist/tuner';
 import { allMatches, knownSongs, me } from '../fixtures/screen';
@@ -349,6 +349,68 @@ describe('results', () => {
     expect(s).toMatchObject({ step: 'quiet', low: null, high: null, matches: [], signedIn: true });
     expect(s.tuner).toEqual(tuned.tuner);
     expect(s.tuner).toMatchObject({ difficulty: 80, eras: ['s80'] });
+  });
+});
+
+describe('what is open on top of the list, and Back to songs from a redo (QWW-57)', () => {
+  const range = { low: 45, high: 72, source: 'test' as const };
+  const atResults = run([{ type: 'booted', me: me(range), progress: null, wantsPick: false }]);
+  const loaded = run([{ type: 'allLoaded', page: allMatches() }], atResults);
+  const tuned = run(tune({ type: 'input', gear: 'difficulty', value: 80 }, { type: 'era', era: 's80' }), loaded);
+
+  it('is a song page at the results, and the quiet, mic and note steps of a redo; the first test, with no range, has nothing open', () => {
+    expect(overlayOf(loaded)).toBeNull();
+    expect(overlayOf(run([{ type: 'select', trackId: 't2' }], loaded))).toBe('song');
+    expect(overlayOf(run([{ type: 'select', trackId: 't2' }, { type: 'deselect' }], loaded))).toBeNull();
+    // A redo, whole or of one end: the range is kept, so there is a list to go back to.
+    expect(overlayOf(run([{ type: 'redo' }], loaded))).toBe('redo');
+    expect(overlayOf(run([{ type: 'redo' }, { type: 'quietDone' }], loaded))).toBe('redo');
+    expect(overlayOf(run([{ type: 'redo' }, { type: 'quietDone' }, ...micOn], loaded))).toBe('redo');
+    expect(overlayOf(run([{ type: 'redoEnd', end: 'low' }], loaded))).toBe('redo');
+    expect(overlayOf(run([{ type: 'redoEnd', end: 'high' }, ...micOn], loaded))).toBe('redo');
+    // Finished: saving and the range screen are not on top of a list.
+    expect(overlayOf(run([{ type: 'redoEnd', end: 'low' }, ...micOn, { type: 'holdEnd', midi: 48 }], loaded))).toBeNull();
+    // The very first test: no range yet, so none of its steps has a list under it.
+    const firstTest = run([{ type: 'booted', me: me(), progress: null, wantsPick: false }]);
+    expect(firstTest.range).toBeNull();
+    for (const events of [[{ type: 'start' }], [{ type: 'start' }, { type: 'quietDone' }], [{ type: 'start' }, { type: 'quietDone' }, ...micOn]] as FlowEvent[][]) {
+      expect(overlayOf(run(events, firstTest))).toBeNull();
+    }
+    expect(overlayOf(firstTest)).toBeNull(); // the title
+    expect(overlayOf(run([{ type: 'start' }, { type: 'quietDone' }, ...micOn, { type: 'holdEnd', midi: 45 }, { type: 'holdEnd', midi: 72 }], firstTest))).toBeNull(); // saving
+  });
+
+  it.each([
+    ['the mic step of one end', [{ type: 'redoEnd', end: 'low' }] as FlowEvent[]],
+    ['its note step', [{ type: 'redoEnd', end: 'high' }, ...micOn] as FlowEvent[]],
+    ['a note step after the first note of a whole redo', [{ type: 'redo' }, { type: 'quietDone' }, ...micOn, { type: 'holdEnd', midi: 40 }] as FlowEvent[]],
+  ])('Back to songs from %s keeps the range, the tuning and the list, and stops the redo', (_what, events) => {
+    const s = run([...events, { type: 'backToSongs' }], tuned);
+    expect(s).toMatchObject({ step: 'results', hold: 'ready', redoing: null, selectedId: null, range, low: 45, high: 72, signedIn: true, mode: 'library' });
+    expect(s.tuner).toEqual(tuned.tuner);
+    expect(s.tuner).toMatchObject({ difficulty: 80, eras: ['s80'] });
+    expect(overlayOf(s)).toBeNull();
+    // The singer can start a redo again from there, from the top.
+    expect(run([{ type: 'redoEnd', end: 'low' }], s)).toMatchObject({ step: 'mic', low: null, high: 72, redoing: 'low' });
+  });
+
+  it('keeps the list when only one end was being redone, and loads it again when the whole test was (it emptied the list)', () => {
+    expect(run([{ type: 'redoEnd', end: 'low' }, { type: 'backToSongs' }], tuned)).toMatchObject({ loading: false, attempt: tuned.attempt, matches: tuned.matches });
+    const whole = run([{ type: 'redo' }, { type: 'backToSongs' }], tuned);
+    expect(whole).toMatchObject({ step: 'results', matches: [], loading: true, attempt: 0, error: null });
+    // ...and the load that follows fills it, as at the first visit.
+    expect(run([{ type: 'allLoaded', page: allMatches() }], whole)).toMatchObject({ loading: false, matches: allMatches().matches });
+  });
+
+  it('does nothing outside a redo: the list, a song page, the title, and the very first test', () => {
+    expect(run([{ type: 'backToSongs' }], loaded)).toBe(loaded);
+    const song = run([{ type: 'select', trackId: 't2' }], loaded);
+    expect(run([{ type: 'backToSongs' }], song)).toBe(song);
+    const firstTest = run([{ type: 'booted', me: me(), progress: null, wantsPick: false }, { type: 'start' }, { type: 'quietDone' }, ...micOn]);
+    expect(firstTest.step).toBe('low');
+    expect(run([{ type: 'backToSongs' }], firstTest)).toBe(firstTest);
+    const title = run([signedOut]);
+    expect(run([{ type: 'backToSongs' }], title)).toBe(title);
   });
 });
 

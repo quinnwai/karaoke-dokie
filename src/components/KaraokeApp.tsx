@@ -9,7 +9,7 @@ import { frequencyToMidi, midiToNoteName } from '../lib/audio/notes';
 import { createApi, LOGIN_PATH, type Api } from '../lib/client/api';
 import { detectBrowser } from '../lib/client/browser';
 import { createTracker, flushWhenHidden, loadAnonId, sendEvents, type Tracker } from '../lib/client/events';
-import { flowReducer, initialState, type FlowEvent, type FlowState } from '../lib/client/flow';
+import { flowReducer, initialState, overlayOf, type FlowEvent, type FlowState } from '../lib/client/flow';
 import { eventsFor, feedbackView, rowPlayEvent, viewProps } from '../lib/client/funnel';
 import { browserMic, classifyMicError, MicError, type Mic, type MicRecorder } from '../lib/client/mic';
 import { createPostHogSink } from '../lib/client/posthog';
@@ -24,6 +24,7 @@ import {
 } from '../lib/client/storage';
 import type { PostHogSettings } from '../lib/contracts';
 import { EVENT } from '../lib/eventNames';
+import { useOverlayHistory } from '../lib/client/useOverlayHistory';
 import { useRankedSetlist } from '../lib/client/useRankedSetlist';
 import { createNetworkEngine, type SetlistEngine } from '../lib/setlist/engine';
 import { toRequest } from '../lib/setlist/tuner';
@@ -255,6 +256,15 @@ export function KaraokeApp({
   // which need not be in the list the screen loaded.
   const findMatch = (trackId: string): Match | undefined =>
     ranked.result?.songs.find((s) => s.match.track.id === trackId)?.match ?? state.matches.find((m) => m.track.id === trackId);
+  // The song page keeps the match it was opened with. A re-rank that lands while it is open can leave the song out of the new
+  // list, and the lookup above would then find nothing: the page closed by itself and came back when a later list had the song
+  // again. Only a tap on a row opens a page, and only Back (or the browser's) closes it.
+  const [opened, setOpened] = useState<Match | null>(null);
+  const matchOf = (trackId: string): Match | undefined => (opened?.track.id === trackId ? opened : findMatch(trackId));
+  const openSong = (trackId: string, position: number) => {
+    setOpened(findMatch(trackId) ?? null);
+    dispatch({ type: 'select', trackId, position });
+  };
 
   // ---- mic ----
   const stopTicker = () => {
@@ -403,7 +413,7 @@ export function KaraokeApp({
   };
 
   const sendFeedback = (trackId: string, thumbs: 'up' | 'down') => {
-    const match = findMatch(trackId);
+    const match = matchOf(trackId);
     if (!match || !state.range) return;
     dispatch({ type: 'feedback', trackId, thumbs });
     const body = { trackId, thumbs, difficulty: match.difficulty, octave: match.octave, view: feedbackView(state) };
@@ -438,7 +448,16 @@ export function KaraokeApp({
     dispatch({ type: 'loggedOut' });
   };
 
-  const selected = state.selectedId ? findMatch(state.selectedId) : undefined;
+  const selected = state.selectedId ? matchOf(state.selectedId) : undefined;
+
+  // The browser's Back button closes what is open on top of the list: a song's page, or a redo's quiet, mic and note steps. The
+  // singer already has a range then, so "Back to songs" brings the list, the range and the tuning back as they were.
+  const overlay = overlayOf(state);
+  const backToSongs = () => {
+    clearProgress();
+    dispatch({ type: 'backToSongs' });
+  };
+  useOverlayHistory(overlay, () => (overlay === 'redo' ? backToSongs() : dispatch({ type: 'deselect' })));
 
   // The Setlist tuner is on the TV like every other step (Round 6A, QWW-57): one frame for the whole flow, with no second
   // bezel. It fills the TV's screen, and only its list scrolls.
@@ -465,7 +484,7 @@ export function KaraokeApp({
           }}
           onTuner={(action) => dispatch({ type: 'tuner', action })}
           onGearDone={(gear) => dispatch({ type: 'gearDone', gear })}
-          onSelect={(trackId, position) => dispatch({ type: 'select', trackId, position })}
+          onSelect={openSong}
           onMore={() => dispatch({ type: 'loadMore' })}
           onRetry={() => dispatch({ type: 'retryLoad' })}
           onRedo={redo}
@@ -509,7 +528,7 @@ export function KaraokeApp({
       )}
 
       {step === 'mic' && (
-        <MicStep gate={gate} onAsk={askMic} onTryHere={() => dispatch({ type: 'micTryHere' })} onReload={reload} />
+        <MicStep gate={gate} onAsk={askMic} onTryHere={() => dispatch({ type: 'micTryHere' })} onReload={reload} onBack={overlay === 'redo' ? backToSongs : undefined} />
       )}
 
       {(step === 'low' || step === 'high') && (
@@ -520,6 +539,7 @@ export function KaraokeApp({
           lowNote={step === 'high' && state.low !== null ? midiToNoteName(state.low) : null}
           onPress={holdStart}
           onRelease={holdEnd}
+          onBack={overlay === 'redo' ? backToSongs : undefined}
         />
       )}
 

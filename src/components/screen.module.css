@@ -560,6 +560,43 @@
   cursor: pointer;
 }
 
+/* "Back to songs" on the mic and note steps of a redo (BackToSongs.tsx, QWW-57): top left, where the song page's ‹ is, in words
+   because these steps are for older singers who must never be stuck. It stands just before the step's own box, which makes room
+   for it below. 44 px tall, 18 px type like the rest of the mic step's links. */
+.backToSongs {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 2;
+  min-height: 44px;
+  padding: 0 14px 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 22px;
+  background: none;
+  color: var(--dim);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.backToSongs span {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.backToSongs:hover,
+.backToSongs:focus-visible {
+  color: var(--ink);
+}
+
+.backToSongs + .mic,
+.backToSongs + .center,
+.backToSongs + .holdStep {
+  padding-top: 64px;
+}
+
 /* The page's address, to copy by hand when the copy button cannot. 18px keeps iOS from zooming in on focus. */
 .micField {
   width: min(100%, 320px);
