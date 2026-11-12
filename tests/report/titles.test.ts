@@ -176,6 +176,36 @@ describe('the report names what the rules keep apart', () => {
     expect(text).toContain('[1 octave apart]');
   });
 
+  it('lists the rows an octave apart that were folded into the better evidenced part, with the evidence behind each', async () => {
+    const store = createMemoryStore();
+    await add(store, "Plain White T's", 'Hey There Delilah', { source: 'audio-full', low: 52, high: 62 });
+    await add(store, 'Plain White T’s', 'Hey There Delilah', { low: 64, high: 74, octaveFrom: 'recording' });
+    const inputs = await store.listCanonicalInputs();
+    const plan = planCanonical(inputs, new Map());
+    expect(plan.build.groups).toHaveLength(1);
+    expect(plan.build.apart).toEqual([]);
+    const text = summarizePlan(inputs, plan).join('\n');
+    expect(text).toContain('1 groups hold rows an octave apart');
+    const shown = text.split('\n').find((l) => l.includes('=>') && l.includes('52-62'))!;
+    expect(shown).toContain("Plain White T's - Hey There Delilah");
+    expect(shown).toContain('recording, octaveFrom none, confidence high, trust 2');
+    expect(text).toContain('64-74, note file, octaveFrom recording, confidence high, trust 1');
+  });
+
+  it('lists every octave group, not a sample of ten', async () => {
+    const store = createMemoryStore();
+    for (let i = 0; i < 12; i++) {
+      await add(store, `Artist ${i}`, 'Song', { source: 'audio-full', low: 52, high: 62 });
+      await add(store, `Artist ${i}`, 'Song ', { low: 64, high: 74 });
+    }
+    const inputs = await store.listCanonicalInputs();
+    const plan = planCanonical(inputs, new Map());
+    const text = summarizePlan(inputs, plan).join('\n');
+    expect(plan.build.groups.filter((g) => g.octave)).toHaveLength(12);
+    expect(text).toContain('(all 12, most popular first)');
+    for (let i = 0; i < 12; i++) expect(text).toContain(`Artist ${i} - Song (52-62, recording`);
+  });
+
   it('folds songs that differ only by a featured artist, so the report has nothing to say about them', async () => {
     const store = createMemoryStore();
     await add(store, 'Michael Jackson', "I Just Can't Stop Loving You");

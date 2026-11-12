@@ -1,6 +1,7 @@
 // Postgres store using raw SQL through an injected query function, so the same code
 // runs on Neon (production) and pg-mem (tests).
 import type { DataSourceLogEntry, FeedbackEntry, Mood, SongRange, VocalRange } from '../contracts';
+import { rangeTrust } from '../songs/canonical';
 import { catalogueRank, pickCatalogue } from '../songs/score';
 import { isMeasured, MEASURED_RANK, SOURCE_RANK } from '../songs/sourceRank';
 import { isFeel } from '../tempo/feel';
@@ -584,6 +585,7 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       const rows = await query(
         `SELECT s.song_key, s.log_json::json ->> 'artist' AS artist, s.log_json::json ->> 'title' AS title,
            s.range_json::json ->> 'usdbViews' AS range_views, s.range_json::json ->> 'low' AS low, s.range_json::json ->> 'high' AS high,
+           s.range_json::json ->> 'source' AS source, s.range_json::json ->> 'confidence' AS confidence, s.range_json::json ->> 'octaveFrom' AS octave_from,
            b.views, p.karaoke_views, p.chart_rank, d.rank AS deezer_rank
          FROM song_ranges s
          LEFT JOIN (SELECT DISTINCT ON (song_key) song_key, id, views FROM usdb_songs ORDER BY song_key, COALESCE(views, 0) DESC, id) b
@@ -594,18 +596,23 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         MEASURED_SOURCES,
       );
       const opt = (v: unknown): number | undefined => (isSet(v) ? num(v) : undefined);
-      return rows.map((r): CanonicalInput => ({
-        key: str(r.song_key),
-        artist: isSet(r.artist) ? str(r.artist) : '',
-        title: isSet(r.title) ? str(r.title) : '',
-        rank: catalogueRank(
-          { usdbViews: opt(r.range_views) },
-          { views: opt(r.views) },
-          { karaokeViews: opt(r.karaoke_views), chartRank: opt(r.chart_rank), deezerRank: opt(r.deezer_rank) },
-        ),
-        low: num(r.low),
-        high: num(r.high),
-      }));
+      return rows.map((r): CanonicalInput => {
+        const evidence = { source: str(r.source), confidence: isSet(r.confidence) ? str(r.confidence) : undefined, octaveFrom: isSet(r.octave_from) ? str(r.octave_from) : undefined };
+        return {
+          key: str(r.song_key),
+          artist: isSet(r.artist) ? str(r.artist) : '',
+          title: isSet(r.title) ? str(r.title) : '',
+          rank: catalogueRank(
+            { usdbViews: opt(r.range_views) },
+            { views: opt(r.views) },
+            { karaokeViews: opt(r.karaoke_views), chartRank: opt(r.chart_rank), deezerRank: opt(r.deezer_rank) },
+          ),
+          low: num(r.low),
+          high: num(r.high),
+          trust: rangeTrust(evidence),
+          ...evidence,
+        };
+      });
     },
 
     // ---- Spotify rate-limit block (QWW-55) ----

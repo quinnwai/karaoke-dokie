@@ -274,6 +274,24 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
       expect(inputs.find((i) => i.key === 'abba|waterloo')).toMatchObject({ low: songRange.low, high: songRange.high });
       expect(inputs.find((i) => i.key === 'nobody|skipped')).toBeUndefined();
       expect(await make().listCanonicalInputs()).toEqual([]);
+      // how far each range's octave can be trusted (rangeTrust): a recording measured with high confidence, a note file moved to sit
+      // with its own recording or by a person, anything else
+      const note = (octaveFrom?: SongRange['octaveFrom'], confidence: SongRange['confidence'] = 'high'): SongRange => ({ ...songRange, confidence, ...(octaveFrom ? { octaveFrom } : {}) });
+      await s.putSongRange('queen|corrected', row('Queen', 'Corrected', note('recording')));
+      await s.putSongRange('queen|checked by hand', row('Queen', 'Checked By Hand', note('hand')));
+      await s.putSongRange('queen|guessed from the artist', row('Queen', 'Guessed From The Artist', note('artist')));
+      await s.putSongRange('queen|guessed from the pitch', row('Queen', 'Guessed From The Pitch', note('pitch')));
+      await s.putSongRange('queen|corrected but unsure', row('Queen', 'Corrected But Unsure', note('recording', 'low')));
+      const again = await s.listCanonicalInputs();
+      const trust = (key: string) => again.find((i) => i.key === key)?.trust;
+      expect([trust('abba|sos'), trust('queen|corrected'), trust('queen|checked by hand'), trust('abba|waterloo')]).toEqual([2, 1, 1, 0]);
+      // a guess is no evidence, and nor is a range the matcher shows as a Maybe, a recording included (queen|rough)
+      expect([trust('queen|guessed from the artist'), trust('queen|guessed from the pitch'), trust('queen|corrected but unsure'), trust('queen|rough')]).toEqual([0, 0, 0, 0]);
+      // what the trust was worked out from comes back too, for the dry run's report
+      expect(again.find((i) => i.key === 'queen|corrected')).toMatchObject({ source: 'note-file', confidence: 'high', octaveFrom: 'recording' });
+      expect(again.find((i) => i.key === 'queen|rough')).toMatchObject({ source: 'audio-full', confidence: 'low' });
+      expect(again.find((i) => i.key === 'abba|sos')).toMatchObject({ source: 'audio-full', confidence: 'high' });
+      expect(again.find((i) => i.key === 'abba|waterloo')?.octaveFrom).toBeUndefined();
     });
   });
 
