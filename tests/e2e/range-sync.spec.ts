@@ -100,7 +100,6 @@ test('a range sung logged out is carried to the account when the singer signs in
 
   // Signed out: the list is built on the range kept on the device, with the time it was sung.
   await expect(page.getByLabel(header('F#2 to C5'))).toBeVisible();
-  await expect(page.getByText('Plastic Love').first()).toBeVisible();
   expect(server.catalogueFor).toEqual(['?low=42&high=72&all=1']);
   expect(await kept(page)).toEqual({ ...FS2_C5, measuredAt: NEW });
 
@@ -108,7 +107,6 @@ test('a range sung logged out is carried to the account when the singer signs in
   await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
   await expect.poll(() => server.libraryBuiltOn.length).toBe(1);
   await expect(page.getByLabel(header('F#2 to C5'))).toBeVisible();
-  await expect(page.getByText('Plastic Love').first()).toBeVisible();
 
   // The new range was saved first, with the time it was sung, so the library list was built on it, not on F2 to C4.
   expect(server.puts).toEqual([{ ...FS2_C5, source: 'test', measuredAt: NEW }]);
@@ -164,7 +162,6 @@ test('signed in with no test in flight, a range on the device sung after the acc
 
   await expect.poll(() => server.libraryBuiltOn.length).toBe(1);
   await expect(page.getByLabel(header('F#2 to C5'))).toBeVisible();
-  await expect(page.getByText('Plastic Love').first()).toBeVisible();
   expect(server.puts).toEqual([{ ...FS2_C5, source: 'test', measuredAt: NEW }]);
   expect(server.libraryBuiltOn).toEqual([{ ...FS2_C5, source: 'test', measuredAt: NEW }]);
   expect(server.user?.range).toEqual({ ...FS2_C5, source: 'test', measuredAt: NEW });

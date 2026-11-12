@@ -3,7 +3,7 @@
 // the account and the signed-out list the one kept on the device, so one singer got two lists (the account held F2 to
 // C4 while the device and its header said F#2 to C5). Here the whole screen runs: the singing test, the sign-in round
 // trip, and what the list, the header, the account and the device each end up with.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KaraokeApp } from '../../src/components/KaraokeApp';
 import type { Api } from '../../src/lib/client/api';
@@ -87,6 +87,15 @@ const T_SUNG = T_OLD + 3_600_000;
 const FS2_C5 = { low: 42, high: 72 };
 const F2_C4 = { low: 41, high: 60 };
 
+/**
+ * The list screen: the header with the range, and the list asked for. The rows come from the screen's own design, which
+ * this rule does not depend on, so nothing here waits for a song.
+ */
+async function onList(api: ReturnType<typeof fakeApi>) {
+  await screen.findByLabelText(/^Your range /);
+  await waitFor(() => expect(api.allRecommendations.mock.calls.length + api.catalogue.mock.calls.length).toBeGreaterThan(0));
+}
+
 /** What the header says the list is built on. */
 const headerRange = () => screen.getByLabelText(/^Your range /).getAttribute('aria-label');
 const device = () => JSON.parse(localStorage.getItem('kd.range') ?? 'null');
@@ -106,13 +115,15 @@ describe('sing a new range logged out, then sign in', () => {
   it('the list and the header use the new range, and the account stores it', async () => {
     const heard = fakeMic();
     const navigate = vi.fn();
-    const out = render(<KaraokeApp api={fakeApi(null)} mic={heard.mic} navigate={navigate} quietMs={0} />);
+    const signedOut = fakeApi(null);
+    const out = render(<KaraokeApp api={signedOut} mic={heard.mic} navigate={navigate} quietMs={0} />);
 
     // Logged out: F#2 to C5 is sung and kept on the device, with the time it was sung.
     await sing(heard, FS2, C5);
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }));
-    await screen.findByText('Plastic Love');
+    await onList(signedOut);
     expect(headerRange()).toBe('Your range F#2 to C5');
+    expect(signedOut.catalogue).toHaveBeenCalledWith(FS2_C5);
     expect(device()).toEqual({ ...FS2_C5, measuredAt: T_SUNG });
 
     // Connect Spotify: the range goes with the round trip.
@@ -125,7 +136,7 @@ describe('sing a new range logged out, then sign in', () => {
     window.history.replaceState(null, '', '/?signedIn=1');
     const api = fakeApi(me({ ...F2_C4, source: 'test', measuredAt: T_OLD }));
     render(<KaraokeApp api={api} mic={heard.mic} />);
-    await screen.findByText('Plastic Love');
+    await onList(api);
 
     // The new range was saved first, with its own time, so the library list is built on it.
     expect(api.saveRange).toHaveBeenCalledTimes(1);
@@ -143,7 +154,7 @@ describe('sing a new range logged out, then sign in', () => {
     localStorage.setItem('kd.range', JSON.stringify(FS2_C5));
     const api = fakeApi(me({ ...F2_C4, source: 'test' }));
     render(<KaraokeApp api={api} mic={fakeMic().mic} />);
-    await screen.findByText('Plastic Love');
+    await onList(api);
 
     expect(api.saveRange).toHaveBeenCalledWith({ ...FS2_C5, source: 'test' });
     expect(api.account()).toEqual({ ...FS2_C5, source: 'test' });
@@ -158,7 +169,7 @@ describe('an older range on the device never overwrites a newer one on the accou
     sessionStorage.setItem('kd.test', JSON.stringify({ ...F2_C4, measuredAt: T_OLD }));
     const api = fakeApi(me({ ...FS2_C5, source: 'test', measuredAt: T_SUNG }));
     render(<KaraokeApp api={api} mic={fakeMic().mic} />);
-    await screen.findByText('Plastic Love');
+    await onList(api);
 
     expect(api.saveRange).not.toHaveBeenCalled();
     expect(api.account()).toEqual({ ...FS2_C5, source: 'test', measuredAt: T_SUNG });
@@ -178,7 +189,7 @@ describe('an older range on the device never overwrites a newer one on the accou
     localStorage.setItem('kd.range', JSON.stringify(F2_C4));
     const api = fakeApi(me({ ...FS2_C5, source: 'test', measuredAt: T_OLD }));
     render(<KaraokeApp api={api} mic={fakeMic().mic} />);
-    await screen.findByText('Plastic Love');
+    await onList(api);
     expect(api.saveRange).not.toHaveBeenCalled();
     expect(headerRange()).toBe('Your range F#2 to C5');
   });
@@ -191,7 +202,7 @@ describe('a new test while signed in', () => {
     render(<KaraokeApp api={api} mic={heard.mic} quietMs={0} />);
 
     await sing(heard, A2, C5);
-    await screen.findByText('Plastic Love');
+    await onList(api);
     expect(api.saveRange).toHaveBeenCalledWith({ low: 45, high: 72, source: 'test', measuredAt: T_SUNG });
     expect(api.account()).toEqual({ low: 45, high: 72, source: 'test', measuredAt: T_SUNG });
     expect(headerRange()).toBe('Your range A2 to C5');
@@ -202,7 +213,7 @@ describe('a new test while signed in', () => {
     const heard = fakeMic();
     const api = fakeApi(me({ ...F2_C4, source: 'test', measuredAt: T_OLD }));
     render(<KaraokeApp api={api} mic={heard.mic} quietMs={0} />);
-    await screen.findByText('Plastic Love');
+    await onList(api);
     expect(headerRange()).toBe('Your range F2 to C4');
     expect(device()).toEqual({ ...F2_C4, measuredAt: T_OLD });
 
@@ -211,7 +222,7 @@ describe('a new test while signed in', () => {
     await screen.findByRole('button', { name: /highest note/ });
     heard.sing(C5);
     await hold(/highest note/);
-    await screen.findByText('Plastic Love');
+    await onList(api);
 
     expect(api.saveRange).toHaveBeenCalledWith({ low: 41, high: 72, source: 'test', measuredAt: T_SUNG });
     expect(headerRange()).toBe('Your range F2 to C5');
@@ -224,7 +235,7 @@ describe('nothing changes for a singer who has one range', () => {
     localStorage.setItem('kd.range', JSON.stringify({ ...FS2_C5, measuredAt: T_OLD }));
     const api = fakeApi(null);
     render(<KaraokeApp api={api} mic={fakeMic().mic} />);
-    await screen.findByText('Plastic Love');
+    await onList(api);
     expect(api.catalogue).toHaveBeenCalledWith(FS2_C5);
     expect(headerRange()).toBe('Your range F#2 to C5');
     expect(device()).toEqual({ ...FS2_C5, measuredAt: T_OLD });
@@ -234,7 +245,7 @@ describe('nothing changes for a singer who has one range', () => {
     localStorage.setItem('kd.range', JSON.stringify({ ...FS2_C5, measuredAt: T_OLD }));
     const api = fakeApi(me({ ...FS2_C5, source: 'test', measuredAt: T_OLD }));
     render(<KaraokeApp api={api} mic={fakeMic().mic} />);
-    await screen.findByText('Plastic Love');
+    await onList(api);
     expect(api.saveRange).not.toHaveBeenCalled();
     expect(headerRange()).toBe('Your range F#2 to C5');
   });
