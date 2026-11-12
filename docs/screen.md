@@ -182,10 +182,11 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      title to them (`rawPress.ts`; the ✕, the era buttons and the sheet's handle count a click only if the press began on them). A finger is judged over a stretch
      (a tap inside 8 px; a drag from 16 px if it is twice as far sideways as up or down; otherwise judged at 32 px), and a drag that was called is taken back, the
      gear put back as it was and nothing recorded, if the finger has been more than 1.5 times as far up or down as to the side (the farthest it has been each way since it landed;
-     fine-tuning that comes back past where it landed is not that). A finger's tap on a ✕ holds that strip's fader (Era's: the eras) for 400 ms. The `<input type="range">` under it takes
+     fine-tuning that comes back past where it landed is not that). A finger's tap on a ✕ holds that strip's fader (Era's: the eras) for 400 ms from the tap, and no longer whatever is pressed in it. The `<input type="range">` under it takes
      no pointer and stays for the keyboard and screen readers; a click on the area gives it the focus as a mouse's. **Expanded** shows
      every gear (rack 416 px); **mini** shows one gear and a tab bar (164 px). The grab handle switches by tap, Enter or
-     Space, or by a vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live.
+     Space, or by a vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live. Its 44 px box ends above the first strip's title, and a
+     strip's head row (the title) takes no press, the ✕ in it excepted, so a tap near the title never reaches the handle and one on the handle never goes to the title.
      **Which mode it opens in** (`src/lib/setlist/fit.ts`, measured in `useSheetFit`): mini when the expanded sheet
      would leave fewer than 3 whole rows (every phone but a tall one; a 390×844 still opens expanded), and where the
      expanded sheet cannot fit inside the screen at all (an iPhone SE with Safari's bars) the handle
