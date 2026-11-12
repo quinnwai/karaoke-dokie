@@ -463,6 +463,24 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(all.get('toto|africa')!.deezerId).toBe(3_135_556_000);
   });
 
+  it('keeps the track a lookup matched, and a later miss clears it (QWW-67)', async () => {
+    const s = make();
+    const hit = {
+      key: 'lana del rey|summertime sadness',
+      rank: 813_635,
+      deezerId: 16_149_860,
+      checkedAt: '2026-11-12T08:00:00.000Z',
+      title: 'Summertime Sadness',
+      album: 'Born To Die',
+      releaseDate: '2012-01-27',
+      duration: 265,
+    };
+    await s.putSongDeezer([hit]);
+    expect((await s.listSongDeezer()).get(hit.key)).toStrictEqual(hit);
+    await s.putSongDeezer([{ key: hit.key, checkedAt: '2026-11-13T08:00:00.000Z' }]);
+    expect((await s.listSongDeezer()).get(hit.key)).toStrictEqual({ key: hit.key, checkedAt: '2026-11-13T08:00:00.000Z' });
+  });
+
   it('keeps one-song-one-row records by key: a batch read, a full list, and a new row replaces the old (QWW-49)', async () => {
     const s = make();
     const rec = (key: string, canonicalKey: string, title: string, reason: SongCanonical['reason']): SongCanonical => ({ key, canonicalKey, title, artist: 'Aaliyah', method: 'titles-v1', reason, sourceTitle: `raw ${title}`, sourceArtist: 'Aaliyah (raw)' });

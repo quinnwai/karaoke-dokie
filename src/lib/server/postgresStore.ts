@@ -521,13 +521,14 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       for (let i = 0; i < unique.length; i += 100) {
         const params: unknown[] = [];
         const rows = unique.slice(i, i + 100).map((e) => {
-          params.push(e.key, e.rank ?? null, e.deezerId ?? null, e.checkedAt);
+          params.push(e.key, e.rank ?? null, e.deezerId ?? null, e.checkedAt, e.title ?? null, e.album ?? null, e.releaseDate ?? null, e.duration ?? null);
           const n = params.length;
-          return `($${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+          return `(${Array.from({ length: 8 }, (_, j) => `$${n - 7 + j}`).join(', ')})`;
         });
         await query(
-          `INSERT INTO song_deezer (song_key, rank, deezer_id, checked_at) VALUES ${rows.join(', ')}
-           ON CONFLICT (song_key) DO UPDATE SET rank = EXCLUDED.rank, deezer_id = EXCLUDED.deezer_id, checked_at = EXCLUDED.checked_at`,
+          `INSERT INTO song_deezer (song_key, rank, deezer_id, checked_at, title, album, release_date, duration) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET rank = EXCLUDED.rank, deezer_id = EXCLUDED.deezer_id, checked_at = EXCLUDED.checked_at,
+             title = EXCLUDED.title, album = EXCLUDED.album, release_date = EXCLUDED.release_date, duration = EXCLUDED.duration`,
           params,
         );
       }
@@ -538,6 +539,10 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         const d: SongDeezerRecord = { key: str(r.song_key), checkedAt: str(r.checked_at) };
         if (isSet(r.rank)) d.rank = num(r.rank);
         if (isSet(r.deezer_id)) d.deezerId = num(r.deezer_id);
+        if (isSet(r.title)) d.title = str(r.title);
+        if (isSet(r.album)) d.album = str(r.album);
+        if (isSet(r.release_date)) d.releaseDate = str(r.release_date);
+        if (isSet(r.duration)) d.duration = num(r.duration);
         out.set(d.key, d);
       }
       return out;
