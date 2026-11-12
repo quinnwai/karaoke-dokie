@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Match, VocalRange } from '../lib/contracts';
 import { difficultyLabel, duetPartLine, isCatalogueTrack, NAMES_APART, octaveWording, rangeBar, type Span } from '../lib/client/display';
 import { spotifyEmbedUrl } from '../lib/client/spotifyEmbed';
@@ -15,6 +15,12 @@ interface SongDetailProps {
   onFeedback(thumbs: 'up' | 'down'): void;
   /** "Open in Spotify" was tapped (for the beta event log). */
   onSpotify?(): void;
+  /**
+   * How long, ms, the page's controls but ‹ (the ▶, the Spotify link or player, the thumbs) let a tap through to the screen behind them,
+   * from the moment the page is on the screen (KaraokeApp's TAP_GUARD_MS). A double tap on a row puts its second tap here, on whatever
+   * the page has under that spot. Unset, nothing is held.
+   */
+  holdMs?: number;
   onBack(): void;
 }
 
@@ -81,7 +87,7 @@ function Thumb({ down, picked }: { down?: boolean; picked?: boolean }) {
   );
 }
 
-export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, onBack }: SongDetailProps) {
+export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, holdMs = 0, onBack }: SongDetailProps) {
   const octave = octaveWording(match.octave);
   const maybe = match.difficulty === 'maybe';
   const duet = duetPartLine(match);
@@ -89,7 +95,6 @@ export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, 
   const catalogue = isCatalogueTrack(match.track.id);
   // Spotify's own player (an iframe) where the song's link is a track to embed; the plain link otherwise (the catalogue's search links).
   const embedded = spotifyEmbedUrl(match.track.spotifyUrl) !== null;
-  const spotify = <SpotifyPlayer track={match.track} label={catalogue ? 'Find on Spotify' : 'Open in Spotify'} onOpen={onSpotify} />;
 
   // The screen is one scroller shared with the song list. With the player, a long title can make this page
   // taller than the screen, and it would open scrolled to wherever the list was, past the back button.
@@ -98,8 +103,22 @@ export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, 
     if (root.current?.parentElement) root.current.parentElement.scrollTop = 0;
   }, []);
 
+  // The page holds its controls for a moment from the commit that puts it on the screen, which is the row's tap (a layout effect, so the
+  // moment does not start after a paint). `pointer-events: none` lets a touch or a click through to the screen behind: the ▶ is not
+  // pressed, the link does not navigate (a skipped handler would not stop it), no thumb is sent, and Spotify's iframe, which no handler
+  // of ours can see into, is held too. Keys are not touched (a key is not a double tap), nor is ‹ (no row sits under it), and nor is
+  // anything that is not a control: the text and the chart can still be hit-tested.
+  const [holding, setHolding] = useState(holdMs > 0);
+  useLayoutEffect(() => {
+    if (holdMs <= 0) return;
+    const timer = setTimeout(() => setHolding(false), holdMs);
+    return () => clearTimeout(timer);
+  }, [holdMs]);
+  const held: CSSProperties | undefined = holding ? { pointerEvents: 'none' } : undefined;
+  const spotify = <SpotifyPlayer track={match.track} label={catalogue ? 'Find on Spotify' : 'Open in Spotify'} onOpen={onSpotify} style={held} />;
+
   return (
-    <div className={styles.detail} ref={root}>
+    <div className={styles.detail} ref={root} data-hold={holding || undefined}>
       <button type="button" className={styles.back} onClick={onBack} aria-label="Back to songs">
         ‹
       </button>
@@ -112,7 +131,7 @@ export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, 
 
       {/* The page's first action (R27): the Deezer ▶ with its ring, on the list's one-at-a-time player (leaving the page stops it). Under it,
           the secondary one: "Find on Spotify" as an outlined button. Spotify's own player, where there is one to embed, stays lower down. */}
-      <PreviewButton id={match.track.id} deezerId={match.deezerId} title={match.track.title} artist={match.track.artist} large />
+      <PreviewButton id={match.track.id} deezerId={match.deezerId} title={match.track.title} artist={match.track.artist} large style={held} />
       {!embedded && spotify}
 
       <RangeBarView userRange={userRange} match={match} />
@@ -151,10 +170,10 @@ export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, 
         <p className={feedback ? styles.thanks : styles.feedbackQ} aria-live="polite">
           {feedback ? 'Thanks! That helps.' : 'How’d it go?'}
         </p>
-        <button type="button" className={styles.thumb} aria-label="It went well" aria-pressed={feedback === 'up'} disabled={feedback !== undefined} onClick={() => onFeedback('up')}>
+        <button type="button" className={styles.thumb} aria-label="It went well" aria-pressed={feedback === 'up'} disabled={feedback !== undefined} onClick={() => onFeedback('up')} style={held}>
           <Thumb picked={feedback === 'up'} />
         </button>
-        <button type="button" className={styles.thumb} aria-label="It didn't go well" aria-pressed={feedback === 'down'} disabled={feedback !== undefined} onClick={() => onFeedback('down')}>
+        <button type="button" className={styles.thumb} aria-label="It didn't go well" aria-pressed={feedback === 'down'} disabled={feedback !== undefined} onClick={() => onFeedback('down')} style={held}>
           <Thumb down picked={feedback === 'down'} />
         </button>
       </div>

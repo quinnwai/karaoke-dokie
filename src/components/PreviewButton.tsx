@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useRef, useSyncExternalStore, type CSSProperties, type RefObject } from 'react';
 import { createPreviewPlayer, type PreviewPlayer, type PreviewSnapshot, type PreviewStatus } from '../lib/client/preview';
 import { DeezerIcon } from './Icon';
 import styles from './screen.module.css';
@@ -131,9 +131,11 @@ interface PreviewButtonProps {
    */
   large?: boolean;
   className?: string;
+  /** The song page holds its ▶ for a moment after it opens (SongDetail's holdMs): its style is `pointer-events: none` then. */
+  style?: CSSProperties;
 }
 
-export function PreviewButton({ id, deezerId, title, artist, position, large, className }: PreviewButtonProps) {
+export function PreviewButton({ id, deezerId, title, artist, position, large, className, style }: PreviewButtonProps) {
   const { state, toggle, player } = usePreview(id, deezerId, position);
   const ring = useRef<SVGCircleElement>(null);
 
@@ -155,6 +157,7 @@ export function PreviewButton({ id, deezerId, title, artist, position, large, cl
       type="button"
       className={[styles.preview, large && styles.previewLarge, className].filter(Boolean).join(' ')}
       data-preview={state}
+      style={style}
       aria-label={label}
       title={state === 'unavailable' && !large ? 'No preview' : undefined}
       disabled={state === 'unavailable'}

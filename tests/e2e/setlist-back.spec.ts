@@ -8,6 +8,9 @@
 //   b. "That's your range" after a redo (no Spotify) answers the system Back and "Back to songs": the old range and the tuning come back
 //   c. closing a song page puts the focus on the row that opened it, at its place in the list now
 //   d. a reload in the middle of a one-note redo comes back to the songs, not to a first test
+// and of the fourth pass on 828aaca:
+//   e. a run of quick taps never gets through: a tap the guard ignores puts the guard off by another 400 ms (three or four taps on ‹ started a redo)
+//      (the double tap on a row, and where ‹ puts the list, are tests/e2e/setlist-row-tap.spec.ts's)
 // The tuner is reached the way the other tuner specs reach it (tests/helpers/tunerE2e.ts). tests/screen/songPage.test.tsx has the
 // same in jsdom, against the app alone.
 
@@ -335,6 +338,59 @@ test.describe('a. a double tap lands once', () => {
       await expect(page.getByRole('button', { name: /Find a quiet spot/ })).toBeVisible();
     });
   }
+
+  /** Between a finger's taps in a run of them: three of these are more than the moment, so the fourth tap is more than a moment after the first. */
+  const EVERY = 150;
+
+  test('‹ four times, 150 ms apart: the list is showing and no redo has started; a tap on the low note after the moment starts one', async ({ page }) => {
+    await open(page);
+    await tune(page);
+    const before = await snapshot(page);
+    await openButton(rows(page).nth(1)).tap();
+    await expect(songTitle(page)).toBeVisible();
+    const at = await centre(backToSongs(page));
+    const taps: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      if (i > 0) await page.waitForTimeout(EVERY);
+      await tap(page, at); // the first closes the page; the rest land on the tuner's low note, which is under the ‹
+      taps.push(Date.now());
+    }
+    expect(taps[3]! - taps[0]!, 'the fourth tap is more than a moment after the first: the first moment alone would not cover it').toBeGreaterThan(GUARD);
+    await page.waitForTimeout(200); // anything it started has started
+    await expect(page.locator('#sheet')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Turn on microphone|Find a quiet spot/ })).toHaveCount(0);
+    expect(await snapshot(page)).toEqual(before);
+    await expect.poll(() => stateOf(page)).toBeNull();
+
+    await pastTheGuard(page);
+    await page.getByRole('button', { name: /^Redo your low note/ }).tap(); // after the moment it is a choice
+    await expect(page.getByRole('button', { name: 'Turn on microphone' })).toBeVisible();
+  });
+
+  test('a range note, then "Back to songs" three times 150 ms apart: the redo is still there; a tap after the moment leaves it', async ({ page }) => {
+    await open(page);
+    await tune(page);
+    const before = await snapshot(page);
+    const note = await centre(page.getByRole('button', { name: /^Redo your low note/ }));
+    const taps: number[] = [];
+    await tap(page, note); // the first: the mic step comes up, with "Back to songs" under the finger
+    taps.push(Date.now());
+    for (let i = 0; i < 3; i++) {
+      await page.waitForTimeout(EVERY);
+      await tap(page, note);
+      taps.push(Date.now());
+    }
+    expect(taps[3]! - taps[0]!, 'the last tap is more than a moment after the first').toBeGreaterThan(GUARD);
+    await page.waitForTimeout(200);
+    await expect(page.getByRole('button', { name: 'Turn on microphone' })).toBeVisible();
+    await expect(page.locator('#sheet')).toHaveCount(0);
+    expect(await stateOf(page)).toBe('redo');
+
+    await pastTheGuard(page);
+    await backToSongs(page).tap();
+    await expect(page.locator('#sheet')).toBeVisible();
+    await expect.poll(() => snapshot(page)).toEqual(before);
+  });
 });
 
 test.describe('b. "That’s your range" after a redo, for a singer without Spotify', () => {

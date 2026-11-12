@@ -271,13 +271,19 @@ export function KaraokeApp({
   // again. Only a tap on a row opens a page, and only Back (or the browser's) closes it.
   const [opened, setOpened] = useState<Match | null>(null);
   const matchOf = (trackId: string): Match | undefined => (opened?.track.id === trackId ? opened : findMatch(trackId));
+  // The list and the song page take turns in the screen, so the list that Back brings is a new one, at the top: where the singer had
+  // scrolled it to is kept here, and put back by the effect below (returnTo).
+  const listTop = useRef(0);
   const openSong = (trackId: string, position: number) => {
+    listTop.current = document.getElementById('list-scroll')?.scrollTop ?? 0;
     setOpened(findMatch(trackId) ?? null);
     dispatch({ type: 'select', trackId, position });
   };
   // A double tap puts its second tap on the screen the first one brought up: the song page's ‹ is over the tuner's low note, "Back to
   // songs" is over its range notes and redo, and a range note is over "Back to songs". So for a moment after a tap changes the screen,
-  // taps on those are ignored (the second review of PR #38). A tap that comes after the moment is a choice, and works.
+  // taps on those are ignored (the second review of PR #38). A tap that comes after the moment is a choice, and works. A tap that is
+  // ignored puts the moment off by another one, so a run of quick taps never gets through. (A double tap on a row lands on the song
+  // page, which holds its own controls for the same moment: SongDetail's holdMs.)
   const quietUntil = useRef(0);
   const hush = () => {
     quietUntil.current = Date.now() + TAP_GUARD_MS;
@@ -286,6 +292,7 @@ export function KaraokeApp({
     <A extends unknown[]>(act: (...args: A) => void) =>
     (...args: A) => {
       if (Date.now() >= quietUntil.current) act(...args);
+      else hush();
     };
   // Closing a song page puts the focus back on the row that opened it, at its place in the list now (a re-rank may have moved it). The
   // page and the list are never in the page together, so the focus would otherwise be lost to the top of the page.
@@ -498,6 +505,11 @@ export function KaraokeApp({
     const id = returnTo.current;
     if (id === null || state.selectedId !== null || step !== 'results' || !ranked.result) return;
     returnTo.current = null;
+    // The list first, then the focus. The list is a new element, at the top: focus() alone left it there in WebKit, and in Chromium it only
+    // centred the row, not where the singer had the list. With scrollTop back, focus() scrolls only if the row is off the screen now (a
+    // re-rank moved it).
+    const scroller = document.getElementById('list-scroll');
+    if (scroller) scroller.scrollTop = listTop.current;
     const row = [...document.querySelectorAll<HTMLElement>('#list [data-row]')].find((li) => li.dataset.id === id);
     row?.querySelector<HTMLElement>(':scope > button')?.focus();
   }, [state.selectedId, step, ranked.result]);
@@ -644,6 +656,7 @@ export function KaraokeApp({
           feedback={state.feedback[selected.track.id] ?? loadFeedback(selected.track.id)}
           onFeedback={(thumbs) => sendFeedback(selected.track.id, thumbs)}
           onSpotify={() => tracker.track('spotify_link_pressed', viewProps(state))}
+          holdMs={TAP_GUARD_MS}
           onBack={() => {
             hush();
             closeSong();

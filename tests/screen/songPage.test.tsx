@@ -8,10 +8,16 @@
 //   a. a double tap lands once: for a moment after a tap brings up a screen, taps on the range notes, redo and "Back to songs" are ignored
 //   b. "That's your range" after a redo (no Spotify) has Back to songs and answers the system Back: the old range and the tuning come back
 //   c. closing a song page puts the focus back on the row that opened it, at its place in the list now
-// Layout and a real phone's Back are tests/e2e/setlist-back.spec.ts's; here is the app's behaviour with jsdom's own History API.
+// and of the fourth pass on 828aaca:
+//   3. a double tap on a row: the song page holds its controls for the same moment (400 ms), so the second tap falls through
+//   5. Back puts the list at the place the singer scrolled it to (the page and the list are one screen's contents in turn)
+//   6. an ignored tap puts the moment off again, so three or four quick taps never get through
+// Layout and a real phone's Back are tests/e2e/setlist-back.spec.ts's, and the real touches of 3 and 5 tests/e2e/setlist-row-tap.spec.ts's; here is
+// the app's behaviour with jsdom's own History API.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KaraokeApp, TAP_GUARD_MS } from '../../src/components/KaraokeApp';
+import { SongDetail } from '../../src/components/SongDetail';
 import type { Api } from '../../src/lib/client/api';
 import type { Mic, MicRecorder } from '../../src/lib/client/mic';
 import { OVERLAY_STATE_KEY } from '../../src/lib/client/useOverlayHistory';
@@ -384,7 +390,7 @@ describe('a double tap lands once (a): taps on the range notes, redo and "Back t
     expect(tuning()).toEqual(tuned);
     expect(overlayNow()).toBeUndefined();
 
-    tick(TAP_GUARD_MS - gap); // the moment is over: a tap is a choice
+    tick(TAP_GUARD_MS); // the ignored tap put the moment off again (6): after a whole one of quiet a tap is a choice
     redoLow();
     await screen.findByRole('button', { name: 'Turn on microphone' });
   });
@@ -404,7 +410,7 @@ describe('a double tap lands once (a): taps on the range notes, redo and "Back t
     expect(tunerOpen()).toBe(false);
     expect(overlayNow()).toBe('redo');
 
-    tick(TAP_GUARD_MS - gap);
+    tick(TAP_GUARD_MS);
     fireEvent.click(back());
     await waitFor(() => expect(tunerOpen()).toBe(true));
     expect(tuning()).toEqual(tuned);
@@ -431,7 +437,7 @@ describe('a double tap lands once (a): taps on the range notes, redo and "Back t
     expect(api.allRecommendations).toHaveBeenCalledTimes(1); // no list was emptied and fetched again
     expect(tuning()).toEqual(tuned);
 
-    tick(TAP_GUARD_MS - gap);
+    tick(TAP_GUARD_MS);
     redoAll(); // after the moment it is a choice
     await screen.findByRole('button', { name: /Find a quiet spot/ });
   });
@@ -453,6 +459,184 @@ describe('a double tap lands once (a): taps on the range notes, redo and "Back t
     await settle();
     expect(tunerOpen()).toBe(true);
     redoLow();
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+  });
+});
+
+describe("a double tap on a row lands once (3): the song page holds its controls for a moment after it opens", () => {
+  // jsdom has no hit testing: it dispatches a click at whatever it is told to, `pointer-events` or not. So these check what the page does to hold
+  // its controls: the attribute and the style, when they go on and off, and what they leave alone. That a tap really falls through (the ▶ not
+  // pressed, no tab opened, nothing sent, nothing played) is tests/e2e/setlist-row-tap.spec.ts's, with real touches in Chromium and WebKit.
+  const held = () => document.querySelector<HTMLElement>('[data-hold]');
+  const timers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  afterEach(() => void vi.useRealTimers());
+  /** The page's controls other than ‹: the ▶, Spotify's link or player, and the two thumbs. */
+  const controls = () => [...document.querySelectorAll<HTMLElement>('button[data-preview], a[href], iframe, button[aria-pressed]')];
+  const style = (e: Element) => (e as HTMLElement).style.pointerEvents;
+  const lemon = allMatches().matches[1]!; // its Spotify link is a track, so its page has Spotify's player
+  const catalogue = { ...lemon, track: { ...lemon.track, id: 'cat:kenshi yonezu|lemon', spotifyUrl: 'https://open.spotify.com/search/Lemon' } }; // a search link: no player, the link
+  const page = (props: Partial<Parameters<typeof SongDetail>[0]> = {}) => (
+    <SongDetail match={lemon} userRange={RANGE} feedback={undefined} onFeedback={vi.fn()} onBack={vi.fn()} {...props} />
+  );
+
+  it('from the row’s tap: the controls are held, ‹ and the chart are not, and all let go after TAP_GUARD_MS, not a millisecond before', async () => {
+    await onTheTuner({ engine: { rank: async () => inOrder(allMatches()) } });
+    const row = await screen.findByRole('button', { name: /^Lemon/ });
+    timers();
+    fireEvent.click(row); // the first tap: the song page is on the screen in this very commit
+    expect(songPageOpen('Lemon')).toBe(true);
+    expect(held(), 'the page says it is holding').toBe(back().parentElement);
+    expect(controls().map((c) => c.tagName), 'the ▶, Spotify’s player and the two thumbs').toEqual(['BUTTON', 'IFRAME', 'BUTTON', 'BUTTON']);
+    expect(controls().map(style)).toEqual(['none', 'none', 'none', 'none']);
+    expect(style(back()), '‹ is not held: no row is under it').toBe('');
+    expect(style(screen.getByRole('img', { name: /^Song goes from/ })), 'nor is the chart, which is no control').toBe('');
+
+    tick(TAP_GUARD_MS - 1);
+    expect(held()).not.toBeNull();
+    expect(controls().map(style)).toEqual(['none', 'none', 'none', 'none']);
+    tick(1);
+    expect(held()).toBeNull();
+    expect(controls().map(style)).toEqual(['', '', '', '']);
+  });
+
+  it('the Spotify link is held too, where the song has a link and no player', () => {
+    timers();
+    render(page({ match: catalogue, holdMs: 400 }));
+    const link = screen.getByRole('link', { name: 'Find on Spotify' });
+    expect(style(link)).toBe('none');
+    expect(controls().map(style)).toEqual(['none', 'none', 'none', 'none']); // the ▶, the link and the thumbs
+    act(() => void vi.advanceTimersByTime(400));
+    expect(style(link)).toBe('');
+  });
+
+  it('a page opened without a moment holds nothing', () => {
+    render(page());
+    expect(held()).toBeNull();
+    expect(controls().map(style)).toEqual(['', '', '', '']);
+  });
+
+  it('each song is held for its own moment: another page opened later starts it again', () => {
+    timers();
+    const { rerender } = render(<div>{page({ holdMs: 400 })}</div>);
+    expect(held()).not.toBeNull();
+    act(() => void vi.advanceTimersByTime(400));
+    expect(held()).toBeNull();
+    // KaraokeApp keys the page by its track: another song is another page, mounted afresh.
+    const other = allMatches().matches[0]!;
+    rerender(
+      <div>
+        <SongDetail key={other.track.id} match={other} userRange={RANGE} feedback={undefined} onFeedback={vi.fn()} onBack={vi.fn()} holdMs={400} />
+      </div>,
+    );
+    expect(held()).not.toBeNull();
+    expect(controls().map(style)).toEqual(['none', 'none', 'none', 'none']);
+    act(() => void vi.advanceTimersByTime(399));
+    expect(held()).not.toBeNull();
+    act(() => void vi.advanceTimersByTime(1));
+    expect(held()).toBeNull();
+  });
+
+  it('a page that goes before its moment is over leaves no timer behind', () => {
+    timers();
+    const { unmount } = render(page({ holdMs: 400 }));
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keys are not held: what a key press does, a click at the control, still goes through in the moment', () => {
+    timers();
+    const onFeedback = vi.fn();
+    render(page({ holdMs: 400, onFeedback }));
+    expect(held()).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
+    expect(onFeedback).toHaveBeenCalledWith('up');
+  });
+});
+
+describe('a run of quick taps never gets through (6): an ignored tap puts the moment off again, wherever it landed', () => {
+  clock();
+  const engine = (): SetlistEngine => ({ rank: async () => inOrder(allMatches()) });
+  const redoLow = () => fireEvent.click(screen.getByRole('button', { name: /^Redo your low note/ }));
+  const micStep = () => screen.queryByRole('button', { name: 'Turn on microphone' });
+  /** Between a finger's taps: more than the third of a moment, so the fourth tap is more than a moment after the first. */
+  const EVERY = 150;
+
+  it('‹, then three more taps on the same spot 150 ms apart: the list shows and no redo has started; a tap after the moment starts it', async () => {
+    await onTheTuner({ engine: engine() });
+    tuneIt();
+    await settle();
+    const tuned = tuning();
+
+    fireEvent.click(await row(/^Plastic Love/));
+    fireEvent.click(back()); // the first of four: the page closes
+    for (let i = 0; i < 3; i++) {
+      tick(EVERY);
+      redoLow(); // the second, third and fourth: on the tuner's low note, the fourth 450 ms after the first
+    }
+    await settle();
+    expect(micStep()).toBeNull();
+    expect(tunerOpen()).toBe(true);
+    expect(tuning()).toEqual(tuned);
+    expect(overlayNow()).toBeUndefined();
+
+    tick(TAP_GUARD_MS);
+    redoLow();
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+  });
+
+  it('a range note, then "Back to songs" three times 150 ms apart: the redo is still there; a tap after the moment leaves it', async () => {
+    await onTheTuner({ engine: engine() });
+    tuneIt();
+    await settle();
+    const tuned = tuning();
+
+    redoLow(); // the first: the mic step comes up
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+    for (let i = 0; i < 3; i++) {
+      tick(EVERY);
+      fireEvent.click(back()); // each lands on "Back to songs", the third 450 ms after the first
+    }
+    await settle();
+    expect(micStep()).not.toBeNull();
+    expect(tunerOpen()).toBe(false);
+    expect(overlayNow()).toBe('redo');
+
+    tick(TAP_GUARD_MS);
+    fireEvent.click(back());
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    expect(tuning()).toEqual(tuned);
+  });
+
+  it('"Back to songs", then redo three times 150 ms apart: the whole test does not start; a tap after the moment starts it', async () => {
+    await onTheTuner({ engine: engine() });
+    redoLow();
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+    tick(TAP_GUARD_MS);
+    fireEvent.click(back()); // the first: back to the list
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    for (let i = 0; i < 3; i++) {
+      tick(EVERY);
+      fireEvent.click(screen.getByRole('button', { name: 'Redo the range test' })); // each on redo, the third 450 ms after the first
+    }
+    await settle();
+    expect(screen.queryByRole('button', { name: /Find a quiet spot/ })).toBeNull();
+    expect(tunerOpen()).toBe(true);
+
+    tick(TAP_GUARD_MS);
+    fireEvent.click(screen.getByRole('button', { name: 'Redo the range test' }));
+    await screen.findByRole('button', { name: /Find a quiet spot/ });
+  });
+
+  it('taps more than a moment apart each work, as they did: quiet is what lets one through, not the number of taps', async () => {
+    await onTheTuner({ engine: engine() });
+    redoLow();
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+    tick(TAP_GUARD_MS + 1);
+    fireEvent.click(back()); // works: back to the list, and a moment starts
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    tick(TAP_GUARD_MS + 1);
+    redoLow(); // works again
     await screen.findByRole('button', { name: 'Turn on microphone' });
   });
 });
@@ -642,6 +826,79 @@ describe('closing a song page puts the focus back on the row that opened it (c)'
     await settle();
     await screen.findByText('Plastic Love');
     expect(document.activeElement).toBe(document.body);
+  });
+});
+
+describe('closing a song page puts the list back where the singer left it (5)', () => {
+  clock();
+  const engine = (): SetlistEngine => ({ rank: async () => inOrder(allMatches()) });
+  /** The list's scroller. The song page and the list take turns in one screen, so it is a new element every time the list comes back. */
+  const scroller = () => el('#list-scroll');
+  const rowOf = (button: HTMLElement) => button.closest<HTMLElement>('[data-row]')!;
+
+  it('‹: the list is scrolled to where it was, and the row that opened the page has the focus', async () => {
+    await onTheTuner({ engine: engine() });
+    scroller().scrollTop = 420; // jsdom has no layout: it keeps the number it is given
+    fireEvent.click(await row(/^Lemon/));
+    expect(songPageOpen('Lemon')).toBe(true);
+    fireEvent.click(back());
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    expect(scroller().scrollTop).toBe(420);
+    expect(document.activeElement).toBe(await row(/^Lemon/));
+  });
+
+  it('the system Back does the same', async () => {
+    await onTheTuner({ engine: engine() });
+    scroller().scrollTop = 260;
+    fireEvent.click(await row(/^Dancing Queen/));
+    act(() => window.history.back());
+    await settle();
+    expect(tunerOpen()).toBe(true);
+    expect(scroller().scrollTop).toBe(260);
+  });
+
+  it('is where it was at the page that closed, not where it was the time before', async () => {
+    await onTheTuner({ engine: engine() });
+    scroller().scrollTop = 420;
+    fireEvent.click(await row(/^Lemon/));
+    fireEvent.click(back());
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    expect(scroller().scrollTop).toBe(420);
+
+    tick(TAP_GUARD_MS);
+    scroller().scrollTop = 90;
+    fireEvent.click(await row(/^Plastic Love/));
+    fireEvent.click(back());
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    expect(scroller().scrollTop).toBe(90);
+  });
+
+  it('a list that was at the top comes back at the top', async () => {
+    await onTheTuner({ engine: engine() });
+    fireEvent.click(await row(/^Plastic Love/));
+    fireEvent.click(back());
+    await waitFor(() => expect(tunerOpen()).toBe(true));
+    expect(scroller().scrollTop).toBe(0);
+  });
+
+  it('the focus is still on the row at its new place when a re-rank moved it, and the list is where it was', async () => {
+    const page = allMatches();
+    const second = deferred<SetlistResponse>();
+    let asked = 0;
+    await onTheTuner({ engine: { rank: async () => (++asked === 2 ? second.promise : inOrder(page)) } });
+    const before = rowOf(await row(/^Lemon/)).dataset.rank;
+    fireEvent.input(el(SEL.slider('difficulty')), { target: { value: '60' } });
+    await waitFor(() => expect(asked).toBe(2));
+    scroller().scrollTop = 300;
+    (await row(/^Lemon/)).focus();
+    fireEvent.click(await row(/^Lemon/)); // opened in the list the singer was looking at
+    await act(async () => second.resolve(response([...page.matches].reverse().map((m) => ranked(m)))));
+    await settle();
+    fireEvent.click(back());
+    const again = await row(/^Lemon/);
+    await waitFor(() => expect(document.activeElement).toBe(again));
+    expect(rowOf(again).dataset.rank, 'the list was ranked again under the page: the row is somewhere else').not.toBe(before);
+    expect(scroller().scrollTop).toBe(300);
   });
 });
 
