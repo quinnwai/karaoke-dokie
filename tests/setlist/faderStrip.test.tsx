@@ -22,10 +22,11 @@ function strip(over: Partial<ComponentProps<typeof GearStrip>> = {}) {
   const onInput = vi.fn<(value: number) => void>();
   const onTouch = vi.fn<() => void>();
   const onDone = vi.fn<() => void>();
+  const onRevert = vi.fn<() => void>();
   const view = render(
-    <GearStrip gear="tempo" value={DEFAULTS.tempo} off hidden={false} onInput={onInput} onTouch={onTouch} onReset={vi.fn()} onDone={onDone} {...over} />,
+    <GearStrip gear="tempo" value={DEFAULTS.tempo} off hidden={false} onInput={onInput} onTouch={onTouch} onReset={vi.fn()} onDone={onDone} onRevert={onRevert} {...over} />,
   );
-  return { ...view, onInput, onTouch, onDone, hit: fader('tempo') };
+  return { ...view, onInput, onTouch, onDone, onRevert, hit: fader('tempo') };
 }
 
 const values = (fn: { mock: { calls: number[][] } }) => fn.mock.calls.map(([value]) => value);
@@ -129,33 +130,111 @@ describe('a mouse press on the fader', () => {
 });
 
 describe('the focus after a press', () => {
-  it('a mouse or a pen leaves it on the gear\'s slider, so the arrow keys carry on from the press as they did with the native one; a finger does not take it', () => {
+  it('is the browser\'s, as a mouse\'s: the strip does not script it at the press, and the area is a plain element (a second label in the strip would be one more for the browser tests and the readers to meet)', () => {
     const { hit } = strip({ value: 30, off: false });
-    const slider = document.getElementById('slider-tempo');
+    expect(hit.tagName).toBe('DIV');
+    expect(document.querySelectorAll('label')).toHaveLength(1);
+    for (const kind of ['mouse', 'pen', 'touch'] as const) {
+      faderPointer('pointerDown', hit, { kind, x: faderX(60) });
+      faderPointer('pointerUp', hit, { kind, x: faderX(60) });
+    }
+    expect(document.activeElement).not.toBe(document.getElementById('slider-tempo'));
+  });
+
+  it('is given by the click a mouse press ends in: the title is clicked, which the browser answers with a label\'s focus (a mouse\'s: no keyboard ring until a key), and where that leaves the slider unfocused it is focused with focusVisible false', () => {
+    const { hit } = strip({ value: 30, off: false });
+    const title = document.querySelector('label')!;
+    const clicked = vi.fn();
+    title.addEventListener('click', clicked);
+    const slider = document.getElementById('slider-tempo') as HTMLInputElement;
+    const focus = vi.spyOn(slider, 'focus');
     faderPointer('pointerDown', hit, { x: faderX(60) });
-    expect(document.activeElement).toBe(slider);
     faderPointer('pointerUp', hit, { x: faderX(60) });
-    (document.activeElement as HTMLElement).blur();
-    faderPointer('pointerDown', hit, { kind: 'pen', x: faderX(40) });
-    expect(document.activeElement).toBe(slider);
-    faderPointer('pointerUp', hit, { kind: 'pen', x: faderX(40) });
-    (document.activeElement as HTMLElement).blur();
-    faderPointer('pointerDown', hit, { kind: 'touch', x: faderX(80) });
-    faderPointer('pointerUp', hit, { kind: 'touch', x: faderX(80) });
-    expect(document.activeElement).not.toBe(slider);
+    fireEvent.click(hit, { detail: 1 });
+    expect(clicked, 'the title is clicked once').toHaveBeenCalledTimes(1);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true, focusVisible: false });
+    // A finger's press does neither: it has no keys.
+    clicked.mockClear();
+    focus.mockClear();
+    faderPointer('pointerDown', hit, { kind: 'touch', x: faderX(40) });
+    faderPointer('pointerUp', hit, { kind: 'touch', x: faderX(40) });
+    fireEvent.click(hit, { detail: 1 });
+    expect(clicked).not.toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
+  });
+
+  it('is not taken at the press: the mousedown after it is the browser\'s and is not cancelled', () => {
+    const { hit } = strip({ value: 30, off: false });
+    faderPointer('pointerDown', hit, { x: faderX(60) });
+    expect(fireEvent.mouseDown(hit), 'the mousedown is the browser\'s, not cancelled').toBe(true);
   });
 });
 
-describe('the mousedown the browser follows a press with', () => {
-  it('is cancelled on the fader, so the browser\'s own step for it does not take the focus off the slider the press has just given it (a real browser does that; jsdom only shows the cancel)', () => {
-    const { hit } = strip({ value: 30, off: false });
-    expect(fireEvent.mouseDown(hit), 'fireEvent returns false when the event was cancelled').toBe(false);
+describe('where a press is: the finger\'s position, not the element the browser names', () => {
+  /** A press as Chromium gives it for a touch with a radius: the event names an element near the finger (the title, the ✕), and its position is the finger's. */
+  const named = (el: Element, init: { x: number; y: number }) => faderPointer('pointerDown', el, { kind: 'touch', ...init });
+  const title = () => document.querySelector('label')!;
+  const reset = () => document.querySelector('button[data-reset]')!;
+
+  it('a press in the fader\'s area is the fader\'s though the event names the ✕ or the title (a finger 16 px above the thumb, from a radius of 12)', () => {
+    const { onInput, onTouch, onDone } = strip({ value: 30, off: false });
+    for (const el of [reset(), title()]) {
+      named(el, { x: faderX(70), y: 1 });
+      faderPointer('pointerUp', el, { kind: 'touch', x: faderX(70), y: 1 });
+    }
+    expect(values(onInput)).toEqual([70, 70]);
+    expect(onTouch).not.toHaveBeenCalled();
+    expect(onDone).toHaveBeenCalledTimes(2);
   });
 
-  it('is not cancelled on the ✕, which a mouse press takes focus on as a button does', () => {
-    const reset = vi.fn();
-    strip({ value: 30, off: false, onReset: reset });
-    expect(fireEvent.mouseDown(document.querySelector('button[data-reset]')!)).toBe(true);
+  it('a press outside the fader\'s area is not, though the event names the fader: a second tap on a ✕ that has gone, or a tap between the title and the ✕', () => {
+    const { hit, onInput, onTouch, onDone } = strip({ value: 30, off: false });
+    for (const y of [-3, -12, 44, 60]) {
+      named(hit, { x: faderX(70), y });
+      faderPointer('pointerUp', hit, { kind: 'touch', x: faderX(70), y });
+    }
+    for (const x of [faderX(0) - 12, faderX(100) + 12]) {
+      named(hit, { x, y: 20 });
+      faderPointer('pointerUp', hit, { kind: 'touch', x, y: 20 });
+    }
+    expect([onInput, onTouch, onDone].map((fn) => fn.mock.calls.length)).toEqual([0, 0, 0]);
+  });
+
+  it('a mouse press outside the area does nothing either, and the pointer that began in the area is followed outside it', () => {
+    const { hit, onInput } = strip({ value: 30, off: false });
+    faderPointer('pointerDown', hit, { x: faderX(60), y: -5 });
+    expect(onInput).not.toHaveBeenCalled();
+    faderPointer('pointerDown', hit, { x: faderX(60), y: 10 });
+    faderPointer('pointerMove', hit, { x: faderX(90), y: 500 });
+    expect(values(onInput)).toEqual([60, 90]);
+  });
+});
+
+describe('the ✕\'s click', () => {
+  const reset = () => document.querySelector<HTMLElement>('button[data-reset]')!;
+  /** A click as a finger makes it (`detail` 1), after a press where `pressAt` says, with the ✕'s box where `box` says (jsdom lays nothing out). */
+  const tapWith = (pressAt: { x: number; y: number }, box: { x: number; y: number; w: number; h: number }) => {
+    reset().getBoundingClientRect = () => new DOMRect(box.x, box.y, box.w, box.h);
+    faderPointer('pointerDown', reset(), { kind: 'touch', ...pressAt });
+    fireEvent.click(reset(), { detail: 1 });
+  };
+
+  it('counts when the finger pressed on the ✕\'s box, and a key press or a screen reader\'s click (detail 0) always counts', () => {
+    const onReset = vi.fn();
+    strip({ value: 30, off: false, onReset });
+    tapWith({ x: 330, y: 8 }, { x: 300, y: 0, w: 44, h: 20 });
+    expect(onReset).toHaveBeenCalledTimes(1);
+    tapWith({ x: 100, y: 500 }, { x: 300, y: 0, w: 44, h: 20 });
+    fireEvent.click(reset(), { detail: 0 });
+    expect(onReset).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not count when the press was somewhere else: the browser gave the ✕ the click of a tap on the fader, or beside the ✕', () => {
+    const onReset = vi.fn();
+    strip({ value: 30, off: false, onReset });
+    tapWith({ x: 300, y: 30 }, { x: 300, y: 0, w: 44, h: 20 }); // the thumb under the ✕
+    tapWith({ x: 250, y: 8 }, { x: 300, y: 0, w: 44, h: 20 }); // beside it
+    expect(onReset).not.toHaveBeenCalled();
   });
 });
 
@@ -266,6 +345,67 @@ describe('a finger on the fader', () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
+  /** A swipe that starts with a kick to the side and then goes straight up or down, as a finger reports it: every 6 px. */
+  const kickThenSwipe = (kickX: number, kickY: number, toY: number, startAt = 20) => {
+    const x0 = faderX(startAt);
+    const path = [{ x: x0 + kickX, y: kickY }];
+    for (let y = kickY + 6; Math.abs(y) <= Math.abs(toY); y += Math.sign(toY) * 6) path.push({ x: x0 + kickX, y });
+    return { x0, path };
+  };
+
+  it.each([
+    ['15 px across in the first 6 px, then 120 px down', 15, 6, 120],
+    ['15 px across in the first 7 px, then 120 px up', 15, -7, -120],
+    ['15 px across in the first 8 px, then 120 px down', 15, 8, 120],
+    ['18 px across in the first 6 px, then 120 px down', 18, 6, 120],
+  ])('a swipe that kicks sideways, %s, and nothing cancels, changes nothing in the end: the gear that it turned on or moved is put back, and no adjustment is recorded (the gate on 1ee41b4)', (_name, kx, ky, toY) => {
+    const { hit, onInput, onTouch, onDone, onRevert } = strip();
+    const { x0, path } = kickThenSwipe(kx, ky, toY);
+    faderPointer('pointerDown', hit, finger(x0, 0));
+    for (const p of path) faderPointer('pointerMove', hit, finger(p.x, p.y));
+    faderPointer('pointerUp', hit, finger(path.at(-1)!.x, path.at(-1)!.y));
+    expect(onDone, 'no adjustment is recorded').not.toHaveBeenCalled();
+    // What it did before it was taken back is what onRevert undoes: at most the gear on and the value at the finger, and nothing after the call. A kick
+    // that was not called a drag at all (8 px up or down in the first 15 across is not twice as far sideways) did nothing to take back.
+    expect(onTouch.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(onInput.mock.calls.length).toBeLessThanOrEqual(1);
+    const didSomething = onTouch.mock.calls.length + onInput.mock.calls.length > 0;
+    expect(onRevert, 'the gear is put back once if it was changed').toHaveBeenCalledTimes(didSomething ? 1 : 0);
+  });
+
+  it('a swipe that kicks and then goes up or down on a gear that is on, and that puts it back the same way, never calls it done', () => {
+    const { hit, onInput, onDone, onRevert } = strip({ value: 40, off: false });
+    const { x0, path } = kickThenSwipe(15, 6, 120);
+    faderPointer('pointerDown', hit, finger(x0, 0));
+    for (const p of path) faderPointer('pointerMove', hit, finger(p.x, p.y));
+    faderPointer('pointerUp', hit, finger(path.at(-1)!.x, path.at(-1)!.y));
+    expect(onRevert).toHaveBeenCalledTimes(1);
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onInput.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+
+  it('a drag that has gone 40 px sideways stands for good: it is not taken back when the finger then goes up or down', () => {
+    const { hit, onInput, onDone, onRevert } = strip({ value: 10, off: false });
+    faderPointer('pointerDown', hit, finger(faderX(20), 0));
+    faderPointer('pointerMove', hit, finger(faderX(20) + 18, 6)); // called, still provisional
+    faderPointer('pointerMove', hit, finger(faderX(20) + 44, 8)); // final
+    faderPointer('pointerMove', hit, finger(faderX(20) + 50, 120)); // and then straight down: it keeps following
+    faderPointer('pointerUp', hit, finger(faderX(20) + 50, 120));
+    expect(onRevert).not.toHaveBeenCalled();
+    expect(values(onInput)).toEqual([29, 42, 45]);
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('deliberate drags are not taken back: sideways with a little up and down along the way, in either direction', () => {
+    const { hit, onInput, onRevert, onDone } = strip({ value: 50, off: false });
+    faderPointer('pointerDown', hit, finger(faderX(50), 0));
+    for (let i = 1; i <= 15; i++) faderPointer('pointerMove', hit, finger(faderX(50) - 4 * i, (i % 2 ? 5 : -5)));
+    faderPointer('pointerUp', hit, finger(faderX(50) - 60, 5));
+    expect(onRevert).not.toHaveBeenCalled();
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(values(onInput).at(-1)).toBe(20);
+  });
+
   it('a drag that dips 7 px down first and then goes 80 px sideways, reported every 2 px as a finger does, takes the thumb to the finger and follows it (review of 828aaca)', () => {
     const { hit, onInput, onTouch, onDone } = strip();
     faderPointer('pointerDown', hit, finger(faderX(20), 0));
@@ -340,7 +480,7 @@ describe('the strip that cannot be used', () => {
   it('has no hit area at all, so it takes no pointer, and its input is disabled', () => {
     const none = vi.fn();
     const { container } = render(
-      <GearStrip gear="history" value={100} off hidden={false} unavailable="Connect Spotify to use your listening history" onInput={none} onTouch={none} onReset={none} onDone={none} />,
+      <GearStrip gear="history" value={100} off hidden={false} unavailable="Connect Spotify to use your listening history" onInput={none} onTouch={none} onReset={none} onDone={none} onRevert={none} />,
     );
     expect(container.querySelector('[data-fader]')).toBeNull();
     expect(container.querySelector<HTMLInputElement>('input[type="range"]')!.disabled).toBe(true);

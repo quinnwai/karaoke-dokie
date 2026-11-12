@@ -1,5 +1,6 @@
-import { useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { gearColor } from '../../lib/setlist/art';
+import { pointIsOn, pressWasOn, trackPresses } from '../../lib/setlist/rawPress';
 import { DRAG_START_PX, modeAfterDrag, neonVars, sheetLayout } from '../../lib/setlist/sheet';
 import { GEAR_META, ERA_META, SHEET_GEARS, SHEET_PARTS } from '../../lib/setlist/gears';
 import { isOn, type TunerAction } from '../../lib/setlist/tuner';
@@ -42,6 +43,16 @@ export function Sheet({ tuner, historyAvailable, historyHint, canExpand, onTuner
 
   const off = (g: TunerPart) => !isOn(tuner, g) || (g === 'history' && !historyAvailable);
 
+  // Every press in the document is noted where it began, for the handle's click (below).
+  useEffect(() => trackPresses(), []);
+
+  // What a drag that turns out to be a swipe up or down puts back (GearStrip's `onRevert`): the gear's value, whether it was on, and which part was open. The first
+  // change a gear's press makes saves them, and the end of the adjustment lets them go.
+  const undo = useRef<Partial<Record<GearId, Partial<TunerState>>>>({});
+  const remember = (g: GearId) => {
+    undo.current[g] ??= { [g]: tuner[g], off: tuner.off, open: tuner.open };
+  };
+
   const endPress = (dy: number) => {
     const p = press.current;
     if (!p) return;
@@ -66,6 +77,9 @@ export function Sheet({ tuner, historyAvailable, historyHint, canExpand, onTuner
           aria-disabled={canExpand ? undefined : true}
           aria-label={mini ? 'Show all gears' : 'Show one gear'}
           onPointerDown={(e) => {
+            // Only a press on the handle is the handle's, by where the finger is: its box reaches 11 px into the first strip, and Chromium hands a touch near it to it, so
+            // a tap in the blank part of the first strip's title row, from a big finger, used to fold the sheet (the gate on 1ee41b4).
+            if (!pointIsOn(e.currentTarget, e.clientX, e.clientY)) return;
             press.current = { startY: e.clientY, dragged: false, lastDy: 0 };
             swallowClick.current = false;
             try {
@@ -86,7 +100,8 @@ export function Sheet({ tuner, historyAvailable, historyHint, canExpand, onTuner
           onPointerUp={(e) => endPress(e.clientY - (press.current?.startY ?? e.clientY))}
           // A cancelled pointer can report zeroed coordinates, so finish from where the drag last was.
           onPointerCancel={() => endPress(press.current?.lastDy ?? 0)}
-          onClick={() => {
+          onClick={(e) => {
+            if (e.detail > 0 && !pressWasOn(e.currentTarget)) return;
             if (swallowClick.current) {
               swallowClick.current = false;
               return;
@@ -110,10 +125,24 @@ export function Sheet({ tuner, historyAvailable, historyHint, canExpand, onTuner
               off={off(g)}
               hidden={compact && tuner.open !== g}
               unavailable={g === 'history' && !historyAvailable ? historyHint : undefined}
-              onInput={(value) => onTuner({ type: 'input', gear: g, value })}
-              onTouch={() => onTuner({ type: 'touch', gear: g })}
+              onInput={(value) => {
+                remember(g);
+                onTuner({ type: 'input', gear: g, value });
+              }}
+              onTouch={() => {
+                remember(g);
+                onTuner({ type: 'touch', gear: g });
+              }}
               onReset={() => onTuner({ type: 'reset', gear: g })}
-              onDone={() => onGearDone(g)}
+              onDone={() => {
+                delete undo.current[g];
+                onGearDone(g);
+              }}
+              onRevert={() => {
+                const back = undo.current[g];
+                delete undo.current[g];
+                if (back) onTuner({ type: 'patch', patch: back });
+              }}
             />
           ))}
         </div>

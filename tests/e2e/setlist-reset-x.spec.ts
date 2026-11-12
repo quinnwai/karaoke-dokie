@@ -2,7 +2,7 @@
 //   R34  For every gear (Difficulty, Popularity, Tempo, History, Era), at 375 and 390 px, the centre of the ✕'s icon box and the centre of the title's
 //        text box differ by 1 px or less, and a screenshot per gear is saved. Measured in Chromium and, where it is installed, WebKit (the engine of an
 //        iPhone; CI installs Chromium only).
-//   The ✕'s touch area (the button's box) is 44 px wide and 20 tall, and it is not centred on the title: it ends 1 px below the title row, where the
+//   The ✕'s touch area (the button's box) is 44 px wide and 20 tall (29 in a mini strip), and it is not centred on the title: it ends 1 px below the title row, where the
 //   icon's box ends, and grows up from there, so that none of it is over the fader's hit area (R33, the gate on 828aaca) or, in the Era panel, the
 //   '20s button (the second pass of the review of #38, item 7). The icon is in the bottom of it, whole.
 // The tuner is reached as the other tuner specs reach it (tests/helpers/tunerE2e.ts).
@@ -51,14 +51,15 @@ const centres = (page: Page, part: Part) =>
     };
   }, part);
 
-async function expectCentred(page: Page, part: Part, at: string) {
+async function expectCentred(page: Page, part: Part, at: string, mini = false) {
   const c = await centres(page, part);
   expect(c.iconH, `${at}: the ✕ is drawn`).toBe(16);
   expect(Math.abs(c.icon - c.text), `${at}: the ✕'s icon box and the title's text box, centre to centre`).toBeLessThanOrEqual(1);
   expect(Math.abs(c.icon - c.title), `${at}: the ✕'s icon box and the title's own box`).toBeLessThanOrEqual(1);
   // The 44 x 20 touch area has the whole icon in its bottom, ends 1 px below the title row (where the icon ends) and keeps clear of what is under it.
+  // A mini strip has 9 px more above the box (it is 94 px tall with its rows centred), and the box grows into them (the gate on 1ee41b4, item 7).
   expect(c.button.width, `${at}: the button is 44 px wide`).toBe(44);
-  expect(c.button.height, `${at}: the button is 20 px tall`).toBe(20);
+  expect(c.button.height, `${at}: the button is ${mini && part !== 'era' ? 29 : 20} px tall`).toBe(mini && part !== 'era' ? 29 : 20);
   expect(Math.abs(c.button.bottom - c.iconBottom), `${at}: the button ends where the icon does`).toBeLessThanOrEqual(0.5);
   expect(c.iconTop >= c.button.top - 0.01 && c.iconLeft >= c.button.left - 0.01 && c.iconRight <= c.button.right + 0.01, `${at}: the icon is inside the button`).toBe(true);
   expect(c.belowTop, `${at}: there is something under the ✕`).not.toBeNull();
@@ -81,7 +82,7 @@ for (const width of [375, 390]) {
     await expect(page.locator('#app')).toHaveAttribute('data-mode', 'mini');
     for (const part of PARTS) {
       await tab(page, part).click();
-      await expectCentred(page, part, `${width} px, mini, ${part}`);
+      await expectCentred(page, part, `${width} px, mini, ${part}`, true);
     }
   });
 }

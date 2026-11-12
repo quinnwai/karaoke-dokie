@@ -7,7 +7,8 @@
 //   - the geometry: no overlap between the ✕ and the hit area; the fader is what is on top at every point of the thumb and 16 px above its centre; the ✕ is
 //     what is on top at the glyph; the ✕ is still 44 px wide and the hit area still 44 px tall
 //   - a tap anywhere on the thumb moves it to the finger and never turns the gear off, with a touch 1, 10, 12 and 16 px in radius (Chromium looks that far for a button)
-//   - a drag from 16 px above the thumb, from the thumb and from the track 60 px away each moves the value to the finger
+//   - a drag from 16 px above the thumb, from the thumb and from the track 60 px away each moves the value, with a touch 1 and 12 px in radius (the second is the gate on
+//     1ee41b4: Chromium hands a press that near the ✕ or the title to them, and the strip goes by where the finger is) to the finger
 //   - a tap on the ✕'s glyph still turns the gear off, and puts the value back at its default
 // Chromium takes real touch through DevTools (Input.dispatchTouchEvent) and is the one that matters here: it is what CI runs, and what chief-keef's preview was
 // checked in. WebKit (where it is installed) runs the same checks with desktop WebKit's own taps and the pointer events a touch raises (see
@@ -150,7 +151,7 @@ for (const width of WIDTHS) {
       test('a drag from 16 px above the thumb, from the thumb and from the track 60 px away moves the value, with the thumb at 100, 80 and 25', async ({ page }) => {
         test.setTimeout(180_000);
         await openAt(page, mode);
-        await eachGear(page, GEARS, (gear) => checkTouchDrags(page, cdpFinger(page), [gear], at, { values: VALUES, on: true }));
+        await eachGear(page, GEARS, (gear) => checkTouchDrags(page, cdpFinger(page), [gear], at, { values: VALUES, on: true, radii: [1, 12] }));
       });
 
       test('a tap on the ✕ glyph turns the gear off at its default, with the thumb at 100, 80 and 25 and a touch 1, 10, 12 and 16 px in radius', async ({ page }) => {

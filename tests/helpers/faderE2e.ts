@@ -39,12 +39,23 @@ export const boxes = (page: Page, gear: GearId) =>
       return b.width === 0 && b.height === 0 ? null : { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width, height: b.height };
     };
     const knob = el.querySelector('[data-knob]')!;
+    // The title's text (the label's own box is as wide as the room it has), and the strip itself.
+    const label = el.querySelector('label');
+    let title: Box | null = null;
+    if (label) {
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const b = range.getBoundingClientRect();
+      title = { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width, height: b.height };
+    }
     return {
       hit: box(el.querySelector('[data-fader]')),
       track: box(knob.parentElement)!,
       knob: box(knob)!,
       reset: box(el.querySelector('button[data-reset]')),
       icon: box(el.querySelector('button[data-reset] svg')),
+      title,
+      strip: box(el)!,
     };
   });
 
@@ -108,21 +119,25 @@ export async function openAt(page: Page, mode: Mode, gear: GearId = 'difficulty'
 }
 
 export interface Finger {
-  /** Down at the first point, along the rest, up. `down` runs after the touch has landed, `end` before it lifts. */
-  drag(path: Point[], hooks?: { down?(): Promise<void>; end?(): Promise<void> }): Promise<void>;
+  /**
+   * Down at the first point, along the rest, up. `down` runs after the touch has landed, `end` before it lifts. `radius` is the touch's radius in px (Chromium's
+   * DevTools take one; a finger's is 8 to 16), which decides how far Chromium looks for a button or label to hand the touch to; 1 where it is not given.
+   */
+  drag(path: Point[], hooks?: { down?(): Promise<void>; end?(): Promise<void> }, radius?: number): Promise<void>;
   /** A tap at a point. `radius` is the touch's radius in px (Chromium's DevTools take one; a finger's is 8 to 12), which decides how far Chromium looks for a button to give the tap to. */
   tap(p: Point, radius?: number): Promise<void>;
 }
 
 /** Real touch through Chromium's DevTools, which raises the same touch and pointer events a finger does. */
 export const cdpFinger = (page: Page): Finger => ({
-  async drag(points, hooks) {
+  async drag(points, hooks, radius = 1) {
     const cdp = await page.context().newCDPSession(page);
     try {
+      const touch = (p: Point) => ({ x: p.x, y: p.y, radiusX: radius, radiusY: radius });
       const [first, ...rest] = points;
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [first!] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [touch(first!)] });
       await hooks?.down?.();
-      for (const p of rest) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [p] });
+      for (const p of rest) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [touch(p)] });
       await hooks?.end?.();
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     } finally {
@@ -216,8 +231,14 @@ export const countCancels = async (page: Page) => {
  * in the right half, so a thumb at the end of the track is dragged off it), and a tap 60 px from the thumb. Each takes the value to the finger, and none
  * moves it at the first touch. `on` turns the gear on first (a gear that is off has no ✕ and a dark thumb; the default is to leave it as it is).
  */
-export async function checkTouchDrags(page: Page, finger: Finger, gears: GearId[], at: string, opts: { shots?: string; values?: readonly number[]; on?: boolean } = {}) {
-  const { shots, values = [25, 75], on = false } = opts;
+export async function checkTouchDrags(
+  page: Page,
+  finger: Finger,
+  gears: GearId[],
+  at: string,
+  opts: { shots?: string; values?: readonly number[]; on?: boolean; radii?: readonly number[] } = {},
+) {
+  const { shots, values = [25, 75], on = false, radii = [1] } = opts;
   const set = on ? setThumbOn : setThumb;
   for (const gear of gears) {
     for (const v of values) {
@@ -231,8 +252,8 @@ export async function checkTouchDrags(page: Page, finger: Finger, gears: GearId[
         { name: `starts on the track 60 px ${side} of the thumb`, from: { x: t0.x + s * 60, y: t0.y }, to: { x: clamp(t0.x + s * 95), y: t0.y + 4 }, file: 'away' },
         { name: 'starts on the thumb', from: { x: t0.x, y: t0.y }, to: { x: clamp(t0.x + s * 55), y: t0.y + 3 }, file: 'thumb' },
       ];
-      for (const c of list) {
-        const why = `${at}, ${gear}, thumb at ${v}, a drag that ${c.name}`;
+      for (const c of list.flatMap((c) => radii.map((radius) => ({ ...c, radius })))) {
+        const why = `${at}, ${gear}, thumb at ${v}, a drag that ${c.name}${radii.length > 1 ? `, touch radius ${c.radius}` : ''}`;
         await set(page, gear, v);
         const t = await thumb(page, gear);
         expect(await under(page, c.from), `${why}: the finger lands on the gear's hit area`).toBe(`fader:${gear}`);
@@ -246,10 +267,10 @@ export async function checkTouchDrags(page: Page, finger: Finger, gears: GearId[
             if (shots && gear === 'difficulty' && v === values[0] && c.file === 'away') await shot(page, `${shots}-first-touch`, c.from, c.from);
           },
           end: async () => expectValue(page, gear, valueAt(t.track, c.to.x), `${why} (while the finger is down)`),
-        });
+        }, c.radius);
         await expectValue(page, gear, valueAt(t.track, c.to.x), `${why} (after it lifts)`);
         expect(await isOff(page, gear), `${why}: the gear is on`).toBe(false);
-        if (shots && gear === 'difficulty' && v === values[0]) await shot(page, `${shots}-${c.file}`, c.from, c.to);
+        if (shots && gear === 'difficulty' && v === values[0] && c.radius === radii[0]) await shot(page, `${shots}-${c.file}`, c.from, c.to);
       }
 
       // A tap on the track 60 px from the thumb jumps the thumb there.

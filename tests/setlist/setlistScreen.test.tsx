@@ -329,6 +329,55 @@ describe('the handle', () => {
     expect(calls(onTuner)).toEqual([{ type: 'mini', mini: !mini }]);
   });
 
+  // The gate on 1ee41b4: the handle's box reaches 11 px into the first strip, and Chromium hands a touch near it (a big finger's, in the blank part of the strip's title
+  // row) to it. By where the finger is, only a press on the handle's own box is the handle's. jsdom lays nothing out, so the handle is given a box.
+  describe('a press that was not on its box', () => {
+    const boxed = () => {
+      const handle = el(SEL.handle);
+      handle.getBoundingClientRect = () => new DOMRect(100, 0, 140, 44);
+      return handle;
+    };
+    /** A press, then the click a touch browser ends it in, as a finger makes it (`detail` 1). */
+    const tap = (target: Element, at: { x: number; y: number }) => {
+      for (const type of ['pointerDown', 'pointerUp'] as const) {
+        const event = createEvent[type](target);
+        Object.defineProperty(event, 'clientX', { value: at.x });
+        Object.defineProperty(event, 'clientY', { value: at.y });
+        fireEvent(target, event);
+      }
+      fireEvent.click(target, { detail: 1 });
+    };
+
+    it('does not fold or open the sheet: the browser named the handle, the finger was in the strip below it', () => {
+      const { onTuner } = draw();
+      tap(boxed(), { x: 260, y: 60 });
+      expect(onTuner).not.toHaveBeenCalled();
+    });
+
+    it('does not start a drag either', () => {
+      const { onTuner } = draw();
+      const handle = boxed();
+      for (const [type, y] of [['pointerDown', 60], ['pointerMove', 160], ['pointerUp', 160]] as const) {
+        const event = createEvent[type](handle);
+        Object.defineProperty(event, 'clientX', { value: 260 });
+        Object.defineProperty(event, 'clientY', { value: y });
+        fireEvent(handle, event);
+      }
+      expect(onTuner).not.toHaveBeenCalled();
+    });
+
+    it('is a press on its box all the same: a tap there folds the sheet, and a key or a screen reader\'s click (detail 0) always does', () => {
+      const { onTuner } = draw();
+      tap(boxed(), { x: 170, y: 20 });
+      expect(calls(onTuner)).toEqual([{ type: 'mini', mini: true }]);
+      fireEvent.click(el(SEL.handle));
+      expect(calls(onTuner)).toEqual([
+        { type: 'mini', mini: true },
+        { type: 'mini', mini: true },
+      ]);
+    });
+  });
+
   it('is not disabled while the sheet can expand', () => {
     draw();
     expect(el(SEL.handle).hasAttribute('aria-disabled')).toBe(false);
@@ -954,6 +1003,32 @@ describe('moving a gear', () => {
     faderPointer('pointerCancel', hit, { kind: 'touch' });
     expect(onTuner).not.toHaveBeenCalled();
     expect(onGearDone).not.toHaveBeenCalled();
+  });
+
+  // The gate on 1ee41b4: no swipe that ends mostly up or down turns a gear on or moves it. A finger that kicked sideways first was called a drag, so the gear was put
+  // on or moved; the sheet puts it back as it was (value, on or off, the open part), through the tuner's own state, and records nothing.
+  it.each<[string, GearId, Partial<TunerState>, number]>([
+    ['an off gear (Tempo)', 'tempo', { off: ['tempo'] }, DEFAULTS.tempo],
+    ['a gear that is on (Difficulty, at 40)', 'difficulty', { difficulty: 40, off: [] }, 40],
+  ])('a swipe that kicked 15 px sideways in its first 6 and then went 120 px down puts %s back as it was, with nothing recorded', (_name, gear, over, before) => {
+    const onTuner = vi.fn<(action: TunerAction) => void>();
+    const onGearDone = vi.fn<(gear: GearId) => void>();
+    render(<Tuned initial={tunerOf({ ...over, open: 'popularity' })} onTuner={onTuner} onGearDone={onGearDone} />);
+    const hit = fader(gear);
+    const wasOff = el(SEL.strip(gear)).hasAttribute('data-off');
+    const x0 = faderX(before);
+    faderPointer('pointerDown', hit, { kind: 'touch', x: x0, y: 0 });
+    faderPointer('pointerMove', hit, { kind: 'touch', x: x0 + 15, y: 6 });
+    // It was called a drag: the gear is on and the value is under the finger.
+    expect(el(SEL.strip(gear)).hasAttribute('data-off')).toBe(false);
+    for (let y = 12; y <= 120; y += 6) faderPointer('pointerMove', hit, { kind: 'touch', x: x0 + 15, y });
+    faderPointer('pointerUp', hit, { kind: 'touch', x: x0 + 15, y: 120 });
+    expect(el(SEL.strip(gear)).hasAttribute('data-off')).toBe(wasOff);
+    expect(Number(el(SEL.slider(gear)).getAttribute('value') ?? (el(SEL.slider(gear)) as HTMLInputElement).value)).toBe(before);
+    expect(onGearDone, 'no adjustment is recorded').not.toHaveBeenCalled();
+    const actions = calls(onTuner) as TunerAction[];
+    expect(actions.at(-1)).toMatchObject({ type: 'patch', patch: { [gear]: before, open: 'popularity' } });
+    expect(actions.filter((a) => a.type === 'reset')).toEqual([]);
   });
 
   it('a press that turned a gear on and was then cancelled ends that adjustment once, and the next plain tap does not look like another', () => {

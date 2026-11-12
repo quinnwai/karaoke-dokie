@@ -129,6 +129,9 @@
   flex: 1;
   min-width: 0;
   position: relative;
+  /* A swipe up or down anywhere in the strip is the browser's, to scroll with, and a sideways move is not: not only over the fader's hit area but over the title
+     and the ✕ too, since a browser may hand a touch near them to those (QWW-57, R33, the gate on 1ee41b4), and the strip's pointer handlers read it all. */
+  touch-action: pan-y;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -202,7 +205,7 @@
   white-space: nowrap;
 }
 
-/* The ✕'s touch area (QWW-57, R34, R33): 44 px wide and 20 tall. It ends 1 px below the 14 px title row, where the icon's box ends, so the icon (16 px,
+/* The ✕'s touch area (QWW-57, R34, R33): 44 px wide and 20 tall (29 in a mini strip, which has 9 px more above it, see below). It ends 1 px below the 14 px title row, where the icon's box ends, so the icon (16 px,
    with its own centre on the title's) sits in the bottom of it and the area grows up from there: in a strip to the strip's own top edge (the rack clips
    what is above that), in the Era panel to 3 px inside the panel's. It never reaches down. Under a strip's ✕ is the fader's hit area, which begins
    where this ends, so a press on the thumb of a gear at 100 or 80 is the fader's and not the ✕'s; and in the Era panel it stops 3 px short of the
@@ -228,6 +231,12 @@
   justify-content: flex-end;
 }
 
+/* A mini strip is 94 px tall with its rows centred, so there are 9 px more above the ✕'s box before the strip's own top edge: the box is 29 px tall there. */
+.sheet[data-compact] .stripBody .resetButton {
+  height: 29px;
+  margin: -14px -8px -1px 0;
+}
+
 .resetButton svg {
   width: 16px;
   height: 16px;
@@ -238,7 +247,8 @@
   color: var(--sl-text);
 }
 
-.resetButton:focus-visible {
+/* `button.` raises it over the screen's own `.app :focus-visible` ring, which has the same weight and may come later: with it the ✕ drew two rings. */
+button.resetButton:focus-visible {
   outline: none;
 }
 

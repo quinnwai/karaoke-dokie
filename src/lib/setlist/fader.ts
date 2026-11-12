@@ -19,6 +19,13 @@ export const TOUCH_DECIDE_PX = 16;
 export const TOUCH_VERDICT_PX = 32;
 
 /**
+ * How far a finger must have gone, still more sideways than up or down, for the drag that was called early to stand for good. Before that the call is provisional:
+ * a swipe that began with a kick to one side and then went up or down is taken back (`dragStanding`), so no swipe that ends mostly vertical has turned a gear on
+ * or moved it (the gate on 1ee41b4).
+ */
+export const TOUCH_FINAL_PX = 40;
+
+/**
  * The value, 0 to 100 in the whole steps the range input has, for a pointer at `x` over a hit area that starts at `left` and is `width`
  * wide. The area is the track with half a knob more at each end, so the knob's centre is at `left + 7` for 0 and `left + width - 7` for
  * 100, and a pointer past either end is that end's value. An area with no track to move along (14 px or less) is 0.
@@ -57,4 +64,16 @@ export function touchIntent(dx: number, dy: number): TouchIntent {
  */
 export function liftsOnTheFader(dx: number, dy: number): boolean {
   return Math.hypot(dx, dy) < TOUCH_SLOP_PX || Math.abs(dx) >= Math.abs(dy);
+}
+
+export type DragStanding = 'keep' | 'final' | 'revoke';
+
+/**
+ * What becomes of a drag that `touchIntent` called as a finger moved (`dx`, `dy`) px from where it landed, and that has put the gear on or moved it: it is
+ * taken back ('revoke') if the finger is then more up or down than sideways before it has gone TOUCH_FINAL_PX, it stands for good ('final') once it has
+ * gone that far still more sideways than up or down, and until then it is kept ('keep'). A drag that stands follows the finger wherever it goes after.
+ */
+export function dragStanding(dx: number, dy: number): DragStanding {
+  if (Math.abs(dy) > Math.abs(dx)) return 'revoke';
+  return Math.hypot(dx, dy) >= TOUCH_FINAL_PX ? 'final' : 'keep';
 }

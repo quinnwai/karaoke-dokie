@@ -38,7 +38,7 @@ export type TunerAction =
   | { type: 'open'; gear: TunerPart }
   /** The handle: set the sheet mode. */
   | { type: 'mini'; mini: boolean }
-  /** Tests only: set any part of the state. */
+  /** Set any part of the state, with nothing recorded: the test hook's, and the sheet's undo of a drag that turned out to be a swipe up or down. */
   | { type: 'patch'; patch: Partial<TunerState> };
 
 export const isOn = (s: Pick<TunerState, 'off'>, part: TunerPart): boolean => !s.off.includes(part);

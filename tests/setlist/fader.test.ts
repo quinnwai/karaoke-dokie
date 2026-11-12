@@ -2,7 +2,7 @@
 // so on a 200 px track it is 214 px wide, and the knob's centre travels the 200 px between the two margins.
 
 import { describe, expect, it } from 'vitest';
-import { faderValue, KNOB_PX, liftsOnTheFader, touchIntent, TOUCH_DECIDE_PX, TOUCH_SLOP_PX, TOUCH_VERDICT_PX } from '../../src/lib/setlist/fader';
+import { dragStanding, faderValue, KNOB_PX, liftsOnTheFader, touchIntent, TOUCH_DECIDE_PX, TOUCH_FINAL_PX, TOUCH_SLOP_PX, TOUCH_VERDICT_PX } from '../../src/lib/setlist/fader';
 
 describe('faderValue', () => {
   // A hit area that starts at x = 50 and is 214 px wide: the track runs from 57 to 257.
@@ -123,5 +123,25 @@ describe('liftsOnTheFader', () => {
     expect(liftsOnTheFader(1, TOUCH_SLOP_PX)).toBe(false);
     expect(liftsOnTheFader(3, 20)).toBe(false);
     expect(liftsOnTheFader(-5, -28)).toBe(false);
+  });
+});
+
+describe('dragStanding', () => {
+  it('keeps a drag that is still more sideways than up or down before it has gone TOUCH_FINAL_PX, and makes it final from there', () => {
+    expect(dragStanding(16, 6)).toBe('keep');
+    expect(dragStanding(30, 20)).toBe('keep');
+    expect(dragStanding(20, 20)).toBe('keep'); // level is not up or down
+    expect(dragStanding(TOUCH_FINAL_PX, 0)).toBe('final');
+    expect(dragStanding(-60, 30)).toBe('final');
+    expect(dragStanding(36, 20)).toBe('final');
+  });
+
+  it('takes a drag back when the finger is more up or down than sideways before it has gone that far: a kick to one side, then a swipe', () => {
+    expect(dragStanding(15, 16)).toBe('revoke');
+    expect(dragStanding(15, 20)).toBe('revoke');
+    expect(dragStanding(15, -60)).toBe('revoke');
+    expect(dragStanding(-15, 120)).toBe('revoke');
+    // Even if the finger is far by then: it never went sideways that far.
+    expect(dragStanding(30, 90)).toBe('revoke');
   });
 });

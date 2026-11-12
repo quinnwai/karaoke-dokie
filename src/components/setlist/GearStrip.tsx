@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useId, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useId, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { gearColor } from '../../lib/setlist/art';
-import { faderValue, liftsOnTheFader, touchIntent } from '../../lib/setlist/fader';
+import { dragStanding, faderValue, liftsOnTheFader, touchIntent } from '../../lib/setlist/fader';
 import { GEAR_META, RESET_TITLE } from '../../lib/setlist/gears';
+import { pressWasOn, trackPresses } from '../../lib/setlist/rawPress';
 import { neonVars } from '../../lib/setlist/sheet';
 import type { GearId } from '../../lib/setlist/types';
 import { GearArt } from './GearArt';
@@ -25,6 +26,8 @@ interface GearStripProps {
   onReset(): void;
   /** One adjustment ended: the thumb was let go, or a key or swipe stepped the value. */
   onDone(): void;
+  /** A drag that had put the gear on or moved it turned out to be a swipe up or down: put the gear back as it was, and record nothing. */
+  onRevert(): void;
 }
 
 /**
@@ -49,6 +52,8 @@ interface Press {
   touch: boolean;
   /** It is on the fader: the gear is on and the value follows it. */
   live: boolean;
+  /** The drag it was called stands for good (dragStanding): it follows the finger wherever it goes now. Until then it can be taken back. */
+  final: boolean;
   /** It went up or down, so the browser takes it for a scroll: the fader leaves it alone. */
   scrolling: boolean;
   /** The last value it sent, so a drag sends each step once. */
@@ -58,9 +63,13 @@ interface Press {
 }
 
 /**
- * One slider gear: its neon art, its label with a reset button, a custom track, a transparent hit area over it that takes the pointer
- * (R33), and the real `<input type="range">` under that, invisible, for the keyboard and screen readers (spec §8). Off, the gear is a
- * switched-off sign (Round 6A §7): unlit art, a dark knob at the default value and no fill, until it is touched.
+ * One slider gear: its neon art, its label with a reset button, a custom track, a transparent hit area over it that marks where the pointer
+ * is the fader's (R33), and the real `<input type="range">` under that, invisible, for the keyboard and screen readers (spec §8). Off, the
+ * gear is a switched-off sign (Round 6A §7): unlit art, a dark knob at the default value and no fill, until it is touched.
+ *
+ * The pointer is read at the strip's body, by where the finger is, and not by the element that is named. Chromium hands the pointer events and the click of a
+ * touch with a radius to a button or label near it (the ✕, the title), a little more than the radius away, so a press in the fader's area was named for the
+ * ✕ or the title and a press outside it was named for the fader; the position stays the finger's (QWW-57, R33, the gate on 1ee41b4).
  */
 export function GearStrip(props: GearStripProps) {
   const { gear, value, off, hidden, unavailable } = props;
@@ -73,17 +82,14 @@ export function GearStrip(props: GearStripProps) {
     handlers.current = props;
   });
 
-  // The hit area has a mousedown listener of its own, a native one, for two reasons (QWW-57, R33, the gate on 828aaca):
-  //  - the press has just put the focus on the slider (below), and the browser's own step for a mousedown, which runs after the pointerdown, would
-  //    take it off again, since the area cannot take focus: the arrow keys did nothing after a click. Cancelling the mousedown keeps it where it is.
-  //  - A touch browser gives the click of a tap to the nearest element within the touch's reach that has a click or mouse listener of its own (measured
-  //    in Chromium, tests/e2e/setlist-fader-ends.spec.ts; iOS Safari does the like), and React's listeners are on the root, so without one here the click
-  //    of a tap on the thumb went to the ✕ beside it, which turned the gear off.
-  const hitRef = useCallback((el: HTMLDivElement | null) => {
-    const keepFocus = (e: MouseEvent) => e.preventDefault();
-    el?.addEventListener('mousedown', keepFocus);
-    return () => el?.removeEventListener('mousedown', keepFocus);
-  }, []);
+  // Every press in the document is noted where it began, for the ✕'s click (below).
+  useEffect(() => trackPresses(), []);
+  // The fader's hit area, whose box says where a press is the fader's.
+  const hit = useRef<HTMLDivElement>(null);
+  // The title, a label for the slider (what a click on it does is the browser's way of giving the slider the focus, below).
+  const title = useRef<HTMLLabelElement>(null);
+  // A mouse or pen press on the fader has not yet given the slider the focus its click will give it (see `afterClick`).
+  const focusAfterClick = useRef(false);
 
   // The browser's `change` event ends one adjustment by the keyboard or a screen reader: a key step or a swipe.
   // (`input` fires on every step. A press on the fader never sets the input's own value, so it sends neither.)
@@ -97,7 +103,9 @@ export function GearStrip(props: GearStripProps) {
 
   // What a press does once it is on the fader: an off gear is turned on (a press that lands exactly on its default moves nothing,
   // so this is what says so), and the value follows the pointer, each step once, as the input's own `input` events used to.
-  const grip = (p: Press, e: ReactPointerEvent<HTMLElement>) => {
+  const grip = (p: Press, x: number) => {
+    const area = hit.current?.getBoundingClientRect();
+    if (!area) return;
     if (!p.live) {
       p.live = true;
       if (off) {
@@ -105,12 +113,21 @@ export function GearStrip(props: GearStripProps) {
         props.onTouch();
       }
     }
-    const area = e.currentTarget.getBoundingClientRect();
-    const next = faderValue(e.clientX, area.left, area.width);
+    const next = faderValue(x, area.left, area.width);
     if (next === p.sent) return;
     p.sent = next;
     p.changed = true;
     props.onInput(next);
+  };
+
+  // A drag that was called early and then turned up or down is a scroll after all (dragStanding): the gear goes back as it was, and nothing is recorded.
+  const revoke = (p: Press) => {
+    p.scrolling = true;
+    p.live = false;
+    if (p.changed) {
+      p.changed = false;
+      props.onRevert();
+    }
   };
 
   // A press ends when its pointer goes: the thumb let go, or the browser took the touch. It is one adjustment if it did anything.
@@ -118,6 +135,76 @@ export function GearStrip(props: GearStripProps) {
     const p = press.current;
     press.current = null;
     if (p?.changed) props.onDone();
+  };
+
+  const pointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // Only a press that is in the fader's area (by where it is, whichever element the browser names) is the fader's.
+    const area = hit.current?.getBoundingClientRect();
+    if (!area || e.clientX < area.left || e.clientX >= area.right || e.clientY < area.top || e.clientY >= area.bottom) return;
+    // A right or middle click is not a press, and a second finger is not the first one's.
+    if (e.button > 0 || (press.current && press.current.id !== e.pointerId)) return;
+    const p: Press = { id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch', live: false, final: false, scrolling: false, sent: value, changed: false };
+    press.current = p;
+    focusAfterClick.current = !p.touch;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // A pointer that is already gone: the press just does not follow it outside the strip.
+    }
+    if (!p.touch) grip(p, e.clientX);
+  };
+
+  const pointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const p = press.current;
+    if (!p || p.id !== e.pointerId || p.scrolling) return;
+    if (p.touch) {
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      if (!p.live) {
+        const intent = touchIntent(dx, dy);
+        if (intent === 'wait') return;
+        if (intent === 'scroll') {
+          p.scrolling = true;
+          return;
+        }
+      }
+      // The drag that was called stands once the finger has gone far enough sideways, and is taken back if the finger turns up or down before that.
+      if (!p.final) {
+        const standing = dragStanding(dx, dy);
+        if (standing === 'revoke') {
+          revoke(p);
+          return;
+        }
+        if (standing === 'final') p.final = true;
+      }
+    }
+    grip(p, e.clientX);
+  };
+
+  const pointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const p = press.current;
+    if (!p || p.id !== e.pointerId) return;
+    // A finger that never went far is a tap: the thumb jumps to where it lifted. So does one that lifts after a short drag; a short swipe up
+    // or down presses nothing.
+    if (!p.live && !p.scrolling && liftsOnTheFader(e.clientX - p.x, e.clientY - p.y)) grip(p, e.clientX);
+    release();
+  };
+
+  const pointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (press.current?.id === e.pointerId) release();
+  };
+
+  // The slider is given the focus when a mouse press on the fader ends in its click, and as a mouse's: where the browser does that for a label, by a click on the title
+  // (Chromium focuses the control of a label as a mouse's focus, and then `:focus-visible` is false until a key is pressed; a script's `focus()` shows the keyboard
+  // ring in Chromium and WebKit alike, and Chromium has no `focusVisible: false`). WebKit does not focus a slider for a label, so there the slider gets it with
+  // `focusVisible: false`, which WebKit has. A finger has no keys, and a key (Tab) is the browser's own.
+  const afterClick = () => {
+    if (!focusAfterClick.current) return;
+    focusAfterClick.current = false;
+    const el = input.current;
+    if (!el || document.activeElement === el) return;
+    title.current?.click();
+    if (document.activeElement !== el) el.focus({ preventScroll: true, focusVisible: false } as FocusOptions);
   };
 
   return (
@@ -132,9 +219,17 @@ export function GearStrip(props: GearStripProps) {
       style={neonVars(gearColor(gear, value)) as CSSProperties}
     >
       <GearArt gear={gear} variant="strip" value={value} off={off} className={styles.gearArt} />
-      <div className={styles.stripBody} style={{ '--pct': `${value}%` } as CSSProperties}>
+      <div
+        className={styles.stripBody}
+        style={{ '--pct': `${value}%` } as CSSProperties}
+        onPointerDown={unavailable ? undefined : pointerDown}
+        onPointerMove={unavailable ? undefined : pointerMove}
+        onPointerUp={unavailable ? undefined : pointerUp}
+        onPointerCancel={unavailable ? undefined : pointerCancel}
+        onClick={unavailable ? undefined : afterClick}
+      >
         <div className={styles.gearHead}>
-          <label className={styles.eyebrow} htmlFor={`slider-${gear}`}>
+          <label ref={title} className={styles.eyebrow} htmlFor={`slider-${gear}`}>
             {meta.eyebrow}
             {/* A gear that cannot be used at all says why under its track, so it does not say " · OFF" as well (R6). */}
             {off && !unavailable && (
@@ -150,7 +245,11 @@ export function GearStrip(props: GearStripProps) {
             aria-label={meta.resetLabel}
             title={RESET_TITLE}
             hidden={off}
-            onClick={() => {
+            onClick={(e) => {
+              // A click is the ✕'s only if the finger pressed on it: the browser may hand it the click of a tap that was elsewhere, on the fader above all (a
+              // finger's tap near the thumb, or a second tap of a double tap on the ✕, which has gone by then). A key or a screen reader's click has no
+              // press (`detail` 0) and counts.
+              if (e.detail > 0 && !pressWasOn(e.currentTarget)) return;
               props.onReset();
               input.current?.focus();
             }}
@@ -162,54 +261,12 @@ export function GearStrip(props: GearStripProps) {
         <div className={styles.track} aria-hidden="true">
           <div className={styles.trackFill} data-fill="" />
           <div className={styles.knob} data-knob="" />
-          {/* The fader's hit area (R33): the pointer goes here and not to the input, which takes a touch only on its own small thumb. A
-              mouse or a pen jumps the value to the pointer and drags; a finger that lands waits to see which way it goes, and only a sideways
-              one (or a tap) moves it, so a swipe up or down scrolls and leaves the gear alone. A gear that cannot be used has none. */}
-          {!unavailable && (
-            <div
-              ref={hitRef}
-              className={styles.faderHit}
-              data-fader=""
-              onPointerDown={(e) => {
-                // A right or middle click is not a press, and a second finger is not the first one's.
-                if (e.button > 0 || (press.current && press.current.id !== e.pointerId)) return;
-                const p: Press = { id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch', live: false, scrolling: false, sent: value, changed: false };
-                press.current = p;
-                // A mouse or a pen leaves the focus on the slider, as a native one took it, so the arrow keys carry on from the press (a finger has no keys).
-                if (!p.touch) input.current?.focus({ preventScroll: true });
-                try {
-                  e.currentTarget.setPointerCapture(e.pointerId);
-                } catch {
-                  // A pointer that is already gone: the press just does not follow it outside the area.
-                }
-                if (!p.touch) grip(p, e);
-              }}
-              onPointerMove={(e) => {
-                const p = press.current;
-                if (!p || p.id !== e.pointerId || p.scrolling) return;
-                if (!p.live) {
-                  const intent = touchIntent(e.clientX - p.x, e.clientY - p.y);
-                  if (intent === 'wait') return;
-                  if (intent === 'scroll') {
-                    p.scrolling = true;
-                    return;
-                  }
-                }
-                grip(p, e);
-              }}
-              onPointerUp={(e) => {
-                const p = press.current;
-                if (!p || p.id !== e.pointerId) return;
-                // A finger that never went far is a tap: the thumb jumps to where it lifted. So does one that lifts after a short drag; a short swipe up
-                // or down presses nothing.
-                if (!p.live && !p.scrolling && liftsOnTheFader(e.clientX - p.x, e.clientY - p.y)) grip(p, e);
-                release();
-              }}
-              onPointerCancel={(e) => {
-                if (press.current?.id === e.pointerId) release();
-              }}
-            />
-          )}
+          {/* The fader's hit area (R33): where a press is the fader's, which the strip's pointer handlers above go by. The pointer is not taken here and not by the
+              input, which takes a touch only on its own small thumb. A mouse or a pen jumps the value to the pointer and drags; a finger that lands waits to see which
+              way it goes, and only a sideways one (or a tap) moves it, so a swipe up or down scrolls and leaves the gear alone. A gear that cannot be used has none.
+              A click on it gives the slider the focus as a mouse's (see `afterClick`): the arrow keys carry on from the click, as they did with the native slider, and
+              the knob shows no keyboard ring until a key is pressed. */}
+          {!unavailable && <div ref={hit} className={styles.faderHit} data-fader="" />}
         </div>
         {unavailable ? (
           <p className={styles.unavailable} id={hintId} data-ends="hint">
