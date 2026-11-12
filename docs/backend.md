@@ -331,10 +331,11 @@ source (`deezer`, `tracker`, `ultrastar`, `reviewed`, or `feel` when only the la
   and a disco song read at 101 at the bottom of the upbeat one, behind the songs whose numbers back the label
   up (and when an end has too few labelled songs, the songs that fill it are the nearest to it by their
   numbers). Every slow song is below every mid song, which is below every upbeat song; a labelled song with no
-  reading sits at the edge of its band facing the middle.
+  reading sits at the edge of its band facing the middle (a weak label, below, at the inner end of the weak strip).
 - A **weak** label (`isWeakLabelSource`: a slow or upbeat label from the second look or the band-edge audit, by its `song_feel.source`) keeps
-  its band but goes into the strip at the band's inner edge, in the order of its own tempo, so it ranks behind every song with a clear
-  label (the strict first pass, a hand fix). An independent judge agreed with 95% of the strict first pass's slow labels and 98% of its
+  its band but goes into the strip at the band's inner edge, in the order of its own tempo, so it ranks behind the clear songs (the strict
+  first pass, a hand fix) whose readings fit their band. A clear song that its reading forced to the band's edge shares that strip, and a
+  weak label with no reading goes last in it. An independent judge agreed with 95% of the strict first pass's slow labels and 98% of its
   upbeat ones, but with 79% and 89% of the audit's where all three runs agreed and 58% and 61% where two did (`data/tempo-feel.md`).
 - `loadCatalogue` works it out once per cache fill and puts it on `Match.tempo`, which is all the rankers
   read: the Tempo slider's `sliderValue`, and the Setlist ranking engine's `effectiveTempo(m) = m.tempo` (QWW-47),
