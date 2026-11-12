@@ -326,6 +326,39 @@ describe('song service whole list (all)', () => {
     expect(res.matches[1]).not.toHaveProperty('genre');
   });
 
+  it("takes Deezer's album genres for a song the index gives none, the index's over Deezer's, and reads them once (QWW-61)", async () => {
+    const store = createMemoryStore();
+    await store.putUsdbSongs([indexRow(2, { genre: 'Rock' }), indexRow(4)]);
+    const checkedAt = '2026-11-12T00:00:00.000Z';
+    await store.putSongGenre([
+      { key: key(2), genres: 'Pop', albumId: 1, source: 'deezer-album', checkedAt },
+      { key: key(4), genres: 'Alternative, Indie', albumId: 2, source: 'deezer-album', checkedAt },
+      { key: key(8), genres: 'Electro', albumId: 3, source: 'deezer-album', checkedAt },
+      { key: key(10), albumId: 4, source: 'deezer-album', checkedAt }, // a miss: the album lists no genre
+    ]);
+    const getSongGenres = vi.spyOn(store, 'getSongGenres');
+    const svc = createSongService(store, fakeDeps().deps);
+    const lib = [track(2), track(4), track(8), track(10)];
+    const res = await svc.recommend(lib, user, 0, 0, { all: true });
+    expect(res.matches.map((m) => m.genre)).toEqual(['Rock', 'Alternative, Indie', 'Electro', undefined]);
+    expect(res.matches[3]).not.toHaveProperty('genre');
+    expect(getSongGenres).toHaveBeenCalledTimes(1);
+    expect((await svc.libraryMatches(lib, user)).matches.map((m) => m.genre)).toEqual(['Rock', 'Alternative, Indie', 'Electro', undefined]);
+    await svc.recommend(lib, user, 0, 5); // a page has no song facts, so it reads no genres
+    expect(getSongGenres).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes the index genres alone, as before, when song_genre is missing (QWW-61)', async () => {
+    const store = createMemoryStore();
+    await store.putUsdbSongs([indexRow(2, { genre: 'Rock' }), indexRow(4)]);
+    await store.putSongGenre([{ key: key(4), genres: 'Pop', albumId: 1, source: 'deezer-album', checkedAt: '2026-11-12T00:00:00.000Z' }]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(store, 'getSongGenres').mockRejectedValueOnce(Object.assign(new Error('relation "song_genre" does not exist'), { code: '42P01' }));
+    const res = await createSongService(store, fakeDeps().deps).recommend([track(2), track(4), track(8)], user, 0, 0, { all: true });
+    expect(res.matches.map((m) => m.genre)).toEqual(['Rock', undefined, undefined]);
+    warn.mockRestore();
+  });
+
   it('scores with the index row\'s views and stars only when the range has none, and never stores them', async () => {
     const store = createMemoryStore();
     await store.putUsdbSongs([indexRow(2, { views: 5000, rating: 4 }), indexRow(4, { views: 9000, rating: 5 })]);
