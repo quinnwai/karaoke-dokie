@@ -48,7 +48,8 @@ describe('Maybe group', () => {
     expect(within(main!).getByText('Easy')).toBeTruthy();
 
     const maybe = screen.getByRole('region', { name: 'Maybe' });
-    expect(within(maybe).getByText(/only have an estimate/)).toBeTruthy();
+    expect(within(maybe).getByText(/less sure of these songs/)).toBeTruthy();
+    expect(within(maybe).queryByText(/estimate/)).toBeNull(); // a narrow note file is a Maybe too (QWW-60), and it is not an artist estimate
     expect(labels(maybe)).toEqual(['Linda Linda by The Blue Hearts, Maybe. Fast lyrics', 'Sukiyaki by Kyu Sakamoto, Maybe']);
     for (const li of within(maybe).getAllByRole('listitem')) expect(li.querySelector('[data-difficulty]')).toBeNull();
     expect(main!.compareDocumentPosition(maybe) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

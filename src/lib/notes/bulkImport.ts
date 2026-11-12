@@ -6,7 +6,7 @@
 
 import type { DataSourceLogEntry, LogOutcome, SongRange } from '../contracts';
 import type { Store } from '../server/store';
-import { songRangeFromUltrastar } from '../songs/range';
+import { applyNarrowRule, isPlausible, PLAUSIBLE_SONG, songRangeFromUltrastar } from '../songs/range';
 import { songKey } from '../songs/resolve';
 import { addsDuetParts, importReplaces, isKnownSource, SOURCE_RANK } from '../songs/sourceRank';
 import { parseUltrastar } from '../songs/ultrastar';
@@ -35,12 +35,8 @@ export function decodeNoteFile(bytes: Uint8Array): string {
   }
 }
 
-/** Note files outside these bounds are badly transcribed (or mash-ups), so they are dropped. */
-export const PLAUSIBLE_SONG = { lowest: 28, highest: 91, widestSpan: 36 } as const;
-
-function plausible(r: SongRange): boolean {
-  return r.low >= PLAUSIBLE_SONG.lowest && r.high <= PLAUSIBLE_SONG.highest && r.high - r.low <= PLAUSIBLE_SONG.widestSpan;
-}
+// Note files outside the bounds of PLAUSIBLE_SONG (range.ts, which the narrow-range rule needs too) are dropped; octave.ts reads them from here.
+export { PLAUSIBLE_SONG };
 
 /** Range of one note file, or null when it has no artist/title, no singable part 1, or an implausible range. */
 export function rangeFromNoteText(text: string, collection: string): BulkRange | null {
@@ -52,7 +48,7 @@ export function rangeFromNoteText(text: string, collection: string): BulkRange |
     const key = songKey(artist, title);
     if (key.startsWith('|') || key.endsWith('|')) return null;
     const range = songRangeFromUltrastar(file);
-    return plausible(range) ? { key, artist, title, collection, range: { ...range, collection } } : null;
+    return isPlausible(range) ? { key, artist, title, collection, range: { ...range, collection } } : null;
   } catch {
     return null;
   }
@@ -136,7 +132,8 @@ export async function importBulkRanges(
         at: now().toISOString(),
       };
       if (old?.log.usdbMissAt) log.usdbMissAt = old.log.usdbMissAt;
-      const range = old?.range && addsDuetParts(r.range, old.range) ? keepUsdbFacts(r.range, old.range) : r.range;
+      // A narrow range is widened or marked on its way in, so a newer export does not bring back a range the rule has marked (QWW-60).
+      const range = applyNarrowRule(old?.range && addsDuetParts(r.range, old.range) ? keepUsdbFacts(r.range, old.range) : r.range);
       await store.putSongRange(r.key, { range, log });
       summary.imported++;
     }

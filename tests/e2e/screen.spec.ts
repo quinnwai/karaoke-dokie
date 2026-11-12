@@ -346,7 +346,7 @@ test("on a 360px phone Spotify's player gets the 280px it wants and the TV stays
   await context.close();
 });
 
-test('a Maybe song has no difficulty, and its info says the range is an estimate', async ({ browser, baseURL }) => {
+test('a Maybe song has no difficulty, and its group says we are less sure of the range', async ({ browser, baseURL }) => {
   const api = freshState();
   api.user = me({ low: 45, high: 72, source: 'test' });
   const context = await browser.newContext({ ...iPhone, baseURL, reducedMotion: 'reduce' });
@@ -355,7 +355,7 @@ test('a Maybe song has no difficulty, and its info says the range is an estimate
   await page.goto('/');
   await page.getByRole('button', { name: 'Load more songs' }).click();
   const maybe = page.getByRole('region', { name: 'Maybe' });
-  await expect(maybe.getByText('We only have an estimate of these songs’ range.', { exact: false })).toBeVisible();
+  await expect(maybe.getByText('We’re less sure of these songs’ range.', { exact: false })).toBeVisible();
   await maybe.scrollIntoViewIfNeeded();
   await page.waitForTimeout(500);
   await shot(page, '17-maybe-group');

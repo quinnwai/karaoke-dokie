@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import type { SongPart, SongRange } from '../../src/lib/contracts';
-import { FAST_LYRICS_SYLLABLES_PER_SECOND, fastShare, octaveCorrection, songRangeFromUltrastar, syllableRate, trimmedRange } from '../../src/lib/songs/range';
+import { PLAUSIBLE_SONG as PLAUSIBLE_SONG_FROM_IMPORT } from '../../src/lib/notes/bulkImport';
+import { shiftRange } from '../../src/lib/songs/octave';
+import {
+  FAST_LYRICS_SYLLABLES_PER_SECOND,
+  NARROW_SPAN,
+  PLAUSIBLE_SONG,
+  applyNarrowRule,
+  fastShare,
+  gentleRange,
+  isNarrow,
+  isPlausible,
+  octaveCorrection,
+  songRangeFromUltrastar,
+  syllableRate,
+  trimmedRange,
+} from '../../src/lib/songs/range';
 import { parseUltrastar } from '../../src/lib/songs/ultrastar';
 import { fixture } from './fixture';
 
@@ -191,21 +206,23 @@ describe('ranges stay as they were before duet parts', () => {
   // Every fixture's range as JSON, computed before duets got each singer's part (commit fd3fde1),
   // plus two made-up songs for the octave fix and the outlier trim. Solo songs must come out
   // byte for byte the same; a duet keeps these top-level fields (P1's, or the part asked for).
+  // One change since, on purpose (QWW-60): a solo song of 5 semitones or fewer is low confidence
+  // (the 1% trim gives these fixtures the same range, since each note carries far more than 1%).
   const song = (notes: [number, number][]) => '#BPM:120\n' + notes.map(([pitch, len], i) => `: ${i * 8} ${len} ${pitch} la`).join('\n') + '\nE\n';
   const twoOctavesHigh = song(Array.from({ length: 12 }, (_, i) => [26 + (i % 5), 4]));
   const shout = song([...Array.from({ length: 30 }, (_, i): [number, number] => [i % 2 ? 2 : 4, 4]), [19, 1]]);
   const before: [name: string, text: string, part: number, json: string][] = [
-    ['ballad.txt', fixture('ballad.txt'), 1, '{"low":58,"high":62,"tessitura":60,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[58,0.2],[59,0.2],[60,0.2],[61,0.2],[62,0.2]]}'],
-    ['comma-bpm.txt', fixture('comma-bpm.txt'), 1, '{"low":60,"high":60,"tessitura":60,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,1]]}'],
-    ['crlf-bom.txt', fixture('crlf-bom.txt'), 1, '{"low":65,"high":69,"tessitura":66.6,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[65,0.4],[67,0.4],[69,0.2]]}'],
-    ['fast.txt', fixture('fast.txt'), 1, '{"low":60,"high":62,"tessitura":60.6,"source":"note-file","confidence":"high","fastLyrics":true,"pitchShare":[[60,0.6],[61,0.2],[62,0.2]]}'],
+    ['ballad.txt', fixture('ballad.txt'), 1, '{"low":58,"high":62,"tessitura":60,"source":"note-file","confidence":"low","fastLyrics":false,"pitchShare":[[58,0.2],[59,0.2],[60,0.2],[61,0.2],[62,0.2]]}'],
+    ['comma-bpm.txt', fixture('comma-bpm.txt'), 1, '{"low":60,"high":60,"tessitura":60,"source":"note-file","confidence":"low","fastLyrics":false,"pitchShare":[[60,1]]}'],
+    ['crlf-bom.txt', fixture('crlf-bom.txt'), 1, '{"low":65,"high":69,"tessitura":66.6,"source":"note-file","confidence":"low","fastLyrics":false,"pitchShare":[[65,0.4],[67,0.4],[69,0.2]]}'],
+    ['fast.txt', fixture('fast.txt'), 1, '{"low":60,"high":62,"tessitura":60.6,"source":"note-file","confidence":"low","fastLyrics":true,"pitchShare":[[60,0.6],[61,0.2],[62,0.2]]}'],
     ['low-song.txt', fixture('low-song.txt'), 1, '{"low":36,"high":48,"tessitura":42,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[36,0.333],[42,0.333],[48,0.333]]}'],
-    ['melisma.txt', fixture('melisma.txt'), 1, '{"low":60,"high":60,"tessitura":60,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,1]]}'],
+    ['melisma.txt', fixture('melisma.txt'), 1, '{"low":60,"high":60,"tessitura":60,"source":"note-file","confidence":"low","fastLyrics":false,"pitchShare":[[60,1]]}'],
     ['rap.txt', fixture('rap.txt'), 1, '{"low":57,"high":69,"tessitura":63.8,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[57,0.2],[62,0.4],[69,0.4]]}'],
-    ['relative.txt', fixture('relative.txt'), 1, '{"low":60,"high":65,"tessitura":62.75,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,0.25],[62,0.25],[64,0.25],[65,0.25]]}'],
+    ['relative.txt', fixture('relative.txt'), 1, '{"low":60,"high":65,"tessitura":62.75,"source":"note-file","confidence":"low","fastLyrics":false,"pitchShare":[[60,0.25],[62,0.25],[64,0.25],[65,0.25]]}'],
     ['solo.txt', fixture('solo.txt'), 1, '{"low":55,"high":67,"tessitura":62.5,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[55,0.167],[60,0.167],[62,0.167],[64,0.167],[67,0.333]]}'],
-    ['two octaves high', twoOctavesHigh, 1, '{"low":62,"high":66,"tessitura":63.75,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[62,0.25],[63,0.25],[64,0.167],[65,0.167],[66,0.167]]}'],
-    ['one-beat shout', shout, 1, '{"low":62,"high":64,"tessitura":63.13223140495868,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[62,0.496],[64,0.496],[79,0.008]]}'],
+    ['two octaves high', twoOctavesHigh, 1, '{"low":62,"high":66,"tessitura":63.75,"source":"note-file","confidence":"low","fastLyrics":false,"pitchShare":[[62,0.25],[63,0.25],[64,0.167],[65,0.167],[66,0.167]]}'],
+    ['one-beat shout', shout, 1, '{"low":62,"high":64,"tessitura":63.13223140495868,"source":"note-file","confidence":"low","fastLyrics":false,"pitchShare":[[62,0.496],[64,0.496],[79,0.008]]}'],
     ['duet.txt', fixture('duet.txt'), 1, '{"low":60,"high":62,"tessitura":61,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[60,0.5],[62,0.5]]}'],
     ['duet.txt', fixture('duet.txt'), 2, '{"low":67,"high":72,"tessitura":70.33333333333333,"source":"note-file","confidence":"high","fastLyrics":false,"pitchShare":[[67,0.333],[72,0.667]]}'],
   ];
@@ -218,5 +235,209 @@ describe('ranges stay as they were before duet parts', () => {
     } else {
       expect(JSON.stringify(range)).toBe(json);
     }
+  });
+});
+
+describe('the narrow-range rule (QWW-60)', () => {
+  // A note file as range.ts stores it: the usual 5% trim of its histogram, and the histogram's mean as the typical note.
+  const noteFile = (pitchShare: [number, number][], extra: Partial<SongRange> = {}): SongRange => {
+    const { low, high } = trimmedRange(pitchShare.map(([midi, length]) => ({ midi, length })));
+    const total = pitchShare.reduce((sum, [, share]) => sum + share, 0);
+    const tessitura = pitchShare.reduce((sum, [midi, share]) => sum + midi * share, 0) / total;
+    return { low, high, tessitura, source: 'note-file', confidence: 'high', fastLyrics: false, pitchShare, ...extra };
+  };
+  // Mostly two notes, with a little singing below and above them that the 5% trim drops and a 1% trim keeps: 56 to 58 becomes 52 to 61.
+  const STRAY: [number, number][] = [[52, 0.015], [55, 0.03], [56, 0.5], [57, 0.4], [58, 0.03], [61, 0.025]];
+  // Are You Bored Yet? by Wallows, as production stores it (the octave fix had moved it): G3 to A3 with 69% of the singing on G#3.
+  const WALLOWS: SongRange = {
+    low: 55,
+    high: 57,
+    tessitura: 56.130472103004294,
+    source: 'note-file',
+    confidence: 'high',
+    fastLyrics: false,
+    octaveFrom: 'recording',
+    pitchShare: [[48, 0.009], [54, 0.012], [55, 0.058], [56, 0.688], [57, 0.198], [58, 0.022], [59, 0.013]],
+  };
+
+  it('measures a note file of 5 semitones or fewer again with a 1% trim, and keeps its confidence when that is wider', () => {
+    const stored = noteFile(STRAY);
+    expect(stored).toMatchObject({ low: 56, high: 58 });
+    expect(applyNarrowRule(stored)).toEqual({ ...stored, low: 52, high: 61 });
+  });
+
+  it('marks what the 1% trim still leaves at 5 semitones or fewer as low confidence, with the widened range (Are You Bored Yet?)', () => {
+    expect(gentleRange(WALLOWS)).toEqual({ low: 54, high: 59 });
+    expect(applyNarrowRule(WALLOWS)).toEqual({ ...WALLOWS, low: 54, high: 59, confidence: 'low' });
+  });
+
+  it('counts 5 semitones as narrow and 6 as wide, before and after the 1% trim', () => {
+    const six = noteFile([[56, 0.5], [62, 0.5]]);
+    expect(isNarrow(six)).toBe(false);
+    expect(applyNarrowRule(six)).toBe(six);
+    // 5 before the finer trim and 6 after it: wide, so not marked.
+    const fiveThenSix = noteFile([[55, 0.015], [56, 0.485], [61, 0.5]]);
+    expect(fiveThenSix).toMatchObject({ low: 56, high: 61 });
+    expect(isNarrow(fiveThenSix)).toBe(true);
+    expect(applyNarrowRule(fiveThenSix)).toEqual({ ...fiveThenSix, low: 55, high: 61 });
+    // 5 before and 5 after: marked.
+    const five = noteFile([[56, 0.5], [61, 0.5]]);
+    expect(applyNarrowRule(five)).toEqual({ ...five, confidence: 'low' });
+  });
+
+  it('marks a recording of 5 semitones or fewer and leaves its range as it is, whatever its histogram would give', () => {
+    const recording = noteFile(STRAY, { source: 'audio-full', method: 'pyin-v1/app-range-v1' });
+    expect(gentleRange(recording)).toEqual({ low: 52, high: 61 });
+    expect(applyNarrowRule(recording)).toEqual({ ...recording, confidence: 'low' });
+    const wide = { ...recording, low: 50, high: 60 };
+    expect(applyNarrowRule(wide)).toBe(wide);
+  });
+
+  it('leaves duets with parts, artist estimates and wide ranges as they are', () => {
+    const part = { low: 56, high: 58, tessitura: 57, fastLyrics: false };
+    const duet = noteFile(STRAY, { duet: true, parts: [part, part] });
+    expect(isNarrow(duet)).toBe(false);
+    expect(applyNarrowRule(duet)).toBe(duet);
+    for (const source of ['artist-typical', 'artist-external'] as const) {
+      const estimate = noteFile(STRAY, { source, confidence: 'low' });
+      expect(applyNarrowRule(estimate)).toBe(estimate);
+    }
+    const wide = noteFile([[50, 0.5], [60, 0.5]]);
+    expect(applyNarrowRule(wide)).toBe(wide);
+  });
+
+  it('only marks a narrow note file that has no histogram, or one that does not describe the song', () => {
+    const { pitchShare: _, ...bare } = noteFile(STRAY);
+    expect(applyNarrowRule(bare)).toEqual({ ...bare, confidence: 'low' });
+    // A typical note 6 semitones off the histogram's mean is nowhere near it at any whole octave.
+    const stale = { ...noteFile(STRAY), tessitura: 62.5 };
+    expect(gentleRange(stale)).toBeNull();
+    expect(applyNarrowRule(stale)).toEqual({ ...stale, confidence: 'low' });
+  });
+
+  it('does not widen to pitches no song has: a note file with junk notes keeps its range and is marked', () => {
+    // 1.5% of the time on a pitch above G6 (as in a production note file that reaches G17): the 5% trim drops it, the 1% trim would keep it.
+    const junkHigh = noteFile([[56, 0.5], [57, 0.485], [100, 0.015]]);
+    expect(junkHigh).toMatchObject({ low: 56, high: 57 });
+    expect(gentleRange(junkHigh)).toEqual({ low: 56, high: 100 });
+    expect(applyNarrowRule(junkHigh)).toEqual({ ...junkHigh, confidence: 'low' });
+    // A pitch below E1, a span of only 14 semitones: still no song's.
+    const junkLow = noteFile([[27, 0.015], [40, 0.5], [41, 0.485]]);
+    expect(applyNarrowRule(junkLow)).toEqual({ ...junkLow, confidence: 'low' });
+    // Junk on one side and a believable stray note on the other: the 1% trim as a whole is not believable, so the range stays and is marked.
+    const mixed = noteFile([[52, 0.015], [56, 0.485], [57, 0.485], [100, 0.015]]);
+    expect(applyNarrowRule(mixed)).toEqual({ ...mixed, confidence: 'low' });
+  });
+
+  it('judges a range plausible by the bounds the import uses (E1 to G6, 36 semitones at most)', () => {
+    expect(PLAUSIBLE_SONG).toEqual({ lowest: 28, highest: 91, widestSpan: 36 });
+    expect(PLAUSIBLE_SONG).toBe(PLAUSIBLE_SONG_FROM_IMPORT);
+    expect(isPlausible({ low: 28, high: 64 })).toBe(true);
+    expect(isPlausible({ low: 55, high: 91 })).toBe(true);
+    expect(isPlausible({ low: 27, high: 40 })).toBe(false);
+    expect(isPlausible({ low: 60, high: 92 })).toBe(false);
+    expect(isPlausible({ low: 40, high: 77 })).toBe(false); // 37 semitones
+    expect(isPlausible({ low: 40, high: 76 })).toBe(true);
+  });
+
+  it('does not take a low-confidence note file back to high when the 1% trim widens it', () => {
+    const rap = noteFile(STRAY, { confidence: 'low' });
+    expect(applyNarrowRule(rap)).toEqual({ ...rap, low: 52, high: 61 });
+  });
+
+  it('is idempotent: a second pass changes nothing', () => {
+    for (const stored of [noteFile(STRAY), WALLOWS, noteFile(STRAY, { source: 'audio-full' }), noteFile([[56, 0.5], [61, 0.5]])]) {
+      const once = applyNarrowRule(stored);
+      expect(once).not.toBe(stored);
+      expect(applyNarrowRule(once)).toBe(once);
+    }
+  });
+
+  describe('octaves', () => {
+    // The octave fix moves a stored range and its histogram together (shiftRange), so the rule's new low and high
+    // are in the stored octave: widening what was moved must not move it back, or an octave further.
+    it.each([[-12, 'recording'], [12, 'artist'], [-24, 'pitch']] as const)('keeps a range moved %i semitones in its octave (histogram moved with it)', (semitones, octaveFrom) => {
+      const moved = { ...shiftRange(noteFile(STRAY), semitones), octaveFrom };
+      expect(applyNarrowRule(moved)).toEqual({ ...moved, low: 52 + semitones, high: 61 + semitones });
+      const wallows = { ...shiftRange(WALLOWS, semitones), octaveFrom };
+      expect(applyNarrowRule(wallows)).toEqual({ ...wallows, low: 54 + semitones, high: 59 + semitones, confidence: 'low' });
+    });
+
+    it('puts the new range in the stored octave when the histogram was left in the note file’s octave', () => {
+      const file = noteFile(STRAY);
+      const moved: SongRange = { ...shiftRange(file, -12), pitchShare: file.pitchShare, octaveFrom: 'recording' };
+      expect(gentleRange(moved)).toEqual({ low: 40, high: 49 });
+      expect(applyNarrowRule(moved)).toMatchObject({ low: 40, high: 49, confidence: 'high' });
+    });
+
+    it('gives the same range whether or not the song was moved', () => {
+      for (const stored of [noteFile(STRAY), WALLOWS]) {
+        const there = applyNarrowRule(shiftRange(stored, 12));
+        const back = applyNarrowRule(stored);
+        expect(there).toEqual(shiftRange(back, 12));
+      }
+    });
+  });
+
+  it('never narrows a range, and leaves every narrow one either wide or low confidence (500 seeded histograms)', () => {
+    let seed = 20261112;
+    const next = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+    let narrow = 0;
+    let widened = 0;
+    for (let i = 0; i < 500; i++) {
+      const base = 45 + Math.floor(next() * 25);
+      const pitches = new Set<number>();
+      const count = 2 + Math.floor(next() * 7);
+      while (pitches.size < count) pitches.add(base + Math.floor(next() * 12));
+      const weights = [...pitches].map((midi, j): [number, number] => [midi, j === 0 ? 4 + next() * 20 : next()]);
+      const sum = weights.reduce((a, [, w]) => a + w, 0);
+      const histogram = weights.map(([midi, w]): [number, number] => [midi, Math.round((w / sum) * 1000) / 1000]).sort((a, b) => a[0] - b[0]);
+      const stored = noteFile(histogram);
+      const out = applyNarrowRule(stored);
+      expect(out.low).toBeLessThanOrEqual(stored.low);
+      expect(out.high).toBeGreaterThanOrEqual(stored.high);
+      if (isNarrow(stored)) {
+        narrow++;
+        if (out.high - out.low > NARROW_SPAN) widened++;
+        expect(out.confidence).toBe(out.high - out.low > NARROW_SPAN ? 'high' : 'low');
+      } else {
+        expect(out).toBe(stored);
+      }
+      expect(applyNarrowRule(out)).toBe(out);
+    }
+    // The sweep reaches both outcomes.
+    expect(widened).toBeGreaterThan(10);
+    expect(narrow - widened).toBeGreaterThan(10);
+  });
+});
+
+describe('songRangeFromUltrastar and narrow ranges (QWW-60)', () => {
+  // One note after another, each [midi, beats], written as UltraStar pitches (midi 60 is pitch 0).
+  const file = (notes: [number, number][]) => '#BPM:120\n' + notes.map(([midi, beats], i) => `: ${i * 1000} ${beats} ${midi - 60} la`).join('\n') + '\nE\n';
+
+  it('measures a song sung on a few notes with the 1% trim, and keeps it confident when that is wider than 5 semitones', () => {
+    // 15, 30, 500, 400, 30 and 25 beats on 52, 55, 56, 57, 58 and 61: the 5% trim gives 56 to 58, the 1% trim 52 to 61.
+    const range = songRangeFromUltrastar(file([[52, 15], [55, 30], [56, 500], [57, 400], [58, 30], [61, 25]]));
+    expect(range).toMatchObject({ low: 52, high: 61, confidence: 'high', source: 'note-file' });
+  });
+
+  it('marks a song that is still 5 semitones or fewer low confidence, so it lands in the Maybe group', () => {
+    const range = songRangeFromUltrastar(file([[56, 900], [57, 100]]));
+    expect(range).toMatchObject({ low: 56, high: 57, confidence: 'low' });
+  });
+
+  it('keeps the range in the corrected octave when the file was written an octave or more off', () => {
+    // The same song written 2 octaves too high (typical note 80.5): range.ts moves it down until it is under C5, an octave
+    // above where it was written here, and the histogram the 1% trim reads moves with it, so the widened range is in that octave too.
+    const range = songRangeFromUltrastar(file([[52 + 24, 15], [55 + 24, 30], [56 + 24, 500], [57 + 24, 400], [58 + 24, 30], [61 + 24, 25]]));
+    expect(range).toMatchObject({ low: 52 + 12, high: 61 + 12, confidence: 'high' });
+    expect(range.pitchShare![0]![0]).toBe(range.low);
+    expect(range.pitchShare!.at(-1)![0]).toBe(range.high);
+  });
+
+  it('leaves a duet as it is measured: the 5% trim, each part its own, and high confidence', () => {
+    const duet = songRangeFromUltrastar(fixture('duet.txt'));
+    expect(duet).toMatchObject({ low: 60, high: 62, confidence: 'high', duet: true });
+    expect(duet.parts).toHaveLength(2);
   });
 });
