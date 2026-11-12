@@ -10,6 +10,9 @@
 import { devices, expect, test } from '@playwright/test';
 import path from 'node:path';
 
+/** A row's song button, which opens the song page (the row's play button, QWW-48, comes first). */
+const SONG_BUTTON = 'button:not([data-preview])';
+
 const SCREENS = path.resolve('test-results/screens');
 
 test('no Spotify: catalogue songs with chips, then Connect Spotify for library songs, feedback, sources and the event log', async ({ browser, baseURL }) => {
@@ -70,7 +73,7 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-03-80s.png') });
 
   // Feedback without an account goes to the catalogue route with this device's id.
-  await songs.first().getByRole('button').first().click();
+  await songs.first().locator(SONG_BUTTON).click();
   await expect(page.getByRole('link', { name: 'Find on Spotify' })).toBeVisible();
   const catFeedback = page.waitForResponse((r) => r.url().includes('/api/catalogue/feedback'));
   await page.getByRole('button', { name: 'It went well' }).click();
@@ -97,7 +100,7 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   }
 
   // Open the first song, check the info line, leave feedback.
-  await songs.first().getByRole('button').first().click();
+  await songs.first().locator(SONG_BUTTON).click();
   // Spotify's player stands where the button was. The mock gives most songs a real track id; the few
   // without one keep the plain link.
   await expect(page.locator('iframe[src^="https://open.spotify.com/embed/track/"], a:has-text("Open in Spotify")')).toHaveCount(1);
@@ -141,7 +144,7 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
       const ev = await (await page.request.get('/api/admin/events', { headers: { 'x-admin-token': 'e2e-admin' } })).json();
       return Object.fromEntries(ev.funnel.map((f: { name: string; devices: number }) => [f.name, f.devices]));
     })
-    .toMatchObject({ results_viewed: 1, song_opened: 1, spotify_connect_pressed: 1 });
+    .toMatchObject({ list_view: 1, song_open: 1, spotify_connect: 1 });
   const ev = await (await page.request.get('/api/admin/events', { headers: { 'x-admin-token': 'e2e-admin' } })).json();
   const stored = JSON.stringify(ev.sessions);
   expect(stored).not.toMatch(/mock-\d+-/);

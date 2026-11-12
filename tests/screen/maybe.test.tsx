@@ -33,7 +33,12 @@ const props = {
   displayName: 'Test Singer',
   onLogout: vi.fn(async () => {}),
 };
-const labels = (el: HTMLElement) => within(el).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
+// The song buttons; each row's play button (QWW-48) is left out.
+const labels = (el: HTMLElement) =>
+  within(el)
+    .getAllByRole('button')
+    .filter((b) => !b.hasAttribute('data-preview'))
+    .map((b) => b.getAttribute('aria-label'));
 
 describe('Maybe group', () => {
   it('lists low-confidence songs after the main list, under Maybe, without a difficulty', () => {

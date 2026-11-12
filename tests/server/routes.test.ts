@@ -155,6 +155,58 @@ describe('sign-in flow', () => {
     }
   });
 
+  // An account off the allowlist is refused one of two ways (QWW-53). The browser gets the same invite-only line
+  // either way, so only the log can tell them apart.
+  it('logs an account Spotify refuses at /me (403, off the allowlist) and sends the browser to authError=spotify', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const jar = new Jar();
+      const r1 = jar.take(await login.GET(req('/api/auth/login')));
+      getAppContext().spotify.getMe = async () => {
+        throw new SpotifyError('Spotify API /me failed (403)', 403, 'Check settings on developer.spotify.com/dashboard, the user may not be registered.');
+      };
+      const r2 = await callback.GET(new Request(r1.headers.get('location')!, { headers: { cookie: jar.header() } }));
+      expect(r2.headers.get('location')).toBe(`${BASE}/?authError=spotify`);
+      expect(r2.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(false);
+      expect(String(spy.mock.calls[0]![0])).toContain('(403) | Check settings on developer.spotify.com/dashboard, the user may not be registered.');
+      // Only a 429 starts Spotify's wait. A 403 is this one account, and must not lock the other testers out.
+      expect(await getAppContext().store.getSpotifyBlock()).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("logs Spotify refusing on its own page (?error=), but not the singer's Cancel", async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const cookie = { headers: { cookie: `${STATE_COOKIE}=s` } };
+      const refused = await callback.GET(new Request(`${BASE}/api/auth/callback?error=server_error&state=s`, cookie));
+      expect(refused.headers.get('location')).toBe(`${BASE}/?authError=server_error`);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0]![0])).toBe('[auth] Spotify refused the sign-in on its own page: error="server_error"');
+
+      const cancelled = await callback.GET(new Request(`${BASE}/api/auth/callback?error=access_denied&state=s`, cookie));
+      expect(cancelled.headers.get('location')).toBe(`${BASE}/?authError=access_denied`);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      // A request we didn't start (no or wrong state) is sent back the same way, but leaves no line in the log.
+      const stray = await callback.GET(new Request(`${BASE}/api/auth/callback?error=server_error&state=x`, cookie));
+      expect(stray.headers.get('location')).toBe(`${BASE}/?authError=server_error`);
+      expect((await callback.GET(new Request(`${BASE}/api/auth/callback?error=server_error`))).headers.get('location')).toBe(`${BASE}/?authError=server_error`);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      // Spotify's value is cut to 100 characters and escaped, so it can't forge a second log line.
+      const odd = encodeURIComponent(`x\n[auth] forged${'y'.repeat(200)}`);
+      await callback.GET(new Request(`${BASE}/api/auth/callback?error=${odd}&state=s`, cookie));
+      expect(spy).toHaveBeenCalledTimes(2);
+      const line = String(spy.mock.calls[1]![0]);
+      expect(line).not.toContain('\n');
+      expect(line).toBe(`[auth] Spotify refused the sign-in on its own page: error=${JSON.stringify(`x\n[auth] forged${'y'.repeat(200)}`.slice(0, 100))}`);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   // Was a 502 and an empty "Couldn't load songs" screen (10 Nov 2026); now the catalogue's songs and a flag (QWW-55).
   it('logs why the library could not be read, and answers with catalogue songs and a flag, not a 502', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -810,17 +862,17 @@ describe('admin events', () => {
 
   it('returns the funnel, per-control numbers and sessions', async () => {
     await send('device-aaaa', [
-      { name: 'landing_viewed', at: at(60) },
+      { name: 'title_view', at: at(60) },
       { name: 'start_pressed', at: at(59) },
-      { name: 'note_detected', at: at(50), props: { step: 'low' } },
-      { name: 'note_detected', at: at(40), props: { step: 'high' } },
+      { name: 'low_note_done', at: at(50), props: { midi: 45 } },
+      { name: 'high_note_done', at: at(40), props: { midi: 72 } },
       { name: 'range_shown', at: at(39) },
     ]);
     const view = { difficulty: null, familiarity: null, popularity: null, tempo: null, decade: '80s', mood: null, duetsOnly: false };
-    const opened = { name: 'song_opened', at: at(15), props: { ...view, position: 2 } };
+    const opened = { name: 'song_open', at: at(15), props: { ...view, position: 2 } };
     await send('device-bbbb', [
-      { name: 'landing_viewed', at: at(30) },
-      { name: 'results_viewed', at: at(20) },
+      { name: 'title_view', at: at(30) },
+      { name: 'list_view', at: at(20) },
       opened,
       { name: 'spotify_link_pressed', at: at(14), props: view },
       { name: 'feedback_tapped', at: at(10), props: { ...view, thumbs: 'up' } },
@@ -830,33 +882,33 @@ describe('admin events', () => {
     expect(res.headers.get('cache-control')).toBe('no-store');
     const body = (await res.json()) as AdminEventsResponse;
     expect(body.funnel).toEqual([
-      { name: 'landing_viewed', devices: 2 },
+      { name: 'title_view', devices: 2 },
       { name: 'start_pressed', devices: 1 },
-      { name: 'low_note_detected', devices: 1 },
-      { name: 'high_note_detected', devices: 1 },
+      { name: 'low_note_done', devices: 1 },
+      { name: 'high_note_done', devices: 1 },
       { name: 'range_shown', devices: 1 },
-      { name: 'results_viewed', devices: 1 },
-      { name: 'song_opened', devices: 1 },
+      { name: 'list_view', devices: 1 },
+      { name: 'song_open', devices: 1 },
       { name: 'spotify_link_pressed', devices: 1 },
-      { name: 'spotify_connect_pressed', devices: 0 },
+      { name: 'spotify_connect', devices: 0 },
     ]);
     expect(body.byControl).toEqual({ decade: { opened: 1, spotify: 1, up: 1, down: 0, medianPosition: 2 } });
     expect(body.sessions.map((s) => s.anonId)).toEqual(['device-bbbb', 'device-aaaa']);
     const names = (i: number) => body.sessions[i]!.events.map((e) => e.name);
-    expect(names(0)).toEqual(['landing_viewed', 'results_viewed', 'song_opened', 'spotify_link_pressed', 'feedback_tapped']);
-    expect(names(1)).toEqual(['landing_viewed', 'start_pressed', 'note_detected', 'note_detected', 'range_shown']);
+    expect(names(0)).toEqual(['title_view', 'list_view', 'song_open', 'spotify_link_pressed', 'feedback_tapped']);
+    expect(names(1)).toEqual(['title_view', 'start_pressed', 'low_note_done', 'high_note_done', 'range_shown']);
     expect(body.sessions[0]!.events[2]).toEqual(opened);
   });
 
   it('reads only the newest `limit` events, and rejects a bad limit', async () => {
     await send('device-aaaa', [
-      { name: 'landing_viewed', at: at(30) },
+      { name: 'title_view', at: at(30) },
       { name: 'start_pressed', at: at(20) },
       { name: 'range_shown', at: at(10) },
     ]);
     const body = (await (await asAdmin('/api/admin/events?limit=2')).json()) as AdminEventsResponse;
     expect(body.funnel.slice(0, 2)).toEqual([
-      { name: 'landing_viewed', devices: 0 },
+      { name: 'title_view', devices: 0 },
       { name: 'start_pressed', devices: 1 },
     ]);
     expect(body.sessions[0]!.events.map((e) => e.name)).toEqual(['start_pressed', 'range_shown']);

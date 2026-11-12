@@ -8,7 +8,7 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | Method | Path | Body / query | Response |
 | --- | --- | --- | --- |
 | GET | `/api/auth/login` | | 302 to Spotify (or straight to the callback with `SPOTIFY_MOCK=1`); sets a 10-minute `kd_oauth_state` cookie |
-| GET | `/api/auth/callback` | `code`, `state` | Checks state, stores the user and tokens, sets the `kd_session` cookie, 302 to `/?signedIn=1`. On failure 302 to `/?authError=<reason>` (`state`, `spotify`, `missing-code`, or Spotify's `error`). Makes no Spotify request while Spotify has told the app to wait (see Spotify rate limit): it is `authError=spotify` at once, and a 429 on the profile step starts that wait |
+| GET | `/api/auth/callback` | `code`, `state` | Checks state, stores the user and tokens, sets the `kd_session` cookie, 302 to `/?signedIn=1`. On failure 302 to `/?authError=<reason>` (`state`, `spotify`, `missing-code`, or Spotify's `error`, which is logged unless it is `access_denied`). Makes no Spotify request while Spotify has told the app to wait (see Spotify rate limit): it is `authError=spotify` at once, and a 429 on the profile step starts that wait |
 | POST | `/api/auth/logout` | | `{ ok: true }`, clears the session cookie |
 | GET | `/api/me` | | `MeResponse` |
 | PUT | `/api/me/range` | `VocalRange` | `{ ok: true }`; 400 unless `low`/`high` are integers, 28 <= low < high <= 96, span 5..48, `source` is `test` or `songs` |
@@ -20,6 +20,7 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | POST | `/api/catalogue/feedback` | `CatalogueFeedbackRequest`: the feedback fields plus `anonId` (8 to 64 of `[A-Za-z0-9-]`) and `range`; no session | `{ ok: true }`; stored with `user_id = 'anon:' + anonId`, the range, and the song's range snapshot looked up by key. 400 on bad input or a `trackId` that is not `cat:` |
 | POST | `/api/setlist` | `SetlistRequest` (QWW-47): `range` (`low`, `high`), `gears` (`difficulty`, `history`, `popularity`, `tempo`, whole numbers 0 to 100), `off` (parts that are reset: any of the four gears and `era`), `eras` (any of `pre`, `s70`, `s80`, `s90`, `s00`, `s10`, `s20`), optional `offset` (default 0) and `limit` (1 to 200, default 100); a session is optional | `SetlistResponse`: `songs` (best first; each `{ match, era, gears }`, where `gears` is the song's place on each gear, 0 to 100, or null when unknown), `total` (songs passing the range and Era filters), `nextOffset`, `sources` (data-source lines by track id), `applied` (the parts that counted), `empty` (`no-era-picked`, `no-songs-in-era` or `no-songs-in-range`, when there are no songs), `libraryUnavailable` and `libraryIncomplete` (the library is only partly in the list: ask again). Signed out it ranks the public catalogue; with a valid session it also adds the singer's library songs and the History gear counts. A signed-in singer whose Spotify library cannot be read gets the catalogue's list and `libraryUnavailable: true`, never a 5xx. A missing, stale or forged session counts as signed out, not a 401. 400 on a body that is not JSON or not this shape. See Setlist ranking |
 | POST | `/api/events` | `EventsRequest`, as JSON or as the `text/plain` body `navigator.sendBeacon` sends; no session | 204, storing nothing while `EVENTS` is off. 400 on bad input, checked even when off: `anonId` 8 to 64 of `[A-Za-z0-9-]`; 1 to 50 events; `name` matching `^[a-z][a-z0-9_]{1,48}$`; `at` an ISO time with a zone, within 7 days of the server clock (stored as UTC); at most 20 props named `^[a-zA-Z][a-zA-Z0-9_]{0,40}$`, each a string of up to 200 characters, a finite number, a boolean or null. Props named `trackId`, `spotifyId`, `userId`, `displayName` or `email` (any case, underscores ignored) are dropped before storing |
+| GET | `/api/preview/<deezerId>` | a Deezer track id (`Match.deezerId`, from `song_deezer`); no session | 302 to the track's 30 s preview on Deezer's CDN, for the play button in each row (QWW-48). One Deezer `/track` call per id, kept per server instance and by Vercel's CDN (`Vercel-CDN-Cache-Control`) until 5 minutes before the link's `exp`, and by the browser for at most 60 s, so no link is handed out with under 5 minutes left (they last 15; a preview plays 30 s). A link whose `exp` cannot be read is kept 60 s at most. 400 for an id that is not a positive whole number, 404 when Deezer has no such track or no preview (remembered 10 minutes per instance), 502 when Deezer cannot be reached in 5 s, is over its quota or answers oddly (never cached). Redirects only to `https` links on `dzcdn.net` (`src/lib/server/preview.ts`) |
 | GET | `/api/admin/events` | header `x-admin-token`, `limit` (1..20000, default 5000) | `AdminEventsResponse` from the newest `limit` events (see Beta event log); 403 like `/api/admin/log` |
 
 Errors are JSON `{ error, message? }`. Every user route returns 401 `{ error: 'signed-out' }`
@@ -54,6 +55,7 @@ ran out of budget (a first visit to a very large library), `all=1` returns `comp
 | `EVENTS` | `on` or `off`: whether `POST /api/events` stores beta events. Unset or blank, it is on only when `NODE_ENV=production`, `SPOTIFY_MOCK` is not `1` and the store is Postgres, so tests, e2e and local dev collect nothing. Any other value counts as off |
 | `DUETS_AND_MOODS` | `on` shows duets and moods on screen; unset, blank or any other value (`1`, `true`, a typo) hides them (QWW-43). Off, the four recommendation responses (`/api/recommendations` and `/api/catalogue/recommendations`, paged or `all=1`) carry no `moods` and no duet markers (`range.duet`, `range.parts`, `part`, `partSinger`), so the Duets and mood chips, the "Duet: take ..." lines and the song-page mood pills never appear. It is applied after ranking (`src/lib/server/features.ts`), so the songs and their order are the same either way; a duet is still scored on the part that fits the singer |
 | `MOODS_SHIPPED` | Comma-separated moods (`upbeat`, `heartfelt`) allowed on screen as chips, while `DUETS_AND_MOODS=on`. Set a mood here only after it passes the QWW-11 precision gate (`npm run moods:report`). Unset = no mood chips |
+| `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | PostHog as the event log's second sink (QWW-51). The key is the project token (`phc_...`, public by design; a personal API key is refused), the host the region's ingest address (`https://us.i.posthog.com` or `https://eu.i.posthog.com`; https only, and a reverse proxy's path is kept). Either missing or malformed and the app records to our own log alone. Read per request by `app/page.tsx` (`postHogSettings` in `src/lib/server/config.ts`) and handed to the screen. `VERCEL_ENV` (set by Vercel) tags every event `production`, `preview` or, anywhere else, `local` |
 | `PICK_SONGS` | `on` shows "or pick songs you sing well" on the title screen and "or use songs from your Spotify" under the range; unset, blank or any other value hides both (QWW-55: one onboarding flow for the first release; the Spotify logo on the list is then the one way to sign in). Read per request by `app/page.tsx` (`pickSongsOn` in `src/lib/server/config.ts`), not baked in at build time, so one build can serve it on or off; no API response changes |
 
 ## Store
@@ -167,12 +169,30 @@ import. The model is the design's distance ranking (round 5 spec section 5), dec
    popularity with difficulty breaking ties: of two songs, the one 10 places less popular needs to be 20 places easier to
    come first, so the single most popular song is first only if it is also easy. `GEAR_WEIGHTS` is the one knob if the top
    of the default list needs to lean harder.
-4. **Order.** The Maybe songs (estimated ranges) come after all the others, as everywhere else. Within each group, a song
-   we do not know on an active gear (no tempo, a one-note range, not in the library) comes after every song we do. When
-   songs miss different gears the more specific control wins: History, then Tempo, then Popularity, then Difficulty (so a
-   song with no tempo is after every song that has one, whatever else either is missing). Then the closest sum first.
-   Exact ties go to the more popular song, the easier, the one sung as written, then artist and title (so a song keeps its
-   place whether it is the catalogue's track or the singer's own), then track id.
+4. **Order.** The Maybe songs (estimated ranges) come after all the others, as everywhere else. Inside the Maybe songs and
+   inside all the others, every song that fits as written comes before any song that needs an octave jump, up or down
+   (QWW-58, Quinn-Wai's decision A, 11 Nov; see below). The jump songs still follow, so a range whose popular songs all
+   need a jump gets a full list, never an empty one. Within each of those groups, a song we do not know on an active gear
+   (no tempo, a one-note range, not in the library) comes after every song we do. When songs miss different gears the more
+   specific control wins: History, then Tempo, then Popularity, then Difficulty (so a song with no tempo is after every
+   song that has one, whatever else either is missing). Then the closest sum first. Exact ties go to the more popular
+   song, the easier, then artist and title (so a song keeps its place whether it is the catalogue's track or the
+   singer's own), then track id.
+
+**Songs sung as written first (QWW-58).** The range filter takes a song as written, an octave down or an octave up, so for
+a range of two octaves it keeps 86 to 90% of the catalogue and hardly tells voice types apart. The gear places do not
+tell the jump from the real thing either, and they favour it: a song that is too high for you sits in the lower half of
+your range an octave down, where the "easy leans low" curve is kindest, so it reads Easy ("In your sweet spot"), and the
+catalogue's biggest hits (mostly tenor and female pop, written around B3 to G4) win in whichever octave fits them. Before
+this rule the octave only broke exact ties, which a sum of places almost never produces, and the octave penalty of the old
+Top picks score never reached the engine. Measured on production's catalogue, logged out with the defaults, no bass (E2 to
+E4) or F2 to F4 list had a song sung as written in its top 20, although every voice type has at least 100 popular songs it
+can sing as written. The penalty inside the distance (option B) was not chosen: it would trade the octave against
+popularity and difficulty at a rate nobody can justify, where the group is a rule a singer can follow. A song that needs a
+jump keeps its places on the gears, and its difficulty is still measured as sung, after the jump; only its position
+relative to the songs sung as written is new. "As written" is only as reliable as the stored octave (`octave.ts`,
+QWW-31), so some songs that a low voice would have to jump (mostly women's and falsetto songs) can still count as sung
+as written.
 
 **The curve (rule 2, easy leans low).** The strain of a song is the sung-time-weighted average of a note's cost, `t` being
 where the note sits in the singer's range (0 lowest, 1 highest, an octave shift applied): `((t - 0.35) / 0.65)²` from the
@@ -190,17 +210,24 @@ each, and what a reset does, is in `setlistConfig.ts`.
 
 **A one-note range** ("Jump", C4 to C4: it fits everyone, so it won on "easy") has no difficulty: a song whose range spans
 fewer than 5 semitones (`MIN_PLAUSIBLE_SPAN`) has `gears.difficulty: null`, so while Difficulty is on it comes after every
-song with one. With Difficulty off it ranks on popularity like any song. Its label on the song page is unchanged (Easy).
+song with one that is sung the same way (one sung as written still comes before the songs that need a jump). With
+Difficulty off it ranks on popularity like any song. Its label on the song page is unchanged (Easy).
 
 **Max difficulty, logged out** (Quinn-Wai's check of 10 Nov). Difficulty at 100 with the other gears as they load lists the
 most popular Hard songs first: the Hard third of the track is nearest to 100, and Popularity (on, double) chooses among
 them. On the synthetic catalogues in the tests (hundreds of Hard songs of every popularity) the first 10 are all Hard in
 every range. It is exact, the first songs being all Hard and the hardest first, when Popularity is off. It is not a law with
 Popularity on: a range with only a handful of Hard songs, all obscure, puts popular Medium and Easy ones among them.
-Quinn-Wai chose this (option A) on 11 Nov, and that the default list leans on popularity as it does (`GEAR_WEIGHTS`).
+Quinn-Wai chose this (option A) on 11 Nov, and that the default list leans on popularity as it does (`GEAR_WEIGHTS`). Songs
+sung as written come first here too (QWW-58): the Hard songs sung as written lead, then the Easy and Medium ones sung as
+written, and only then the Hard songs that need a jump. On production's catalogue every voice type has hundreds of Hard
+songs it can sing as written (637 to 1,742 over the eight ranges of QWW-58), so with no era picked the first 10 are still
+all Hard. With one era picked, 16 of the 56 lists (eight ranges, seven eras) have fewer than 10 Hard songs in their first
+10, as many as before this rule, and the worst has 5 (6 before): with Popularity on a popular Medium song can still beat
+an obscure Hard one, as the paragraph above says.
 
-**Not used by the ranking:** the fast-lyrics flag and the octave penalty of the Top picks score (a song an octave away
-only loses a tie to one sung as written; its notes are scored as sung). A singer whose range is so narrow that no song
+**Not used by the ranking:** the fast-lyrics flag and the octave penalty of the Top picks score (the octave decides a
+group, rule 4, and is not a penalty; a song that needs a jump has its notes scored as sung). A singer whose range is so narrow that no song
 fits (5 to about 9 semitones) gets `no-songs-in-range`; Quinn-Wai (11 Nov) did not want a widening fallback, so the tests
 and the release checks use ranges of an octave or more.
 
@@ -387,17 +414,60 @@ The client tracker (`createTracker`) batches events and sends them with `sendEve
 (`navigator.sendBeacon`, else `fetch` with `keepalive`); `flushWhenHidden` flushes when the page
 is hidden or unloaded. It never throws, and drops props the server would reject.
 
+The names of the events the first tester release is judged by are in `src/lib/eventNames.ts`
+(`title_view`, the mic events, `low_note_done`, `high_note_done`, `list_view`, `gear_change`,
+`era_change`, `row_play`, `song_open`, `spotify_connect`), the one place the mic flow, the tuner and
+the play row take them from. Their props are documented there. The mic events carry `browser`, `via`
+and `reason` (and `app` for an in-app browser), all short labels from closed sets; `row_play` is sent by the
+preview player when a preview a tap started makes its first sound.
+
+### PostHog (QWW-51)
+
+PostHog is a second sink behind the same tracker: `createTracker`'s `mirror` option hands each
+event it accepted, after cleaning, to `createPostHogSink` (`src/lib/client/posthog.ts`), so one
+`track()` call reaches our log and PostHog. Our log stays the one that counts; PostHog may fail or
+be switched off (no key) and nothing else changes. What the sink keeps to:
+
+- **Identity**: the device's own random id (`loadAnonId`) is the PostHog distinct id, set at every
+  load. Nobody is identified and no person profile is made. PostHog stores nothing on the device
+  (`persistence: 'memory'`: no cookie, no localStorage).
+- **What leaves**: only events our tracker named, and only the props on an allowlist
+  (`POSTHOG_PROPS` in `src/lib/eventNames.ts`); our log keeps whatever the tracker accepts. A new
+  prop reaches PostHog only once it is added there, which is a privacy decision: never a Spotify id
+  or URI, a name, an email, or the title or artist of a song from a library (a catalogue song's key
+  is public and fine). Autocapture (and with it click text), pageviews, heatmaps, dead clicks,
+  exception capture and surveys are off, and `beforeSend` drops every other event whose name is not
+  one of ours, web vitals included (PostHog's own start with `$`; the replay's `$snapshot` is the
+  one exception). `beforeSend` also strips props named `trackId`, `spotifyId`, `userId`,
+  `displayName` or `email` (any case, underscores ignored), whoever added them, even from a call
+  that goes around the tracker. IP-based location is a PostHog project setting ("Discard client IP
+  data"), not something the page can switch off.
+- **Environment**: previews and production send to one PostHog project, so every event carries
+  `environment` (`production`, `preview` or `local`, from `VERCEL_ENV`). The "Release funnel"
+  insight should filter on `environment = production`, to leave out preview and local traffic.
+- **Session replay**: inputs are masked (`maskAllInputs`). Replay starts only once the screen knows
+  the visitor is signed out (`PostHogSink.setReplay`, driven from `KaraokeApp`) and stays off for a
+  signed-in visitor, whose screen shows their Spotify name and songs from their library; a Log out
+  starts it. It also needs "Record user sessions" on in PostHog (Settings > Project > Session
+  replay).
+- **Loading**: `posthog-js` is a separate chunk, imported once the screen is up (the screen's first
+  `setReplay`) or at the first event, whichever is first, so the title screen never waits for it.
+  Events that arrive while it loads wait (at most 100) and keep the time they happened; a page that
+  closes before it is ready loses them from PostHog, not from our log.
+
+The `/credits` page tells testers this in plain words (`ANALYTICS_NOTE` in `src/lib/credits.ts`); change both together.
+
 `GET /api/admin/events` is computed by `summarizeEvents` (`src/lib/server/eventStats.ts`) from
 these names and props:
 
-- **Funnel**, distinct devices per step: `landing_viewed`, `start_pressed`, `note_detected` with
-  `step: 'low'` and with `step: 'high'`, `range_shown`, `results_viewed`, `song_opened`,
-  `spotify_link_pressed`, `spotify_connect_pressed`. Each step counts on its own, so a returning
-  tester who lands on results still counts there.
+- **Funnel**, distinct devices per step: `title_view`, `start_pressed`, `low_note_done`,
+  `high_note_done`, `range_shown`, `list_view`, `song_open`, `spotify_link_pressed`,
+  `spotify_connect`. Each step counts on its own, so a returning tester who lands on results still
+  counts there.
 - **By control**, keyed by each control in use when the event happened: `difficulty`,
   `familiarity` or `popularity` when that slider prop is a number, `decade` or `mood` when one is
   picked, `duets` when `duetsOnly` is true, else `none`. An event with several controls in use
-  counts toward each. Per control: `song_opened` (count, and the median of its `position` prop),
+  counts toward each. Per control: `song_open` (count, and the median of its `position` prop),
   `spotify_link_pressed` (count), `feedback_tapped` (its `thumbs` prop, `up` or `down`).
 - **Sessions**: each device's events in time order, the 50 most recently active devices first.
 

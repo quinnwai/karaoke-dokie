@@ -1,13 +1,14 @@
-// Release eval harness (QWW-52): a pass/fail table for the QWW-42 success criteria 1 to 4 and 6, on
-// five fixed test ranges (src/lib/eval/release.ts). Reads the catalogue straight from Postgres with
-// SELECT only, ranks it with this checkout's tuner engine (POST /api/setlist), and checks what a
-// logged-out singer would see.
+// Release eval harness (QWW-52): a pass/fail table for the QWW-42 success criteria 1 to 4, 6 and 9, on
+// nine fixed test ranges, one per voice type (src/lib/eval/release.ts). Reads the catalogue straight from
+// Postgres with SELECT only, folded to one row per song with its clean title as the app serves it, ranks it
+// with this checkout's tuner engine (POST /api/setlist), and checks what a logged-out singer would see.
 //
 //   1  recognisable: the bundled Billboard Year-End list (data/billboard-year-end.csv) or a high Deezer rank
 //   2  tempo: an LLM judges every song in each era's slow and upbeat top 20, 3 runs in parallel, seeing
 //      only artist, title and year; a song counts when 2 of the 3 runs give the end's label, and an end
 //      passes with 18 of its top 20 counting
 //   3  never empty, 4  titles, 6  play: Deezer is asked whether each top-20 song has a 30 s preview
+//   9  sung as written (QWW-58): at least 15 of the tuner's top 20 have no octave shift
 //
 // Usage: npm run eval:release -- [--db production|preview] [--provider anthropic|openai|gemini]
 //                                [--model <id>] [--skip-judge] [--skip-play] [--out eval-out]
@@ -26,6 +27,7 @@ import {
   checkNeverEmpty,
   checkPlay,
   checkRecognisable,
+  checkSungAsWritten,
   checkTempo,
   checkTitles,
   handCheck,
@@ -40,6 +42,7 @@ import {
   TEST_RANGES,
   tempoLists,
   toMarkdown,
+  tunerDefaultList,
   verdict,
   topTen,
   type Check,
@@ -122,6 +125,16 @@ async function deezerPlayable(id: number): Promise<boolean | 'error'> {
   return 'error';
 }
 
+/**
+ * The catalogue as the app serves it (wiring.ts): one row per song with its clean title (QWW-49, `canonical`), so the harness
+ * grades the list a logged-out singer sees and not the rows as stored. Titles and the tags on them (criterion 4) and the songs
+ * in every list (criteria 1, 2, 6 and 9) would differ otherwise. A mapping that cannot be read gives the titles as stored, and
+ * `degraded`: main() stops then, rather than grade them.
+ */
+export function loadHarnessCatalogue(store: Parameters<typeof loadCatalogue>[0]) {
+  return loadCatalogue(store, undefined, { canonical: true });
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -138,8 +151,7 @@ async function main() {
   const store = createPostgresStore(query, { autoMigrate: false });
 
   const [entries, deezer, billboardCsv] = await Promise.all([
-    // As the app loads it (wiring.ts): one row per song, with its clean title (QWW-49's song_canonical).
-    loadCatalogue(store, undefined, { canonical: true }),
+    loadHarnessCatalogue(store),
     store.listSongDeezer(),
     readFile(new URL('../data/billboard-year-end.csv', import.meta.url), 'utf8'),
   ]);
@@ -160,12 +172,14 @@ async function main() {
   }
 
   const meta = [
-    `Database: ${db} (${entries.length} catalogue songs, titles as the app shows them), code: this checkout, logged out.`,
-    'Lists: the tuner engine (POST /api/setlist). Criteria 1, 4 and 6 read the list as the tuner opens (Popularity and Difficulty on); criterion 2 reads each era with Tempo alone at each end.',
+    `Database: ${db} (${entries.length} catalogue songs, one row per song with its clean title, as the app serves it), code: this checkout, logged out.`,
+    'Lists: the tuner engine (POST /api/setlist). Criteria 1, 4, 6 and 9 read the list as the tuner opens (Popularity and Difficulty on); criterion 2 reads each era with Tempo alone at each end.',
     'Ranges: ' + TEST_RANGES.map((t) => t.label).join('; ') + '.',
   ];
   const checks: Check[] = [];
-  for (const t of inputs) checks.push(checkRecognisable(t, billboard, facts), checkNeverEmpty(t), checkTitles(t));
+  for (const t of inputs) {
+    checks.push(checkRecognisable(t, billboard, facts), checkNeverEmpty(t), checkTitles(t), checkSungAsWritten(t.test, tunerDefaultList(t.prepared)));
+  }
 
   // 6. Play: ask Deezer about every top-20 song once.
   if (!values['skip-play']) {

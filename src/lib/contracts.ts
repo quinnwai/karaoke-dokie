@@ -175,6 +175,11 @@ export interface Match {
   partSinger?: string;
   /** Moods that passed the label gate, for the mood chips. Unset when the song has no shipped label. */
   moods?: Mood[];
+  /**
+   * The song's Deezer track id (song_deezer), for the play button in its row (QWW-48): it plays the track's 30 s
+   * preview through GET /api/preview/<deezerId>. Unset when Deezer had no matching track, and the button is disabled.
+   */
+  deezerId?: number;
 }
 
 // ---------- results view (QWW-9, QWW-13, QWW-22, QWW-23) ----------
@@ -345,6 +350,9 @@ export interface FeedbackEntry {
 // Beta event log (QWW-16, QWW-20):
 // POST /api/events     body EventsRequest -> 204 (also 204 when collection is switched off)
 // GET  /api/admin/events (header x-admin-token) -> AdminEventsResponse
+// Row play button (QWW-48), no session needed:
+// GET  /api/preview/<deezerId>         -> 302 to the track's 30 s Deezer preview (an MP3 link that expires after
+//   15 minutes, so it is never stored), 404 when Deezer has no preview, 502 when Deezer cannot be reached
 
 export interface MeResponse {
   userId: string;
@@ -395,7 +403,7 @@ export type EventValue = string | number | boolean | null;
 
 /** One thing a tester did. Never carries a Spotify id or a song from someone's Spotify library. */
 export interface AppEvent {
-  /** e.g. 'landing_viewed', 'range_shown', 'results_viewed', 'slider_changed', 'song_opened'. */
+  /** e.g. 'title_view', 'range_shown', 'list_view', 'slider_changed', 'song_open'. The release funnel's names are in eventNames.ts. */
   name: string;
   /** ISO time on the device. */
   at: string;
@@ -405,6 +413,19 @@ export interface AppEvent {
 export interface EventsRequest {
   anonId: string;
   events: AppEvent[];
+}
+
+/**
+ * What the screen needs to send events to PostHog, the event log's second sink (QWW-51). app/page.tsx reads it from the
+ * environment (postHogSettings in src/lib/server/config.ts) and hands it to KaraokeApp.
+ */
+export interface PostHogSettings {
+  /** The project token ("phc_..."), public by design: it ships to every browser. */
+  key: string;
+  /** The ingest address, https and without a trailing slash; it has a path only when it is a reverse proxy's. */
+  host: string;
+  /** production, preview or local. Sent on every event so the release funnel can leave the rest out. */
+  environment: string;
 }
 
 export interface AdminEventsResponse {

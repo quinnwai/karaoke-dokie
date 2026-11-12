@@ -501,12 +501,14 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
         const [rows, deezer] = await Promise.all([
           query(`SELECT * FROM song_popularity WHERE song_key IN (${placeholders})`, chunk),
-          query(`SELECT song_key, rank FROM song_deezer WHERE rank IS NOT NULL AND song_key IN (${placeholders})`, chunk),
+          query(`SELECT song_key, rank, deezer_id FROM song_deezer WHERE rank IS NOT NULL AND song_key IN (${placeholders})`, chunk),
         ]);
         for (const r of rows) out.set(str(r.song_key), toSongPopularity(r));
         for (const r of deezer) {
           const key = str(r.song_key);
-          out.set(key, { ...(out.get(key) ?? { key, source: 'deezer' }), deezerRank: num(r.rank) });
+          const p: SongPopularityRecord = { ...(out.get(key) ?? { key, source: 'deezer' }), deezerRank: num(r.rank) };
+          if (isSet(r.deezer_id)) p.deezerId = num(r.deezer_id);
+          out.set(key, p);
         }
       }
       return out;

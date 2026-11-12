@@ -74,7 +74,8 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    results (step 7) is the one way to sign in.
    A sign-in that fails (Spotify says wait, one of the sign-in's Spotify calls fails, the sign-in cookie is gone,
    ...) is sent back by the callback as `/?authError=<reason>`. The range was kept for the round trip, so
-   it lands here: `?authError` is taken out of the address and one quiet line, "Couldn’t sign in to Spotify.",
+   it lands here: `?authError` is taken out of the address and one quiet line, "Couldn’t sign in. Spotify
+   sign-in is for invited testers only right now.",
    shows under the arrow, and again under the bar of the results the arrow leads to. `access_denied` is the
    singer pressing Cancel on Spotify's page, which is their answer, so nothing is said.
 7. **Results**: one request for every match (`/api/catalogue/recommendations?...&all=1` without
@@ -112,6 +113,43 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    without Spotify whose range is kept on the device lands on catalogue results.
 10. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
    low and highest high become the range (`source: 'songs'`). Signed-out users sign in first.
+
+## Play from the list (QWW-48)
+
+Each result row starts with a play button that plays the song's 30 s Deezer preview, so a singer can hear a song
+without leaving the list. Spotify's player stays on the song page (below); it was too slow to start from our own
+button and must stay on screen (spike QWW-44).
+
+- **One player.** Every button shares one `<audio>` element (`src/lib/client/preview.ts`), so one song plays at a
+  time and a tap on another row switches at once. The latest tap always wins: five taps in five seconds end with the
+  fifth song playing. The player holds a row (its track id), not a Deezer track, so two rows that share a Deezer
+  track never both show ⏸.
+- **iOS.** The tap handler sets the element's address to `/api/preview/<deezerId>` and calls `play()` in the same
+  tick; iOS plays audio only when it starts inside the tap. That route redirects to Deezer's preview link (see
+  backend.md), which expires after 15 minutes, so links are never stored.
+- **What it shows.** ▶ until tapped; then ⏸, a thin pink ring that fills as the preview plays, and the row's title in
+  pink, as Spotify marks the track it is on. Tapped again it pauses, and the ring stays where it stopped; a pause by
+  the phone (a call, the lock screen, headphones) shows the same, and a resume from there shows ⏸ again. At the end it
+  goes back to ▶. The button is 44 px square.
+- **When there is nothing to play.** A song with no Deezer match (`Match.deezerId` unset) gets a disabled button. A
+  preview that fails to load before making a sound goes back to ▶ at once, and the player asks the route why: only a
+  404 (Deezer has no preview) disables the button for the rest of the visit. Any other failure (Deezer slow or down,
+  the network) leaves ▶ ready for another tap. A resume after a pause of more than 4 minutes, or after the load failed
+  while paused, starts from a fresh link at the same spot, since a link can run out.
+- **The row.** The play button and the song button sit side by side, never one inside the other: the play button
+  never opens the song page, and the rest of the row still does. Opening the song page (or a filter taking the song off
+  the list) stops the preview.
+- **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly, so a line over the list reads
+  "Previews from [logo] Deezer" whenever a song on it has a preview. It links to the credits page, which says the
+  previews stream from Deezer for private, non-commercial listening and that no audio is kept, as the terms ask
+  listeners to be told.
+- **Event log (QWW-51).** When a preview a tap started makes its first sound, the player tells `KaraokeApp`
+  (`listenForRowPlay` in `PreviewButton.tsx`), which records `row_play` with the row's place in the list and a
+  catalogue song's key (`rowPlayEvent` in `funnel.ts`; a library song carries only its place). A pause, a resume, a
+  resume from a fresh link and a preview that never sounds record nothing.
+- **For the round 5 rows (QWW-46).** `PreviewButton` takes the row's track id (`id`), the song's `deezerId`, title and
+  artist, and its `position` (the row's 1-based place on screen, which `row_play` carries); `DeezerCredit` is the logo
+  line. Both draw in `currentColor` and the pink accent, so a new row can restyle them.
 
 ## Spotify player
 
@@ -167,12 +205,14 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/lib/client/storage.ts` | Guarded `sessionStorage` for test progress and the pick-songs intent; `localStorage` for a range kept on the device. |
 | `src/lib/songs/browse.ts` | Sliders, chips, counts and the "Saved, not played lately" divider, as pure functions over every match. |
 | `src/lib/client/funnel.ts`, `events.ts` | What each action records in the beta event log, and the batching tracker that sends it. |
+| `src/lib/client/posthog.ts`, `src/lib/eventNames.ts` | PostHog as the tracker's second sink (replay only while signed out), and the release funnel's event names, shared with the mic flow, tuner and play row. |
 | `src/lib/client/spotifyEmbed.ts` | A song's `open.spotify.com/track/ID` link to the address of Spotify's player, or null. |
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `reload`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,Results,SongDetail,PickSongs}.tsx` | The screen pieces. |
 | `src/components/RoundButton.tsx` | The round pink-ringed button, shared by the record button (`HoldStep.tsx`, a dot in it) and "Turn on microphone" (`MicStep.tsx`, a microphone in it), so the two keep one look. |
 | `src/components/MicStep.tsx` | The mic step's screens. |
 | `src/components/SpotifyPlayer.tsx` | Spotify's player iframe, or the plain "Open in Spotify" link when there is no track to embed. |
+| `src/components/PreviewButton.tsx`, `src/lib/client/preview.ts` | The play button in each row, its hook and the one shared `<audio>` they drive (QWW-48); the Deezer logo line. |
 | `src/components/screen.module.css`, `app/globals.css` | Styles; `prefers-reduced-motion` stops all animation. |
 
 ## Tests
