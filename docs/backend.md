@@ -474,8 +474,10 @@ be switched off (no key) and nothing else changes. What the sink keeps to:
     because a rewrite passes the browser's headers on whole, and `kd_session` holds the Spotify id of
     someone signed in: with a plain rewrite the e2e stand-in received it with every event, and PostHog's
     `Set-Cookie` landed on our origin. The route forwards `content-type`, `accept`, `user-agent` and
-    `x-forwarded-for` (the visitor's address, which PostHog saw before as well) and returns `content-type`
-    and `cache-control`; nothing else, in either direction.
+    `x-forwarded-for` (the visitor's address, which PostHog saw before as well) and returns `cache-control`
+    and a `content-type` that is JSON, JavaScript or plain text, as PostHog's are (any other type, a page
+    above all, goes back as plain text, with `nosniff`, so nothing PostHog says can be shown as a page on
+    our origin); nothing else, in either direction.
   - **When it fails.** PostHog down or slower than 8 s: 502, and the library's own retries and our log
     carry on. PostHog off here: 404, so the route is no relay for anything else. Anything but GET and
     POST: 405. `next.config.ts` sets `skipTrailingSlashRedirect` because PostHog's paths end in a slash

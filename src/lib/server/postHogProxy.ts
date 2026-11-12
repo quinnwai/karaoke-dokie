@@ -3,6 +3,7 @@
 // rewrite passes the browser's headers on whole, and our session cookie (kd_session) holds the Spotify id of someone
 // signed in: PostHog would get it with every event, against what /credits promises. Here nothing is forwarded that is not
 // named below, and nothing PostHog sends back is passed on but a type and a caching rule, so no cookie moves either way.
+// It also serves PostHog's answers from our origin, so what it says can never be shown there as a page (see SAFE_TYPE).
 
 import { fromProxyPath, POSTHOG_PROXY_PATH } from '../postHogProxy';
 import type { PostHogUpstream } from './config';
@@ -12,8 +13,14 @@ import type { PostHogUpstream } from './config';
  * and to tell bots apart) and the address the request came from, as it would see it from a browser that called it directly.
  */
 const FORWARDED = ['content-type', 'accept', 'user-agent', 'x-forwarded-for'];
-/** What of PostHog's answer goes back: not its cookies, and not its encoding or length, which fetch has already undone. */
-const RETURNED = ['content-type', 'cache-control'];
+/** What of PostHog's answer goes back besides its type: not its cookies, and not its encoding or length, which fetch has already undone. */
+const RETURNED = ['cache-control'];
+/**
+ * The types PostHog really sends: JSON for its answers, JavaScript for its scripts, plain text for its errors. Any other
+ * type, a page above all, goes back as plain text (and with nosniff), so nothing PostHog says, or a path someone makes up
+ * for it to answer, can be shown as a page on our origin, where a script would act as the signed-in visitor.
+ */
+const SAFE_TYPE = /^(application\/(json|javascript)|text\/(javascript|plain))\s*(;|$)/i;
 /** Long enough for PostHog to take a replay chunk, short enough to stay under Vercel's 10 s function default and answer 502 ourselves. */
 const TIMEOUT_MS = 8_000;
 
@@ -52,5 +59,8 @@ export async function proxyToPostHog(req: Request, upstream: PostHogUpstream, do
     const value = answer.headers.get(name);
     if (value) out.set(name, value);
   }
+  const type = answer.headers.get('content-type') ?? '';
+  out.set('content-type', SAFE_TYPE.test(type) ? type : 'text/plain; charset=utf-8');
+  out.set('x-content-type-options', 'nosniff');
   return new Response([204, 205, 304].includes(answer.status) ? null : answer.body, { status: answer.status, headers: out });
 }

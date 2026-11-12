@@ -138,7 +138,7 @@ describe('proxyToPostHog: no cookie moves, in either direction', () => {
     expect(sentHeaders(calls[0]!.init).cookie).toBeUndefined();
   });
 
-  it('passes back only a type and a caching rule: not PostHog\'s cookies, its encoding or length, or its CORS headers', async () => {
+  it('passes back only a type, a caching rule and nosniff: not PostHog\'s cookies, its encoding or length, or its CORS headers', async () => {
     const { doFetch } = fakeFetch(
       () =>
         new Response('{"status":1}', {
@@ -156,13 +156,31 @@ describe('proxyToPostHog: no cookie moves, in either direction', () => {
         }),
     );
     const res = await proxyToPostHog(request(`${POSTHOG_PROXY_PATH}/e/`, { method: 'POST', body: 'x' }), UPSTREAM, doFetch);
-    expect(Object.fromEntries(res.headers.entries())).toEqual({ 'content-type': 'application/json', 'cache-control': 'public, max-age=300' });
+    expect(Object.fromEntries(res.headers.entries())).toEqual({ 'content-type': 'application/json', 'cache-control': 'public, max-age=300', 'x-content-type-options': 'nosniff' });
     expect(res.headers.get('set-cookie')).toBeNull();
     expect(await res.text()).toBe('{"status":1}');
   });
 });
 
 describe('proxyToPostHog: answers', () => {
+  it('never lets a type that browsers show as a page through: anything but JSON, JavaScript or plain text goes back as plain text', async () => {
+    const typeFor = async (type: string | null) => {
+      const headers = new Headers(type ? { 'content-type': type } : {});
+      // Bytes, not a string: a string body would give the response a plain-text type of its own.
+      const { doFetch } = fakeFetch(() => new Response(new TextEncoder().encode('<script>alert(document.domain)</script>'), { status: 200, headers }));
+      const res = await proxyToPostHog(request(`${POSTHOG_PROXY_PATH}/anything`), UPSTREAM, doFetch);
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      return res.headers.get('content-type');
+    };
+    // What PostHog really sends, as it is: its answers, its scripts and its errors.
+    for (const type of ['application/json', 'application/javascript', 'text/javascript; charset=utf-8', 'text/plain; charset=utf-8', 'TEXT/PLAIN']) {
+      expect(await typeFor(type), type).toBe(type);
+    }
+    for (const type of ['text/html', 'text/html; charset=utf-8', 'application/xhtml+xml', 'image/svg+xml', 'application/xml', 'text/xml', 'application/pdf', 'multipart/x-mixed-replace', 'text/plain-ish', 'application/jsonp', null]) {
+      expect(await typeFor(type), String(type)).toBe('text/plain; charset=utf-8');
+    }
+  });
+
   it('passes PostHog\'s status through, an error included, so the library\'s own retry rules apply', async () => {
     for (const status of [200, 400, 401, 413, 429, 500, 503]) {
       const { doFetch } = fakeFetch(() => new Response('{"type":"x"}', { status, headers: { 'content-type': 'application/json' } }));
