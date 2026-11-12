@@ -838,19 +838,31 @@ describe('Tempo at an end: the songs at that end come before how a song is sung 
     expect(r.indexOf('jump-hit')).toBeLessThan(r.indexOf('mid-written'));
   });
 
-  it('puts the band before the singer\'s own songs too (R31): own songs in the band, other songs in the band, own songs out of it, the rest', () => {
+  it('puts the band before the singer\'s own songs too (R31), and sung as written before History: own written, other written, own jump, other jump in the band, then the same four out of it', () => {
     // Signed in with History on at 100, the way the tuner opens signed in, and Tempo at an end. The singer's own songs are the ones with a
-    // listening share. A catalogue song in the upbeat band is ahead of the singer's own mid songs at the upbeat end.
-    const own = (id: string, tempo: number) => ({ match: timed(id, 'none', tempo), listening: 0.9 });
-    const other = (id: string, tempo: number) => ({ match: timed(id, 'none', tempo) });
-    const list = prepareSetlist([other('other-mid', 105), own('own-mid', 110), other('other-fast', 160), own('own-fast', 150)], USER);
+    // listening share. Sung as written comes ahead of History (QWW-58), so the singer's own jump song is behind a catalogue song sung as
+    // written, and both are ahead of every song out of the band. Fast songs (150 to 180) are in the upbeat band, mid songs (105 to 120) are not.
+    const own = (id: string, how: keyof typeof AS_SUNG, tempo: number) => ({ match: timed(id, how, tempo), listening: 0.9 });
+    const other = (id: string, how: keyof typeof AS_SUNG, tempo: number) => ({ match: timed(id, how, tempo) });
+    const list = prepareSetlist(
+      [
+        other('mid-jump-other', 'up', 120), own('mid-jump-own', 'down', 115), other('mid-written-other', 'none', 105), own('mid-written-own', 'none', 110),
+        other('fast-jump-other', 'up', 180), own('fast-jump-own', 'down', 170), other('fast-written-other', 'none', 160), own('fast-written-own', 'none', 150),
+      ],
+      USER,
+    );
     const signedIn: Parameters<typeof state>[0] = { off: ['era', 'difficulty', 'popularity'], loggedIn: true };
-    expect(ids(rankPrepared(list, state({ ...signedIn, gears: { tempo: 100 } })))).toEqual(['own-fast', 'other-fast', 'own-mid', 'other-mid']);
-    expect(ids(rankPrepared(list, state({ ...signedIn, gears: { tempo: 94 } })))).toEqual(['own-fast', 'other-fast', 'own-mid', 'other-mid']);
-    // No song is in the slow band, so at the slow end History decides: the singer's own songs first.
-    expect(ids(rankPrepared(list, state({ ...signedIn, gears: { tempo: 0 } }))).slice(0, 2).sort()).toEqual(['own-fast', 'own-mid']);
-    // And short of the ends nothing changes: History, then the closest sum.
-    expect(ids(rankPrepared(list, state({ ...signedIn, gears: { tempo: 50 } }))).slice(0, 2).sort()).toEqual(['own-fast', 'own-mid']);
+    const atEnd = ['fast-written-own', 'fast-written-other', 'fast-jump-own', 'fast-jump-other', 'mid-written-own', 'mid-written-other', 'mid-jump-own', 'mid-jump-other'];
+    for (const tempo of [100, 94]) expect(ids(rankPrepared(list, state({ ...signedIn, gears: { tempo } }))), `tempo ${tempo}`).toEqual(atEnd);
+    // No song is in the slow band, so at the slow end and short of the ends the order is the usual one: sung as written first, the singer's
+    // own songs first inside each, then the jumps the same way.
+    for (const tempo of [0, 50]) {
+      const r = ids(rankPrepared(list, state({ ...signedIn, gears: { tempo } })));
+      expect(r.slice(0, 2).sort(), `tempo ${tempo}`).toEqual(['fast-written-own', 'mid-written-own']);
+      expect(r.slice(2, 4).sort(), `tempo ${tempo}`).toEqual(['fast-written-other', 'mid-written-other']);
+      expect(r.slice(4, 6).sort(), `tempo ${tempo}`).toEqual(['fast-jump-own', 'mid-jump-own']);
+      expect(r.slice(6).sort(), `tempo ${tempo}`).toEqual(['fast-jump-other', 'mid-jump-other']);
+    }
   });
 
   it('puts a song with no tempo after the songs that have one inside its group, and the Maybe songs last', () => {

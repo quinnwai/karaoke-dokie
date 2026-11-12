@@ -12,8 +12,9 @@
 //      octave jump, whatever the gears say, except with Tempo at an end of its track (below). The jump songs
 //      still follow, so a singer whose popular songs all need a jump still gets a full list. The Maybe songs
 //      (estimated ranges) come after all the others, as everywhere else, and are sorted that way inside too.
-//      Inside each of those groups the songs are sorted by distance to the gear values (rankPrepared):
-//        distance = sum over the active gears of weight × |song's place − gear value|
+//      Inside each of those groups the songs are sorted by distance to the gear targets (rankPrepared):
+//        distance = sum over the active gears of weight × |song's place − the gear's target|
+//      A gear's target is its value on the track, except Tempo's (see "Tempo at an end" below).
 //      An active gear is one that is not in `off` (and History only when the singer's library was read).
 //      Off gears add nothing. A song we do not know on an active gear (no tempo, an implausible range, not in
 //      the singer's library) sorts after every song of its group that is known on it: "songs without a tempo
@@ -41,7 +42,8 @@
 // put the biggest hits back at the top in whichever octave fits them, 47% of the top 20 octave jumps (a bass's 97%) where
 // there had been none. The first and last TEMPO_END_REACH places of the Tempo track are one stop each: there Tempo's distance
 // is to the end itself (0 or 100), and between the stops it is to a target that runs from 0 to 100 (rankPrepared). The default
-// list, and every list with Tempo off or in the middle, keep the order they had.
+// list, and every list with Tempo off, keep the order they had. With Tempo on between the stops the middle lists change too:
+// every setting but 50 aims at a different place (20 at 12.5, 30 at 25, 70 at 75, 80 at 87.5).
 //
 // The default state (setlistConfig.ts) is Popularity on at 100, Difficulty on at 0, the rest off. With
 // Popularity counting double, that is a blend that leans on popularity: of two songs sung the same way, the one
