@@ -211,6 +211,8 @@ describe('the catalogue the harness grades (QWW-49)', () => {
     const { tracks, inputs } = await harnessInputs(store);
     expect(tracks).toHaveLength(3);
     expect(inputs.map((t) => t.test.id)).toEqual(TEST_RANGES.map((t) => t.id));
+    // Each range's songs are placed against that range, not the first one's.
+    expect(inputs.map((t) => [t.prepared.range.low, t.prepared.range.high])).toEqual(TEST_RANGES.map((t) => [t.range.low, t.range.high]));
     expect(TEST_RANGES).toHaveLength(9);
     const offline = offlineChecks(inputs, new Set(), new Map());
     for (const t of TEST_RANGES) expect(offline.filter((c) => c.range === t.id).map((c) => c.criterion)).toEqual([1, 3, 4, 9]);
@@ -483,6 +485,8 @@ describe('report', () => {
     ]);
     expect(h.ends[0]!.songs.every((s) => s.counts && s.year! >= 1990 && s.year! < 2000)).toBe(true);
     expect(h.ends[1]!.songs.some((s) => s.counts)).toBe(false);
+    // Each end is its own list: the upbeat end starts with a faster song than any at the slow end.
+    expect(h.ends[1]!.songs[0]!.bpm!).toBeGreaterThan(Math.max(...h.ends[0]!.songs.map((s) => s.bpm!)));
     const md = toMarkdown({ title: 'Release eval', checks: [], top10: [], handCheck: h, meta: [] });
     expect(md).toContain('### Tempo hand check: Low male, Quinn-Wai (F2-C5), ’90s');
     expect(md).toContain('**Slow end, top 20: 20 count**');

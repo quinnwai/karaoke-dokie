@@ -130,7 +130,7 @@ async function deezerPlayable(id: number): Promise<boolean | 'error'> {
  * The catalogue as the app serves it (wiring.ts): one row per song with its clean title (QWW-49, `canonical`), so the harness
  * grades the list a logged-out singer sees and not the rows as stored. Titles and the tags on them (criterion 4) and the songs
  * in every list (criteria 1, 2, 6 and 9) would differ otherwise. A mapping that cannot be read gives the titles as stored, and
- * `degraded`: main() stops then, rather than grade them.
+ * `degraded`: harnessInputs stops the run then, rather than grade them.
  */
 export function loadHarnessCatalogue(store: Parameters<typeof loadCatalogue>[0]) {
   return loadCatalogue(store, undefined, { canonical: true });
