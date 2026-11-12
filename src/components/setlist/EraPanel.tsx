@@ -28,8 +28,8 @@ export function EraPanel({ eras, off, hidden, onToggle, onReset }: EraPanelProps
   const grid = useRef<HTMLDivElement>(null);
   // Every press in the document is noted where it began, for the clicks below.
   useEffect(() => trackPresses(), []);
-  // A finger's tap on the ✕ turns Era off and the ✕ goes, so the second tap of a double tap lands where it was, or a few px lower, on the '20s: the eras are held for a
-  // moment after it, and an ignored tap puts the moment off again (the gate on 4e324f5).
+  // A finger's tap on the ✕ turns Era off and the ✕ goes, so the second tap of a double tap lands where it was, or a few px lower, on the '20s: the eras are held for
+  // TAP_GUARD_MS after the tap, and for no longer, whatever is tapped meanwhile (the gates on 4e324f5 and 5ab0be7).
   const heldUntil = useRef(0);
   return (
     <div
@@ -87,10 +87,8 @@ export function EraPanel({ eras, off, hidden, onToggle, onReset }: EraPanelProps
                 // An era's only if the finger pressed on it, give or take 2 px (half the gap between two): a double tap on the ✕ puts its second tap where the ✕ has
                 // gone, a few px above the eras, and the browser hands that to the nearest era, which turned Era back on with the '20s picked (the gate on 1ee41b4).
                 if (e.detail > 0 && !pressWasOn(e.currentTarget, 2)) return;
-                if (e.detail > 0 && pressWasTouch() && Date.now() < heldUntil.current) {
-                  heldUntil.current = Date.now() + TAP_GUARD_MS;
-                  return;
-                }
+                // A finger's tap in the hold is a double tap's second one. A tap that is held does not put the hold off again (the gate on 5ab0be7).
+                if (e.detail > 0 && pressWasTouch() && Date.now() < heldUntil.current) return;
                 onToggle(era);
               }}
             >

@@ -93,7 +93,7 @@ export function GearStrip(props: GearStripProps) {
   // A mouse or pen press on the fader has not yet given the slider the focus its click will give it (see `afterClick`).
   const focusAfterClick = useRef(false);
   // A finger's tap on the ✕ turns the gear off and the ✕ goes, so the second tap of a double tap lands where it was, a few px above the fader's area or a little lower,
-  // in it: a finger's presses on the fader are held for a moment after, and an ignored one puts the moment off again (the gate on 4e324f5).
+  // in it: a finger's presses on the fader are held for TAP_GUARD_MS after the tap, and for no longer, whatever is pressed meanwhile (the gates on 4e324f5 and 5ab0be7).
   const heldUntil = useRef(0);
 
   // The browser's `change` event ends one adjustment by the keyboard or a screen reader: a key step or a swipe.
@@ -148,10 +148,9 @@ export function GearStrip(props: GearStripProps) {
     if (!area || e.clientX < area.left || e.clientX >= area.right || e.clientY < area.top || e.clientY >= area.bottom) return;
     // A right or middle click is not a press, and a second finger is not the first one's.
     if (e.button > 0 || (press.current && press.current.id !== e.pointerId)) return;
-    if (e.pointerType === 'touch' && Date.now() < heldUntil.current) {
-      heldUntil.current = Date.now() + TAP_GUARD_MS;
-      return;
-    }
+    // A finger's press in the hold is a double tap's second one and is not the fader's. A press that is held does not put the hold off again: it ends TAP_GUARD_MS after the
+    // ✕'s tap, so a run of taps on the fader no longer keeps it dead for seconds (the gate on 5ab0be7).
+    if (e.pointerType === 'touch' && Date.now() < heldUntil.current) return;
     const p: Press = { id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch', live: false, reachX: 0, reachY: 0, scrolling: false, sent: value, changed: false };
     press.current = p;
     focusAfterClick.current = !p.touch;

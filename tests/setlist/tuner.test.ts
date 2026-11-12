@@ -524,6 +524,26 @@ describe('sheet.module.css (QWW-57: R5, R6, R8, R10; the review of #38: findings
     expect(outsideHover).not.toMatch(/:hover ?\{[^}]*border/);
   });
 
+  // The gate on 5ab0be7: the handle's 44 px box reached 6 px into the first strip's title, so a tap on the top of "DIFFICULTY" folded the sheet, and a touch browser handed a
+  // tap in the handle's last few px to the title's row. Layout and hit-testing are tests/e2e/setlist-fader-touch.spec.ts's (a browser, at four widths); these keep the numbers.
+  it('ends the handle\'s box above the first strip\'s title with the bar where it was, and keeps a strip\'s head row out of the targets a touch can be handed to, the ✕ excepted (the gate on 5ab0be7)', () => {
+    const handle = rule('.handle');
+    // The row is 22 px tall and the box 44, so the bar (the box's content, centred) is 11 px down the row when the box's top and its padding-top add up to -4.
+    expect(rule('.handleRow')).toContain('height: 22px;');
+    expect(handle).toContain('height: 44px;');
+    expect(handle).toContain('box-sizing: border-box;');
+    const top = Number(/ top: (-?\d+)px;/.exec(handle)?.[1]);
+    const padding = Number(/ padding: (\d+)px 0 0;/.exec(handle)?.[1]);
+    expect(top + padding + (44 - padding) / 2).toBe(11);
+    // The box's bottom edge is 26 px from the row's top at the lowest: the first strip's title begins 27 px down (tests/e2e/setlist-fader-touch.spec.ts measures it).
+    expect(top + 44).toBeLessThanOrEqual(26);
+    // Over the strips, whose own positioned parts would paint over the 4 px of the box that are the first one's (the gate on 4e324f5).
+    expect(handle).toContain('z-index: 2;');
+    // The title and the row it is in take no press (a touch is handed to a label or a row that answers taps, a few px from the finger), and the ✕ in the row does.
+    expect(rule('.stripBody .gearHead')).toContain('pointer-events: none;');
+    expect(rule('.stripBody .resetButton')).toContain('pointer-events: auto;');
+  });
+
   it('sets the four labels\' type by the strip body\'s width, from 6A\'s 11 px and 0.12em down to 9 px (R6)', () => {
     expect(rule('.stripBody')).toContain('container-type: inline-size;');
     // 6A's look is the base, and what a browser without container units keeps.

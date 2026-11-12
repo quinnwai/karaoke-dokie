@@ -11,15 +11,20 @@
 //   - drags at 20, 30 and 44 degrees still move the value, as one gear_change
 //   - a double tap on every gear's ✕ and on Era's, 150 and 300 ms apart, with the second tap 0 to 12 px lower than the first, at a radius of 10: the gear ends off at its
 //     default with one gear_change (Era: one era_change); the fader and the eras are held for a moment after a finger's tap on a ✕
-//   - the handle takes a tap on the bottom of its 44 px box in an expanded sheet, and the first Enter after a touch drag of it toggles the sheet
-// The arithmetic is tests/setlist/fader.test.ts, the handlers' rules tests/setlist/faderStrip.test.tsx and setlistScreen.test.tsx.
+//   - the first Enter after a touch drag of the handle toggles the sheet
+// The gate on 5ab0be7 (QWW-57, 12 Nov), checked here at 360, 375, 390 and 412 px, expanded and in mini, with a finger of radius 1, 8, 12 and 16 in Chromium and a tap in WebKit:
+//   - the handle's 44 px box ends above the first strip's title (it reached 6 px into it, and a tap on the top of "DIFFICULTY" folded the sheet), a tap on any part of the title,
+//     under the handle or beside it, changes nothing, and the handle takes a tap on its bar and on the bottom of its box, 1, 2 and 5 px above the edge, left or right of the middle
+//   - the hold after a tap on a ✕ is 400 ms from the tap and no longer, whatever is tapped in it (each tap it held used to put it off again, so a fader could stay dead for
+//     seconds): a tap or a drag on the fader, or a tap on an era, that starts 600 ms or more after the ✕ works after two taps that the hold ignored
+// The arithmetic is tests/setlist/fader.test.ts, the handlers' rules tests/setlist/faderStrip.test.tsx and setlistScreen.test.tsx, the stylesheet's decisions tests/setlist/tuner.test.ts.
 
 import { devices, expect, test, webkit, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import type { AppEvent } from '../../src/lib/contracts';
 import type { GearId } from '../../src/lib/setlist/types';
-import { cdpFinger, isOff, makeScreensDir, MODES, openAt, recorded, setThumbOn, stateOf, syntheticFinger, thumb, valueAt, type Finger, type Point } from '../helpers/faderE2e';
+import { boxes, cdpFinger, isOff, line, makeScreensDir, MODES, openAt, recorded, setThumbOn, stateOf, syntheticFinger, thumb, valueAt, type Finger, type Mode, type Point } from '../helpers/faderE2e';
 import { eraButton, resetButton, tab, touchDrag, tuner, value } from '../helpers/tunerE2e';
 
 test.beforeAll(() => makeScreensDir());
@@ -27,7 +32,10 @@ test.describe.configure({ mode: 'parallel' });
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, contextOptions: { reducedMotion: 'reduce' }, screenshot: 'off' });
 
 const WIDTHS = [360, 375, 390] as const;
+// The handle and the first strip's title are checked at 412 px too (the widest phone the layout is made for).
+const HANDLE_WIDTHS = [360, 375, 390, 412] as const;
 const RADII = [1, 8, 12] as const;
+const HANDLE_RADII = [1, 8, 12, 16] as const;
 const clampTo = (min: number, max: number, x: number) => Math.min(Math.max(x, min + 3), max - 3);
 
 /** Sets the gear off (the rest as it is), waited for, so that what a test compares is what the page holds. */
@@ -167,17 +175,126 @@ async function checkDoubleTapLower(page: Page, events: AppEvent[], part: GearId 
   expect(failures, `${at}: double taps on the ✕, the second one lower`).toEqual([]);
 }
 
-/** In an expanded sheet the handle's whole 44 px box is the handle's: the bottom of it, over the first strip's top, takes a tap. */
-async function checkHandleReach(page: Page, finger: Finger, at: string) {
-  const box = (await page.locator('#handle').boundingBox())!;
-  for (const inset of [2, 5]) {
-    const p = { x: box.x + box.width / 2 - 20, y: box.y + box.height - inset };
-    expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('#handle'), p), `${at}: ${inset} px above the bottom of the handle's box is the handle`).toBe(true);
-    await finger.tap(p, 1);
-    await expect(page.locator('#app'), `${at}: a tap ${inset} px above the bottom of the handle's box folds the sheet`).toHaveAttribute('data-mode', 'mini');
-    await page.evaluate(() => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ mini: false }));
-    await expect(page.locator('#app')).toHaveAttribute('data-mode', 'expanded');
+type HandleGeometry = { handle: Box; bar: Box; label: Box; text: Box };
+type Box = { left: number; right: number; top: number; bottom: number };
+
+/**
+ * The sheet's handle and the first strip's title (the gate on 5ab0be7). The handle's 44 px box ends above the title (it reached 6 px into it); a tap on any part of the title,
+ * under the handle or beside it, from a finger of each radius, changes nothing (not the value, on or off, the open part, the eras or the sheet's mode, and nothing is recorded);
+ * and the handle takes a tap on its bar and on the bottom of its box, 1, 2 and 5 px above its edge, left and right of the middle, from the same fingers.
+ */
+async function checkHandleAndTitle(page: Page, events: AppEvent[], finger: Finger, at: string, mode: Mode, radii: readonly number[]) {
+  const failures: string[] = [];
+  const read = (): Promise<HandleGeometry> =>
+    page.evaluate(() => {
+      const rect = (e: { getBoundingClientRect(): DOMRect }) => {
+        const b = e.getBoundingClientRect();
+        return { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+      };
+      const label = document.querySelector('[data-strip][data-gear="difficulty"] label')!;
+      const text = document.createRange();
+      text.selectNodeContents(label);
+      return { handle: rect(document.querySelector('#handle')!), bar: rect(document.querySelector('#handle span')!), label: rect(label), text: rect(text) };
+    });
+  const onHandle = (p: Point) => page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('#handle'), p);
+  const records = async () => (await recorded(page, events, 'gear_change')).length + (await recorded(page, events, 'era_change')).length;
+  // A tap on the handle moves the sheet to the other mode; this puts it back.
+  const home = { mini: mode === 'mini' };
+  const putBack = async () => {
+    await page.evaluate((p) => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState(p), home);
+    await expect(page.locator('#app')).toHaveAttribute('data-mode', mode);
+    await page.waitForTimeout(60);
+  };
+
+  const g = await read();
+  const titleTop = Math.min(g.label.top, g.text.top);
+  const titleBottom = Math.max(g.label.bottom, g.text.bottom);
+  if (g.handle.bottom > titleTop) failures.push(`the handle's box ends at ${g.handle.bottom}, ${g.handle.bottom - titleTop} px into the title, which begins at ${titleTop}`);
+
+  // A tap on any part of the title changes nothing: its left and right ends and its middle, and under the handle, from its top row to its bottom row.
+  const middle = (g.handle.left + g.handle.right) / 2;
+  const xs = [...new Set([g.text.left + 2, (g.text.left + g.text.right) / 2, g.text.right - 2, middle - 20, middle].map(Math.round))];
+  const ys = [titleTop, titleTop + 1, titleTop + 3, titleTop + 5, (titleTop + titleBottom) / 2, titleBottom - 1];
+  const was = JSON.stringify(await stateOf(page, 'difficulty'));
+  const recordsBefore = await records();
+  for (const x of xs) {
+    for (const y of ys) {
+      if (await onHandle({ x, y })) failures.push(`(${x}, ${y.toFixed(1)}), on the title, is the handle's`);
+    }
   }
+  for (const radius of radii) {
+    const moved: string[] = [];
+    for (const x of xs) {
+      for (const y of ys) {
+        await finger.tap({ x, y }, radius);
+        if (JSON.stringify(await stateOf(page, 'difficulty')) !== was) {
+          moved.push(`(${x}, ${(y - titleTop).toFixed(0)} px under its top)`);
+          await putBack();
+        }
+      }
+    }
+    if (moved.length) failures.push(`a tap on the title from a finger of radius ${radius} changed the state: ${moved.join(', ')}`);
+  }
+  const made = (await records()) - recordsBefore;
+  if (made !== 0) failures.push(`the taps on the title made ${made} gear_change or era_change records`);
+
+  // The handle takes a tap on its bar, and on the bottom of its box, 1, 2 and 5 px above the edge, whichever side of the middle.
+  const cases: [string, (b: HandleGeometry) => Point][] = [['its bar', (b) => ({ x: (b.bar.left + b.bar.right) / 2, y: (b.bar.top + b.bar.bottom) / 2 })]];
+  for (const inset of [1, 2, 5]) {
+    for (const dx of [-20, 20]) cases.push([`${inset} px above the bottom of its box, ${Math.abs(dx)} px ${dx < 0 ? 'left' : 'right'} of the middle`, (b) => ({ x: (b.handle.left + b.handle.right) / 2 + dx, y: b.handle.bottom - inset })]);
+  }
+  for (const radius of radii) {
+    for (const [name, where] of cases) {
+      const p = where(await read());
+      if (!(await onHandle(p))) failures.push(`${name} (${p.x.toFixed(1)}, ${p.y.toFixed(1)}) is not the handle's`);
+      await finger.tap(p, radius);
+      if ((await tuner(page)).mini === home.mini) failures.push(`a tap on ${name} from a finger of radius ${radius} did not move the sheet`);
+      else await putBack();
+    }
+  }
+  expect(failures, `${at}: the handle and the first strip's title`).toEqual([]);
+}
+
+/**
+ * The hold after a tap on a ✕ ends 400 ms after it, whatever is tapped meanwhile (the gate on 5ab0be7): two taps on the fader (or the '20s), which the hold ignores, and then a tap
+ * (for a gear, a drag too) that starts 600 ms or more after the ✕ works. The hold used to be put off by each tap it held, so a fader was dead for as long as the taps went on.
+ */
+async function checkHoldEnds(page: Page, part: GearId | 'era', at: string, finger: Finger, radius: number) {
+  const failures: string[] = [];
+  for (const how of part === 'era' ? (['tap'] as const) : (['tap', 'drag'] as const)) {
+    if (part === 'era') await page.evaluate(() => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ off: [], eras: ['s80'] }));
+    else await setThumbOn(page, part, 60);
+    await expect(resetButton(page, part)).toBeVisible();
+    const icon = await resetButton(page, part).locator('svg').boundingBox();
+    const glyph = { x: icon!.x + icon!.width / 2, y: icon!.y + icon!.height / 2 };
+    // Where the taps the hold ignores go: the fader, a little lower than the ✕, or the '20s.
+    const era20 = part === 'era' ? await eraButton(page, 's20').boundingBox() : null;
+    const b = part === 'era' ? null : await boxes(page, part);
+    const held: Point = era20 ? { x: era20.x + era20.width / 2, y: era20.y + era20.height / 2 } : { x: b!.track.left + b!.track.width * 0.85, y: b!.knob.top + b!.knob.height / 2 };
+    const t0 = Date.now();
+    await finger.tap(glyph, radius);
+    await finger.tap(held, radius);
+    await finger.tap(held, radius);
+    await page.waitForTimeout(Math.max(t0 + 600 - Date.now(), 0));
+    const label = `${part}, a ${how} that starts 600 ms after the ✕ (touch radius ${radius})`;
+    if (part === 'era') {
+      await finger.tap(held, radius);
+      await page.waitForTimeout(150);
+      const t = await tuner(page);
+      if (t.off.includes('era') || !t.eras.includes('s20')) failures.push(`${label}: Era is ${t.off.includes('era') ? 'still off' : 'on'} with the picks ${t.eras.join()}, not on with the '20s picked`);
+    } else {
+      const from = { x: b!.track.left + b!.track.width * 0.3, y: held.y };
+      const to = { x: b!.track.left + b!.track.width * 0.7, y: held.y + 3 };
+      if (how === 'tap') await finger.tap(from, radius);
+      else await finger.drag(line(from, to, 12), undefined, radius);
+      const want = valueAt(b!.track, how === 'tap' ? from.x : to.x);
+      await page.waitForTimeout(150);
+      const got = await value(page, part);
+      if (await isOff(page, part)) failures.push(`${label}: the gear is still off`);
+      else if (Math.abs(got - want) > 1) failures.push(`${label}: the value is ${got}, the finger says ${want}`);
+    }
+  }
+  expect(failures, `${at}: the hold after a tap on the ✕ ends 400 ms after it`).toEqual([]);
 }
 
 // ============================================================================================================
@@ -236,6 +353,20 @@ for (const width of WIDTHS) {
         await checkDoubleTapLower(page, events, 'era', at, finger, full ? [0, 4, 8, 12] : [8, 12], full ? [150, 300] : [150], 10);
         expect(await eraButton(page, 's20').count()).toBe(1);
       });
+
+      test('a tap or a drag that starts 600 ms after a tap on a ✕ works after taps the hold ignored: the hold on a fader is 400 ms from the ✕ and no longer', async ({ page }) => {
+        test.setTimeout(90_000);
+        await openAt(page, mode);
+        await show(page, 'difficulty');
+        await checkHoldEnds(page, 'difficulty', at, cdpFinger(page), 10);
+      });
+
+      test('a tap that starts 600 ms after a tap on Era\'s ✕ works after taps the hold ignored: the hold on the eras is 400 ms from the ✕ and no longer', async ({ page }) => {
+        test.setTimeout(90_000);
+        await openAt(page, mode);
+        await show(page, 'era');
+        await checkHoldEnds(page, 'era', at, cdpFinger(page), 10);
+      });
     });
   }
 
@@ -243,10 +374,9 @@ for (const width of WIDTHS) {
     test.use({ viewport: { width, height: 844 } });
     test.beforeEach(({ browserName }) => test.skip(browserName !== 'chromium', 'touch is driven through Chromium DevTools'));
 
-    test('the handle takes a tap on the bottom of its 44 px box, and the first Enter after a touch drag of it toggles the sheet', async ({ page }) => {
+    test('the first Enter after a touch drag of the handle toggles the sheet', async ({ page }) => {
       test.setTimeout(90_000);
       await openAt(page, 'expanded');
-      await checkHandleReach(page, cdpFinger(page), `${width} px, expanded`);
       // A touch drag of the handle (down, to the other mode) has no click of its own: the first Enter after it must still toggle.
       const handle = page.locator('#handle');
       const b = (await handle.boundingBox())!;
@@ -260,6 +390,22 @@ for (const width of WIDTHS) {
   });
 }
 
+// The handle and the first strip's title, at the four widths, expanded and in mini, from a finger of radius 1, 8, 12 and 16 (the gate on 5ab0be7).
+for (const width of HANDLE_WIDTHS) {
+  for (const mode of MODES) {
+    test.describe(`${width} px, ${mode}, the handle and the first strip's title`, () => {
+      test.use({ viewport: { width, height: 844 } });
+      test.beforeEach(({ browserName }) => test.skip(browserName !== 'chromium', 'touch is driven through Chromium DevTools'));
+
+      test("the handle's box ends above the title, a tap on any part of the title changes nothing, and the handle takes a tap on its bar and the bottom of its box", async ({ page }) => {
+        test.setTimeout(150_000);
+        const { events } = await openAt(page, mode);
+        await checkHandleAndTitle(page, events, cdpFinger(page), `${width} px, ${mode}`, mode, HANDLE_RADII);
+      });
+    });
+  }
+}
+
 // ============================================================================================================
 // WebKit (desktop, not iOS Safari: see tests/e2e/setlist-fader.spec.ts)
 // ============================================================================================================
@@ -267,9 +413,28 @@ for (const width of WIDTHS) {
 test.describe('in WebKit (desktop WebKit, not iOS Safari)', () => {
   test.skip(!existsSync(webkit.executablePath()), 'WebKit is not installed here (CI installs Chromium only)');
 
+  // The handle and the first strip's title (the gate on 5ab0be7); WebKit's tap has no radius.
+  for (const width of HANDLE_WIDTHS) {
+    for (const mode of MODES) {
+      test(`${width} px, ${mode}: the handle's box ends above the title, a tap on any part of the title changes nothing, and the handle takes a tap on its bar and the bottom of its box`, async ({ baseURL }) => {
+        test.setTimeout(120_000);
+        const browser = await webkit.launch();
+        try {
+          const context = await browser.newContext({ ...devices['iPhone 13'], viewport: { width, height: 844 }, baseURL, reducedMotion: 'reduce' });
+          const page = await context.newPage();
+          const { events } = await openAt(page, mode);
+          await checkHandleAndTitle(page, events, syntheticFinger(page), `WebKit, ${width} px, ${mode}`, mode, [1]);
+          await context.close();
+        } finally {
+          await browser.close();
+        }
+      });
+    }
+  }
+
   for (const width of WIDTHS) {
     for (const mode of MODES) {
-      test(`${width} px, ${mode}: fine-tuning, kicks and arcs, angles, a double tap on the ✕ with the second tap lower, and the handle's reach`, async ({ baseURL }) => {
+      test(`${width} px, ${mode}: fine-tuning, kicks and arcs, angles, a double tap on the ✕ with the second tap lower, and the hold after the ✕`, async ({ baseURL }) => {
         test.setTimeout(300_000);
         const browser = await webkit.launch();
         try {
@@ -293,7 +458,10 @@ test.describe('in WebKit (desktop WebKit, not iOS Safari)', () => {
           }
           await show('era');
           await checkDoubleTapLower(page, events, 'era', at, finger, [0, 8, 12], [150, 300], 1);
-          if (mode === 'expanded') await checkHandleReach(page, finger, at);
+          await show('difficulty');
+          await checkHoldEnds(page, 'difficulty', at, finger, 1);
+          await show('era');
+          await checkHoldEnds(page, 'era', at, finger, 1);
           await context.close();
         } finally {
           await browser.close();

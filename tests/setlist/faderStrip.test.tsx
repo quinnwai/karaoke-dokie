@@ -238,7 +238,7 @@ describe('the ✕\'s click', () => {
   });
 });
 
-describe('the fader after a finger\'s tap on the ✕ (the gate on 4e324f5)', () => {
+describe('the fader after a finger\'s tap on the ✕ (the gates on 4e324f5 and 5ab0be7)', () => {
   const reset = () => document.querySelector<HTMLElement>('button[data-reset]')!;
   /** A finger's tap on the ✕ (a press on its box, then the click), or a mouse's. */
   const tapReset = (kind: 'touch' | 'mouse') => {
@@ -280,17 +280,47 @@ describe('the fader after a finger\'s tap on the ✕ (the gate on 4e324f5)', () 
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
-  it('is put off by each press it holds, so a run of quick taps never gets through', () => {
-    const { hit, onInput } = strip({ value: 30, off: false, onReset: vi.fn() });
+  it('is 400 ms from the tap on the ✕ and no more: a run of taps it holds does not put it off, and a tap 450 ms after the ✕ works, whatever was held before it (the gate on 5ab0be7)', () => {
+    const { hit, onInput, onDone } = strip({ value: 30, off: false, onReset: vi.fn() });
     tapReset('touch');
-    for (const at of [300, 600, 900, 1200]) {
+    for (const at of [60, 160, 260, 360, 399]) {
       vi.setSystemTime(1_000_000 + at);
       tapFader(hit, 90);
     }
     expect(onInput).not.toHaveBeenCalled();
-    vi.setSystemTime(1_000_000 + 1200 + 401);
+    vi.setSystemTime(1_000_000 + 450);
     tapFader(hit, 90);
     expect(values(onInput)).toEqual([90]);
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('is no longer for a drag: one that starts 450 ms after the ✕ follows the finger, after taps it held (the gate on 5ab0be7)', () => {
+    const { hit, onInput, onDone } = strip({ value: 30, off: false, onReset: vi.fn() });
+    tapReset('touch');
+    for (const at of [100, 250, 399]) {
+      vi.setSystemTime(1_000_000 + at);
+      tapFader(hit, 90);
+    }
+    expect(onInput).not.toHaveBeenCalled();
+    vi.setSystemTime(1_000_000 + 450);
+    const finger = { kind: 'touch' as const, y: 12, id: 7 };
+    faderPointer('pointerDown', hit, { ...finger, x: faderX(20) });
+    faderPointer('pointerMove', hit, { ...finger, x: faderX(40) });
+    faderPointer('pointerMove', hit, { ...finger, x: faderX(60) });
+    faderPointer('pointerUp', hit, { ...finger, x: faderX(60) });
+    expect(values(onInput)).toEqual([40, 60]);
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('is counted from the tap on the ✕ alone: a tap held at 399 ms has not moved the end of it, so a tap at 401 ms works', () => {
+    const { hit, onInput } = strip({ value: 30, off: false, onReset: vi.fn() });
+    tapReset('touch');
+    vi.setSystemTime(1_000_000 + 399);
+    tapFader(hit, 90);
+    expect(onInput).not.toHaveBeenCalled();
+    vi.setSystemTime(1_000_000 + 401);
+    tapFader(hit, 70);
+    expect(values(onInput)).toEqual([70]);
   });
 
   it('is not a mouse\'s: a click on the ✕ with a mouse and a click on the track right after are two choices', () => {

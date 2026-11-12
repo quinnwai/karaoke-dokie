@@ -82,8 +82,8 @@ export function Sheet({ tuner, historyAvailable, historyHint, canExpand, onTuner
           aria-disabled={canExpand ? undefined : true}
           aria-label={mini ? 'Show all gears' : 'Show one gear'}
           onPointerDown={(e) => {
-            // Only a press on the handle is the handle's, by where the finger is: its box reaches 11 px into the first strip, and Chromium hands a touch near it to it, so
-            // a tap in the blank part of the first strip's title row, from a big finger, used to fold the sheet (the gate on 1ee41b4).
+            // Only a press on the handle is the handle's, by where the finger is: its box ends 1 px above the first strip's title, and Chromium hands a touch within a finger's
+            // reach of it to it, so a tap on the top of the title, from a big finger, used to fold the sheet (the gates on 1ee41b4 and 5ab0be7).
             if (!pointIsOn(e.currentTarget, e.clientX, e.clientY)) return;
             press.current = { startY: e.clientY, dragged: false, lastDy: 0 };
             swallowClick.current = false;

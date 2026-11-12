@@ -1061,7 +1061,7 @@ describe('moving a gear', () => {
 
 // ---- Era ----
 
-describe('the Era panel after a finger\'s tap on its ✕ (the gate on 4e324f5)', () => {
+describe('the Era panel after a finger\'s tap on its ✕ (the gates on 4e324f5 and 5ab0be7)', () => {
   const eraButton = (era: EraId) => el(`${SEL.eraPanel} [data-era="${era}"]`);
   /** A finger's tap: a press at the box's middle, then the click (`detail` 1). */
   const tap = (target: Element, kind: 'touch' | 'mouse' = 'touch') => {
@@ -1091,19 +1091,47 @@ describe('the Era panel after a finger\'s tap on its ✕ (the gate on 4e324f5)',
     vi.setSystemTime(2_000_000 + 399);
     tap(eraButton('s20'));
     expect(calls(onTuner)).toEqual([{ type: 'reset', gear: 'era' }]);
-    // Each tap it held put the moment off again; after 400 ms of quiet a tap is a choice.
-    vi.setSystemTime(2_000_000 + 399 + 401);
+    // The moment is 400 ms from the ✕ and no more: the taps it held did not put it off, so a tap 2 ms later is a choice.
+    vi.setSystemTime(2_000_000 + 401);
     tap(eraButton('s20'));
     expect(calls(onTuner)).toEqual([{ type: 'reset', gear: 'era' }, { type: 'era', era: 's20' }]);
   });
 
-  it('is a finger\'s: a mouse click on the ✕ and one on an era right after are two choices, and so is a key', () => {
+  it('is 400 ms from the tap on the ✕ whatever it holds: after a run of taps in it, a tap 450 ms after the ✕ turns the era on (the gate on 5ab0be7)', () => {
+    const onTuner = vi.fn<(action: TunerAction) => void>();
+    render(<Tuned initial={tunerOf({ off: [], eras: ['s80'] })} onTuner={onTuner} />);
+    tap(el('button[data-reset="era"]'));
+    for (const at of [60, 160, 260, 360, 399]) {
+      vi.setSystemTime(2_000_000 + at);
+      tap(eraButton('s20'));
+    }
+    expect(calls(onTuner)).toEqual([{ type: 'reset', gear: 'era' }]);
+    vi.setSystemTime(2_000_000 + 450);
+    tap(eraButton('s20'));
+    expect(calls(onTuner)).toEqual([{ type: 'reset', gear: 'era' }, { type: 'era', era: 's20' }]);
+  });
+
+  it('is a finger\'s: a mouse click on the ✕ and one on an era right after are two choices', () => {
     const onTuner = vi.fn<(action: TunerAction) => void>();
     render(<Tuned initial={tunerOf({ off: [], eras: ['s80'] })} onTuner={onTuner} />);
     tap(el('button[data-reset="era"]'), 'mouse');
     vi.setSystemTime(2_000_000 + 100);
     tap(eraButton('s20'), 'mouse');
     expect(calls(onTuner)).toHaveLength(2);
+  });
+
+  it('is not started by a key on the ✕ (a click with detail 0), and does not hold a key on an era: a tap or a key right after is a choice', () => {
+    const onTuner = vi.fn<(action: TunerAction) => void>();
+    render(<Tuned initial={tunerOf({ off: [], eras: ['s80'] })} onTuner={onTuner} />);
+    fireEvent.click(el('button[data-reset="era"]'), { detail: 0 });
+    vi.setSystemTime(2_000_000 + 100);
+    tap(eraButton('s20'));
+    expect(calls(onTuner)).toEqual([{ type: 'reset', gear: 'era' }, { type: 'era', era: 's20' }]);
+    // And after a finger's tap on the ✕ (a hold), a key on an era is still not held: it has no press, so nobody pressed it by mistake.
+    tap(el('button[data-reset="era"]'));
+    vi.setSystemTime(2_000_000 + 150);
+    fireEvent.click(eraButton('s70'), { detail: 0 });
+    expect(calls(onTuner).at(-1)).toEqual({ type: 'era', era: 's70' });
   });
 });
 
