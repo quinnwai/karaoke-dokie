@@ -6,6 +6,7 @@
 //      away (match.ts matchSong). That happens before this file: `candidates` are the songs that fit.
 //   2. Every song gets a place on each gear, 0 to 100 (prepareSetlist). It depends on the songs and the
 //      singer's range only, never on the gears, so it is made once per range and reused while a slider moves.
+//      A language weight (QWW-59, rankPrepared) lays the Popularity places out again per request, from a copy.
 //   3. Era filter, then the songs are sorted. The first thing that counts is how a song is sung (QWW-58,
 //      Quinn-Wai's decision A, 11 Nov): every song that fits as written comes before any song that needs an
 //      octave jump, whatever the gears say. The jump songs still follow, so a singer whose popular songs all

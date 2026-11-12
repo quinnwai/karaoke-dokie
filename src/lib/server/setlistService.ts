@@ -2,6 +2,7 @@
 // library songs, ranked by the engine (songs/setlist.ts) and cut to the page asked for. Nothing here ranks.
 
 import type { DataSourceLogEntry, SetlistRequest, SetlistResponse } from '../contracts';
+import type { LanguageWeights } from '../songs/score';
 import { libraryCandidate, prepareSetlist, rankPrepared, type SetlistCandidate } from '../songs/setlist';
 import { SETLIST_PAGE } from '../songs/setlistConfig';
 import { catalogueKey, type CatalogueSetlist } from './catalogue';
@@ -34,8 +35,9 @@ export function withLibrary(
  * The response for a request: the catalogue's list, or with `library` (the singer is signed in and it was read) the
  * catalogue's songs and theirs, with the History gear counting. Songs on the page are stripped of their pitch
  * histograms, like every whole-list response. Duets and moods are applied afterwards (features.ts), so never to the order.
+ * `languageWeights` replaces the engine's choice of language weights for this request (rankPrepared, QWW-59).
  */
-export function setlistFor(base: CatalogueSetlist, library: LibraryMatches | null, req: SetlistRequest): SetlistResponse {
+export function setlistFor(base: CatalogueSetlist, library: LibraryMatches | null, req: SetlistRequest, languageWeights?: LanguageWeights): SetlistResponse {
   let prepared = base.prepared;
   let logs = base.logs;
   if (library) {
@@ -43,9 +45,10 @@ export function setlistFor(base: CatalogueSetlist, library: LibraryMatches | nul
     prepared = prepareSetlist(merged.candidates, req.range);
     logs = merged.logs;
   }
-  // With no library read, the engine lowers German, Polish and French songs that rank on USDB views alone (QWW-59:
-  // score.ts LANGUAGE_POPULARITY_WEIGHTS); signed in, it does not. A `languageWeights` here would replace that choice.
-  const ranked = rankPrepared(prepared, { gears: req.gears, off: req.off, eras: req.eras, loggedIn: library !== null });
+  // Left to the engine, German, Polish and French songs that rank on USDB views alone are lowered when no library was
+  // read (QWW-59: score.ts LANGUAGE_POPULARITY_WEIGHTS), and nothing is when one was.
+  const state = { gears: req.gears, off: req.off, eras: req.eras, loggedIn: library !== null };
+  const ranked = rankPrepared(prepared, languageWeights ? { ...state, languageWeights } : state);
 
   const offset = req.offset ?? 0;
   const limit = req.limit ?? SETLIST_PAGE.default;

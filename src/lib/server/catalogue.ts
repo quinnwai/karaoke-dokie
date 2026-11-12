@@ -263,7 +263,8 @@ export const SETLIST_RANGES_KEPT = 6;
 export interface Catalogue {
   /** The catalogue as tracks: read from the store on first use, and again once the TTL has passed. */
   get(): Promise<CatalogueTrack[]>;
-  recommend(userRange: VocalRange, page: CataloguePage): Promise<RecommendationsResponse>;
+  /** `languageWeights` replaces LANGUAGE_POPULARITY_WEIGHTS for this request (recommendCatalogue). */
+  recommend(userRange: VocalRange, page: CataloguePage, languageWeights?: LanguageWeights): Promise<RecommendationsResponse>;
   /** The tuner's songs for a range, kept for the next requests (the last SETLIST_RANGES_KEPT ranges), and dropped when the catalogue reloads. */
   setlist(range: Pick<VocalRange, 'low' | 'high'>): Promise<CatalogueSetlist>;
 }
@@ -298,8 +299,8 @@ export function createCatalogue(
   let listsFrom: CatalogueTrack[] | null = null;
   return {
     get,
-    async recommend(userRange, page) {
-      return recommendCatalogue(await get(), userRange, deps, page);
+    async recommend(userRange, page, languageWeights) {
+      return recommendCatalogue(await get(), userRange, deps, page, languageWeights);
     },
     async setlist(range) {
       const tracks = await get();

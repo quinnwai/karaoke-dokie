@@ -145,15 +145,13 @@ export type LanguageWeights = Readonly<Record<string, number>>;
  */
 export const LANGUAGE_POPULARITY_WEIGHTS: LanguageWeights = Object.freeze({ German: 0.5, Polish: 0.5, French: 0.5 });
 
-/** True when a song's USDB views are its only popularity signal: no Spotify popularity, KaraFun views, Billboard Year-End entry or Deezer rank. */
+/**
+ * True when a song's USDB views are its only popularity signal: without them popularityKnown would find nothing (no
+ * Spotify popularity, KaraFun views, Billboard Year-End entry or Deezer rank), so a signal added there counts here too.
+ */
 export function usdbOnlyPopularity(track: Pick<Track, 'popularity'>, song: PopularityInputs): boolean {
-  return (
-    typeof song.usdbViews === 'number' &&
-    typeof track.popularity !== 'number' &&
-    typeof song.karaokeViews !== 'number' &&
-    typeof song.chartRank !== 'number' &&
-    typeof song.deezerRank !== 'number'
-  );
+  const { usdbViews, ...others } = song;
+  return typeof usdbViews === 'number' && !popularityKnown(track, others);
 }
 
 /**
