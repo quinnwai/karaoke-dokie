@@ -55,7 +55,7 @@ ran out of budget (a first visit to a very large library), `all=1` returns `comp
 | `EVENTS` | `on` or `off`: whether `POST /api/events` stores beta events. Unset or blank, it is on only when `NODE_ENV=production`, `SPOTIFY_MOCK` is not `1` and the store is Postgres, so tests, e2e and local dev collect nothing. Any other value counts as off |
 | `DUETS_AND_MOODS` | `on` shows duets and moods on screen; unset, blank or any other value (`1`, `true`, a typo) hides them (QWW-43). Off, the four recommendation responses (`/api/recommendations` and `/api/catalogue/recommendations`, paged or `all=1`) carry no `moods` and no duet markers (`range.duet`, `range.parts`, `part`, `partSinger`), so the Duets and mood chips, the "Duet: take ..." lines and the song-page mood pills never appear. It is applied after ranking (`src/lib/server/features.ts`), so the songs and their order are the same either way; a duet is still scored on the part that fits the singer |
 | `MOODS_SHIPPED` | Comma-separated moods (`upbeat`, `heartfelt`) allowed on screen as chips, while `DUETS_AND_MOODS=on`. Set a mood here only after it passes the QWW-11 precision gate (`npm run moods:report`). Unset = no mood chips |
-| `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | PostHog as the event log's second sink (QWW-51). The key is the project token (`phc_...`, public by design; a personal API key is refused), the host PostHog's own ingest address (`https://us.i.posthog.com` or `https://eu.i.posthog.com`; https only, and only its origin counts). The browser never calls that host: the screen sends to our own `/roadie` and the route under `app/roadie` forwards it there (QWW-63), so the host says where that route forwards to, and its region picks the asset host too. Either missing or malformed and the app records to our own log alone, and `/roadie` answers 404. Read per request by `app/page.tsx` and `app/roadie` (`postHogSettings` and `postHogUpstream` in `src/lib/server/config.ts`). `VERCEL_ENV` (set by Vercel) tags every event `production`, `preview` or, anywhere else, `local` |
+| `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | PostHog as the event log's second sink (QWW-51). The key is the project token (`phc_...`, public by design; a personal API key is refused), the host PostHog's own ingest address (`https://us.i.posthog.com` or `https://eu.i.posthog.com`; https only, or http on this machine for the e2e stand-in, and only its origin counts). The browser never calls that host: the screen sends to our own `/roadie` and the route under `app/roadie` forwards it there (QWW-63), so the host says where that route forwards to, and its region picks the asset host too. Either missing or malformed and the app records to our own log alone, and `/roadie` answers 404. Read per request by `app/page.tsx` and `app/roadie` (`postHogSettings` and `postHogUpstream` in `src/lib/server/config.ts`). `VERCEL_ENV` (set by Vercel) tags every event `production`, `preview` or, anywhere else, `local` |
 | `PICK_SONGS` | `on` shows "or pick songs you sing well" on the title screen and "or use songs from your Spotify" under the range; unset, blank or any other value hides both (QWW-55: one onboarding flow for the first release; the Spotify logo on the list is then the one way to sign in). Read per request by `app/page.tsx` (`pickSongsOn` in `src/lib/server/config.ts`), not baked in at build time, so one build can serve it on or off; no API response changes |
 
 ## Store
@@ -458,15 +458,22 @@ be switched off (no key) and nothing else changes. What the sink keeps to:
   refuse `*.posthog.com` (AdGuard's tracking list blocks the whole `i.posthog.com` host; EasyPrivacy
   blocks its retries and `posthog-recorder.js`), and a tester with one sent nothing from production. So `api_host` is `POSTHOG_PROXY_PATH` (`/roadie`, in `src/lib/postHogProxy.ts`),
   `ui_host` is PostHog's own app, and `app/roadie/[...path]/route.ts` forwards to PostHog
-  (`src/lib/server/postHogProxy.ts`): events, replay and flags to its ingest host, `/static/` and
-  `/array/` (the recorder, the project's config) to its asset host (`us-assets.i.posthog.com`). Both
-  hosts come from `NEXT_PUBLIC_POSTHOG_HOST`, never from the request.
+  (`src/lib/server/postHogProxy.ts`): events, replay and flags (POST `/e/`, `/s/`, `/flags/`) to its
+  ingest host, the recorder and the like (GET `/static/<version>/<name>.js`) and our own project's config
+  (GET `/array/<our key>/config` and `.js`) to its asset host (`us-assets.i.posthog.com`). Both hosts
+  come from `NEXT_PUBLIC_POSTHOG_HOST`, never from the request. It is not a relay: everything else is a
+  404, because PostHog's hosts also serve source maps of several MB and a REST API, and a free relay on
+  our domain would hand them to anyone at our cost. (A new posthog-js that asks for another path needs
+  it added to `POST_PATH` or `SCRIPT_PATH`; the e2e shows which call fails.)
   - **The path's name.** PostHog's suggested `/ingest` has rules on the lists (uBlock's privacy list and
     AdGuard match `/ingest/...ip=`; this posthog-js sends no `ip=`, so they miss today, but it is the
     name lists learn first). `/roadie` matched none of EasyList, EasyPrivacy, uBlock filters and
     privacy, AdGuard base and tracking or Peter Lowe's, for every URL posthog-js asks for under it
-    (checked 12 Nov 2026 by loading the lists into `@ghostery/adblocker`). Repeat that before renaming it,
-    and rename the folder under `app/` with it (a test keeps the two together).
+    (checked 12 Nov 2026). To repeat that before renaming it: download the lists (easylist.to,
+    ublockorigin.github.io/uAssets, filters.adtidy.org), load each with `FiltersEngine.parse` from
+    `@ghostery/adblocker` (installed in a scratch folder, not in this repo) and match each URL as a
+    first-party `xhr` or `script` request. Rename the folder under `app/` with the constant (a test keeps
+    the two together).
   - **The recorder's file name.** EasyPrivacy and AdGuard match `/posthog-recorder.js` under any path,
     so posthog-js's `rewriteRequestPath` asks for `reel.js` and the route puts the real name back. A
     file name that gets listed later is one more pair in `postHogProxy.ts`.
@@ -474,15 +481,21 @@ be switched off (no key) and nothing else changes. What the sink keeps to:
     because a rewrite passes the browser's headers on whole, and `kd_session` holds the Spotify id of
     someone signed in: with a plain rewrite the e2e stand-in received it with every event, and PostHog's
     `Set-Cookie` landed on our origin. The route forwards `content-type`, `accept`, `user-agent` and
-    `x-forwarded-for` (the visitor's address, which PostHog saw before as well) and returns `cache-control`
-    and a `content-type` that is JSON, JavaScript or plain text, as PostHog's are (any other type, a page
-    above all, goes back as plain text, with `nosniff`, so nothing PostHog says can be shown as a page on
-    our origin); nothing else, in either direction.
-  - **When it fails.** PostHog down or slower than 8 s: 502, and the library's own retries and our log
-    carry on. PostHog off here: 404, so the route is no relay for anything else. Anything but GET and
-    POST: 405. `next.config.ts` sets `skipTrailingSlashRedirect` because PostHog's paths end in a slash
-    (`/e/`, `/s/`); the site's own pages then serve `/credits/` as they serve `/credits`, with no redirect.
-    Vercel caps a function's request body at 4.5 MB, which a compressed replay chunk stays well under.
+    `x-forwarded-for` (the visitor's address, which PostHog saw before as well) and returns `cache-control`,
+    `retry-after` (posthog-js backs off by it) and a `content-type` that is JSON, JavaScript or plain
+    text, as PostHog's are (the type that goes back is ours for that family, and plain text for any other,
+    a page above all, with `nosniff`, so nothing PostHog says can be shown as a page on our origin);
+    nothing else, in either direction. The browser's cookies do arrive at the route, as the call is
+    same-origin, so never log its request headers.
+  - **When it fails.** PostHog down, or not starting to answer within 8 s: 502, and the library's own
+    retries and our log carry on. A 502 also logs a `[posthog] could not forward ...` line (the host and
+    why, never a header), the one sign of a host that is mistyped in the environment. A redirect from
+    PostHog is not followed (502). PostHog off here: 404. Another site's page calling the route (it says
+    `Sec-Fetch-Site: cross-site`): 403. A body above 4 MB, which is Vercel's limit as well: 413. Any
+    method but GET and POST that reaches the route: 405 (Next answers OPTIONS itself).
+    `next.config.ts` sets `skipTrailingSlashRedirect` because PostHog's paths end in a slash (`/e/`,
+    `/s/`); the site's own pages then serve `/credits/` as they serve `/credits`, with no redirect.
+    A WAF rate limit on `/roadie/*` in Vercel's dashboard would cap what any one address can do with it.
 
 The `/credits` page tells testers this in plain words (`ANALYTICS_NOTE` in `src/lib/credits.ts`); change both together.
 

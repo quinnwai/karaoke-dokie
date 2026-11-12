@@ -91,13 +91,13 @@ describe('postHogUpstream (QWW-63): where the proxy forwards to', () => {
   const upstream = (host: string) => postHogUpstream({ ...env, NEXT_PUBLIC_POSTHOG_HOST: host });
 
   it('is PostHog\'s ingest host for events, and its asset host for scripts and config, per region', () => {
-    expect(upstream('https://us.i.posthog.com')).toEqual({ api: 'https://us.i.posthog.com', assets: 'https://us-assets.i.posthog.com' });
-    expect(upstream('https://eu.i.posthog.com/')).toEqual({ api: 'https://eu.i.posthog.com', assets: 'https://eu-assets.i.posthog.com' });
+    expect(upstream('https://us.i.posthog.com')).toEqual({ api: 'https://us.i.posthog.com', assets: 'https://us-assets.i.posthog.com', key: KEY });
+    expect(upstream('https://eu.i.posthog.com/')).toEqual({ api: 'https://eu.i.posthog.com', assets: 'https://eu-assets.i.posthog.com', key: KEY });
   });
 
   it('serves both from one host when it is not PostHog\'s cloud: a self-hosted PostHog, or the stand-in in e2e', () => {
-    expect(upstream('https://posthog.example.com')).toEqual({ api: 'https://posthog.example.com', assets: 'https://posthog.example.com' });
-    expect(upstream('http://127.0.0.1:4010')).toEqual({ api: 'http://127.0.0.1:4010', assets: 'http://127.0.0.1:4010' });
+    expect(upstream('https://posthog.example.com')).toEqual({ api: 'https://posthog.example.com', assets: 'https://posthog.example.com', key: KEY });
+    expect(upstream('http://127.0.0.1:4010')).toEqual({ api: 'http://127.0.0.1:4010', assets: 'http://127.0.0.1:4010', key: KEY });
   });
 
   it('keeps only the origin: a path, query or fragment is dropped', () => {

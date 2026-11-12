@@ -2,8 +2,12 @@
 // privacy blockers that refuse *.posthog.com do not hide it. Written by hand rather than as a Next.js rewrite because a
 // rewrite passes the browser's headers on whole, and our session cookie (kd_session) holds the Spotify id of someone
 // signed in: PostHog would get it with every event, against what /credits promises. Here nothing is forwarded that is not
-// named below, and nothing PostHog sends back is passed on but a type and a caching rule, so no cookie moves either way.
-// It also serves PostHog's answers from our origin, so what it says can never be shown there as a page (see SAFE_TYPE).
+// named below, and nothing PostHog sends back is passed on but a type and two caching rules, so no cookie moves either way.
+// The browser's cookies do arrive here (the call is same-origin), so never log this request's headers.
+//
+// It is not a relay either: it answers only the calls posthog-js makes with our settings, to our own project, and 404 to
+// everything else. PostHog's hosts also serve source maps of several MB and a REST API, which a free relay on our domain
+// would hand to anyone at our cost.
 
 import { fromProxyPath, POSTHOG_PROXY_PATH } from '../postHogProxy';
 import type { PostHogUpstream } from './config';
@@ -14,29 +18,56 @@ import type { PostHogUpstream } from './config';
  */
 const FORWARDED = ['content-type', 'accept', 'user-agent', 'x-forwarded-for'];
 /** What of PostHog's answer goes back besides its type: not its cookies, and not its encoding or length, which fetch has already undone. */
-const RETURNED = ['cache-control'];
+const RETURNED = ['cache-control', 'retry-after'];
 /**
- * The types PostHog really sends: JSON for its answers, JavaScript for its scripts, plain text for its errors. Any other
- * type, a page above all, goes back as plain text (and with nosniff), so nothing PostHog says, or a path someone makes up
- * for it to answer, can be shown as a page on our origin, where a script would act as the signed-in visitor.
+ * The types PostHog really sends: JSON for its answers, JavaScript for its scripts, plain text for its errors. The type that
+ * goes back is ours for the family PostHog's belongs to, and plain text for anything else (a page above all, or a header
+ * that says two things), with nosniff: nothing PostHog says can be shown as a page on our origin, where a script would
+ * act as the signed-in visitor.
  */
-const SAFE_TYPE = /^(application\/(json|javascript)|text\/(javascript|plain))\s*(;|$)/i;
-/** Long enough for PostHog to take a replay chunk, short enough to stay under Vercel's 10 s function default and answer 502 ourselves. */
+const TYPES: [RegExp, string][] = [
+  [/^application\/json\s*(;|,|$)/i, 'application/json'],
+  [/^(application|text)\/javascript\s*(;|,|$)/i, 'application/javascript'],
+  [/^text\/plain\s*(;|,|$)/i, 'text/plain; charset=utf-8'],
+];
+const PLAIN = 'text/plain; charset=utf-8';
+/** Long enough for PostHog to start answering a replay chunk, short enough to stay under Vercel's 10 s function default and answer 502 ourselves. */
 const TIMEOUT_MS = 8_000;
+/** Vercel refuses a function's request body above 4.5 MB; so do we, anywhere else. */
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
-/** PostHog's scripts and config come from its asset host; events, replay and flags go to its ingest host. */
-const ASSET_PATH = /^\/(static|array)\//;
+/** What posthog-js POSTs to PostHog's ingest host: events, replay and feature flags (and the newer capture path for events). */
+const POST_PATH = /^\/(e|s|flags|i\/v0\/e)\/?$/;
+/** A version number, as in PostHog's /static/1.447.7/ folder. */
+const VERSION = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`;
+/** The scripts it loads from PostHog's asset host: the recorder and the like, a .js file and never a source map. */
+const SCRIPT_PATH = new RegExp(String.raw`^/static/(?:${VERSION}/)?[A-Za-z0-9_-][A-Za-z0-9._-]*\.js$`);
 
-export async function proxyToPostHog(req: Request, upstream: PostHogUpstream, doFetch: typeof fetch = fetch): Promise<Response> {
+/** The path PostHog is asked for, and which of its hosts has it; null when the screen has no business asking. */
+function route(method: string, path: string, upstream: PostHogUpstream): { host: string; path: string } | null {
+  if (method === 'POST') return POST_PATH.test(path) ? { host: upstream.api, path } : null;
+  // The project's config, ours alone: another project's would be a script of theirs served from our origin.
+  if (path === `/array/${upstream.key}/config` || path === `/array/${upstream.key}/config.js`) return { host: upstream.assets, path };
+  return SCRIPT_PATH.test(path) ? { host: upstream.assets, path } : null;
+}
+
+export async function proxyToPostHog(
+  req: Request,
+  upstream: PostHogUpstream,
+  doFetch: typeof fetch = fetch,
+  timeoutMs: number = TIMEOUT_MS,
+): Promise<Response> {
   if (req.method !== 'GET' && req.method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'GET, POST' } });
+  // Our own screen is same-origin. Another site's page calling this route would be borrowing it.
+  if (req.headers.get('sec-fetch-site') === 'cross-site') return new Response(null, { status: 403 });
   const url = new URL(req.url);
   if (!url.pathname.startsWith(`${POSTHOG_PROXY_PATH}/`)) return new Response(null, { status: 404 });
 
-  const path = fromProxyPath(url.pathname.slice(POSTHOG_PROXY_PATH.length));
-  const origin = ASSET_PATH.test(path) ? upstream.assets : upstream.api;
+  const wanted = route(req.method, fromProxyPath(url.pathname.slice(POSTHOG_PROXY_PATH.length)), upstream);
+  if (!wanted) return new Response(null, { status: 404 });
   // The path is set on a fixed origin, never resolved against it, so nothing in it (a "//host" or a "..") can name another host.
-  const target = new URL(origin);
-  target.pathname = path;
+  const target = new URL(wanted.host);
+  target.pathname = wanted.path;
   target.search = url.search;
 
   const headers = new Headers();
@@ -47,10 +78,22 @@ export async function proxyToPostHog(req: Request, upstream: PostHogUpstream, do
 
   let answer: Response;
   try {
-    const body = req.method === 'POST' ? await req.arrayBuffer() : undefined;
-    answer = await doFetch(target, { method: req.method, headers, body, signal: AbortSignal.timeout(TIMEOUT_MS) });
-  } catch {
-    // PostHog down, slow or unreachable: the screen's own retries and our own event log carry on.
+    let body: ArrayBuffer | undefined;
+    if (req.method === 'POST') {
+      if (Number(req.headers.get('content-length')) > MAX_BODY_BYTES) return new Response(null, { status: 413 });
+      body = await req.arrayBuffer();
+      if (body.byteLength > MAX_BODY_BYTES) return new Response(null, { status: 413 });
+    }
+    // Not followed: a redirect would send the visitor's address and browser name to wherever it points.
+    answer = await doFetch(target, { method: req.method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+  } catch (err) {
+    // PostHog down, slow or unreachable: the screen's own retries and our own event log carry on. The line is the only
+    // sign of a host that is mistyped in the environment, when every call comes back 502.
+    console.error(`[posthog] could not forward ${req.method} ${target.host}${target.pathname}: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`);
+    return new Response(null, { status: 502 });
+  }
+  if (answer.status >= 300 && answer.status < 400 && answer.status !== 304) {
+    console.error(`[posthog] ${target.host}${target.pathname} answered ${answer.status}, a redirect, which is not followed`);
     return new Response(null, { status: 502 });
   }
 
@@ -60,7 +103,7 @@ export async function proxyToPostHog(req: Request, upstream: PostHogUpstream, do
     if (value) out.set(name, value);
   }
   const type = answer.headers.get('content-type') ?? '';
-  out.set('content-type', SAFE_TYPE.test(type) ? type : 'text/plain; charset=utf-8');
+  out.set('content-type', TYPES.find(([family]) => family.test(type))?.[1] ?? PLAIN);
   out.set('x-content-type-options', 'nosniff');
   return new Response([204, 205, 304].includes(answer.status) ? null : answer.body, { status: answer.status, headers: out });
 }

@@ -86,10 +86,12 @@ export function postHogSettings(env: Record<string, string | undefined>): PostHo
   return { key: posthog.key, host: POSTHOG_PROXY_PATH, uiHost: posthog.origin.replace('.i.posthog.com', '.posthog.com'), environment };
 }
 
-/** The two PostHog origins our proxy forwards to (QWW-63): PostHog serves its scripts and config from a separate asset host. */
+/** What our proxy forwards to (QWW-63): PostHog serves its scripts and config from a separate asset host, and the config is the project's own. */
 export interface PostHogUpstream {
   api: string;
   assets: string;
+  /** The project token: the one config the proxy serves is this project's. */
+  key: string;
 }
 
 /**
@@ -100,7 +102,7 @@ export function postHogUpstream(env: Record<string, string | undefined>): PostHo
   const posthog = readPostHog(env);
   if (!posthog) return null;
   // PostHog's cloud has an asset host per region (us-assets.i.posthog.com); any other host serves both itself.
-  return { api: posthog.origin, assets: posthog.origin.replace(/^https:\/\/(us|eu)\.i\.posthog\.com$/, 'https://$1-assets.i.posthog.com') };
+  return { api: posthog.origin, assets: posthog.origin.replace(/^https:\/\/(us|eu)\.i\.posthog\.com$/, 'https://$1-assets.i.posthog.com'), key: posthog.key };
 }
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);

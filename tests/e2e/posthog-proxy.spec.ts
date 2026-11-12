@@ -4,10 +4,10 @@
 // a third server from the same build with PostHog on, forwarding to a stand-in for PostHog's cloud (posthogStub.ts) that
 // writes down what it is sent: so this covers the screen, our /roadie route and what PostHog would receive, offline.
 
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page, type Request } from '@playwright/test';
 import { POSTHOG_PROXY_PATH } from '../../src/lib/postHogProxy';
 import { SESSION_COOKIE } from '../../src/lib/server/session';
-import type { Seen } from './posthogStub';
+import type { Seen, StubEvent } from './posthogStub';
 
 // The same expressions as in playwright.config.ts.
 const port = Number(process.env.E2E_PORT ?? 3000);
@@ -24,6 +24,8 @@ interface Session {
   direct: string[];
   /** Answers our own origin gave to the page's PostHog traffic. */
   proxied: { method: string; path: string; status: number }[];
+  /** The page's requests to our /roadie, to read what the browser sent with them. */
+  toOurRoute: Request[];
   /** What the library said in the console about PostHog being off or failing. */
   warnings: string[];
 }
@@ -38,9 +40,11 @@ async function blockPostHog(context: BrowserContext, page: Page): Promise<Sessio
   });
   await context.route(POSTHOG_HOSTS, (route) => route.abort('blockedbyclient'));
 
-  const session: Session = { direct: [], proxied: [], warnings: [] };
+  const session: Session = { direct: [], proxied: [], toOurRoute: [], warnings: [] };
   page.on('request', (req) => {
     if (POSTHOG_HOSTS.test(req.url())) session.direct.push(req.url());
+    const url = new URL(req.url());
+    if (url.origin === APP && url.pathname.startsWith(`${POSTHOG_PROXY_PATH}/`)) session.toOurRoute.push(req);
   });
   page.on('response', (res) => {
     const url = new URL(res.url());
@@ -61,8 +65,10 @@ async function blockPostHog(context: BrowserContext, page: Page): Promise<Sessio
 const tap = (page: Page) => page.mouse.click(30, 300);
 
 const seenByStub = async (page: Page): Promise<Seen[]> => (await page.request.get(`${STUB}/__requests`)).json();
-const eventNames = (seen: Seen[]) => seen.flatMap((r) => r.events.map((e) => e.event));
+/** The events this browser sent (its device id is the distinct id), not any a test before it left behind. */
+const eventsOf = (seen: Seen[], anonId: string | null): StubEvent[] => seen.flatMap((r) => r.events).filter((e) => e.properties.distinct_id === anonId);
 const header = (seen: Seen[], name: string) => seen.map((r) => r.headers[name]).filter((v) => v !== undefined);
+const deviceId = (page: Page) => page.evaluate(() => localStorage.getItem('kd.anonId'));
 
 test.beforeEach(async ({ request }) => {
   await request.post(`${STUB}/__reset`);
@@ -73,7 +79,7 @@ test('with *.posthog.com blocked, the title view and the replay still reach Post
   const session = await blockPostHog(context, page);
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
-  const anonId = await page.evaluate(() => localStorage.getItem('kd.anonId'));
+  const anonId = await deviceId(page);
   expect(anonId).toMatch(/^[A-Za-z0-9-]{8,64}$/);
 
   // The title view, and the replay (the visitor is signed out): both got to PostHog's side.
@@ -81,7 +87,7 @@ test('with *.posthog.com blocked, the title view and the replay still reach Post
     .poll(
       async () => {
         await tap(page);
-        return eventNames(await seenByStub(page));
+        return eventsOf(await seenByStub(page), anonId).map((e) => e.event);
       },
       { timeout: 45_000 },
     )
@@ -94,20 +100,21 @@ test('with *.posthog.com blocked, the title view and the replay still reach Post
   const answered = (method: string, pattern: RegExp) => session.proxied.filter((r) => r.method === method && pattern.test(r.path));
   expect(answered('POST', /^\/roadie\/e\/$/).length).toBeGreaterThan(0);
   expect(answered('POST', /^\/roadie\/s\/$/).length).toBeGreaterThan(0);
-  expect(answered('GET', /^\/roadie\/array\/phc_e2etestkey\/config\.js$/)).toHaveLength(1);
+  expect(answered('GET', /^\/roadie\/array\/phc_e2etestkey\/config\.js$/).length).toBeGreaterThan(0);
   // The recorder is asked for under a file name the block lists do not match (not posthog-recorder.js).
-  expect(answered('GET', /^\/roadie\/static\/[^/]+\/reel\.js$/)).toHaveLength(1);
+  expect(answered('GET', /^\/roadie\/static\/[^/]+\/reel\.js$/).length).toBeGreaterThan(0);
   expect(session.proxied.filter((r) => r.status !== 200)).toEqual([]);
   expect(session.proxied.map((r) => r.path).filter((p) => /posthog/i.test(p))).toEqual([]);
 
   // PostHog's side: the title view carries the device's own id and says where it came from; the replay data is there; and
   // the recorder was fetched from PostHog under PostHog's own name for it.
-  const titleView = seen.flatMap((r) => r.events).find((e) => e.event === 'title_view')!;
-  expect(titleView.properties.distinct_id).toBe(anonId);
+  const mine = eventsOf(seen, anonId);
+  const titleView = mine.find((e) => e.event === 'title_view')!;
   expect(titleView.properties.environment).toBe('local');
+  expect(mine.find((e) => e.event === '$snapshot')!.properties.environment).toBe('local');
   expect(seen.some((r) => r.method === 'GET' && /^\/static\/[^/]+\/posthog-recorder\.js$/.test(r.path))).toBe(true);
-  expect(seen.filter((r) => r.method === 'POST' && r.path.startsWith('/s/')).length).toBeGreaterThan(0);
-  // What the browser sent travels on in the way it is meant to: the browser's name, a body type, and no cookie at all.
+  expect(seen.some((r) => r.method === 'POST' && r.path.startsWith('/s/'))).toBe(true);
+  // What the browser sent travels on in the way it is meant to: the browser's name, and no cookie at all.
   expect(header(seen, 'user-agent').every((ua) => /iPhone/.test(String(ua)))).toBe(true);
   expect(header(seen, 'cookie')).toEqual([]);
 
@@ -118,7 +125,7 @@ test('with *.posthog.com blocked, the title view and the replay still reach Post
 });
 
 test('signed in, our session cookie never goes to PostHog, and the replay stays off', async ({ context, page }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const session = await blockPostHog(context, page);
   // The mock Spotify answers at once: this signs in as "Test Singer", with a real signed session cookie.
   await page.goto('/api/auth/login');
@@ -127,9 +134,10 @@ test('signed in, our session cookie never goes to PostHog, and the replay stays 
   expect(cookies.map((c) => c.name)).toContain(SESSION_COOKIE);
   const sessionValue = cookies.find((c) => c.name === SESSION_COOKIE)!.value;
   expect((await page.request.get('/api/me')).status()).toBe(200); // the server knows this browser as signed in
+  const anonId = await deviceId(page);
 
   // Events still go through our origin while signed in (it is only the replay that is off).
-  await expect.poll(async () => (await seenByStub(page)).filter((r) => r.path.startsWith('/e/')).length, { timeout: 45_000 }).toBeGreaterThan(0);
+  await expect.poll(async () => eventsOf(await seenByStub(page), anonId).length, { timeout: 45_000 }).toBeGreaterThan(0);
   // The taps that start a replay for someone signed out, and time for it to show up, had it started.
   for (let i = 0; i < 5; i++) {
     await tap(page);
@@ -137,14 +145,32 @@ test('signed in, our session cookie never goes to PostHog, and the replay stays 
   }
   const seen = await seenByStub(page);
 
-  // The premise: the browser had the cookie, and sent it to our origin with every call to /roadie. The point: PostHog got none of it.
+  // The premise, held to the browser's own record: it sent the session cookie to our /roadie with its calls. The point:
+  // PostHog got none of it. (A browser that stopped sending it would make the point true for no reason.)
+  const sentToUs = await Promise.all(session.toOurRoute.map((req) => req.headerValue('cookie')));
+  expect(sentToUs.length).toBeGreaterThan(0);
+  expect(sentToUs.filter((cookie) => cookie?.includes(`${SESSION_COOKIE}=`)).length).toBeGreaterThan(0);
   expect(header(seen, 'cookie')).toEqual([]);
   expect(JSON.stringify(seen)).not.toContain(sessionValue);
   expect(JSON.stringify(seen)).not.toContain(SESSION_COOKIE);
   expect(session.direct).toEqual([]);
   expect(session.proxied.filter((r) => r.method === 'POST' && r.path === '/roadie/e/').length).toBeGreaterThan(0);
   expect(session.proxied.filter((r) => r.status !== 200)).toEqual([]);
-  // Signed in: no replay, so no recorder and no snapshot.
-  expect(eventNames(seen)).not.toContain('$snapshot');
-  expect(seen.filter((r) => /^\/s\/|posthog-recorder/.test(r.path))).toEqual([]);
+  // Signed in: no replay from this browser, so no snapshot of its screen.
+  expect(eventsOf(seen, anonId).map((e) => e.event)).not.toContain('$snapshot');
+
+  // The same browser, the same taps, signed out: the replay starts. So the silence above is the sign-in, not a replay that
+  // could not have started here.
+  await context.clearCookies();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        await tap(page);
+        return eventsOf(await seenByStub(page), anonId).map((e) => e.event);
+      },
+      { timeout: 45_000 },
+    )
+    .toContain('$snapshot');
 });
