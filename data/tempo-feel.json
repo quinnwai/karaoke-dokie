@@ -1792,7 +1792,7 @@
 {"keys":["ed sheeran|happier"],"feel":"slow"},
 {"keys":["ed sheeran|how would you feel"],"feel":"slow"},
 {"keys":["ed sheeran|i don’t care"],"feel":"mid"},
-{"keys":["ed sheeran|i see fire"],"feel":"mid"},
+{"keys":["ed sheeran|i see fire"],"feel":"slow","method":"manual/hand-fix-qww-54b"},
 {"keys":["ed sheeran|lego house"],"feel":"mid"},
 {"keys":["ed sheeran|nancy mulligan"],"feel":"upbeat"},
 {"keys":["ed sheeran|old phone"],"feel":"mid"},

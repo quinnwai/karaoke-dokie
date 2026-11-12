@@ -12,9 +12,10 @@ a measurement: no audio, no measured tempo and no lyrics went in. They were made
 songs, each batch a separate fresh run that saw only its own songs and the instructions below; a song the model did not know
 got no label, and a song that two batches labelled differently became "mid". The second look and the recheck are described
 further down. The file holds 6,196 labels, which cover 6,202 of the catalogue's 7,638 songs (81%) and 97 to 98% of the 300, 1,000, 2,000 and
-3,000 most popular: **685 slow, 3,737 mid and 1,780 upbeat songs**. Of the mids, 691 are songs a later pass
-took away a slow or upbeat label from (method `claude-opus-5-5/feel-recheck-v1`). One label was set by hand after review
-(method `manual/hand-fix-qww-54`): a-ha, Take On Me, from mid to upbeat.
+3,000 most popular: **686 slow, 3,736 mid and 1,780 upbeat songs**. Of the mids, 691 are songs a later pass
+took away a slow or upbeat label from (method `claude-opus-5-5/feel-recheck-v1`). Two labels were set by hand after review:
+a-ha, Take On Me, from mid to upbeat (method `manual/hand-fix-qww-54`), and Ed Sheeran, I See Fire, from mid to slow
+(method `manual/hand-fix-qww-54b`).
 
 The labels are tuned for precision at the two ends: the instructions say to answer slow or upbeat only when it is
 unmistakable, and mid otherwise. So a song missing from an end is expected, and a song at an end has been vouched for.
@@ -36,6 +37,15 @@ into 70 to 180) puts them like this, by label:
 
 So most slow songs are read at double time or more, and no rule on the numbers alone can tell them from a fast song. With
 the label, 228 of the 297 slow songs are halved into the slow band, 53 go to its top edge and 16 were already in it.
+
+## A mid label can hide a slow song
+
+Mid is not neutral for a song read at double time. A label only moves a reading by whole octaves when that is cheaper than
+leaving it, so a slow ballad whose reading sits near the mid band stays there and is pinned just inside the top edge of the
+mid band (about 125 bpm), right under every upbeat song. That is what happened to Ed Sheeran's "I See Fire", labelled mid: 124.8
+bpm and 72 of 100 on the Tempo gear, near the top at "Upbeat tracks". With the slow label the same reading is halved into the
+slow band. So a wrong mid on a slow or upbeat song shows as a song pinned within a bpm or two of an edge of its band (90 or
+125) while its reading says otherwise; that is where to look for wrong labels.
 
 ## The instructions (feel-v1)
 
