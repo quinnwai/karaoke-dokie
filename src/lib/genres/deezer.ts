@@ -6,7 +6,7 @@
 
 import { isMissingTable } from '../server/songFeel';
 import type { SongDeezerRecord, SongGenreRecord, Store } from '../server/store';
-import { hasGenre } from './genres';
+import { nonBlank } from './genres';
 
 /** song_genre's source for the rows written here. */
 export const GENRE_SOURCE = 'deezer-album';
@@ -15,7 +15,7 @@ export const GENRE_SOURCE = 'deezer-album';
  * 8 a second (src/lib/popularity/deezer.ts), so this stays at 5 a second, half the limit.
  */
 export const REQUESTS_PER_SECOND = 5;
-/** How long a miss stands before a rerun asks Deezer again. Genres, once found, are kept. */
+/** How long a miss stands before a rerun asks Deezer again. Genres, once found, are kept while the song's Deezer match stands. */
 export const RECHECK_DAYS = 90;
 /** Songs looked up at a time; the client spaces their requests. */
 const CONCURRENCY = 5;
@@ -94,8 +94,10 @@ export interface GenreSong {
 }
 
 /**
- * The songs to look up, in order: every song with a Deezer track that has no song_genre row, or only a miss older than
- * RECHECK_DAYS. Songs USDB gives no genre come first, since only theirs are shown, then the most popular (best Deezer rank).
+ * The songs to look up, in order: every song with a Deezer track that has no song_genre row, only a miss older than
+ * RECHECK_DAYS, or a row older than its Deezer match (popularity:deezer checked the song again since, and may have picked
+ * another track, on another album). Songs USDB gives no genre come first, since only theirs are shown, then the most
+ * popular (best Deezer rank).
  */
 export function genresDue(
   deezer: Iterable<SongDeezerRecord>,
@@ -103,10 +105,13 @@ export function genresDue(
   usdbGenre: (key: string) => boolean,
   now: number,
 ): GenreSong[] {
-  const stands = (g: SongGenreRecord | undefined) => g !== undefined && (hasGenre(g.genres) || now - Date.parse(g.checkedAt) < RECHECK_DAYS * 86_400_000);
+  const stands = (g: SongGenreRecord | undefined, d: SongDeezerRecord) =>
+    g !== undefined &&
+    !(Date.parse(d.checkedAt) > Date.parse(g.checkedAt)) && // an unreadable time never counts as newer
+    (nonBlank(g.genres) !== undefined || now - Date.parse(g.checkedAt) < RECHECK_DAYS * 86_400_000);
   const due: GenreSong[] = [];
   for (const d of deezer) {
-    if (d.deezerId === undefined || stands(done.get(d.key))) continue;
+    if (d.deezerId === undefined || stands(done.get(d.key), d)) continue;
     due.push({ key: d.key, deezerId: d.deezerId, rank: d.rank ?? 0, usdbGenre: usdbGenre(d.key) });
   }
   return due.sort((a, b) => Number(a.usdbGenre) - Number(b.usdbGenre) || b.rank - a.rank || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
@@ -154,7 +159,7 @@ export async function runGenreFetch(
     throw err;
   });
   const usdb = await store.findUsdbSongs(withTrack.map((d) => d.key));
-  const due = genresDue(withTrack, done, (key) => hasGenre(usdb.get(key)?.genre), now().getTime());
+  const due = genresDue(withTrack, done, (key) => nonBlank(usdb.get(key)?.genre) !== undefined, now().getTime());
   const todo = opts.dryRun ? [] : due.slice(0, opts.limit);
   const gaps = due.filter((s) => !s.usdbGenre).length;
   log(
@@ -169,7 +174,10 @@ export async function runGenreFetch(
   // Each album is read once: the first song on it starts the read, and the others wait for it. Albums whose genres an
   // earlier run found are known already, so a song on one needs only its track looked up.
   const albums = new Map<number, Promise<string[] | null>>();
-  for (const g of done.values()) if (g.albumId !== undefined && hasGenre(g.genres)) albums.set(g.albumId, Promise.resolve(g.genres.split(', ')));
+  for (const g of done.values()) {
+    const genres = nonBlank(g.genres);
+    if (g.albumId !== undefined && genres) albums.set(g.albumId, Promise.resolve(genres.split(', ')));
+  }
   let albumsRead = 0;
   const genresOf = (albumId: number) => {
     let read = albums.get(albumId);

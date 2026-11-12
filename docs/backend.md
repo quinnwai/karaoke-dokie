@@ -12,7 +12,7 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | POST | `/api/auth/logout` | | `{ ok: true }`, clears the session cookie |
 | GET | `/api/me` | | `MeResponse` |
 | PUT | `/api/me/range` | `VocalRange` | `{ ok: true }`; 400 unless `low`/`high` are integers, 28 <= low < high <= 96, span 5..48, `source` is `test` or `songs` |
-| GET | `/api/recommendations` | `offset` (default 0), `limit` (1..50, default 5), or `all=1` | `RecommendationsResponse`; songs with a low-confidence range come last with `difficulty: 'maybe'` (the Maybe group); 409 `{ error: 'no-range' }` before a range is saved. `all=1` ignores `offset` and `limit` and sends every match (at most 1,000, the best-ranked) with its `year` and `yearSource` (the earlier of USDB's and Spotify's album year, else the Billboard Year-End chart year, `chart`), `genre` (USDB's), USDB views and stars for songs whose range has none, and no pitch histograms; it is ranked with karaoke popularity too (see Song popularity), which is not sent. `complete: true` when that is every match. `complete: false` with a `nextOffset` means lookups ran out of budget (a first visit to a very large library): ask `all=1` again to carry on, not a page from `nextOffset`, since pages rank without the USDB and karaoke popularity. `complete: false` with `nextOffset: null` means the list was cut at 1,000 |
+| GET | `/api/recommendations` | `offset` (default 0), `limit` (1..50, default 5), or `all=1` | `RecommendationsResponse`; songs with a low-confidence range come last with `difficulty: 'maybe'` (the Maybe group); 409 `{ error: 'no-range' }` before a range is saved. `all=1` ignores `offset` and `limit` and sends every match (at most 1,000, the best-ranked) with its `year` and `yearSource` (the earlier of USDB's and Spotify's album year, else the Billboard Year-End chart year, `chart`), `genre` (USDB's, else Deezer's album genres; see Song genre), USDB views and stars for songs whose range has none, and no pitch histograms; it is ranked with karaoke popularity too (see Song popularity), which is not sent. `complete: true` when that is every match. `complete: false` with a `nextOffset` means lookups ran out of budget (a first visit to a very large library): ask `all=1` again to carry on, not a page from `nextOffset`, since pages rank without the USDB and karaoke popularity. `complete: false` with `nextOffset: null` means the list was cut at 1,000 |
 | GET | `/api/songs/known` | | `KnownSongsResponse` (up to 50 library songs with a known range, play order); `{ songs: [], libraryUnavailable: true }` when the library cannot be read |
 | POST | `/api/feedback` | `FeedbackRequest` (`difficulty` may be `maybe`; optional `view`, the results view the song was found in) | `{ ok: true }`; 400 on bad input, including a `view` without `difficulty`, `familiarity` and `popularity` that are each null or a number from 0 to 1, a `decade` and `mood` that are known or null, and a boolean `duetsOnly`; 409 before a range is saved. Stored with the user's current range, the view (`view_json`) and, when the song is in the cached library, its range at that moment (`range_source` = the log outcome, `range_method`, `range_low`, `range_high`); the tap never loads the library from Spotify |
 | GET | `/api/admin/log` | header `x-admin-token`, `limit` (1..1000, default 200) | `{ entries: DataSourceLogEntry[] }`, newest first; 403 on a wrong token or when `ADMIN_TOKEN` is unset |
@@ -399,6 +399,22 @@ FROM feedback f LEFT JOIN song_canonical c ON f.track_id = 'cat:' || c.song_key;
 ("Diddy – Dirty Money", "DiddyDirtyMoney") stays two rows. Apostrophes are set aside entirely, so "I'll" and "Ill" by one
 artist would fold.
 Rerun the build after `usdb:sync`, `ranges:import`, `popularity:*` or the octave fix changes titles, ranges or popularity.
+
+## Song genre (QWW-61)
+
+A song's genre (`Match.genre`) is USDB's `#GENRE` when the note file names one: free text, and the richer label. Otherwise
+it is the genres Deezer gives the album of the song's Deezer track, joined by ", " ("Pop, Rock"), from `song_genre` (one
+additive table, `IF NOT EXISTS`). `shownGenre` (`src/lib/genres/genres.ts`) picks it, when the catalogue loads and for
+a library's whole list. A database with no `song_genre` table, or an empty one, gives USDB's genres only, as before.
+
+- `npm run genres:deezer -- --max-minutes 9`, repeated until it reports nothing left: for each song `popularity:deezer`
+  matched, `GET /track/<id>` names the album and `GET /album/<id>` lists its genres, each album read once. Songs with
+  no USDB genre go first, then the most popular. A miss (the track or album is gone, or the album lists no genre) is a
+  row with no genres, asked again after 90 days; a row older than the song's `song_deezer` check is read again, since
+  the match may have changed. Paced at 5 requests a second; stops after 20 failures in a row. Never runs at page load.
+- `-- --dry-run` only reads (no migration, no Deezer, no writes): what is due, and the genre coverage now and at most
+  after a full run, for measured songs and the release harness's nine logged-out lists. `--limit N` caps a run.
+- Rollback: `DELETE FROM song_genre;`.
 
 ## Beta event log
 

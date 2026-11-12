@@ -168,7 +168,10 @@ export interface Match {
    * tempo (Deezer, a beat tracker or the note file, QWW-40) squeezed into 90 to 125. Not a plain bpm. Unset when unknown.
    */
   tempo?: number;
-  /** Genre as USDB lists it (free text, e.g. "Rock"). */
+  /**
+   * Genre: USDB's when it lists one (free text, e.g. "Rock"), else the genres Deezer gives the album of the song's Deezer
+   * track, joined by ", " ("Pop, Rock"; song_genre, QWW-61). Unset when neither has one.
+   */
   genre?: string;
   /** For a duet matched on one singer's part: which part (1 = P1, 2 = P2) and that singer's name. */
   part?: number;

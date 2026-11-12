@@ -10,13 +10,12 @@
 import { isMissingTable } from '../server/songFeel';
 import type { Store } from '../server/store';
 
-/** True for a genre with something in it: USDB rows can hold an empty one. */
-export const hasGenre = (genre: string | undefined): genre is string => Boolean(genre?.trim());
+/** The genre, or undefined when there is none: USDB rows can hold an empty one. */
+export const nonBlank = (genre: string | undefined): string | undefined => (genre?.trim() ? genre : undefined);
 
 /** The genre a song shows: USDB's when it has one, else Deezer's album genres ("Pop, Rock"), else none. */
 export function shownGenre(usdb: string | undefined, deezer: string | undefined): string | undefined {
-  if (hasGenre(usdb)) return usdb;
-  return hasGenre(deezer) ? deezer : undefined;
+  return nonBlank(usdb) ?? nonBlank(deezer);
 }
 
 /** Deezer's genres for the keys that have some, by song key; misses are left out. */
@@ -31,6 +30,9 @@ export async function readSongGenres(store: Partial<Pick<Store, 'getSongGenres'>
     return new Map();
   }
   const out = new Map<string, string>();
-  for (const [key, row] of rows) if (hasGenre(row.genres)) out.set(key, row.genres);
+  for (const [key, row] of rows) {
+    const genres = nonBlank(row.genres);
+    if (genres) out.set(key, genres);
+  }
   return out;
 }

@@ -72,6 +72,31 @@ describe('Deezer genre client (QWW-61)', () => {
     expect(await client.albumGenres(3)).toEqual([]);
   });
 
+  it("spaces requests 200 ms apart (5 a second, half of Deezer's 50 per 5 s), and waits 5 s after a quota error", async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: T0 });
+    try {
+      const sent: number[] = [];
+      const waits: number[] = [];
+      let quota = 1;
+      const fetch: Fetch = async (url) => {
+        sent.push(Date.now() - T0);
+        const body = url.endsWith('/track/3') && quota-- > 0 ? { error: { type: 'Exception', message: 'Quota limit exceeded', code: 4 } } : { album: { id: 9 } };
+        return { ok: true, status: 200, json: async () => body };
+      };
+      const sleep = async (ms: number) => {
+        waits.push(ms);
+        vi.setSystemTime(Date.now() + ms); // the clock moves only while the client waits
+      };
+      const client = createGenreClient({ fetch, sleep });
+      for (const id of [1, 2, 3, 4]) expect(await client.trackAlbum(id)).toBe(9);
+      // track 3 is answered with a quota error, waited out (5 s) and asked again
+      expect(sent).toEqual([0, 200, 400, 5400, 5600]);
+      expect(waits).toEqual([200, 200, 5000, 200]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('waits out a quota error and asks again, and gives up at once when the CDN refuses us (403)', async () => {
     let quota = 1;
     const { client, requests } = fakeDeezer({ 5: 50 }, {}, (path) => {
@@ -119,6 +144,40 @@ describe('npm run genres:deezer (runGenreFetch, QWW-61)', () => {
     expect(requests.filter((r) => r.startsWith('track/'))).toHaveLength(8);
     expect(result).toMatchObject({ hits: 8, albumsRead: 2 });
     expect([...(await store.listSongGenres()).values()].map((g) => g.genres)).toEqual([...Array(7).fill('Pop'), 'Jazz']);
+  });
+
+  it('does not keep a failed album read: the songs waiting on it fail, and the next song on the album reads it again', async () => {
+    // seven songs on album 100, whose first read fails (both tries); the second read works
+    const songs = Array.from({ length: 7 }, (_, i) => ({ key: `artist|song ${i}`, deezerId: i + 1, rank: 1000 - i }));
+    const store = await storeWith(songs);
+    let failures = 2;
+    const { client, requests } = fakeDeezer(Object.fromEntries(songs.map((s) => [s.deezerId, 100])), { 100: ['Pop'] }, (path) =>
+      path === 'album/100' && failures-- > 0 ? { status: 500 } : undefined,
+    );
+    const result = await runGenreFetch(store, client, { now: at(T0), ...quiet });
+    expect(result.errors).toBeGreaterThanOrEqual(1);
+    expect(result.hits).toBeGreaterThanOrEqual(2); // at least the songs started after the failure
+    expect(result.hits + result.errors).toBe(7);
+    expect(result.albumsRead).toBe(2);
+    expect(requests.filter((r) => r === 'album/100')).toHaveLength(3); // the failed read's two tries, then one read that works
+    // the failed songs were not recorded; the rerun finds them, with the album's genres known from the songs that worked
+    const rerun = await runGenreFetch(store, client, { now: at(T0), ...quiet });
+    expect(rerun).toMatchObject({ todo: result.errors, hits: result.errors, errors: 0, albumsRead: 0 });
+  });
+
+  it("looks a song up again once popularity:deezer has checked its match since: the track, and its album, may have changed", async () => {
+    const store = await storeWith([
+      { key: 'a|rematched', deezerId: 1 },
+      { key: 'a|same', deezerId: 3 },
+    ]);
+    const { client } = fakeDeezer({ 1: 100, 2: 200, 3: 300 }, { 100: ['Pop'], 200: ['Rock'], 300: ['Jazz'] });
+    await runGenreFetch(store, client, { now: at(T0), ...quiet });
+    // a day later popularity:deezer matches 'a|rematched' to another track; 'a|same' was checked before its genres were read
+    await store.putSongDeezer([{ key: 'a|rematched', rank: 1000, deezerId: 2, checkedAt: new Date(T0 + DAY).toISOString() }]);
+    const later = await runGenreFetch(store, client, { now: at(T0 + 2 * DAY), ...quiet });
+    expect(later.due.map((s) => s.key)).toEqual(['a|rematched']);
+    expect((await store.listSongGenres()).get('a|rematched')).toMatchObject({ genres: 'Rock', albumId: 200 });
+    expect((await runGenreFetch(store, client, { now: at(T0 + 2 * DAY), ...quiet })).due).toEqual([]);
   });
 
   it('reuses album genres an earlier run found: a song on that album needs only its track read', async () => {
