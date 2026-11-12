@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { isWeakLabelSource } from '../../src/lib/tempo/feel';
 import { feelRows, parseFeelFile } from '../../src/lib/tempo/feelFile';
 
 const file = (labels: unknown, extra: Record<string, unknown> = {}) => JSON.stringify({ method: 'test/v1', labeledAt: '2026-11-10', labels, ...extra });
@@ -48,5 +51,39 @@ describe('feelRows', () => {
   it('writes a row for every key of a label the catalogue knows under more than one', () => {
     const { rows } = feelRows(f, new Set(['mariah carey & boyz ii men|one sweet day', 'mariah carey|one sweet day']));
     expect(rows.map((r) => r.key)).toEqual(['mariah carey & boyz ii men|one sweet day', 'mariah carey|one sweet day']);
+  });
+});
+
+describe('data/tempo-feel.json: every method is classed as strict or weak on purpose (QWW-54)', () => {
+  // isWeakLabelSource knows the plain-definition passes by name and counts every other source as strict, so a typo in a method, or a
+  // new pass nobody classed, would silently rank as a clear label. Each method the file uses has to be in one of these two lists; a new
+  // one fails here until somebody decides which it is (and adds it to WEAK_LABEL_SOURCE in src/lib/tempo/feel.ts if it is weak).
+  const STRICT = [
+    'claude-opus-5-5/feel-v1', // the strict first pass
+    'claude-opus-5-5/feel-recheck-v1', // the strict recheck, which only takes labels away
+    'manual/hand-fix-qww-54', // a person's fix: Take On Me
+    'manual/hand-fix-qww-54b', // I See Fire
+    'manual/hand-fix-qww-54d', // the 12 Nov fixes after the review; a hand-set label counts as clear
+  ];
+  const WEAK = [
+    'claude-opus-5-5/feel-plain-v1', // the second look, plain definitions
+    'claude-opus-5-5/feel-edge-recheck-v1', // the band-edge audit, plain definitions
+  ];
+  const labels = parseFeelFile(readFileSync(join(__dirname, '../../data/tempo-feel.json'), 'utf8'));
+  const used = new Set([labels.method, ...labels.labels.map((l) => l.method ?? labels.method)]);
+
+  it('names every method the file uses', () => {
+    expect([...used].filter((m) => !STRICT.includes(m) && !WEAK.includes(m)).sort(), 'methods nobody has classed').toEqual([]);
+  });
+
+  it('agrees with isWeakLabelSource about each of them, so the lists above are what the ranking does', () => {
+    for (const m of STRICT) expect(isWeakLabelSource(m), `${m} is strict`).toBe(false);
+    for (const m of WEAK) expect(isWeakLabelSource(m), `${m} is weak`).toBe(true);
+    expect(STRICT.filter((m) => WEAK.includes(m))).toEqual([]);
+  });
+
+  it('has both kinds in it, so the check above is not about an empty list', () => {
+    expect([...used].some((m) => WEAK.includes(m))).toBe(true);
+    expect([...used].some((m) => STRICT.includes(m))).toBe(true);
   });
 });

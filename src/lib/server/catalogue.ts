@@ -15,7 +15,7 @@ import { partRange } from '../songs/match';
 import { hasLittleSinging } from '../songs/resolve';
 import { LANGUAGE_POPULARITY_WEIGHTS, languageWeight, usdbOnlyPopularity, withKaraokePopularity, withPopularityWeight, type LanguageWeights } from '../songs/score';
 import { prepareSetlist, rankPrepared, type PreparedSetlist, type RankedSetlist, type SetlistCandidate } from '../songs/setlist';
-import { effectiveTempo, type EffectiveSource } from '../tempo/feel';
+import { effectiveTempo, isWeakLabelSource, type EffectiveSource } from '../tempo/feel';
 import { readSongFeels } from './songFeel';
 import { MAX_ALL_MATCHES, type SongDeps } from './songService';
 import type { CatalogueSong, SongPopularityRecord, Store, UsdbIndexEntry } from './store';
@@ -102,7 +102,8 @@ export async function loadCatalogue(
   ]);
   const entries: LoadedCatalogue = songs.map((s) => {
     const p = popularity.get(s.key);
-    const t = effectiveTempo({ key: s.key, record: tempos.get(s.key), feel: feels.get(s.key)?.feel });
+    const label = feels.get(s.key);
+    const t = effectiveTempo({ key: s.key, record: tempos.get(s.key), feel: label?.feel, weak: isWeakLabelSource(label?.source) });
     const g = genres.get(s.key);
     return { ...s, ...(p ? { popularity: p } : {}), ...(t ? { tempo: t.tempo, tempoSource: t.source } : {}), ...(g ? { deezerGenres: g } : {}) };
   });

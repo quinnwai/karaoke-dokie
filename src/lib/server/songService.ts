@@ -13,7 +13,7 @@ import type {
 import type { SongPopularityRecord, SongRangeRecord, Store, UsdbIndexEntry } from './store';
 import { readSongGenres, shownGenre } from '../genres/genres';
 import { hasLittleSinging } from '../songs/resolve';
-import { effectiveTempo } from '../tempo/feel';
+import { effectiveTempo, isWeakLabelSource } from '../tempo/feel';
 import { readSongFeels } from './songFeel';
 import { withKaraokePopularity, type KaraokePopularity } from '../songs/score';
 
@@ -271,7 +271,8 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       const pop = popularity?.get(key);
       const m = deps.matchSong(track, index ? withKaraokePopularity(withIndexPopularity(range, row), pop) : range, userRange);
       if (!m) continue;
-      const tempo = effectiveTempo({ key, record: tempos?.get(key), feel: feels?.get(key)?.feel })?.tempo;
+      const label = feels?.get(key);
+      const tempo = effectiveTempo({ key, record: tempos?.get(key), feel: label?.feel, weak: isWeakLabelSource(label?.source) })?.tempo;
       const deezer = pop?.deezerId !== undefined ? { deezerId: pop.deezerId } : {};
       matches.push(index ? { ...m, ...songFacts(track, row, pop, genres?.get(key)), ...(tempo !== undefined ? { tempo } : {}), ...deezer } : m);
       logs.set(track.id, log);
