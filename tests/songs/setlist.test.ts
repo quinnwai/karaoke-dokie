@@ -769,6 +769,20 @@ describe('Tempo at an end: the songs at that end come before how a song is sung 
     expect(at(89)).toEqual(['fast-written', 'mid-written', 'slow-written', 'fast-jump', 'slow-jump']);
   });
 
+  it('counts a thumb at 6 to 10 (or 90 to 94) as the end itself: the songs in the band go slowest first, not nearest the thumb', () => {
+    // Eleven songs, places 0, 10, ... 100 on Tempo. 'weak-slow' rests at the top of the slow band and 'weak-fast' at the bottom of the
+    // upbeat band, as the weak labels of #49 do (89.5 to 89.9, 125 to 125.4), so a thumb at 10 or at 90 sits exactly on one of them.
+    const eleven = [
+      timed('clear-slow', 'none', 50), timed('weak-slow', 'none', 89.6), timed('mid-1', 'none', 95), timed('mid-2', 'none', 100), timed('mid-3', 'none', 105),
+      timed('mid-4', 'none', 110), timed('mid-5', 'none', 115), timed('mid-6', 'none', 120), timed('mid-7', 'none', 124), timed('weak-fast', 'none', 125.2), timed('clear-fast', 'none', 190),
+    ];
+    expect(at(0, eleven).slice(0, 2)).toEqual(['clear-slow', 'weak-slow']);
+    expect(at(100, eleven).slice(0, 2)).toEqual(['clear-fast', 'weak-fast']);
+    // Measured to the thumb, a thumb at 10 would put the weak song first; at the end it is the same list as at 0.
+    for (const tempo of [6, 8, 10]) expect(at(tempo, eleven), `tempo ${tempo}`).toEqual(at(0, eleven));
+    for (const tempo of [90, 92, 94]) expect(at(tempo, eleven), `tempo ${tempo}`).toEqual(at(100, eleven));
+  });
+
   it('keeps the songs sung as written first everywhere else on the track', () => {
     for (const tempo of [12, 25, 50, 75, 88]) {
       const r = at(tempo);
@@ -985,9 +999,16 @@ describe.each(TEST_RANGES)('%s', (_name, range) => {
   it('moves the list along the whole length of every gear (QWW-33): the top 10 differ between neighbouring tenths', () => {
     for (const g of ['difficulty', 'popularity', 'tempo'] as const) {
       const top = (v: number) => ids(rankPrepared(list.prepared, state({ off: ['history', 'era'], gears: { [g]: v, ...(g === 'popularity' ? {} : { popularity: 100 }) } })), 10);
+      // Tempo's first and last tenth are one stop: the thumb counts as the end there (QWW-54), so 0 to 10 and 90 to 100 are flat by design.
+      const flat = g === 'tempo' ? new Set([10, 100]) : new Set<number>();
       let moved = 0;
-      for (let v = 10; v <= 100; v += 10) if (top(v).some((id, i) => id !== top(v - 10)[i])) moved++;
-      expect(moved, g).toBeGreaterThanOrEqual(9);
+      let steps = 0;
+      for (let v = 10; v <= 100; v += 10) {
+        if (flat.has(v)) continue;
+        steps++;
+        if (top(v).some((id, i) => id !== top(v - 10)[i])) moved++;
+      }
+      expect(moved, g).toBeGreaterThanOrEqual(Math.ceil(0.9 * steps));
     }
   });
 });
@@ -1047,10 +1068,11 @@ describe.each(VOICE_RANGES)('%s: songs sung as written first (criterion 9)', (_n
         const inPart = sure.filter((x) => inBand(x) === part);
         const written = inPart.map(sungAsWritten);
         expect(written.indexOf(false) < 0 || !written.slice(written.indexOf(false)).includes(true), `tempo ${tempo}, ${part ? 'in' : 'out of'} the band: a song sung as written after a jump`).toBe(true);
-        // Nearest first inside each group of songs sung the same way, the ones with no tempo after those that have one.
+        // Nearest the end first inside each group of songs sung the same way (the thumb counts as the end, so Tempo 10 is Tempo 0).
+        const end = band === 'slow' ? 0 : 100;
         for (const way of [true, false]) {
           const group = inPart.filter((x) => sungAsWritten(x) === way && x.gears.tempo !== null);
-          for (let i = 1; i < group.length; i++) expect(Math.abs(group[i]!.gears.tempo! - tempo), `tempo ${tempo}, song ${i}`).toBeGreaterThanOrEqual(Math.abs(group[i - 1]!.gears.tempo! - tempo) - 1e-6);
+          for (let i = 1; i < group.length; i++) expect(Math.abs(group[i]!.gears.tempo! - end), `tempo ${tempo}, song ${i}`).toBeGreaterThanOrEqual(Math.abs(group[i - 1]!.gears.tempo! - end) - 1e-6);
         }
       }
     }
