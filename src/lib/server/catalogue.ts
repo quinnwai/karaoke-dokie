@@ -11,8 +11,8 @@ import type { DataSourceLogEntry, Match, RecommendationsResponse, SetlistInput, 
 import { applyCanonical, type SongCanonical } from '../songs/canonical';
 import { partRange } from '../songs/match';
 import { hasLittleSinging } from '../songs/resolve';
-import { withKaraokePopularity } from '../songs/score';
-import { prepareSetlist, rankPrepared, type PreparedSetlist, type RankedSetlist } from '../songs/setlist';
+import { LANGUAGE_POPULARITY_WEIGHTS, languageWeight, usdbOnlyPopularity, withKaraokePopularity, withPopularityWeight, type LanguageWeights } from '../songs/score';
+import { prepareSetlist, rankPrepared, type PreparedSetlist, type RankedSetlist, type SetlistCandidate } from '../songs/setlist';
 import { effectiveTempo, type EffectiveSource } from '../tempo/feel';
 import { readSongFeels } from './songFeel';
 import { MAX_ALL_MATCHES, type SongDeps } from './songService';
@@ -151,18 +151,23 @@ function withoutPitchShare(range: SongRange): SongRange {
   return rest;
 }
 
+/** What a language weight reads from a catalogue song (QWW-59): its USDB language, and whether USDB views are its only popularity signal. */
+export type PopularitySignals = Pick<SetlistCandidate, 'language' | 'usdbOnly'>;
+
 /**
  * The catalogue songs that fit `userRange` (the hard range filter: `deps.matchSong` is null for a song that does
- * not), as matches carrying their year, genre and tempo, and the log line of each by track id. Neither ranked nor
- * cut, and the stored range, pitch histogram included, is kept.
+ * not), as matches carrying their year, genre and tempo, the log line of each by track id, and what a language
+ * weight reads from each by track id (`signals`). Neither ranked nor cut, and the stored range, pitch histogram
+ * included, is kept.
  */
 export function catalogueMatches(
   songs: CatalogueTrack[],
   userRange: VocalRange,
   deps: Pick<CatalogueDeps, 'matchSong'>,
-): { matches: Match[]; logs: Map<string, DataSourceLogEntry> } {
+): { matches: Match[]; logs: Map<string, DataSourceLogEntry>; signals: Map<string, PopularitySignals> } {
   const matches: Match[] = [];
   const logs = new Map<string, DataSourceLogEntry>();
+  const signals = new Map<string, PopularitySignals>();
   for (const song of songs) {
     if (hasLittleSinging(song.title)) continue; // a dub or karaoke version shares the original's key
     const scored = withKaraokePopularity(scoringRange(song.range, song.usdb), song.popularity);
@@ -184,18 +189,27 @@ export function catalogueMatches(
     if (song.popularity?.deezerId !== undefined) m.deezerId = song.popularity.deezerId;
     matches.push(m);
     logs.set(song.track.id, song.log);
+    const signal: PopularitySignals = { usdbOnly: usdbOnlyPopularity(song.track, scored) };
+    if (song.usdb?.language) signal.language = song.usdb.language;
+    signals.set(song.track.id, signal);
   }
-  return { matches, logs };
+  return { matches, logs, signals };
 }
 
-/** Matches the whole catalogue against the visitor's range, ranks it, then returns all of it or one page. */
+/**
+ * Matches the whole catalogue against the visitor's range, ranks it, then returns all of it or one page. The visitor is
+ * never signed in here, so `languageWeights` (score.ts) applies to every song whose only popularity signal is its USDB
+ * views, before the ranking: its popularity, score and "Crowd favourite" reason are the weighted ones (QWW-59).
+ */
 export function recommendCatalogue(
   songs: CatalogueTrack[],
   userRange: VocalRange,
   deps: CatalogueDeps,
   page: CataloguePage,
+  languageWeights: LanguageWeights = LANGUAGE_POPULARITY_WEIGHTS,
 ): RecommendationsResponse {
-  const { matches, logs } = catalogueMatches(songs, userRange, deps);
+  const { matches: found, logs, signals } = catalogueMatches(songs, userRange, deps);
+  const matches = found.map((m) => withPopularityWeight(userRange, m, languageWeight(signals.get(m.track.id) ?? {}, languageWeights)));
 
   // Ranked as a whole, then paged. The order is the same on every request while the cached
   // catalogue lasts, so pages never repeat or skip a song.
@@ -220,6 +234,8 @@ export interface CatalogueSetlist {
   /** Every catalogue song that fits the range. */
   matches: Match[];
   logs: Map<string, DataSourceLogEntry>;
+  /** What a language weight reads from each song, by track id (catalogueMatches). */
+  signals: Map<string, PopularitySignals>;
   prepared: PreparedSetlist;
 }
 
@@ -229,8 +245,8 @@ export function prepareCatalogue(
   range: Pick<VocalRange, 'low' | 'high'>,
   deps: Pick<CatalogueDeps, 'matchSong'>,
 ): CatalogueSetlist {
-  const { matches, logs } = catalogueMatches(songs, { low: range.low, high: range.high, source: 'test' }, deps);
-  return { matches, logs, prepared: prepareSetlist(matches.map((match) => ({ match })), range) };
+  const { matches, logs, signals } = catalogueMatches(songs, { low: range.low, high: range.high, source: 'test' }, deps);
+  return { matches, logs, signals, prepared: prepareSetlist(matches.map((match) => ({ match, ...signals.get(match.track.id) })), range) };
 }
 
 /**

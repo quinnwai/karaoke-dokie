@@ -47,7 +47,7 @@
 
 import type { EraId, GearId, Match, SetlistInput, SetlistSong, SetlistState, TunerPart, VocalRange } from '../contracts';
 import { GEAR_IDS } from '../contracts';
-import { familiarityScore } from './score';
+import { familiarityScore, LANGUAGE_POPULARITY_WEIGHTS, languageWeight, withPopularityWeight, type LanguageWeights } from './score';
 import { difficultyFromEdgeTime, edgeTime, pitchTime } from './match';
 import { eraOf } from './setlistConfig';
 
@@ -128,6 +128,10 @@ export interface SetlistCandidate {
    * their library, and for everyone who is logged out. Those songs have no place on the History gear.
    */
   listening?: number;
+  /** The song's language as USDB lists it (#LANGUAGE), for a language weight. Catalogue songs only. */
+  language?: string;
+  /** True when USDB views are the song's only popularity signal (score.ts usdbOnlyPopularity). Catalogue songs only. */
+  usdbOnly?: boolean;
 }
 
 interface PreparedSong {
@@ -270,15 +274,51 @@ export function prepareSetlist(candidates: SetlistCandidate[], range: Pick<Vocal
 
 const compareIds = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-/** The era filter and the sort: what changes when a slider moves. */
-export function rankPrepared(prepared: PreparedSetlist, state: SetlistState & { loggedIn: boolean }): RankedSetlist {
+/**
+ * The songs with a language weight applied (QWW-59): a song whose only popularity signal is its USDB views has its
+ * popularity multiplied by its language's weight (score.ts withPopularityWeight: its score and reasons follow), and the
+ * Popularity places are laid out again from the weighted scores, each group on its own as prepareSetlist lays them out.
+ * So the place, the tie-break and the "Crowd favourite" reason all read the weighted score. `prepared` is shared by
+ * every request for the range and is left as it is; it comes back as it is when no song is weighted.
+ */
+function weighLanguages(prepared: PreparedSetlist, weights: LanguageWeights): PreparedSetlist {
+  const weightOf = (s: PreparedSong) => languageWeight(s.candidate, weights);
+  if (prepared.songs.every((s) => weightOf(s) === 1)) return prepared;
+  const songs: PreparedSong[] = [];
+  for (const maybe of [false, true]) {
+    const group = prepared.songs
+      .filter((s) => s.maybe === maybe)
+      .map((s): PreparedSong => {
+        const weight = weightOf(s);
+        if (weight === 1) return s;
+        const match = withPopularityWeight(prepared.range, s.candidate.match, weight);
+        return { ...s, candidate: { ...s.candidate, match }, popularity: match.parts?.popularityKnown ? match.parts.popularity : -1 };
+      });
+    const places = placesByRank(group.map((s) => (s.candidate.match.parts?.popularityKnown ? s.candidate.match.parts.popularity : null)));
+    group.forEach((s, k) => songs.push({ ...s, gears: { ...s.gears, popularity: places[k]! } }));
+  }
+  return { range: prepared.range, songs };
+}
+
+/**
+ * The era filter and the sort: what changes when a slider moves. `languageWeights` lowers (or raises) songs whose only
+ * popularity signal is their USDB views, by language (weighLanguages). Left out, it is LANGUAGE_POPULARITY_WEIGHTS when no
+ * signed-in library was read (`loggedIn` false) and nothing when one was: signed in, the singer's own songs are what count
+ * (Quinn-Wai, 12 Nov). A library song never carries a language, so no map moves it.
+ */
+export function rankPrepared(
+  prepared: PreparedSetlist,
+  state: SetlistState & { loggedIn: boolean; languageWeights?: LanguageWeights },
+): RankedSetlist {
+  const weights = state.languageWeights ?? (state.loggedIn ? undefined : LANGUAGE_POPULARITY_WEIGHTS);
+  const list = weights ? weighLanguages(prepared, weights) : prepared;
   const off = new Set<TunerPart>(state.off);
   const active = GEAR_IDS.filter((g) => !off.has(g) && (g !== 'history' || state.loggedIn));
   const eraOn = !off.has('era');
   const applied: TunerPart[] = eraOn ? [...active, 'era'] : active;
   const picked = new Set<EraId>(state.eras);
 
-  const passing = prepared.songs.filter((s) => !eraOn || (s.era !== null && picked.has(s.era)));
+  const passing = list.songs.filter((s) => !eraOn || (s.era !== null && picked.has(s.era)));
   const scored = passing.map((s) => {
     let distance = 0;
     let missing = 0;

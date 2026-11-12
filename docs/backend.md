@@ -259,6 +259,17 @@ a floor at the lower quartile of its tier's charting songs. USDB stars are not u
 song has 5. `npm run popularity:calibrate [-- --dry-run]` reads the numbers from `DATABASE_URL` and
 writes `src/lib/songs/popularityScale.ts`.
 
+**Language weight (QWW-59).** USDB is a German fan site, so a German, Polish or French party song can rank high on
+its USDB views when nothing else knows it. When no signed-in library is read (`POST /api/setlist` signed out or with
+the library unavailable, and always on `/api/catalogue/recommendations`), a song whose only popularity signal is its
+USDB views (`usdbOnlyPopularity`: no KaraFun views, Year-End entry or Deezer rank) has its score multiplied by its
+language's weight in `LANGUAGE_POPULARITY_WEIGHTS` (`src/lib/songs/score.ts`), keyed by USDB's `#LANGUAGE` exactly
+(German, Polish and French at 0.5; "German, English" is not "German"). Its Popularity place, tie-break, score and
+"Crowd favourite" reason all use the weighted score. The catalogue keeps each song's language and that flag
+(`catalogueMatches` `signals`), so the per-range lists stay shared and the weight is applied while ranking
+(`rankPrepared`'s `languageWeights`, which a future language preference can pass). Signed-in lists are not weighted,
+and a library song never is.
+
 ## Song tempo
 
 The Tempo slider (QWW-40) sorts by beats per minute, 70 to 180, placed by rank like popularity. No

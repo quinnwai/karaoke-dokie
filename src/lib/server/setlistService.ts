@@ -9,14 +9,15 @@ import { compact, type LibraryMatches } from './songService';
 
 /**
  * The catalogue's songs that fit plus the library's, one entry per song. A song in both is the library's: it carries
- * how much the singer plays it, and their own Spotify track.
+ * how much the singer plays it, and their own Spotify track. A catalogue song keeps what a language weight reads from it
+ * (its signals); a library song has none, so no language weight ever moves it.
  */
 export function withLibrary(
   base: CatalogueSetlist,
   library: LibraryMatches,
 ): { candidates: SetlistCandidate[]; logs: Map<string, DataSourceLogEntry> } {
   const bySong = new Map<string, SetlistCandidate>();
-  for (const match of base.matches) bySong.set(catalogueKey(match.track.id) ?? match.track.id, { match });
+  for (const match of base.matches) bySong.set(catalogueKey(match.track.id) ?? match.track.id, { match, ...base.signals.get(match.track.id) });
   const logs = new Map(base.logs);
   for (const match of library.matches) {
     const key = library.keys.get(match.track.id) ?? match.track.id;
@@ -42,6 +43,8 @@ export function setlistFor(base: CatalogueSetlist, library: LibraryMatches | nul
     prepared = prepareSetlist(merged.candidates, req.range);
     logs = merged.logs;
   }
+  // With no library read, the engine lowers German, Polish and French songs that rank on USDB views alone (QWW-59:
+  // score.ts LANGUAGE_POPULARITY_WEIGHTS); signed in, it does not. A `languageWeights` here would replace that choice.
   const ranked = rankPrepared(prepared, { gears: req.gears, off: req.off, eras: req.eras, loggedIn: library !== null });
 
   const offset = req.offset ?? 0;
