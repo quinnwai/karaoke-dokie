@@ -234,9 +234,11 @@ const LIVE_ALBUM =
 const REMIX_ALBUM = /\bre-?mix(?:e[sd])?\b|\bmixes\b/;
 /**
  * An album of someone else's recordings, anywhere in its title, tags included (QWW-67): "Anti-Hero (Karaoke Version)",
- * "Songs Made Famous By Adele", "Taylor Swift - Piano Covers". Not the bare word "cover": "Cover To Cover" is a best-of.
+ * "Songs Made Famous By Adele", "Taylor Swift - Piano Covers". Not the bare word "cover" ("Cover To Cover" is a best-of),
+ * nor "tribute" ("Greatest Hits 1990-1999: A Tribute To A Work In Progress" is The Black Crowes' own): a tribute act is
+ * already known by its name and its titles.
  */
-const COVER_ALBUM = /\bkaraoke\b|\binstrumentals?\b|\btribute\b|\bmade famous\b|\bin the style of\b|\bas performed\b|\boriginally performed\b|\bcovers\b/;
+const COVER_ALBUM = /\bkaraoke\b|\binstrumentals?\b|\bmade famous\b|\bin the style of\b|\bas performed\b|\boriginally performed\b|\bcovers\b/;
 /** Words that only say how the original recording was released: "(Single Version)", "(Radio Edit)", "(Original Mix)". */
 const RELEASE_WORDS = new Set(
   'single album radio original main lp ep 7 12 inch mono stereo explicit clean edited edit uncensored censored uncut extended short long full deluxe bonus track us uk digital official audio video film movie soundtrack ost mix mixed version ver the a'.split(
@@ -309,7 +311,8 @@ export function recordingsOf(title: string): Set<Recording> {
  */
 export function albumRecordings(album: string, song = ''): Set<Recording> {
   const kinds = new Set<Recording>();
-  if (COVER_ALBUM.test(album.normalize('NFKC').toLowerCase())) kinds.add('cover');
+  // 'not-a-song', not 'cover': a karaoke or cover album is never the song, even under the artist's own name.
+  if (COVER_ALBUM.test(album.normalize('NFKC').toLowerCase())) kinds.add('not-a-song');
   const base = titlePart(album); // lower case, without tags
   if (song && loose(base) === loose(song)) return kinds;
   for (const tag of tagsOf(album)) {
@@ -341,7 +344,8 @@ function trackRecordings(
   const own = (tag: string) => ours.has(joined(loose(tag.toLowerCase())));
   return new Set([
     ...tagsOf(title).flatMap((tag) => (own(tag) ? [] : (recordingOf(tag, 'deezer') ?? []))),
-    ...versionTags.flatMap((tag) => recordingOf(tag, 'deezer-version') ?? []),
+    // Deezer files some subtitles as the version part: "Sadeness" with "(Part I)".
+    ...versionTags.flatMap((tag) => (own(tag) ? [] : (recordingOf(tag, 'deezer-version') ?? []))),
     ...(track.album?.title ? albumRecordings(track.album.title, song) : []),
   ]);
 }
@@ -426,7 +430,11 @@ function bestTrack(key: string, results: DeezerTrack[], title: string): { track:
   for (const t of results) {
     const credit = typeof t.rank === 'number' ? keyMatch(key, t) : null;
     if (credit === null) continue;
-    const kinds = [...trackRecordings(t, key.split('|')[1], ours)];
+    // Under the artist's own credit a cover is their recording of another act's song, which is our song: Lacuna Coil's
+    // "Enjoy the Silence (cover version)", the Glee Cast's "(Cover of Adele)" (QWW-67). Not a cover naming the artist
+    // themselves ("Take on Me (a-ha Cover)" under a-ha): that is someone else's, filed under their name.
+    const theirOwn = credit === 0 && !joined(loose(t.title.toLowerCase())).includes(joined(loose(key.split('|')[0] ?? '')));
+    const kinds = [...trackRecordings(t, key.split('|')[1], ours)].filter((k) => !(k === 'cover' && theirOwn));
     if (kinds.some((k) => NEVER.has(k) && !named.has(k))) continue;
     const tier = kinds.length === 0 ? 0 : kinds.every((k) => named.has(k)) ? 1 : 2;
     const order = [credit, tier, -t.rank];

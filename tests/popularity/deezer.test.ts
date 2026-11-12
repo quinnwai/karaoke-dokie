@@ -282,8 +282,18 @@ describe('pickDeezerHit, after the review of QWW-59', () => {
   it('reads a subtitle our own title has as the title, not a live take: "(Can\'t Live Without Your) Love and Affection" (QWW-67)', () => {
     const nelson = [dza(1, 312_000, 'Nelson', "(Can't Live Without Your) Love And Affection (Remastered 2017)", 'After The Rain (Remastered)')];
     expect(pick('Nelson', "(Can't Live Without Your) Love and Affection", nelson)).toBe(1);
+    // Also when Deezer files the subtitle as the version part: "Sadeness" with "(Part I)" keeps over Part II.
+    const sadeness = [dz(4621947, 693_610, 'Enigma', 'Sadeness', '(Part I)'), dz(135875728, 296_154, 'Enigma', 'Sadeness (Part II)')];
+    expect(pick('Enigma', 'Sadeness (Part I)', sadeness)).toBe(4621947);
     // A version tag in our title still loses to the original (QWW-59).
     expect(pick('Toto', 'Africa', [dz(1, 900_000, 'Toto', 'Africa (Live)'), dz(2, 500_000, 'Toto', 'Africa')], 'Africa (Live)')).toBe(2);
+  });
+
+  it("takes a cover under the artist's own credit: it is their recording, the song we list (QWW-67)", () => {
+    expect(pick('Lacuna Coil', 'Enjoy The Silence', [dza(1, 494_867, 'Lacuna Coil', 'Enjoy the Silence (cover version)', 'Karmacode')])).toBe(1);
+    // Another act's cover still never counts, nor a track on a karaoke album under the artist's name.
+    expect(pick('Depeche Mode', 'Enjoy The Silence', [dza(1, 494_867, 'Lacuna Coil', 'Enjoy the Silence (cover version)', 'Karmacode')])).toBeNull();
+    expect(pick('Taylor Swift', 'Anti-Hero', [dza(1, 500_000, 'Taylor Swift', 'Anti-Hero', 'Taylor Swift Karaoke Hits')])).toBeNull();
   });
 
   it('counts "(Original Version 1983)" and "(7\'\' Version)" as the original release (QWW-67)', () => {
@@ -319,12 +329,11 @@ describe('albumRecordings (QWW-67)', () => {
     ['I Let Her Go (Remixes)', ['remix']],
     ['Sadnecessary (Acoustic Version)', ['version']],
     ["Red (Taylor's Version)", ['version']],
-    ['Party Tyme Karaoke - Pop Male Hits 8 (Vocal Versions)', ['cover']],
-    ['Anti-Hero (Karaoke Version)', ['cover']],
-    ['Anti-Hero - Instrumental', ['cover']],
-    ['Songs Made Famous By Adele', ['cover']],
-    ['Taylor Swift - Piano Covers', ['cover', 'version']],
-    ['Taylor Swift Tribute', ['cover']],
+    ['Party Tyme Karaoke - Pop Male Hits 8 (Vocal Versions)', ['not-a-song']],
+    ['Anti-Hero (Karaoke Version)', ['not-a-song']],
+    ['Anti-Hero - Instrumental', ['not-a-song']],
+    ['Songs Made Famous By Adele', ['not-a-song']],
+    ['Taylor Swift - Piano Covers', ['not-a-song', 'version']],
     ['Caetano e Bethânia Ao Vivo', ['live']],
     ['The Remixes', ['remix']],
   ])('%s is %j', (album, kinds) => {
@@ -338,7 +347,7 @@ describe('albumRecordings (QWW-67)', () => {
     expect([...albumRecordings('Girl on Fire (Remixes) - EP', 'empire state of mind')]).toEqual(['remix']);
     expect(pick('Alicia Keys', 'Girl On Fire', [dza(61542462, 878_990, 'Alicia Keys', 'Girl on Fire', 'Girl on Fire (Remixes) - EP')])).toBe(61542462);
     // A karaoke single named after the song is still karaoke.
-    expect([...albumRecordings('Anti-Hero (Karaoke Version)', 'anti-hero')]).toEqual(['cover']);
+    expect([...albumRecordings('Anti-Hero (Karaoke Version)', 'anti-hero')]).toEqual(['not-a-song']);
   });
 
   it.each([
@@ -357,6 +366,7 @@ describe('albumRecordings (QWW-67)', () => {
     'The Best Of Billy Ray Cyrus: Cover To Cover',
     'The Grenade Sessions',
     'Listen Without Prejudice / MTV Unplugged (Deluxe)',
+    'Greatest Hits 1990-1999: A Tribute To A Work In Progress...',
   ])('%s says nothing against its tracks', (album) => {
     expect([...albumRecordings(album)]).toEqual([]);
   });
