@@ -224,6 +224,24 @@ p.deezer {
   color: var(--sl-pink-line);
 }
 
+/* The reason line is the one line that runs on under the badge (QWW-57, R35). The badge's box ends at 45 px of the 66 px row and this line's starts at 44,
+   its letters well below, so the line may have the row's whole width, not the column beside the badge. "In your sweet spot · Unconventional pick" is
+   230 px at 12 px and "In your sweet spot · Crowd favourite" 205, and the column is 167 px beside a Medium badge at 360 px (186 beside the others, 182
+   and 201 at 375, 197 and 216 at 390), so an ellipsis cut both there; the row is 244 px wide at 360 (259, 274). Below about 350 px even that is not
+   enough, so the type tightens (never under 10.5 px: 10.4 would be needed on a 320 px phone) to keep the longest line whole. Without container units
+   the line is as it was, in its column. */
+@supports (width: 1cqw) {
+  .rowOpen {
+    container-type: inline-size;
+  }
+
+  .rowWhy {
+    width: max-content;
+    max-width: 100cqw;
+    font-size: clamp(10.5px, calc((100cqw - 4px) / 19.2), 12px);
+  }
+}
+
 /* The title's karaoke fill (R12, in place of the looping #1 wipe): when a row first comes into view its title fills in once,
    left to right, in about 0.6 s, and ends in its normal white. Until then the title is dim, and a white copy of it, clipped
    to nothing, waits on top of it; the transition opens the clip from the left.
