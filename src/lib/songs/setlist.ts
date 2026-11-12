@@ -39,8 +39,9 @@
 // last. Without the band, the songs sung as written filled a narrow range's top 20 with mid-tempo songs ahead of the first
 // slow song that needed a jump. Taking the octave groups away alone was tried and not kept: on the tuner's default gears it
 // put the biggest hits back at the top in whichever octave fits them, 47% of the top 20 octave jumps (a bass's 97%) where
-// there had been none. At an end the thumb counts as the end (0 or 100): Tempo's distance is to the end itself. The default
-// list, and every list with Tempo off or in the middle, are unchanged.
+// there had been none. The first and last TEMPO_END_REACH places of the Tempo track are one stop each: there Tempo's distance
+// is to the end itself (0 or 100), and between the stops it is to a target that runs from 0 to 100 (rankPrepared). The default
+// list, and every list with Tempo off or in the middle, keep the order they had.
 //
 // The default state (setlistConfig.ts) is Popularity on at 100, Difficulty on at 0, the rest off. With
 // Popularity counting double, that is a blend that leans on popularity: of two songs sung the same way, the one
@@ -71,8 +72,8 @@ export const GEAR_WEIGHTS: Readonly<Record<GearId, number>> = Object.freeze({ di
 
 /**
  * How far in from an end of the Tempo track still counts as the end (QWW-54): Tempo is on and at most this many places
- * from 0 or 100. There the songs in that end's band come first, and the thumb counts as the end itself (rankPrepared). 10 and 90 are
- * at the end; 11 and 89 are not.
+ * from 0 or 100. There the songs in that end's band come first, and the thumb counts as the end itself, one stop at each end
+ * (rankPrepared). 10 and 90 are at the end; 11 and 89 are not, but their target starts from the stop's edge, not from the thumb.
  */
 export const TEMPO_END_REACH = 10;
 
@@ -341,10 +342,12 @@ export function rankPrepared(
   // Tempo at an end of its track: the songs in that end's band come before all the others, whichever way they are sung and
   // whatever the other gears say (QWW-54). Null while Tempo is off or short of its ends.
   const endBand: Feel | null = !active.includes('tempo') ? null : state.gears.tempo <= TEMPO_END_REACH ? 'slow' : state.gears.tempo >= 100 - TEMPO_END_REACH ? 'upbeat' : null;
-  // And there the thumb counts as the end itself: Tempo's distance is measured to 0 or 100, not to where the thumb is, so the songs in
-  // the band go slowest first (fastest first). Measured to the thumb, a thumb at 8 or 10 reached first the labels that rest at the top of
-  // the slow band, the weak ones (isWeakLabelSource), ahead of the slowest clearly labelled songs.
-  const tempoTarget = endBand === 'slow' ? 0 : endBand === 'upbeat' ? 100 : state.gears.tempo;
+  // Where Tempo's distance is measured to. Within TEMPO_END_REACH of an end the thumb counts as the end itself (0 or 100), so the
+  // songs in the band go slowest first (fastest first): measured to the thumb, a thumb at 8 or 10 reached first the labels that rest at
+  // the top of the slow band, the weak ones (isWeakLabelSource), ahead of the slowest clearly labelled songs. Between the two stops the
+  // target runs on from there, 0 at the thumb's 10 to 100 at its 90, so it does not jump when the thumb leaves a stop (from the
+  // stop's edge straight to the thumb the top 20 changed completely between 10 and 11, and the weak labels came first again).
+  const tempoTarget = ((Math.min(100 - TEMPO_END_REACH, Math.max(TEMPO_END_REACH, state.gears.tempo)) - TEMPO_END_REACH) * 100) / (100 - 2 * TEMPO_END_REACH);
 
   const passing = list.songs.filter((s) => !eraOn || (s.era !== null && picked.has(s.era)));
   const scored = passing.map((s) => {

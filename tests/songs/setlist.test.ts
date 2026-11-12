@@ -443,12 +443,11 @@ describe('a song we do not know on an active gear is a tier of its own', () => {
       const r = rankPrepared(preparedOf(...songs), state({ off: ['history', 'era'], gears: { tempo } }));
       expect(ids(r), `tempo ${tempo}`).toEqual(['complete', 'no-popularity', 'no-tempo']);
     }
-    // And History above Tempo: a song outside the library sorts after one inside it, even one with no tempo.
-    const lib = [
-      placed('own-no-tempo', { history: 50, tempo: null }, { popularity: 0.1 }),
-      placed('other-has-tempo', { history: null, tempo: 100 }, { popularity: 0.99 }),
-    ];
-    const r = rankPrepared(preparedOf(...lib), state({ off: ['era', 'difficulty', 'popularity'], loggedIn: true, gears: { tempo: 100 } }));
+    // And History above Tempo, away from the Tempo ends: a song outside the library sorts after one inside it, even one with no tempo.
+    // (At an end the songs in its band come first, ahead of History: see "Tempo at an end" below.) Real songs with real tempos.
+    const own = { match: song('own-no-tempo', { low: 50, high: 60, popularity: 0.1 }), listening: 0.8 };
+    const other = { match: song('other-has-tempo', { low: 50, high: 60, popularity: 0.99, tempo: 100 }) };
+    const r = rankPrepared(prepareSetlist([other, own], USER), state({ off: ['era', 'difficulty', 'popularity'], loggedIn: true, gears: { tempo: 50 } }));
     expect(ids(r)).toEqual(['own-no-tempo', 'other-has-tempo']);
   });
 
@@ -458,9 +457,9 @@ describe('a song we do not know on an active gear is a tier of its own', () => {
   });
 
   it('puts a song with no tempo after the songs that have one when Tempo is on, on a real list, in each group (QWW-58)', () => {
-    // Tempo at 30, short of the end (at an end the songs are not grouped by how they are sung, QWW-54, tested with the rule).
-    const r = rankCatalogue(CATALOGUE, input(TEST_RANGES[0]![1], { gears: { tempo: 30 }, off: [...others, 'difficulty', 'popularity'].filter((p, i, all) => all.indexOf(p) === i) as TunerPart[] }), deps);
-    // The songs sung as written come first, then the jumps; a song with no tempo goes after the others of its own group.
+    // Tempo is at its slow end here, so the songs in the slow band come first (QWW-54, tested with the rule); a song with no tempo is not in it.
+    const r = rankCatalogue(CATALOGUE, input(TEST_RANGES[0]![1], { gears: { tempo: 0 }, off: [...others, 'difficulty', 'popularity'].filter((p, i, all) => all.indexOf(p) === i) as TunerPart[] }), deps);
+    // The songs sung as written come first, then the jumps, in the band and out of it; a song with no tempo goes after the others of its own group.
     for (const written of [true, false]) {
       const group = r.songs.filter((s) => s.match.difficulty !== 'maybe' && (s.match.octave === 'none') === written);
       const firstUnknown = group.findIndex((s) => s.gears.tempo === null);
@@ -769,18 +768,30 @@ describe('Tempo at an end: the songs at that end come before how a song is sung 
     expect(at(89)).toEqual(['fast-written', 'mid-written', 'slow-written', 'fast-jump', 'slow-jump']);
   });
 
+  // Eleven songs, places 0, 10, ... 100 on Tempo. 'weak-slow' rests at the top of the slow band and 'weak-fast' at the bottom of the upbeat
+  // band, as the weak labels of #49 do (89.5 to 89.9, 125 to 125.4), so a thumb at 10 or at 90 sits exactly on one of them.
+  const eleven = [
+    timed('clear-slow', 'none', 50), timed('weak-slow', 'none', 89.6), timed('mid-1', 'none', 95), timed('mid-2', 'none', 100), timed('mid-3', 'none', 105),
+    timed('mid-4', 'none', 110), timed('mid-5', 'none', 115), timed('mid-6', 'none', 120), timed('mid-7', 'none', 124), timed('weak-fast', 'none', 125.2), timed('clear-fast', 'none', 190),
+  ];
+
   it('counts a thumb at 6 to 10 (or 90 to 94) as the end itself: the songs in the band go slowest first, not nearest the thumb', () => {
-    // Eleven songs, places 0, 10, ... 100 on Tempo. 'weak-slow' rests at the top of the slow band and 'weak-fast' at the bottom of the
-    // upbeat band, as the weak labels of #49 do (89.5 to 89.9, 125 to 125.4), so a thumb at 10 or at 90 sits exactly on one of them.
-    const eleven = [
-      timed('clear-slow', 'none', 50), timed('weak-slow', 'none', 89.6), timed('mid-1', 'none', 95), timed('mid-2', 'none', 100), timed('mid-3', 'none', 105),
-      timed('mid-4', 'none', 110), timed('mid-5', 'none', 115), timed('mid-6', 'none', 120), timed('mid-7', 'none', 124), timed('weak-fast', 'none', 125.2), timed('clear-fast', 'none', 190),
-    ];
     expect(at(0, eleven).slice(0, 2)).toEqual(['clear-slow', 'weak-slow']);
     expect(at(100, eleven).slice(0, 2)).toEqual(['clear-fast', 'weak-fast']);
     // Measured to the thumb, a thumb at 10 would put the weak song first; at the end it is the same list as at 0.
     for (const tempo of [6, 8, 10]) expect(at(tempo, eleven), `tempo ${tempo}`).toEqual(at(0, eleven));
     for (const tempo of [90, 92, 94]) expect(at(tempo, eleven), `tempo ${tempo}`).toEqual(at(100, eleven));
+  });
+
+  it('has no jump when the thumb leaves a stop: the target runs from 0 at the thumb\'s 10 to 100 at its 90', () => {
+    // From the stop's edge straight to the thumb, a thumb at 11 would put the weak song (place 10) first, though at 10 it was second.
+    expect(at(11, eleven).slice(0, 2)).toEqual(['clear-slow', 'weak-slow']);
+    expect(at(89, eleven).slice(0, 2)).toEqual(['clear-fast', 'weak-fast']);
+    // The target moves 1.25 places for each step of the thumb: it reaches the weak song's place, 10, at a thumb of 18 (90 at a thumb of 82).
+    expect(at(18, eleven)[0]).toBe('weak-slow');
+    expect(at(82, eleven)[0]).toBe('weak-fast');
+    // The middle of the track stays the middle.
+    expect(at(50, eleven)[0]).toBe('mid-4');
   });
 
   it('keeps the songs sung as written first everywhere else on the track', () => {
@@ -825,6 +836,21 @@ describe('Tempo at an end: the songs at that end come before how a song is sung 
     expect(r.indexOf('jump-hit')).toBeGreaterThan(r.indexOf('slow-written-a'));
     expect(r.indexOf('jump-hit')).toBeGreaterThan(r.indexOf('slow-written-b'));
     expect(r.indexOf('jump-hit')).toBeLessThan(r.indexOf('mid-written'));
+  });
+
+  it('puts the band before the singer\'s own songs too (R31): own songs in the band, other songs in the band, own songs out of it, the rest', () => {
+    // Signed in with History on at 100, the way the tuner opens signed in, and Tempo at an end. The singer's own songs are the ones with a
+    // listening share. A catalogue song in the upbeat band is ahead of the singer's own mid songs at the upbeat end.
+    const own = (id: string, tempo: number) => ({ match: timed(id, 'none', tempo), listening: 0.9 });
+    const other = (id: string, tempo: number) => ({ match: timed(id, 'none', tempo) });
+    const list = prepareSetlist([other('other-mid', 105), own('own-mid', 110), other('other-fast', 160), own('own-fast', 150)], USER);
+    const signedIn: Parameters<typeof state>[0] = { off: ['era', 'difficulty', 'popularity'], loggedIn: true };
+    expect(ids(rankPrepared(list, state({ ...signedIn, gears: { tempo: 100 } })))).toEqual(['own-fast', 'other-fast', 'own-mid', 'other-mid']);
+    expect(ids(rankPrepared(list, state({ ...signedIn, gears: { tempo: 94 } })))).toEqual(['own-fast', 'other-fast', 'own-mid', 'other-mid']);
+    // No song is in the slow band, so at the slow end History decides: the singer's own songs first.
+    expect(ids(rankPrepared(list, state({ ...signedIn, gears: { tempo: 0 } }))).slice(0, 2).sort()).toEqual(['own-fast', 'own-mid']);
+    // And short of the ends nothing changes: History, then the closest sum.
+    expect(ids(rankPrepared(list, state({ ...signedIn, gears: { tempo: 50 } }))).slice(0, 2).sort()).toEqual(['own-fast', 'own-mid']);
   });
 
   it('puts a song with no tempo after the songs that have one inside its group, and the Maybe songs last', () => {
