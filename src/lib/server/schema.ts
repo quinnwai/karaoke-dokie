@@ -101,6 +101,12 @@ CREATE TABLE IF NOT EXISTS song_deezer (
   deezer_id BIGINT,
   checked_at TEXT NOT NULL
 );
+-- The track a lookup matched (QWW-67), as Deezer gives it: title, album, release date and length in seconds, so an
+-- audit of the matches needs no Deezer calls. Null for a miss and for a lookup made before they were kept.
+ALTER TABLE song_deezer ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE song_deezer ADD COLUMN IF NOT EXISTS album TEXT;
+ALTER TABLE song_deezer ADD COLUMN IF NOT EXISTS release_date TEXT;
+ALTER TABLE song_deezer ADD COLUMN IF NOT EXISTS duration INTEGER;
 -- Tempo per song (QWW-40), one column per source, written by npm run tempo:fill (Deezer, beat
 -- tracker) and npm run tempo:ultrastar (note files). Raw values: the one tempo shown is worked out
 -- when read (src/lib/tempo/tempo.ts). A row with no bpm at all is a miss, kept so a rerun skips it.

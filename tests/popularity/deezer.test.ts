@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { createDeezerClient, deezerQuery, matchesKey, pickDeezerHit, type DeezerTrack } from '../../src/lib/popularity/deezer';
+import {
+  albumRecordings,
+  createDeezerClient,
+  creditedActs,
+  deezerQuery,
+  everyActQuery,
+  findDeezerTrack,
+  HAND_CHECKED,
+  matchesKey,
+  pickDeezerHit,
+  recordingsOf,
+  TITLE_SEARCH_LIMIT,
+  type DeezerArtist,
+  type DeezerTrack,
+  type DeezerTrackDetail,
+} from '../../src/lib/popularity/deezer';
 import { songKey } from '../../src/lib/songs/resolve';
 
 const track = (artist: string, title: string, rank: number, id = rank): DeezerTrack => ({ id, title, rank, artist: { name: artist } });
@@ -30,8 +45,8 @@ describe('matchesKey', () => {
 });
 
 describe('pickDeezerHit', () => {
-  it('takes the best-ranked matching result, original or live', () => {
-    const results = [track('Toto', 'Africa (Live)', 383_105), track('Toto', 'Africa', 964_180), track('Weezer', 'Africa', 999_999)];
+  it('takes the original over a live take, and never another artist\'s track', () => {
+    const results = [track('Toto', 'Africa (Live)', 999_000), track('Toto', 'Africa', 964_180), track('Weezer', 'Africa', 999_999)];
     expect(pickDeezerHit(songKey('Toto', 'Africa'), results)).toEqual({ rank: 964_180, deezerId: 964_180, artist: 'Toto', title: 'Africa' });
   });
   it('is null when nothing matches', () => {
@@ -66,5 +81,640 @@ describe('matchesKey, names written differently', () => {
   it('reads "&" as "and" and a medley by its first song', () => {
     expect(matchesKey(songKey('KC & The Sunshine Band', 'Boogie Shoes'), track('KC and the Sunshine Band', 'Boogie Shoes', 1))).toBe(true);
     expect(matchesKey(songKey('Chicago', "Hard to Say I'm Sorry - 2009 Remaster"), track('Chicago', "Hard to Say I'm Sorry / Get Away", 1))).toBe(true);
+  });
+  it('reads "+" as "and", and an apostrophe as part of its word: Fool\'s Garden is Deezer\'s "Fools Garden"', () => {
+    expect(matchesKey(songKey('Fool’s Garden', 'Lemon Tree'), track('Fools Garden', 'Lemon Tree', 1))).toBe(true);
+    expect(matchesKey(songKey('Walk The Moon', 'Shut Up + Dance'), track('WALK THE MOON', 'Shut Up and Dance', 1))).toBe(true);
+    expect(matchesKey(songKey('Journey', 'Don’t Stop Believin’'), track('Journey', "Don't Stop Believin'", 1))).toBe(true);
+  });
+});
+
+// ---------- QWW-59: the original recording, and titles with a bracketed part ----------
+// Search results as Deezer's API returned them on 12 Nov 2026 (id, rank, artist, title, title_short, title_version),
+// trimmed to the ones that matter. Deezer splits a version part off some titles (title_version) and not others.
+
+const dz = (id: number, rank: number, artist: string, title: string, version?: string): DeezerTrack => ({
+  id,
+  rank,
+  title: version ? `${title} ${version}` : title,
+  ...(version ? { title_short: title, title_version: version } : {}),
+  artist: { name: artist },
+});
+const pick = (artist: string, title: string, results: DeezerTrack[], ours = title) => pickDeezerHit(songKey(artist, title), results, ours)?.deezerId ?? null;
+
+describe('pickDeezerHit, the original studio recording (QWW-59)', () => {
+  // "onerepublic counting stars" returned the 2023 re-recording and a live album take, never the 2013 original
+  // (65759979, rank 799,652, readable, with a preview), which is why song_deezer held the 2023 Version. The original
+  // is ranked higher here than it is, so the test shows it wins on being the original, not on its rank.
+  const countingStars = [
+    dz(2444664705, 900_000, 'OneRepublic', 'Counting Stars (2023 Version)'),
+    dz(1640375672, 337_021, 'OneRepublic', 'Counting Stars', '(from One Night In Malibu)'),
+    dz(76810529, 68_317, "Counting By 2's", 'Counting Stars (OneRepublic Cover)'),
+    dz(65759979, 799_652, 'OneRepublic', 'Counting Stars'),
+  ];
+
+  it('Counting Stars: takes the 2013 original over "(2023 Version)", even when the re-recording ranks higher', () => {
+    expect(pick('OneRepublic', 'Counting Stars', countingStars)).toBe(65759979);
+  });
+
+  it('Counting Stars: a title that names "(2023 Version)" still gets the original when Deezer has it', () => {
+    expect(pick('OneRepublic', 'Counting Stars', countingStars, 'Counting Stars (2023 Version)')).toBe(65759979);
+  });
+
+  it('Time Of Your Life: finds Green Day\'s "Good Riddance (Time of Your Life)", and not one of its live takes', () => {
+    const results = [
+      dz(778429, 773_489, 'Green Day', 'Good Riddance (Time of Your Life)'),
+      dz(679787, 262_391, 'Green Day', 'Good Riddance (Time of Your Life)', '(Live at Milton Keynes National Bowl, Milton Keynes, England, 6/18/05)'),
+      dz(2125323967, 118_902, 'Green Day', 'Good Riddance (Time of Your Life)', '(Live at the Electric Factory, Philadelphia 11/14/97)'),
+      dz(10540407, 26_038, 'Various Musique', 'Good Riddance (Time Of Your Life) (Originally By Green Day)'),
+    ];
+    expect(pick('Green Day', 'Time Of Your Life', results)).toBe(778429);
+    expect(pick('Green Day', 'Good Riddance (Time Of Your Life)', results)).toBe(778429);
+    // Before, the bracketed part never counted as the title: no match at all.
+    expect(matchesKey(songKey('Green Day', 'Time Of Your Life'), results[0]!)).toBe(true);
+  });
+
+  it('passes over a live take, a remix, a sped-up edit, a cover and a commentary track, however well they rank', () => {
+    const footloose = [
+      dz(1296073692, 227_511, 'Kenny Loggins', 'Footloose', '(Live at John F. Kennedy Stadium, 13th July 1985)'),
+      dz(1013285, 111_963, 'Kenny Loggins', 'Footloose', '(Live)'),
+      dz(4155200162, 153_987, 'Kenny Loggins', 'Footloose'),
+    ];
+    expect(pick('Kenny Loggins', 'Footloose', footloose)).toBe(4155200162); // it used to take the live take, on rank
+    const passedOver = [
+      dz(1, 990_000, 'a-ha', 'Take on Me', '(Kygo Remix)'),
+      dz(2, 980_000, 'a-ha', 'Take on Me (Sped Up)'),
+      dz(3, 970_000, 'a-ha', 'Take on Me', '(Commentary)'),
+      dz(4, 960_000, 'a-ha', 'Take on Me (a-ha Cover)'),
+      dz(5, 950_000, 'a-ha', 'Take On Me', '(MTV Unplugged)'),
+      dz(664107, 100_000, 'a-ha', 'Take on Me'),
+    ];
+    expect(pick('a-ha', 'Take On Me', passedOver)).toBe(664107);
+    expect(pick('a-ha', 'Take On Me', passedOver.slice(0, 5))).toBeNull(); // none of them is the song as recorded
+  });
+
+  it('counts release tags as the original: remasters, radio edits, single mixes and soundtrack tags', () => {
+    const heyJude = [dz(116348632, 859_208, 'The Beatles', 'Hey Jude', '(Remastered 2015)'), dz(126848613, 674_633, 'The Beatles', 'Hey Jude'), dz(122172010, 900_000, 'The Beatles', 'Hey Jude', '(Take 2)')];
+    expect(pick('The Beatles', 'Hey Jude', heyJude)).toBe(116348632);
+    const letItGo = [
+      dz(72371930, 709_827, 'Idina Menzel', 'Let It Go', '(From "Frozen"/Soundtrack Version)'),
+      dz(78106761, 800_000, 'Idina Menzel', 'Let It Go', '(From "Frozen"/Dave Audé Club Remix)'),
+      dz(562854602, 750_000, 'Idina Menzel', 'Let It Go', '(Live)'),
+    ];
+    expect(pick('Idina Menzel', 'Let It Go', letItGo)).toBe(72371930);
+    const takeOnMe = [dz(859733152, 395_327, 'a-ha', 'Take on Me', '(1985 Single Mix; 2015 Remaster)'), dz(432951302, 707_081, 'a-ha', 'Take On Me', '(2017 Acoustic)')];
+    expect(pick('a-ha', 'Take On Me', takeOnMe)).toBe(859733152);
+  });
+
+  it('takes a re-recording only when there is no original: Deezer\'s search has no "Shake It Off" but Taylor\'s Version', () => {
+    const results = [
+      dz(2512293231, 696_539, 'Taylor Swift', "Shake It Off (Taylor's Version)"),
+      dz(602092482, 195_831, 'Taylor Swift', 'Shake It Off', '(Commentary)'),
+      dz(132744476, 171_345, "Tonight i'm Taylor Swift", 'Shake It Off'), // a tribute act, plain title
+      dz(721346612, 104_307, 'Sean Redmond', 'Shake It Off (Originally Performed by Taylor Swift)'),
+    ];
+    expect(pick('Taylor Swift', 'Shake It Off', results)).toBe(2512293231);
+    // With only the act's track, it is still a match: its name is Taylor Swift's with words added.
+    expect(pick('Taylor Swift', 'Shake It Off', results.slice(2, 3))).toBe(132744476);
+  });
+
+  it('takes the best of the versions Deezer names when none is plain: "My Heart Will Go On (Love Theme from "Titanic")"', () => {
+    const results = [
+      dz(14552280, 852_618, 'Céline Dion', 'My Heart Will Go On', '(Love Theme from "Titanic")'),
+      dz(17000055, 680_400, 'Céline Dion', 'My Heart Will Go On', '(Love Theme from "Titanic")'),
+      dz(17000067, 900_000, 'Céline Dion', 'My Heart Will Go On (Dialogue Mix)', '(includes "Titanic" film dialogue)'),
+      dz(129225918, 950_000, 'Céline Dion', 'My Heart Will Go On', '(Tony Moran Mix)'),
+    ];
+    expect(pick('Celine Dion', 'My Heart Will Go On', results)).toBe(14552280);
+  });
+
+  it('takes the original for a note file of a live take too, and the live take only when there is no original', () => {
+    // Journey's "Don't Stop Believin' (Live in Houston)" note file: the studio track is the song people know, and its
+    // rank (916,669 against the live take's 470,979) is the song's popularity.
+    const results = [dz(1079668, 964_180, 'Toto', 'Africa'), dz(649767712, 345_995, 'Toto', 'Africa', '(Live)')];
+    expect(pick('Toto', 'Africa', results, 'Africa (Live)')).toBe(1079668);
+    expect(pick('Toto', 'Africa', results.slice(1), 'Africa (Live)')).toBe(649767712);
+    expect(pick('Toto', 'Africa', results.slice(1))).toBeNull(); // a plain title never takes a live take
+  });
+});
+
+describe('matchesKey, tribute acts', () => {
+  it('refuses an artist named as a tribute, a karaoke act or a cover act of the singer', () => {
+    for (const name of ['OneRepublic Tribute Band', 'Karaoke Hits of OneRepublic', 'Made Famous by OneRepublic', 'OneRepublic Covers']) {
+      expect(matchesKey(songKey('OneRepublic', 'Counting Stars'), dz(1, 1, name, 'Counting Stars')), name).toBe(false);
+    }
+    expect(matchesKey(songKey('OneRepublic', 'Counting Stars'), dz(1, 1, 'OneRepublic', 'Counting Stars'))).toBe(true);
+  });
+});
+
+describe('recordingsOf', () => {
+  it.each<[string, string[]]>([
+    ['Counting Stars (2023 Version)', ['version']],
+    ['Love Story (Taylor’s Version)', ['version']],
+    ['(Everything I Do) I Do It For You (Classic Version)', ['version']],
+    ['Let It Go (German Version)', ['other-song']],
+    ['Nothing Else Matters (Jungle Cruise Version Part 2)', ['other-song']],
+    ['Take On Me (2017 Acoustic)', ['version']],
+    ['Africa (Live)', ['live']],
+    ['Take On Me (MTV Unplugged)', ['live']],
+    ['I Will Always Love You (Live Version)', ['live']],
+    ['Take on Me (Kygo Remix)', ['remix']],
+    ['I Will Always Love You (Hex Hector Radio Mix)', ['remix']],
+    ['Song (Sped Up)', ['sped-up']],
+    ['Song (Slowed + Reverb)', ['sped-up']],
+    ['Counting Stars (OneRepublic Cover)', ['cover']],
+    ['Shake It Off (Commentary)', ['not-a-song']],
+    ['Hey Jude (Take 2)', ['not-a-song']],
+  ])('%s is %j', (title, kinds) => {
+    expect([...recordingsOf(title)].sort()).toEqual(kinds);
+  });
+
+  it.each([
+    'Counting Stars',
+    'Hey Jude (Remastered 2015)',
+    'Bohemian Rhapsody - Remastered 2011',
+    'Flashdance...What a Feeling (Radio Edit)',
+    'Take on Me (Single Mix)',
+    'Take on Me (1985 Single Mix; 2015 Remaster)',
+    'Hey Jude (Single Version)',
+    'I Will Always Love You (Film Version)',
+    'Let It Go (From "Frozen"/Soundtrack Version)',
+    'Thriller (25th Anniversary Edition)',
+    'Rumours (Deluxe Edition)',
+    'Shallow (feat. Bradley Cooper)',
+    'Good Riddance (Time of Your Life)',
+    "(I Can't Get No) Satisfaction",
+  ])('%s is the original', (title) => {
+    expect([...recordingsOf(title)]).toEqual([]);
+  });
+});
+
+describe('pickDeezerHit, after the review of QWW-59', () => {
+  it('reads a live take as live wherever Deezer writes it: "(Live Aid)" in the title, or a version part with no brackets', () => {
+    const results = [dz(1, 900_000, 'Queen', 'Bohemian Rhapsody (Live Aid)'), dz(2, 850_000, 'Queen', 'Bohemian Rhapsody', 'Live'), dz(3, 800_000, 'Queen', 'Bohemian Rhapsody')];
+    expect(pick('Queen', 'Bohemian Rhapsody', results)).toBe(3);
+  });
+
+  it('never takes a language version for a plain title, even with nothing else to take', () => {
+    expect(pick('ABBA', 'Chiquitita', [dz(1, 500_000, 'ABBA', 'Chiquitita (Spanish Version)')])).toBeNull();
+    expect(pick('ABBA', 'Chiquitita', [dz(1, 500_000, 'ABBA', 'Chiquitita (Spanish Version)')], 'Chiquitita (Spanish Version)')).toBe(1);
+  });
+
+  it('counts a title or a co-credit as the artist\'s own credit, so the original beats the artist\'s re-recording', () => {
+    const lauryn = [dz(1, 100_000, 'Lauryn Hill', 'Doo Wop (That Thing) (2018 Version)'), dz(2, 500_000, 'Ms. Lauryn Hill', 'Doo Wop (That Thing)')];
+    expect(pick('Lauryn Hill', 'Doo Wop (That Thing)', lauryn)).toBe(2);
+    const wailers = [dz(1, 100_000, 'Bob Marley', 'Three Little Birds (Acoustic)'), dz(2, 600_000, 'Bob Marley & The Wailers', 'Three Little Birds')];
+    expect(pick('Bob Marley', 'Three Little Birds', wailers)).toBe(2);
+    // Other words before the name are not a credit: a tribute act's plain title stays behind the artist's re-recording.
+    const tribute = [dz(1, 696_539, 'Taylor Swift', "Shake It Off (Taylor's Version)"), dz(2, 900_000, 'We Love Taylor Swift', 'Shake It Off')];
+    expect(pick('Taylor Swift', 'Shake It Off', tribute)).toBe(1);
+  });
+
+  it('counts "(Deluxe Edition)" as the original release', () => {
+    expect(pick('Fleetwood Mac', 'Dreams', [dz(1, 900_000, 'Fleetwood Mac', 'Dreams', '(Deluxe Edition)'), dz(2, 300_000, 'Fleetwood Mac', 'Dreams (Live)')])).toBe(1);
+  });
+
+  it('matches names written with an apostrophe in another place: "O\'Mine" and "O\' Mine", "Tell \'Em" and "Tell\'em" (QWW-67)', () => {
+    expect(pick("Guns N' Roses", "Sweet Child O'Mine", [dza(1, 934_281, "Guns N' Roses", "Sweet Child O' Mine", 'Appetite For Destruction')])).toBe(1);
+    expect(pick("Soulja Boy Tell 'Em", 'Crank That (Soulja Boy)', [dza(1, 795_043, "Soulja Boy Tell'em", 'Crank That (Soulja Boy)', 'souljaboytellem.com')])).toBe(1);
+  });
+
+  it('reads a subtitle our own title has as the title, not a live take: "(Can\'t Live Without Your) Love and Affection" (QWW-67)', () => {
+    const nelson = [dza(1, 312_000, 'Nelson', "(Can't Live Without Your) Love And Affection (Remastered 2017)", 'After The Rain (Remastered)')];
+    expect(pick('Nelson', "(Can't Live Without Your) Love and Affection", nelson)).toBe(1);
+    // Also when Deezer files the subtitle as the version part: "Sadeness" with "(Part I)" keeps over Part II.
+    const sadeness = [dz(4621947, 693_610, 'Enigma', 'Sadeness', '(Part I)'), dz(135875728, 296_154, 'Enigma', 'Sadeness (Part II)')];
+    expect(pick('Enigma', 'Sadeness (Part I)', sadeness)).toBe(4621947);
+    // A version tag in our title still loses to the original (QWW-59).
+    expect(pick('Toto', 'Africa', [dz(1, 900_000, 'Toto', 'Africa (Live)'), dz(2, 500_000, 'Toto', 'Africa')], 'Africa (Live)')).toBe(2);
+  });
+
+  it("takes a cover under the artist's own credit: it is their recording, the song we list (QWW-67)", () => {
+    expect(pick('Lacuna Coil', 'Enjoy The Silence', [dza(1, 494_867, 'Lacuna Coil', 'Enjoy the Silence (cover version)', 'Karmacode')])).toBe(1);
+    // Another act's cover still never counts, nor a track on a karaoke album under the artist's name.
+    expect(pick('Depeche Mode', 'Enjoy The Silence', [dza(1, 494_867, 'Lacuna Coil', 'Enjoy the Silence (cover version)', 'Karmacode')])).toBeNull();
+    expect(pick('Taylor Swift', 'Anti-Hero', [dza(1, 500_000, 'Taylor Swift', 'Anti-Hero', 'Taylor Swift Karaoke Hits')])).toBeNull();
+  });
+
+  it('counts "(Original Version 1983)" and "(7\'\' Version)" as the original release (QWW-67)', () => {
+    expect([...recordingsOf('Words (Original Version 1983)')]).toEqual([]);
+    expect([...recordingsOf("You Sexy Thing (7'' Version)")]).toEqual([]);
+    expect([...recordingsOf('Counting Stars (2023 Version)')]).toEqual(['version']);
+  });
+
+  it('counts a version part of release words only as the original: Big Sean\'s "My Last (Album Version Explicit)" (QWW-67)', () => {
+    expect(pick('Big Sean', 'My Last', [dz(14539386, 443_385, 'Big Sean', 'My Last', '(Album Version Explicit)')])).toBe(14539386);
+    expect(pick('ABBA', 'Chiquitita', [dz(1, 500_000, 'ABBA', 'Chiquitita', '(Spanish Version)')])).toBeNull(); // still a language version
+  });
+});
+
+// ---------- QWW-67: the album, other names for a credit, and the lookup's fallbacks ----------
+// Tracks as Deezer's API returned them on 12 Nov 2026 (id, rank, artist, title, album), trimmed to the ones that matter.
+
+const dza = (id: number, rank: number, artist: string, title: string, album: string, version?: string): DeezerTrack => ({
+  ...dz(id, rank, artist, title, version),
+  album: { title: album },
+});
+
+describe('albumRecordings (QWW-67)', () => {
+  it.each<[string, string[]]>([
+    ['MTV Unplugged In New York', ['live']],
+    ['Anniversary | Oral Fixation (20th) and Pies Descalzos (30th) LIVE', ['live']],
+    ['One More Car, One More Rider (Live)', ['live']],
+    ['Unshatter Film Soundtrack (Live in São Paulo)', ['live']],
+    ['Live at Wembley Stadium', ['live']],
+    ['Live 1975-85', ['live']],
+    ['Deezer Session', ['live']],
+    ['Summertime Sadness (Lana Del Rey Vs. Cedric Gervais) (Cedric Gervais Remix)', ['remix']],
+    ['I Let Her Go (Remixes)', ['remix']],
+    ['Sadnecessary (Acoustic Version)', ['version']],
+    ["Red (Taylor's Version)", ['version']],
+    ['Party Tyme Karaoke - Pop Male Hits 8 (Vocal Versions)', ['not-a-song']],
+    ['Anti-Hero (Karaoke Version)', ['not-a-song']],
+    ['Anti-Hero - Instrumental', ['not-a-song']],
+    ['Songs Made Famous By Adele', ['not-a-song']],
+    ['Taylor Swift - Piano Covers', ['not-a-song', 'version']],
+    ['Caetano e Bethânia Ao Vivo', ['live']],
+    ['The Remixes', ['remix']],
+  ])('%s is %j', (album, kinds) => {
+    expect([...albumRecordings(album)].sort()).toEqual(kinds);
+  });
+
+  it('says nothing about a single or an EP named after the song: it carries the original beside the other versions', () => {
+    // Alicia Keys' "Girl on Fire" at rank 878,990 is the original mix, on the remix EP; Carly Pearce's is on the single named for its live take.
+    expect([...albumRecordings('Girl on Fire (Remixes) - EP', 'girl on fire')]).toEqual([]);
+    expect([...albumRecordings('I Hope You’re Happy Now (Live)', 'i hope you’re happy now')]).toEqual([]);
+    expect([...albumRecordings('Girl on Fire (Remixes) - EP', 'empire state of mind')]).toEqual(['remix']);
+    expect(pick('Alicia Keys', 'Girl On Fire', [dza(61542462, 878_990, 'Alicia Keys', 'Girl on Fire', 'Girl on Fire (Remixes) - EP')])).toBe(61542462);
+    // A karaoke single named after the song is still karaoke.
+    expect([...albumRecordings('Anti-Hero (Karaoke Version)', 'anti-hero')]).toEqual(['not-a-song']);
+  });
+
+  it.each([
+    'Born To Die',
+    'Born To Die - The Paradise Edition',
+    'Rumours (Deluxe Edition)',
+    'Sadnecessary (Bonus Track Version)',
+    'Oral Fixation, Vol. 2 (Expanded Edition)',
+    'High School Musical 3: Senior Year (Original Motion Picture Soundtrack)',
+    'U218 Singles (Deluxe Version)',
+    'Live Through This',
+    'Alive 2007',
+    'Stripped',
+    'Undercover',
+    'Legend - The Best Of Bob Marley And The Wailers',
+    'The Best Of Billy Ray Cyrus: Cover To Cover',
+    'The Grenade Sessions',
+    'Listen Without Prejudice / MTV Unplugged (Deluxe)',
+    'Greatest Hits 1990-1999: A Tribute To A Work In Progress...',
+  ])('%s says nothing against its tracks', (album) => {
+    expect([...albumRecordings(album)]).toEqual([]);
+  });
+});
+
+describe('pickDeezerHit, the album counts as the title does (QWW-67)', () => {
+  it("Hips Don't Lie: passes over a plain title on a live album, however well it ranks", () => {
+    const results = [
+      dza(3663852612, 877_583, 'Shakira', "Hips Don't Lie", 'Anniversary | Oral Fixation (20th) and Pies Descalzos (30th) LIVE'),
+      dza(14896962, 300_557, 'Shakira', "Hips Don't Lie", 'Live From Paris', '(Live Version)'),
+      dza(3389132901, 757_492, 'Shakira', "Hips Don't Lie (feat. Wyclef Jean)", 'Oral Fixation, Vol. 2 (Expanded Edition)'),
+    ];
+    expect(pick('Shakira', "Hips Don't Lie", results)).toBe(3389132901);
+    expect(pick('Shakira', "Hips Don't Lie", results.slice(0, 2))).toBeNull();
+  });
+
+  it('Let Her Go: a take recorded at Deezer is live, and so is a track on a "Deezer Session" album', () => {
+    const results = [
+      dza(724841252, 601_419, 'Passenger', 'Let Her Go (Recorded at Deezer, Sao Paulo)', 'Deezer Session'),
+      dza(2183569797, 176_556, 'Passenger', 'Let Her Go (Live from San Francisco)', 'Passenger (Live from San Francisco)'),
+    ];
+    expect(pick('Passenger', 'Let Her Go', results)).toBeNull();
+    expect(pick('Passenger', 'Let Her Go', [dza(724841252, 601_419, 'Passenger', 'Let Her Go', 'Deezer Session')])).toBeNull();
+  });
+
+  it('Come As You Are: a track on "MTV Unplugged In New York" is live even with a plain title', () => {
+    const unplugged = [dza(1, 636_392, 'Nirvana', 'Come As You Are', 'MTV Unplugged In New York')];
+    expect(pick('Nirvana', 'Come As You Are', unplugged)).toBeNull();
+    expect(pick('Nirvana', 'Come As You Are', unplugged, 'Come As You Are (Live)')).toBe(1);
+  });
+
+  it('Stolen Dance: a track on an acoustic album is taken only when there is no original', () => {
+    const acoustic = dza(1700988147, 592_248, 'Milky Chance', 'Stolen Dance', 'Sadnecessary (Acoustic Version)');
+    const original = dza(1762958607, 544_072, 'Milky Chance', 'Stolen Dance', 'Sadnecessary (Bonus Track Version)');
+    expect(pick('Milky Chance', 'Stolen Dance', [acoustic, original])).toBe(1762958607);
+    expect(pick('Milky Chance', 'Stolen Dance', [acoustic])).toBe(1700988147);
+  });
+});
+
+describe('other names for a credit (QWW-67)', () => {
+  it('reads a credit as Deezer names the act: Pink is P!nk, ★N Sync is *NSYNC, Dixie Chicks are The Chicks', () => {
+    expect(matchesKey(songKey('Pink', 'Just Like a Pill'), dz(15597819, 554_354, 'P!nk', 'Just Like a Pill'))).toBe(true);
+    expect(matchesKey(songKey('★N Sync', 'Bye Bye Bye'), dz(71183268, 505_100, '*NSYNC', 'Bye Bye Bye'))).toBe(true);
+    expect(matchesKey(songKey('Dixie Chicks', 'Landslide'), dz(1, 1, 'The Chicks', 'Landslide'))).toBe(true);
+    // Only Deezer's name counts for an aliased act: the other artist named "Pink" is a namesake, and so is "Pink Floyd".
+    expect(matchesKey(songKey('Pink', 'Just Like a Pill'), dz(1, 1, 'Pink', 'Just Like a Pill'))).toBe(false);
+    expect(matchesKey(songKey('Pink', 'Just Like a Pill'), dz(1, 1, 'Pink Floyd', 'Just Like a Pill'))).toBe(false);
+    // An act of a shared credit goes by Deezer's name too.
+    expect(matchesKey(songKey('Pink & Nate Ruess', 'Just Give Me A Reason'), dz(60200391, 986_564, 'P!nk', 'Just Give Me a Reason (feat. Nate Ruess)'))).toBe(true);
+  });
+
+  it.each<[string, string[]]>([
+    ['u2 and green day', ['u2', 'green day']],
+    ['sean kingston / justin bieber', ['sean kingston', 'justin bieber']],
+    ['kid cudi vs. crookers', ['kid cudi', 'crookers']],
+    ['imagine dragons x j.i.d.', ['imagine dragons', 'j.i.d.']],
+    ['bryan adams, rod stewart & sting', ['bryan adams', 'rod stewart', 'sting']],
+    ['enrique iglesias with usher', ['enrique iglesias', 'usher']],
+    ['ariana grande & the weeknd', ['ariana grande', 'the weeknd']],
+    // A band's own name splits too: its acts are tried only after the whole credit.
+    ['bob marley & the wailers', ['bob marley', 'the wailers']],
+    ['adele', []],
+  ])('creditedActs(%s) is %j', (credit, acts) => {
+    expect(creditedActs(credit)).toEqual(acts);
+  });
+
+  it('takes one act of a shared credit, "U2" for "U2 and Green Day", below the credit itself', () => {
+    const key = songKey('U2 and Green Day', 'The Saints Are Coming');
+    const u2 = dza(1574233, 260_934, 'U2', 'The Saints Are Coming', 'U218 Singles (Deluxe Version)');
+    expect(pickDeezerHit(key, [u2])?.deezerId).toBe(1574233);
+    expect(pickDeezerHit(key, [u2, dz(2, 100, 'U2 & Green Day', 'The Saints Are Coming')])?.deezerId).toBe(2);
+    // One act beats a longer name that only contains the credit.
+    const sk = songKey('Sean Kingston / Justin Bieber', 'Eenie Meenie');
+    expect(pickDeezerHit(sk, [dz(1, 900_000, 'Sean Kingston Tribute', 'Eenie Meenie'), dz(2, 500_000, 'Sean Kingston', 'Eenie Meenie')])?.deezerId).toBe(2);
+  });
+
+  it('takes the soundtrack of the film or show a credit names: "Disney’s Aladdin", "Hamilton"', () => {
+    const aladdin = songKey('Disney’s Aladdin', 'A Whole New World');
+    expect(matchesKey(aladdin, dza(120917666, 430_262, 'Lea Salonga', 'A Whole New World', 'Aladdin (Original Motion Picture Soundtrack)'))).toBe(true);
+    expect(matchesKey(aladdin, dza(134928834, 296_473, 'Jon Sarta', 'A Whole New World', 'Disney Piano Classics'))).toBe(false);
+    expect(matchesKey(aladdin, dza(1, 1, 'Lea Salonga', 'A Whole New World', 'Aladdin'))).toBe(false); // no soundtrack word
+    const hamilton = songKey('Hamilton', 'My Shot');
+    expect(pickDeezerHit(hamilton, [dza(107832272, 633_897, 'Lin-Manuel Miranda', 'My Shot', 'Hamilton (Original Broadway Cast Recording)')])?.deezerId).toBe(107832272);
+    // The album starts with the work's name and goes on, if at all, with a subtitle or soundtrack words.
+    const campRock = songKey('Disney’s Camp Rock 2', 'Can’t Back Down');
+    expect(matchesKey(campRock, dza(1, 1, 'Demi Lovato', 'Can’t Back Down', 'Camp Rock 2: The Final Jam (Original Motion Picture Soundtrack)'))).toBe(true);
+    expect(matchesKey(songKey('Mamma Mia!', 'Mamma Mia'), dza(1, 1, 'Meryl Streep', 'Mamma Mia', 'Mamma Mia! The Movie Soundtrack'))).toBe(true);
+    expect(matchesKey(songKey('Queen', 'Slept So Long'), dza(1, 1, 'Jonathan Davis', 'Slept So Long', 'Queen Of The Damned (Soundtrack)'))).toBe(false);
+    expect(matchesKey(songKey('Up', 'Married Life'), dza(1, 1, 'Michael Giacchino', 'Married Life', 'Upside Down (Original Motion Picture Soundtrack)'))).toBe(false);
+  });
+});
+
+/** A client that answers from fixed data and records each call. */
+function fakeClient(data: {
+  search?: Record<string, DeezerTrack[]>;
+  artists?: Record<string, DeezerArtist[]>;
+  top?: Record<number, DeezerTrack[]>;
+  tracks?: Record<number, DeezerTrackDetail>;
+}) {
+  const calls: string[] = [];
+  return {
+    calls,
+    async search(q: string, limit?: number) {
+      calls.push(`search ${q}${limit ? ` (${limit})` : ''}`);
+      return data.search?.[q] ?? [];
+    },
+    async artists(name: string) {
+      calls.push(`artists ${name}`);
+      return data.artists?.[name] ?? [];
+    },
+    async artistTop(id: number) {
+      calls.push(`top ${id}`);
+      return data.top?.[id] ?? [];
+    },
+    async track(id: number) {
+      calls.push(`track ${id}`);
+      return data.tracks?.[id] ?? null;
+    },
+  };
+}
+
+describe('findDeezerTrack (QWW-67)', () => {
+  // "lana del rey summertime sadness" returned only remixes, a sped-up edit and covers; the original from Born To Die
+  // (16149860) is in her top 100.
+  const summertime = {
+    search: {
+      'lana del rey summertime sadness': [
+        dza(69419038, 809_798, 'Lana Del Rey', 'Summertime Sadness (Lana Del Rey Vs. Cedric Gervais)', 'Summertime Sadness (Lana Del Rey Vs. Cedric Gervais) (Cedric Gervais Remix)', '(Cedric Gervais Remix)'),
+        dza(1927583977, 479_624, 'Lana Del Rey', 'Summertime Sadness', 'Summertime Sadness (Sped Up)', '(Sped Up)'),
+        dza(4312131932, 522_229, 'Jaax', 'Summertime Sadness', 'Summertime Sadness'),
+        dza(2412060525, 97_495, 'Lana Del Rey Piano Covers', 'Summertime Sadness - Piano Cover', 'Lana Del Rey - Piano Covers'),
+      ],
+    },
+    artists: {
+      'lana del rey': [
+        { id: 1424821, name: 'Lana Del Rey', nb_fan: 5_846_630 },
+        { id: 404449462, name: 'Lana Del Rey', nb_fan: 29 },
+        { id: 225697895, name: 'Lana Del Rey Piano Covers', nb_fan: 142 },
+      ],
+    },
+    top: {
+      1424821: [dza(16149860, 813_635, 'Lana Del Rey', 'Summertime Sadness', 'Born To Die'), dza(16149858, 700_000, 'Lana Del Rey', 'Video Games', 'Born To Die')],
+    },
+    tracks: { 16149860: { ...dza(16149860, 813_635, 'Lana Del Rey', 'Summertime Sadness', 'Born To Die'), bpm: 112, release_date: '2012-01-27' } },
+  };
+
+  it('Summertime Sadness: when the search has only remixes, takes the original from the artist with the name and the most fans', async () => {
+    const client = fakeClient(summertime);
+    const found = await findDeezerTrack(client, 'Lana Del Rey', 'Summertime Sadness');
+    expect(found.hit).toEqual({ rank: 813_635, deezerId: 16149860, artist: 'Lana Del Rey', title: 'Summertime Sadness', album: 'Born To Die' });
+    expect(found.route).toBe('artist');
+    // The original settles it: no search on the title alone.
+    expect(client.calls).toEqual(['search lana del rey summertime sadness', 'artists lana del rey', 'top 1424821']);
+    expect(found.calls).toBe(3);
+  });
+
+  it('reads the chosen track by its id once more for its release date, when asked', async () => {
+    const client = fakeClient(summertime);
+    const found = await findDeezerTrack(client, 'Lana Del Rey', 'Summertime Sadness', { releaseDate: true });
+    expect(found.hit?.releaseDate).toBe('2012-01-27');
+    expect(client.calls.at(-1)).toBe('track 16149860');
+    expect(found.calls).toBe(4);
+  });
+
+  it("makes no other call when the search has the original under the artist's own credit", async () => {
+    const client = fakeClient({ search: { 'toto africa': [dza(1079668, 964_180, 'Toto', 'Africa', 'Toto IV'), dza(649767712, 345_995, 'Toto', 'Africa (Live)', 'Live')] } });
+    const found = await findDeezerTrack(client, 'Toto', 'Africa');
+    expect(found).toEqual({ hit: { rank: 964_180, deezerId: 1079668, artist: 'Toto', title: 'Africa', album: 'Toto IV' }, route: 'search', calls: 1 });
+    expect(client.calls).toEqual(['search toto africa']);
+  });
+
+  it('Pink: searches and looks up the artist as P!nk, never the other act named Pink', async () => {
+    const client = fakeClient({
+      artists: { 'P!nk': [{ id: 69925, name: 'P!nk', nb_fan: 4_680_904 }, { id: 296088961, name: 'PNK GST ZL', nb_fan: 181 }] },
+      top: { 69925: [dza(15597819, 554_354, 'P!nk', 'Just Like a Pill', 'Greatest Hits...So Far!!!')] },
+    });
+    const found = await findDeezerTrack(client, 'Pink', 'Just Like a Pill');
+    expect(found.hit?.deezerId).toBe(15597819);
+    expect(client.calls).toEqual(['search p!nk just like a pill', 'artists P!nk', 'top 69925']);
+  });
+
+  it('U2 and Green Day: tries the whole credit, then each act', async () => {
+    const client = fakeClient({
+      artists: { u2: [{ id: 174917877, name: 'U2', nb_fan: 12 }, { id: 432, name: 'U2', nb_fan: 5_000_000 }] },
+      top: { 432: [dza(1574233, 260_934, 'U2', 'The Saints Are Coming', 'U218 Singles (Deluxe Version)')] },
+    });
+    const found = await findDeezerTrack(client, 'U2 and Green Day', 'The Saints Are Coming');
+    expect(found.hit?.deezerId).toBe(1574233);
+    expect(found.route).toBe('artist');
+    // One act's track is not the artist's own credit, so the rest of the ladder still runs; it finds nothing better.
+    expect(client.calls).toEqual([
+      'search u2 and green day the saints are coming',
+      'artists u2 and green day',
+      'artists u2',
+      'top 432',
+      'artists green day',
+      'search the saints are coming (25)',
+    ]);
+  });
+
+  it('AC/DC: tries the acts of a credit only when Deezer has no artist by the whole name', async () => {
+    const client = fakeClient({
+      artists: { 'ac/dc': [{ id: 115, name: 'AC/DC', nb_fan: 9_000_000 }] },
+      top: { 115: [dza(574145, 900_000, 'AC/DC', 'Highway to Hell', 'Highway to Hell')] },
+    });
+    const found = await findDeezerTrack(client, 'AC/DC', 'Highway To Hell');
+    expect(found.hit?.deezerId).toBe(574145);
+    expect(client.calls).toEqual(['search ac/dc highway to hell', 'artists ac/dc', 'top 115']);
+  });
+
+  it('never sends an empty query: a key part can be empty, and Deezer answers that with an error', async () => {
+    const client = fakeClient({});
+    expect(await findDeezerTrack(client, 'Patrick Nuo', '(Intro)')).toEqual({ hit: null, calls: 2 });
+    expect(client.calls).toEqual(['search patrick nuo ', 'artists patrick nuo']);
+    const none = fakeClient({});
+    expect(await findDeezerTrack(none, '(Unknown)', '[Intro]')).toEqual({ hit: null, calls: 0 });
+    expect(none.calls).toEqual([]);
+  });
+
+  it('keeps the stored track when the search now returns only a lower-ranked copy: Lighthouse Family\'s "High"', async () => {
+    const stored = { ...dza(2163021, 556_607, 'Lighthouse Family', 'High', 'Greatest Hits'), bpm: 0, release_date: '2002-11-11' };
+    const client = fakeClient({
+      search: { 'lighthouse family high': [dza(1159470, 69_261, 'Lighthouse Family', 'High', 'High')] },
+      tracks: { 2163021: stored },
+    });
+    const found = await findDeezerTrack(client, 'Lighthouse Family', 'High', { stored: 2163021, releaseDate: true });
+    expect(found.hit).toMatchObject({ deezerId: 2163021, releaseDate: '2002-11-11' });
+    expect(found.route).toBe('stored');
+    // Read by its id already, so no call more for the release date.
+    expect(client.calls).toEqual(['track 2163021', 'search lighthouse family high']);
+  });
+
+  it('replaces a stored live take with the original, and drops a stored track Deezer no longer has', async () => {
+    const live = { ...dza(1105734, 636_392, 'Nirvana', 'Come As You Are', 'MTV Unplugged In New York', '(Live)'), bpm: 0 };
+    const original = dza(1105738, 600_000, 'Nirvana', 'Come As You Are', 'Nevermind');
+    const client = fakeClient({ search: { 'nirvana come as you are': [original] }, tracks: { 1105734: live } });
+    expect((await findDeezerTrack(client, 'Nirvana', 'Come As You Are', { stored: 1105734 })).hit?.deezerId).toBe(1105738);
+    const gone = fakeClient({ search: { 'nirvana come as you are': [original] } });
+    expect((await findDeezerTrack(gone, 'Nirvana', 'Come As You Are', { stored: 1 })).hit?.deezerId).toBe(1105738);
+  });
+
+  it('reads renamed acts by their Deezer names: Puff Daddy is Diddy, Snoop Doggy Dogg is Snoop Dogg', () => {
+    expect(matchesKey(songKey('Puff Daddy', "I'll Be Missing You"), dz(1, 1, 'Diddy', "I'll Be Missing You (feat. Faith Evans & 112)"))).toBe(true);
+    expect(matchesKey(songKey('Snoop Doggy Dogg', 'Gin and Juice'), dz(1, 1, 'Snoop Dogg', 'Gin and Juice'))).toBe(true);
+  });
+
+  it('keeps a hit when its release date cannot be read', async () => {
+    const client = { ...fakeClient(summertime), track: async () => Promise.reject(new Error('Deezer track 16149860 failed (HTTP 503)')) };
+    const found = await findDeezerTrack(client, 'Lana Del Rey', 'Summertime Sadness', { releaseDate: true });
+    expect(found.hit?.deezerId).toBe(16149860);
+    expect(found.hit).not.toHaveProperty('releaseDate');
+  });
+
+  it('Disney’s Aladdin: no artist has the name, so the title alone finds the soundtrack', async () => {
+    const client = fakeClient({
+      search: {
+        'a whole new world': [
+          dza(1486760292, 439_485, 'Tiny Moon', 'A Whole New World (Piano Version)', 'Piano Lullabies'),
+          dza(120917666, 430_262, 'Lea Salonga', 'A Whole New World', 'Aladdin (Original Motion Picture Soundtrack)'),
+        ],
+      },
+    });
+    const found = await findDeezerTrack(client, 'Disney’s Aladdin', 'A Whole New World');
+    expect(found.hit?.deezerId).toBe(120917666);
+    expect(found.route).toBe('title');
+    expect(client.calls).toEqual(['search disney’s aladdin a whole new world', 'artists disney’s aladdin', 'search a whole new world (25)']);
+  });
+
+  it('keeps a hand-checked track: Counting Stars is read by its id, with no search', async () => {
+    const original = { ...dza(65759979, 799_652, 'OneRepublic', 'Counting Stars', 'Native'), bpm: 122, release_date: '2013-03-22', duration: 257 };
+    const client = fakeClient({ tracks: { 65759979: original } });
+    const found = await findDeezerTrack(client, 'OneRepublic', 'Counting Stars');
+    expect(found.hit).toEqual({ rank: 799_652, deezerId: 65759979, artist: 'OneRepublic', title: 'Counting Stars', album: 'Native', duration: 257, releaseDate: '2013-03-22' });
+    expect(found.route).toBe('hand');
+    expect(client.calls).toEqual(['track 65759979']);
+    expect(HAND_CHECKED.get(songKey('Green Day', 'Time Of Your Life'))).toBe(778429);
+  });
+
+  it('Too Close: a copy on a compilation ranked far below the song does not settle it; the artist\'s top tracks have the album\'s', async () => {
+    const client = fakeClient({
+      search: {
+        'alex clare too close': [
+          dza(500090262, 357_456, 'Alex Clare', 'Too Close', 'Three Days at Greenmount', '(Acoustic)'),
+          dza(70042416, 1_806, 'Alex Clare', 'Too Close', 'Ultra Dance 14'),
+        ],
+      },
+      artists: { 'alex clare': [{ id: 1021165, name: 'Alex Clare', nb_fan: 60_000 }] },
+      top: { 1021165: [dza(1762965567, 353_172, 'Alex Clare', 'Too Close', 'The Lateness Of The Hour'), dza(32143941, 143_659, 'Alex Clare', 'Too Close', 'Too Close (Unplugged)', '(Unplugged)')] },
+    });
+    const found = await findDeezerTrack(client, 'Alex Clare', 'Too Close');
+    expect(found.hit?.deezerId).toBe(1762965567);
+    expect(found.route).toBe('artist');
+  });
+
+  it('Break Free: searches again naming the featured act when the plain search has only a live take and an a cappella', async () => {
+    expect(everyActQuery('Ariana Grande feat. Zedd', 'Break Free')).toBe('ariana grande zedd break free');
+    expect(everyActQuery('Luis Fonsi', 'Despacito (feat. Justin Bieber)')).toBe('luis fonsi justin bieber despacito');
+    expect(everyActQuery('Ariana Grande & The Weeknd', 'Love Me Harder')).toBeNull(); // the plain search names both already
+    expect(everyActQuery('Adele', 'Hello')).toBeNull();
+    const client = fakeClient({
+      search: {
+        'ariana grande break free': [
+          dza(841310422, 408_633, 'Ariana Grande', 'break free (live)', 'k bye for now (swt live)', '(live)'),
+          dza(2958872101, 195_507, 'Ariana Grande', 'Break Free (A Cappella)', 'Break Free', '(A Cappella)'),
+        ],
+        'ariana grande zedd break free': [dza(2948131691, 626_344, 'Ariana Grande', 'Break Free', 'My Everything (Tenth Anniversary Edition)')],
+      },
+    });
+    const found = await findDeezerTrack(client, 'Ariana Grande feat. Zedd', 'Break Free');
+    expect(found.hit?.deezerId).toBe(2948131691);
+    expect(found.route).toBe('acts');
+    expect(client.calls).toEqual(['search ariana grande break free', 'search ariana grande zedd break free']);
+  });
+
+  it('The Buggles: the artist lookup takes "The Buggles" for "Buggles", as a credit match does', async () => {
+    const client = fakeClient({
+      artists: { buggles: [{ id: 149264, name: 'The Buggles', nb_fan: 19_247 }, { id: 994, name: 'The Bangles', nb_fan: 118_371 }] },
+      top: { 149264: [dza(3129436, 600_000, 'The Buggles', 'Video Killed The Radio Star', 'The Age Of Plastic')] },
+    });
+    const found = await findDeezerTrack(client, 'Buggles', 'Video Killed The Radio Star');
+    expect(found.hit?.deezerId).toBe(3129436);
+    expect(client.calls).toEqual(['search buggles video killed the radio star', 'artists buggles', 'top 149264']);
+  });
+
+  it('is a miss when no route finds the song', async () => {
+    const client = fakeClient({});
+    expect(await findDeezerTrack(client, 'Patrick Nuo', '5 Days')).toEqual({ hit: null, calls: 3 });
+    expect(client.calls).toEqual(['search patrick nuo 5 days', 'artists patrick nuo', 'search 5 days (25)']);
+  });
+});
+
+describe('createDeezerClient, the artist routes (QWW-67)', () => {
+  it("asks for artists by name, an artist's top 100, and a longer search", async () => {
+    const urls: string[] = [];
+    const client = createDeezerClient({
+      fetch: async (url) => {
+        urls.push(url);
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      },
+      sleep: async () => {},
+    });
+    await client.artists('P!nk');
+    await client.artistTop(69925);
+    await client.search('summertime sadness', TITLE_SEARCH_LIMIT);
+    expect(urls).toEqual([
+      'https://api.deezer.com/search/artist?q=P!nk&limit=10',
+      'https://api.deezer.com/artist/69925/top?limit=100',
+      'https://api.deezer.com/search?q=summertime%20sadness&limit=25',
+    ]);
   });
 });

@@ -463,6 +463,24 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(all.get('toto|africa')!.deezerId).toBe(3_135_556_000);
   });
 
+  it('keeps the track a lookup matched, and a later miss clears it (QWW-67)', async () => {
+    const s = make();
+    const hit = {
+      key: 'lana del rey|summertime sadness',
+      rank: 813_635,
+      deezerId: 16_149_860,
+      checkedAt: '2026-11-12T08:00:00.000Z',
+      title: 'Summertime Sadness',
+      album: 'Born To Die',
+      releaseDate: '2012-01-27',
+      duration: 265,
+    };
+    await s.putSongDeezer([hit]);
+    expect((await s.listSongDeezer()).get(hit.key)).toStrictEqual(hit);
+    await s.putSongDeezer([{ key: hit.key, checkedAt: '2026-11-13T08:00:00.000Z' }]);
+    expect((await s.listSongDeezer()).get(hit.key)).toStrictEqual({ key: hit.key, checkedAt: '2026-11-13T08:00:00.000Z' });
+  });
+
   it('keeps one-song-one-row records by key: a batch read, a full list, and a new row replaces the old (QWW-49)', async () => {
     const s = make();
     const rec = (key: string, canonicalKey: string, title: string, reason: SongCanonical['reason']): SongCanonical => ({ key, canonicalKey, title, artist: 'Aaliyah', method: 'titles-v1', reason, sourceTitle: `raw ${title}`, sourceArtist: 'Aaliyah (raw)' });
@@ -671,6 +689,20 @@ describe('schema and store selection', () => {
     expect(await s.listFeedback()).toEqual([fresh, old]);
     // A tap saved before the view column existed comes back with no view.
     expect((await s.listFeedback())[1]).not.toHaveProperty('view');
+  });
+
+  it('migrate adds the matched-track columns to a song_deezer made before them, and can run again (QWW-67)', async () => {
+    const q = pgMemQuery({ noAstCoverageCheck: true });
+    await q('CREATE TABLE song_deezer (song_key TEXT PRIMARY KEY, rank INTEGER, deezer_id BIGINT, checked_at TEXT NOT NULL)');
+    await q('INSERT INTO song_deezer (song_key, rank, deezer_id, checked_at) VALUES ($1, $2, $3, $4)', ['toto|africa', 964_180, 1_079_668, '2026-11-06T12:00:00.000Z']);
+    await migrate(q);
+    await migrate(q);
+    const s = createPostgresStore(q, { autoMigrate: false });
+    // A lookup stored before the columns existed reads back without them; a new one keeps them.
+    expect((await s.listSongDeezer()).get('toto|africa')).toStrictEqual({ key: 'toto|africa', rank: 964_180, deezerId: 1_079_668, checkedAt: '2026-11-06T12:00:00.000Z' });
+    const hit = { key: 'toto|africa', rank: 964_180, deezerId: 1_079_668, checkedAt: '2026-11-13T00:00:00.000Z', title: 'Africa', album: 'Toto IV', releaseDate: '1982-04-08', duration: 295 };
+    await s.putSongDeezer([hit]);
+    expect((await s.listSongDeezer()).get('toto|africa')).toStrictEqual(hit);
   });
 
   it('picks memory unless a DATABASE_URL is set and KARAOKE_STORE is not memory', () => {

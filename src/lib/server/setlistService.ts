@@ -2,6 +2,7 @@
 // library songs, ranked by the engine (songs/setlist.ts) and cut to the page asked for. Nothing here ranks.
 
 import type { DataSourceLogEntry, SetlistRequest, SetlistResponse } from '../contracts';
+import type { LanguageWeights } from '../songs/score';
 import { libraryCandidate, prepareSetlist, rankPrepared, type SetlistCandidate } from '../songs/setlist';
 import { SETLIST_PAGE } from '../songs/setlistConfig';
 import { catalogueKey, type CatalogueSetlist } from './catalogue';
@@ -9,14 +10,15 @@ import { compact, type LibraryMatches } from './songService';
 
 /**
  * The catalogue's songs that fit plus the library's, one entry per song. A song in both is the library's: it carries
- * how much the singer plays it, and their own Spotify track.
+ * how much the singer plays it, and their own Spotify track. A catalogue song keeps what a language weight reads from it
+ * (its signals); a library song has none, so no language weight ever moves it.
  */
 export function withLibrary(
   base: CatalogueSetlist,
   library: LibraryMatches,
 ): { candidates: SetlistCandidate[]; logs: Map<string, DataSourceLogEntry> } {
   const bySong = new Map<string, SetlistCandidate>();
-  for (const match of base.matches) bySong.set(catalogueKey(match.track.id) ?? match.track.id, { match });
+  for (const match of base.matches) bySong.set(catalogueKey(match.track.id) ?? match.track.id, { match, ...base.signals.get(match.track.id) });
   const logs = new Map(base.logs);
   for (const match of library.matches) {
     const key = library.keys.get(match.track.id) ?? match.track.id;
@@ -33,8 +35,9 @@ export function withLibrary(
  * The response for a request: the catalogue's list, or with `library` (the singer is signed in and it was read) the
  * catalogue's songs and theirs, with the History gear counting. Songs on the page are stripped of their pitch
  * histograms, like every whole-list response. Duets and moods are applied afterwards (features.ts), so never to the order.
+ * `languageWeights` replaces the engine's choice of language weights for this request (rankPrepared, QWW-59).
  */
-export function setlistFor(base: CatalogueSetlist, library: LibraryMatches | null, req: SetlistRequest): SetlistResponse {
+export function setlistFor(base: CatalogueSetlist, library: LibraryMatches | null, req: SetlistRequest, languageWeights?: LanguageWeights): SetlistResponse {
   let prepared = base.prepared;
   let logs = base.logs;
   if (library) {
@@ -42,7 +45,10 @@ export function setlistFor(base: CatalogueSetlist, library: LibraryMatches | nul
     prepared = prepareSetlist(merged.candidates, req.range);
     logs = merged.logs;
   }
-  const ranked = rankPrepared(prepared, { gears: req.gears, off: req.off, eras: req.eras, loggedIn: library !== null });
+  // Left to the engine, German, Polish and French songs that rank on USDB views alone are lowered when no library was
+  // read (QWW-59: score.ts LANGUAGE_POPULARITY_WEIGHTS), and nothing is when one was.
+  const state = { gears: req.gears, off: req.off, eras: req.eras, loggedIn: library !== null };
+  const ranked = rankPrepared(prepared, languageWeights ? { ...state, languageWeights } : state);
 
   const offset = req.offset ?? 0;
   const limit = req.limit ?? SETLIST_PAGE.default;

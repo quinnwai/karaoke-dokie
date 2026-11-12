@@ -133,6 +133,11 @@ export interface SongDeezerRecord {
   deezerId?: number;
   /** ISO time of the lookup. */
   checkedAt: string;
+  /** The matched track as Deezer gives it (QWW-67): its title, album, release date ("YYYY-MM-DD") and length in seconds. */
+  title?: string;
+  album?: string;
+  releaseDate?: string;
+  duration?: number;
 }
 
 import type { SongFeelRecord } from '../tempo/feel';
