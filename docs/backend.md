@@ -196,19 +196,23 @@ as written.
 
 **Tempo at an end (QWW-54).** With Tempo on and within 10 places of either end of its track (0 to 10 or 90 to 100,
 `TEMPO_END_REACH`), the songs in that end's band come first: under 90 on the one tempo at the slow end, 125 and over at the
-upbeat end (`feelOfTempo`; with a feel label these are the songs labelled slow or upbeat). They come ahead of how a song is
-sung and ahead of every other gear. Inside the band, and inside the rest, the order is the usual one: sung as written first,
-then the jumps (QWW-58), each by the closest sum. The Maybe songs still come last, and a song with no tempo comes after every
-song that has one in its group. With Tempo off, or on and 11 to 89, nothing changes: the default list, criterion 9 and the Hard
-songs above are as they were. Why: asked for "Slow jams", the songs sung as written came first and, in a narrow range, filled
-the top 20 with mid-tempo songs before the first slow song that needed a jump. In the release eval (criterion 2, Tempo alone)
-the soprano's 2020s slow list showed 6 slow songs and then 14 mid or unlabelled ones, while 40 slow-labelled songs fit the
-range. Dropping the octave groups at the ends, so that the sum decides, was tried first and not kept: on the tuner's default
-gears (Popularity and Difficulty stay on when Tempo moves) it put the biggest hits back at the top in whichever octave fits
-them, 47% of the top 20 of the eval's 144 lists octave jumps (a bass's 97%), where there had been none. With the band first
-3% of those slots are jump songs (96 of 2,880). On one set of the judge's answers, with the feel labels ranked by clarity, 128
-of the 144 lists of criterion 2 reach 18 of 20 with this rule against 120 without it, and 115 against 27 on the default gears.
-It changes Quinn-Wai's QWW-58 decision A for these two ends only.
+upbeat end (`feelOfTempo`). The band follows the feel labels: a song labelled slow or upbeat is in its band, a weak label too,
+and a song with no label is squeezed into the mid band (90 to 124.5), so with no labels both bands are empty and the rule does
+nothing. The band songs come ahead of how a song is sung and ahead of every other gear. Inside the band, and inside the rest,
+the order is the usual one: sung as written first, then the jumps (QWW-58), each by the closest sum. There the thumb counts as
+the end itself: Tempo's distance is to 0 or 100, so a thumb anywhere from 0 to 10 (90 to 100) gives the same list and the
+slowest (fastest) songs come first. Measured to the thumb, a thumb at 8 or 10 reached first the weak labels, which rest at the
+top of the slow band (at Tempo 10, 71% of the slow end's top 20 were weak labels; with the end as the target, 9.5%). The Maybe
+songs still come last, and a song with no tempo comes after every song that has one in its group. With Tempo off, or on and 11
+to 89, nothing changes: the default list, criterion 9 and the Hard songs above are as they were. Why: asked for "Slow jams",
+the songs sung as written came first and, in a narrow range, filled the top 20 with mid-tempo songs before the first slow song
+that needed a jump. In the release eval (criterion 2, Tempo alone) the soprano's 2020s slow list showed 6 slow songs and then
+14 mid or unlabelled ones, while 40 slow-labelled songs fit the range. Dropping the octave groups at the ends, so that the sum
+decides, was tried first and not kept: on the tuner's default gears (Popularity and Difficulty stay on when Tempo moves) it put
+the biggest hits back at the top in whichever octave fits them, 47% of the top 20 of the eval's 144 lists octave jumps (a
+bass's 97%), where there had been none. With the band first 3% of those slots are jump songs (96 of 2,880). On one set of the
+judge's answers, 128 of the 144 lists of criterion 2 reach 18 of 20 with this rule against 120 without it, and 115 against 27
+on the default gears. It changes Quinn-Wai's QWW-58 decision A for these two ends only.
 
 **The curve (rule 2, easy leans low).** The strain of a song is the sung-time-weighted average of a note's cost, `t` being
 where the note sits in the singer's range (0 lowest, 1 highest, an octave shift applied): `((t - 0.35) / 0.65)²` from the
