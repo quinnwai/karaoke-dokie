@@ -16,7 +16,7 @@
 //
 // Not every label vouches for its end equally. An independent judge agreed with 95% of the slow labels the strict first
 // pass made, but with only 79% of those the band-edge audit made (58% where just two of its three runs agreed), so a
-// label from a plain-definition pass ranks behind the clear ones in its band (isWeakLabelSource).
+// label from a plain-definition pass ranks behind the clear songs whose readings fit their band (isWeakLabelSource).
 
 import { reviewedBpm } from './reviewed';
 import { combineTempo, TEMPO_MAX, TEMPO_MIN, type SongTempoRecord, type TempoSource } from './tempo';
@@ -96,7 +96,7 @@ export interface EffectiveTempo {
    * (with no label) squeezed into the mid band. Unset when the measured value is used as it is.
    */
   adjusted?: 'halved' | 'doubled' | 'clamped' | 'compressed';
-  /** True when the label is a weak one (isWeakLabelSource) and the song was put behind the clear ones in its band. */
+  /** True when the label is a weak one (isWeakLabelSource) and the song was put in the strip at its band's inner edge, behind the clear songs whose readings fit the band. */
   weak?: true;
 }
 
@@ -152,7 +152,10 @@ export function fitReading(readings: Reading[], feel: Feel): { value: number; oc
  *   is fitReading), and a value still outside the band goes into a thin strip just inside its nearest edge. With no
  *   reading the song sits at FEEL_REST.
  * - A weak label (`weak`, from isWeakLabelSource) at either end: the same band, but the song goes into the strip at the band's
- *   inner edge, in the order of its tempo, so it ranks behind every song with a clear label (a mid label has no end to be behind).
+ *   inner edge, in the order of its tempo, so it ranks behind the clear songs whose readings fit the band. A clear song that had
+ *   to be forced to the band's edge by its reading shares that strip with it, so "behind every clear song" is not what this
+ *   promises (a mid label has no end to be behind). With no reading a weak label sits at the inner end of the strip, behind the
+ *   weak songs whose readings back their label.
  */
 export function effectiveTempo(input: {
   key?: string;
@@ -175,8 +178,13 @@ export function effectiveTempo(input: {
   }
 
   const best = fitReading(readingsOf(record, reviewed), feel);
-  if (!best) return { tempo: FEEL_REST[feel], source: 'feel' };
   const band = FEEL_BANDS[feel];
+  if (!best) {
+    // Nothing backs the label but the label. A weak one goes last in the strip at the band's inner edge (the end of it nearest the
+    // middle), behind the weak songs whose readings fit; a clear one rests at FEEL_REST.
+    if (input.weak && feel !== 'mid') return { tempo: feel === 'slow' ? band.max - EDGE + STRIP : band.min, source: 'feel', weak: true };
+    return { tempo: FEEL_REST[feel], source: 'feel' };
+  }
 
   // Out of its band, a value goes into a thin strip at the nearest edge: the strip at the top is the last half bpm before
   // the band ends, the one at the bottom is its first. Inside it the order follows the reading (the slower the reading,
@@ -187,7 +195,7 @@ export function effectiveTempo(input: {
   const clamped = best.value < band.min || best.value >= band.max;
   const adjusted = clamped ? 'clamped' : best.octaves < 0 ? 'halved' : best.octaves > 0 ? 'doubled' : undefined;
   if (input.weak && feel !== 'mid') {
-    // Behind the clear labels: the inner edge of the band, the strip next to the middle, in the order the song had.
+    // Behind the clear songs whose readings fit: the inner edge of the band, the strip next to the middle, in the order the song had.
     const place = Math.min(1, Math.max(0, (tempo - band.min) / (band.max - band.min)));
     const inner = feel === 'slow' ? band.max - EDGE + STRIP * place : band.min + STRIP * place;
     return { tempo: inner, source: best.source, ...(adjusted ? { adjusted } : {}), weak: true };

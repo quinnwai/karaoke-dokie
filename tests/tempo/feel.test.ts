@@ -252,11 +252,29 @@ describe('weak labels: the second look and the band-edge audit rank behind the s
     expect(weak('upbeat', 70)).toMatchObject({ adjusted: 'doubled', weak: true });
   });
 
-  it('leaves a mid label, a song with no label and a labelled song with no reading as they are', () => {
+  it('leaves a mid label and a song with no label as they are', () => {
     expect(weak('mid', 100)).toEqual(clear('mid', 100));
     expect(effectiveTempo({ record: { deezerBpm: 100 }, weak: true })).toEqual(effectiveTempo({ record: { deezerBpm: 100 } }));
-    expect(effectiveTempo({ feel: 'slow', weak: true })).toEqual({ tempo: FEEL_REST.slow, source: 'feel' });
-    expect(effectiveTempo({ feel: 'upbeat', weak: true })).toEqual({ tempo: FEEL_REST.upbeat, source: 'feel' });
+    expect(effectiveTempo({ feel: 'mid', weak: true })).toEqual({ tempo: FEEL_REST.mid, source: 'feel' });
+  });
+
+  it('puts a weak label with no reading last in the strip, behind the weak songs whose readings back their label, not at rest', () => {
+    // Only the label vouches for it, so it is the least backed of all: the inner end of the strip. (It used to rest at FEEL_REST,
+    // which for slow is the front of the strip, ahead of every weak song with a reading.)
+    const slow = effectiveTempo({ feel: 'slow', weak: true })!;
+    const upbeat = effectiveTempo({ feel: 'upbeat', weak: true })!;
+    expect(slow).toMatchObject({ source: 'feel', weak: true });
+    expect(upbeat).toMatchObject({ source: 'feel', weak: true });
+    expect(slow.tempo).toBeCloseTo(FEEL_BANDS.slow.max - 0.5 + 0.4, 9);
+    expect(upbeat.tempo).toBe(FEEL_BANDS.upbeat.min);
+    for (const bpm of [45, 50, 70, 85, 100, 148]) expect(weak('slow', bpm).tempo, `slow ${bpm}`).toBeLessThanOrEqual(slow.tempo);
+    for (const bpm of [70, 130, 150, 190]) expect(weak('upbeat', bpm).tempo, `upbeat ${bpm}`).toBeGreaterThanOrEqual(upbeat.tempo);
+    // A clear label with no reading is as it was: at rest, ahead of the weak one at the slow end.
+    expect(effectiveTempo({ feel: 'slow' })).toEqual({ tempo: FEEL_REST.slow, source: 'feel' });
+    expect(effectiveTempo({ feel: 'upbeat' })).toEqual({ tempo: FEEL_REST.upbeat, source: 'feel' });
+    expect(effectiveTempo({ feel: 'slow' })!.tempo).toBeLessThan(slow.tempo);
+    // And the same for a record with no usable number in it.
+    expect(effectiveTempo({ record: { deezerBpm: 0 }, feel: 'slow', weak: true })).toEqual(slow);
   });
 
   it('never leaves the label\'s band, so a weak slow song is still below every mid song and a weak upbeat song above', () => {
