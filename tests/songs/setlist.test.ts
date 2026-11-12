@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EraId, GearId, Match, SetlistInput, SetlistState, SongRange, Track, TunerPart, VocalRange } from '../../src/lib/contracts';
 import { ERA_IDS, GEAR_IDS } from '../../src/lib/contracts';
+import { feelOfTempo } from '../../src/lib/tempo/feel';
 import { catalogueMatches, catalogueTracks, prepareCatalogue, rankCatalogue, type CatalogueTrack } from '../../src/lib/server/catalogue';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { productionSongDeps } from '../../src/lib/server/wiring';
@@ -737,9 +738,10 @@ describe('songs sung as written come before songs that need an octave jump (QWW-
   });
 });
 
-describe('Tempo at an end ranks before "sung as written" (QWW-54, option 3)', () => {
+describe('Tempo at an end: the songs at that end come before how a song is sung (QWW-54)', () => {
   // The same notes as the singer sings them (as in QWW-58 above), written as they are sung, an octave above or an octave below,
-  // each with the tempo a test gives it. Five songs with a tempo get the places 0, 25, 50, 75 and 100 on Tempo, slowest to fastest.
+  // each with the tempo a test gives it: under 90 is the slow band, 125 and over the upbeat band (feelOfTempo), between is mid.
+  // Five songs with a tempo get the places 0, 25, 50, 75 and 100 on Tempo, slowest to fastest.
   const AS_SUNG = { none: [46, 62], down: [58, 74], up: [34, 50] } as const;
   const timed = (id: string, how: keyof typeof AS_SUNG, tempo: number | undefined, popularity = 0.5) => {
     const [low, high] = AS_SUNG[how];
@@ -751,17 +753,18 @@ describe('Tempo at an end ranks before "sung as written" (QWW-54, option 3)', ()
   const at = (tempo: number, ms: Match[] = FIVE, over: Parameters<typeof state>[0] = {}) =>
     ids(rankPrepared(prepareSetlist(cands(...ms), USER), state({ off: tempoOnly, ...over, gears: { tempo, ...over.gears } })));
 
-  it('puts the slowest songs first at the slow end and the fastest first at the fast end, whichever way they are sung', () => {
+  it('puts the slow band first at the slow end and the upbeat band first at the upbeat end, the songs sung as written first inside each', () => {
     expect([slowJump.octave, FIVE[4]!.octave]).toEqual(['down', 'up']);
-    expect(at(0)).toEqual(['slow-jump', 'slow-written', 'mid-written', 'fast-written', 'fast-jump']);
-    expect(at(100)).toEqual(['fast-jump', 'fast-written', 'mid-written', 'slow-written', 'slow-jump']);
+    // A slow song that needs a jump comes before the mid and fast songs sung as written, and after the slow one sung as written.
+    expect(at(0)).toEqual(['slow-written', 'slow-jump', 'mid-written', 'fast-written', 'fast-jump']);
+    expect(at(100)).toEqual(['fast-written', 'fast-jump', 'mid-written', 'slow-written', 'slow-jump']);
   });
 
   it('reaches 10 places in from either end: Tempo 10 and 90 are at the end, 11 and 89 are not', () => {
     expect(TEMPO_END_REACH).toBe(10);
-    expect(at(10)).toEqual(['slow-jump', 'slow-written', 'mid-written', 'fast-written', 'fast-jump']);
-    expect(at(90)).toEqual(['fast-jump', 'fast-written', 'mid-written', 'slow-written', 'slow-jump']);
-    // One place further in, the songs sung as written come first again and the jumps follow, each group nearest first.
+    expect(at(10)).toEqual(['slow-written', 'slow-jump', 'mid-written', 'fast-written', 'fast-jump']);
+    expect(at(90)).toEqual(['fast-written', 'fast-jump', 'mid-written', 'slow-written', 'slow-jump']);
+    // One place further in, every song sung as written comes first again and the jumps follow, each group nearest first.
     expect(at(11)).toEqual(['slow-written', 'mid-written', 'fast-written', 'slow-jump', 'fast-jump']);
     expect(at(89)).toEqual(['fast-written', 'mid-written', 'slow-written', 'fast-jump', 'slow-jump']);
   });
@@ -780,26 +783,41 @@ describe('Tempo at an end ranks before "sung as written" (QWW-54, option 3)', ()
     expect(r.slice(3).sort()).toEqual(['fast-jump', 'slow-jump']);
   });
 
-  it('still adds up every gear that is on: a popular song that needs a jump can come between songs sung as written', () => {
-    // Places: Tempo 70, 80 and 120 bpm are 0, 50 and 100; Popularity 0.1, 0.9 and 0.95 are 0, 50 and 100 (counted double).
-    // With Tempo at 0 and Popularity at 100 the sums are 100 (written-hit), 150 (jump-hit) and 200 (written-obscure).
-    const three = [timed('jump-hit', 'down', 80, 0.9), timed('written-obscure', 'none', 70, 0.1), timed('written-hit', 'none', 120, 0.95)];
+  it('puts the songs at the end first whatever the other gears say, and still orders inside them by those gears', () => {
+    // Tempo 70, 80 and 110 are places 0, 50 and 100; Popularity 0.1, 0.5 and 0.95 are places 0, 50 and 100 (counted double). With Tempo
+    // at 0 and Popularity at 100 the sums are 200 (slow-obscure), 150 (slow-hit) and 100 (mid-hit): by the sum alone the mid hit is first.
+    const three = [timed('slow-obscure', 'none', 70, 0.1), timed('slow-hit', 'none', 80, 0.5), timed('mid-hit', 'none', 110, 0.95)];
     const popularityToo: Parameters<typeof state>[0] = { off: ['history', 'era', 'difficulty'], gears: { popularity: 100 } };
-    expect(at(0, three, popularityToo)).toEqual(['written-hit', 'jump-hit', 'written-obscure']);
-    // Short of the end the jump song is last, as it was.
-    expect(at(50, three, popularityToo)).toEqual(['written-hit', 'written-obscure', 'jump-hit']);
+    expect(at(0, three, popularityToo)).toEqual(['slow-hit', 'slow-obscure', 'mid-hit']);
+    // Short of the end nothing is first but the sum.
+    expect(at(50, three, popularityToo)).toEqual(['mid-hit', 'slow-hit', 'slow-obscure']);
   });
 
-  it('puts a song with no tempo after every song that has one at an end, a jump song included', () => {
+  it('draws the line between the slow and the mid band at 90 and the one between the mid and the upbeat band at 125', () => {
+    // Tempo 89.9 is slow and 90 is mid; 124.9 is mid and 125 is upbeat (feelOfTempo). The two songs next to each line differ in
+    // popularity so that the sum alone would put the popular one of each pair first.
+    const edge = [timed('t-89.9', 'none', 89.9, 0.1), timed('t-90', 'none', 90, 0.99), timed('t-124.9', 'none', 124.9, 0.1), timed('t-125', 'none', 125, 0.99)];
+    const popularityToo: Parameters<typeof state>[0] = { off: ['history', 'era', 'difficulty'], gears: { popularity: 100 } };
+    expect(at(0, edge, popularityToo)).toEqual(['t-89.9', 't-90', 't-125', 't-124.9']);
+    expect(at(100, edge, popularityToo)).toEqual(['t-125', 't-90', 't-124.9', 't-89.9']);
+  });
+
+  it('keeps a big hit sung an octave down behind the songs at the end that are sung as written (QWW-58 inside the band)', () => {
+    // The hit is the most popular song and an octave jump; with Popularity on it would lead whatever the Tempo end said, if the octave
+    // groups were dropped. Both slow songs sung as written are ahead of it, and so is the slow jump song: it is in the band.
+    const songs = [timed('jump-hit', 'down', 75, 0.99), timed('slow-written-a', 'none', 70, 0.2), timed('slow-written-b', 'none', 80, 0.1), timed('mid-written', 'none', 110, 0.5)];
+    const popularityToo: Parameters<typeof state>[0] = { off: ['history', 'era', 'difficulty'], gears: { popularity: 100 } };
+    const r = at(0, songs, popularityToo);
+    expect(r.indexOf('jump-hit')).toBeGreaterThan(r.indexOf('slow-written-a'));
+    expect(r.indexOf('jump-hit')).toBeGreaterThan(r.indexOf('slow-written-b'));
+    expect(r.indexOf('jump-hit')).toBeLessThan(r.indexOf('mid-written'));
+  });
+
+  it('puts a song with no tempo after the songs that have one inside its group, and the Maybe songs last', () => {
     const noTempo = timed('written-no-tempo', 'none', undefined, 0.9);
     expect(effectiveTempo(noTempo)).toBeUndefined();
-    expect(at(100, [...FIVE, noTempo])).toEqual(['fast-jump', 'fast-written', 'mid-written', 'slow-written', 'slow-jump', 'written-no-tempo']);
-    expect(at(0, [...FIVE, noTempo]).at(-1)).toBe('written-no-tempo');
-    // Short of the end it stays inside its own group, ahead of the jump songs (QWW-58).
-    expect(at(50, [...FIVE, noTempo]).indexOf('written-no-tempo')).toBe(3);
-  });
-
-  it('keeps the Maybe songs after all the others', () => {
+    // It is out of the band, so it is in the rest: after the songs sung as written that have a tempo, before the rest's jump songs.
+    expect(at(100, [...FIVE, noTempo])).toEqual(['fast-written', 'fast-jump', 'mid-written', 'slow-written', 'written-no-tempo', 'slow-jump']);
     const maybe = song('maybe-slow', { low: 40, high: 70, confidence: 'low', popularity: 0.99, tempo: 40 });
     expect(maybe.difficulty).toBe('maybe');
     expect(at(0, [maybe, ...FIVE]).at(-1)).toBe('maybe-slow');
@@ -1014,20 +1032,28 @@ describe.each(VOICE_RANGES)('%s: songs sung as written first (criterion 9)', (_n
     }
   });
 
-  it('with Tempo at an end, lists the sure songs by their distance on Tempo alone, however they are sung (QWW-54)', () => {
-    let jumpsInTheTop20 = 0;
-    for (const tempo of [0, 10, 90, 100]) {
+  it('with Tempo at an end, lists the songs at that end first, and inside each part as written before a jump (QWW-54)', () => {
+    for (const [tempo, band] of [[0, 'slow'], [10, 'slow'], [90, 'upbeat'], [100, 'upbeat']] as const) {
       const { songs } = rankPrepared(prepared, state({ off: ['history', 'era', 'difficulty', 'popularity'], gears: { tempo } }));
       const sure = songs.filter((x) => x.match.difficulty !== 'maybe');
-      const known = sure.filter((x) => x.gears.tempo !== null);
-      expect(known.length, `tempo ${tempo}`).toBeGreaterThan(100);
-      // Nearest first, all the way down: no group by how a song is sung. The ones with no tempo follow, the Maybe songs last.
-      for (let i = 1; i < known.length; i++) expect(Math.abs(known[i]!.gears.tempo! - tempo), `tempo ${tempo}, song ${i}`).toBeGreaterThanOrEqual(Math.abs(known[i - 1]!.gears.tempo! - tempo) - 1e-6);
-      expect(sure.slice(0, known.length).every((x) => x.gears.tempo !== null), `tempo ${tempo}`).toBe(true);
-      expect(songs.slice(sure.length).every((x) => x.match.difficulty === 'maybe'), `tempo ${tempo}`).toBe(true);
-      jumpsInTheTop20 += songs.slice(0, 20).filter((x) => !sungAsWritten(x)).length;
+      expect(songs.slice(sure.length).every((x) => x.match.difficulty === 'maybe'), `tempo ${tempo}: the Maybe songs are last`).toBe(true);
+      const inBand = (x: { match: Match }) => x.match.tempo !== undefined && feelOfTempo(x.match.tempo) === band;
+      const flags = sure.map(inBand);
+      expect(flags.filter(Boolean).length, `tempo ${tempo}: songs in the ${band} band`).toBeGreaterThan(100);
+      // Songs in the band that need a jump exist, so the check below is about them: they come before every song out of the band.
+      expect(sure.filter((x) => inBand(x) && !sungAsWritten(x)).length, `tempo ${tempo}: jump songs in the band`).toBeGreaterThan(0);
+      expect(flags.indexOf(false) < 0 || !flags.slice(flags.indexOf(false)).includes(true), `tempo ${tempo}: a song in the band after one that is not`).toBe(true);
+      for (const part of [true, false]) {
+        const inPart = sure.filter((x) => inBand(x) === part);
+        const written = inPart.map(sungAsWritten);
+        expect(written.indexOf(false) < 0 || !written.slice(written.indexOf(false)).includes(true), `tempo ${tempo}, ${part ? 'in' : 'out of'} the band: a song sung as written after a jump`).toBe(true);
+        // Nearest first inside each group of songs sung the same way, the ones with no tempo after those that have one.
+        for (const way of [true, false]) {
+          const group = inPart.filter((x) => sungAsWritten(x) === way && x.gears.tempo !== null);
+          for (let i = 1; i < group.length; i++) expect(Math.abs(group[i]!.gears.tempo! - tempo), `tempo ${tempo}, song ${i}`).toBeGreaterThanOrEqual(Math.abs(group[i - 1]!.gears.tempo! - tempo) - 1e-6);
+        }
+      }
     }
-    expect(jumpsInTheTop20, 'songs that need a jump among the first 20 of the four lists').toBeGreaterThan(0);
   });
 
   it('still lists every song that fits, and is never empty (criterion 3): the jumps follow, they are not dropped', () => {

@@ -33,10 +33,13 @@
 // Popularity place it is shown at, it just comes after the songs sung as written.
 //
 // Tempo at an end is the one exception (QWW-54, 12 Nov). With Tempo on and within TEMPO_END_REACH places of 0 or 100,
-// the singer asked for "Slow jams" or "Upbeat tracks", and a slow or fast song that needs a jump answers that as well as
-// one sung as written. So there are no octave groups then: the distance decides, and only the Maybe songs still come
-// last. Kept as a group, the songs sung as written filled a narrow range's top 20 with mid-tempo songs ahead of the
-// first slow song that needed a jump. The default list, and every list with Tempo off or in the middle, are unchanged.
+// the singer asked for "Slow jams" or "Upbeat tracks", so the songs in that band of the gear (under 90 bpm on the one tempo,
+// or 125 and over: feelOfTempo) come first, ahead of how a song is sung and of every other gear. Inside them, and inside
+// all the rest, the order is the usual one: sung as written, then the jumps, each by distance. The Maybe songs still come
+// last. Without the band, the songs sung as written filled a narrow range's top 20 with mid-tempo songs ahead of the first
+// slow song that needed a jump. Taking the octave groups away alone was tried and not kept: on the tuner's default gears it
+// put the biggest hits back at the top in whichever octave fits them, 47% of the top 20 octave jumps (a bass's 97%) where
+// there had been none. The default list, and every list with Tempo off or in the middle, are unchanged.
 //
 // The default state (setlistConfig.ts) is Popularity on at 100, Difficulty on at 0, the rest off. With
 // Popularity counting double, that is a blend that leans on popularity: of two songs sung the same way, the one
@@ -57,6 +60,7 @@ import { GEAR_IDS } from '../contracts';
 import { familiarityScore, LANGUAGE_POPULARITY_WEIGHTS, languageWeight, withPopularityWeight, type LanguageWeights } from './score';
 import { difficultyFromEdgeTime, edgeTime, pitchTime } from './match';
 import { eraOf } from './setlistConfig';
+import { feelOfTempo, type Feel } from '../tempo/feel';
 
 /**
  * How much a gear's distance counts. Popularity counts double (model A), which is what makes the default state lean
@@ -66,7 +70,7 @@ export const GEAR_WEIGHTS: Readonly<Record<GearId, number>> = Object.freeze({ di
 
 /**
  * How far in from an end of the Tempo track still counts as the end (QWW-54): Tempo is on and at most this many places
- * from 0 or 100. There the octave is not a group of its own (rankPrepared). 10 and 90 are at the end; 11 and 89 are not.
+ * from 0 or 100. There the songs in that end's band come first (rankPrepared). 10 and 90 are at the end; 11 and 89 are not.
  */
 export const TEMPO_END_REACH = 10;
 
@@ -175,8 +179,8 @@ export interface RankedSetlist {
  * Which missing gear counts most when songs miss different ones, as bits of a sum: a song missing History sorts after
  * every song that has it, then one missing Tempo after every song that has it, then Popularity, then Difficulty.
  * All of it inside a group: songs sung as written come before songs that need an octave jump (QWW-58), so a song that
- * misses a gear still comes before a jump song that has it. With Tempo at an end (TEMPO_END_REACH) there are no such
- * groups (QWW-54), so a song that misses a gear comes after every song that has it, whichever way each is sung.
+ * misses a gear still comes before a jump song that has it. With Tempo at an end (TEMPO_END_REACH) the songs in that end's
+ * band and the rest are two such groups first (QWW-54), each split by how a song is sung.
  * The gears the singer chose to switch on (History, Tempo) outrank the ones that are on from the start.
  */
 const MISSING_RANK: Readonly<Record<GearId, number>> = Object.freeze({ difficulty: 1, popularity: 2, tempo: 4, history: 8 });
@@ -332,9 +336,9 @@ export function rankPrepared(
   const applied: TunerPart[] = eraOn ? [...active, 'era'] : active;
   const picked = new Set<EraId>(state.eras);
 
-  // Tempo at an end of its track: the songs are not grouped by how they are sung, and a slow (or fast) song that needs an
-  // octave jump can come before one sung as written (QWW-54).
-  const tempoAtEnd = active.includes('tempo') && (state.gears.tempo <= TEMPO_END_REACH || state.gears.tempo >= 100 - TEMPO_END_REACH);
+  // Tempo at an end of its track: the songs in that end's band come before all the others, whichever way they are sung and
+  // whatever the other gears say (QWW-54). Null while Tempo is off or short of its ends.
+  const endBand: Feel | null = !active.includes('tempo') ? null : state.gears.tempo <= TEMPO_END_REACH ? 'slow' : state.gears.tempo >= 100 - TEMPO_END_REACH ? 'upbeat' : null;
 
   const passing = list.songs.filter((s) => !eraOn || (s.era !== null && picked.has(s.era)));
   const scored = passing.map((s) => {
@@ -346,13 +350,17 @@ export function rankPrepared(
       else distance += GEAR_WEIGHTS[g] * Math.abs(place - state.gears[g]);
     }
     const m = s.candidate.match;
-    // 0 for a song sung as written, 1 for one that needs an octave jump, up or down (QWW-58); 0 for every song with Tempo at an end.
-    const jump = !tempoAtEnd && octaveSemitones(m) !== 0 ? 1 : 0;
-    return { s, jump, missing, distance: quantize(distance), who: `${m.track.artist}\u0000${m.track.title}`.toLowerCase() };
+    // 0 for a song in the band of the end Tempo is at, 1 for every other song (and 0 for all while Tempo is not at an end).
+    const tempo = effectiveTempo(m);
+    const tier = endBand !== null && (tempo === undefined || feelOfTempo(tempo) !== endBand) ? 1 : 0;
+    // 0 for a song sung as written, 1 for one that needs an octave jump, up or down (QWW-58).
+    const jump = octaveSemitones(m) === 0 ? 0 : 1;
+    return { s, tier, jump, missing, distance: quantize(distance), who: `${m.track.artist}\u0000${m.track.title}`.toLowerCase() };
   });
   scored.sort(
     (a, b) =>
       Number(a.s.maybe) - Number(b.s.maybe) ||
+      a.tier - b.tier ||
       a.jump - b.jump ||
       a.missing - b.missing ||
       a.distance - b.distance ||
