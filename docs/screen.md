@@ -128,8 +128,8 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      its track id: a catalogue id has spaces ("cat:michael jackson|beat it"), which split the list of ids. The reason line is
      `whyOf` in `src/lib/setlist/rows.ts`: the first two of "In your sweet spot" (Difficulty on, the song's place within 15
      of it), "Crowd favourite" or "Deep cut" (place on Popularity at least 85, or at most 35), "On repeat" or "Rediscover"
-     (History at least 85, or at most 20), and when none holds "Gets the room moving" / "Slow burner" / "Solid pick"
-     (Tempo at least 70, at most 25, or unknown). The places are the engine's, percentiles among the songs that fit the
+     (History at least 85, or at most 20), and when none holds "For the party people" / "Slow burn" / "Solid pick"
+     (Tempo at least 70, at most 25, or unknown; the two tempo words are Quinn-Wai's, R32). The places are the engine's, percentiles among the songs that fit the
      singer; a place that is null skips its rule, so a signed-out singer never sees the History ones. A song that fits only an octave away says "Shifted down to fit range" or "Shifted up to fit range" and nothing else (R13; its badge stays). The badge is the song's
      own label (what the song page shows); a Maybe song has none. Each title fills in once, left to right (about 0.6 s,
      `useFillIn`), as its row scrolls into view, and ends the normal white. It plays once per visit, and a visit lasts until the

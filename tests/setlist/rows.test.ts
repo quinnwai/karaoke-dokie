@@ -219,16 +219,27 @@ describe('whyOf: the order, and at most two', () => {
 
 describe('whyOf: nothing else to say', () => {
   it.each<[number | null, string]>([
-    [100, 'Gets the room moving'],
-    [70, 'Gets the room moving'],
+    [100, 'For the party people'],
+    [70, 'For the party people'],
     [69.9, 'Solid pick'],
     [50, 'Solid pick'],
     [25.1, 'Solid pick'],
-    [25, 'Slow burner'],
-    [0, 'Slow burner'],
+    [25, 'Slow burn'],
+    [0, 'Slow burn'],
     [null, 'Solid pick'],
   ])('a tempo place of %s says %s', (tempo, word) => {
     expect(whyOf(placed({ tempo }), START)).toBe(word);
+  });
+
+  it('R32 (QWW-57): the only words a tempo can bring are "For the party people", "Slow burn" and "Solid pick", across the whole range', () => {
+    // Quinn-Wai renamed the two tempo words on 12 Nov (see the QWW-57 ticket); the thresholds (70 and 25) are as they were. Every place
+    // from 0 to 100 in half steps, and none, says one of the three, so the old words cannot come back by another road.
+    const said = new Set<string>();
+    for (let tempo = 0; tempo <= 100; tempo += 0.5) said.add(whyOf(placed({ tempo }), START));
+    said.add(whyOf(placed({ tempo: null }), START));
+    expect([...said].sort()).toEqual(['For the party people', 'Slow burn', 'Solid pick']);
+    expect(whyOf(placed({ tempo: 70 }), START)).toBe('For the party people');
+    expect(whyOf(placed({ tempo: 25 }), START)).toBe('Slow burn');
   });
 
   it('is only the last resort: a song with another reason does not also get a tempo line', () => {
@@ -280,7 +291,7 @@ describe('whyOf: a song that fits an octave away says so, and nothing else (QWW-
     expect(whyOf(shifted('none', { popularity: 95 }), START)).toBe('Crowd favourite');
     expect(whyOf(shifted('none', { history: 5 }), START)).toBe('Rediscover');
     expect(whyOf(shifted('none'), START)).toBe('Solid pick');
-    expect(whyOf(shifted('none', { tempo: 99 }), START)).toBe('Gets the room moving');
+    expect(whyOf(shifted('none', { tempo: 99 }), START)).toBe('For the party people');
   });
 
   it('is what the row carries, and the badge and the button\'s name are the song\'s own, as for any song', () => {
@@ -349,6 +360,6 @@ describe('toRows', () => {
     ];
     const rows = toRows(mixed, START);
     expect(rows.map((r) => r.badge)).toEqual(['Easy', null, 'Hard']);
-    expect(rows.map((r) => r.why)).toEqual(['In your sweet spot · Crowd favourite', 'Slow burner', 'Rediscover']);
+    expect(rows.map((r) => r.why)).toEqual(['In your sweet spot · Crowd favourite', 'Slow burn', 'Rediscover']);
   });
 });

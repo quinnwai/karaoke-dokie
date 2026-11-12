@@ -1059,7 +1059,7 @@ test('signed in, the Spotify account sits where Connect does: far right, with th
 
 /** What the reference's viewModel() would draw for the real defaults, signed out: the top 4 of the 25 mock songs. */
 const TOP_ROWS = [
-  { title: 'Mr. Brightside', why: 'Gets the room moving', badge: 'Medium' },
+  { title: 'Mr. Brightside', why: 'For the party people', badge: 'Medium' },
   { title: "Don't Stop Believin'", why: 'Crowd favourite', badge: 'Hard' },
   { title: 'Dancing Queen', why: 'Solid pick', badge: 'Medium' },
   { title: 'Bohemian Rhapsody', why: 'Crowd favourite', badge: 'Hard' },

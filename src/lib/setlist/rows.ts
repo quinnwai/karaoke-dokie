@@ -73,8 +73,9 @@ export function whyOf(song: SetlistSong, tuner: WhyTuner): string {
     if (history >= 85) reasons.push('On repeat');
     else if (history <= 20) reasons.push('Rediscover');
   }
-  // 4. Nothing else to say: what it sounds like. A song with no tempo is a solid pick.
-  if (reasons.length === 0) reasons.push(tempo !== null && tempo >= 70 ? 'Gets the room moving' : tempo !== null && tempo <= 25 ? 'Slow burner' : 'Solid pick');
+  // 4. Nothing else to say: what it sounds like (QWW-57, R32: Quinn-Wai renamed the two tempo words, 12 Nov; the rules are as they were). A song with no
+  // tempo is a solid pick.
+  if (reasons.length === 0) reasons.push(tempo !== null && tempo >= 70 ? 'For the party people' : tempo !== null && tempo <= 25 ? 'Slow burn' : 'Solid pick');
   return reasons.slice(0, 2).join(' · ');
 }
 
