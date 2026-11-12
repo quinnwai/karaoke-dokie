@@ -163,8 +163,9 @@ import. The model is the design's distance ranking (round 5 spec section 5), dec
    so each pick adds songs and takes none away, and the songs keep the order they have in the whole list; a song with no
    year is left out), and nothing picked is an empty list (`no-era-picked`). Every one of the 127 combinations of eras is
    tested (`tests/songs/setlist.test.ts`, `tests/server/setlist.test.ts`). Then
-   `distance = sum over the active gears of weight × |song's place - gear value|`. An active gear is one not in `off`,
-   and History only when the singer is signed in and their library was read. An off gear adds nothing. Popularity's
+   `distance = sum over the active gears of weight × |song's place - the gear's target|`; a gear's target is its value, except
+   Tempo's (see "Tempo at an end" below). An active gear is one not in `off`, and History only when the singer is signed in and
+   their library was read. An off gear adds nothing. Popularity's
    weight is 2, the others 1 (`GEAR_WEIGHTS`). With the defaults that is a blend that leans on popularity, not a sort by
    popularity with difficulty breaking ties: of two songs, the one 10 places less popular needs to be 20 places easier to
    come first, so the single most popular song is first only if it is also easy. `GEAR_WEIGHTS` is the one knob if the top
@@ -199,21 +200,28 @@ as written.
 upbeat end (`feelOfTempo`). The band follows the feel labels: a song labelled slow or upbeat is in its band, a weak label too,
 and a song with no label is squeezed into the mid band (90 to 124.5), so with no labels both bands are empty and this part does
 nothing. The band songs come ahead of how a song is sung, ahead of the singer's own songs (History, R31) and ahead of every
-other gear. Signed in with History on, the order at an end is: the singer's own songs in the band, other songs in the band, the
-singer's own songs outside it, the rest. Inside the band, and inside the rest, the order is the usual one: sung as written
-first, then the jumps (QWW-58), each by the closest sum. The Maybe songs still come last, and a song with no tempo comes after
-every song that has one in its group.
+other gear. Sung as written still comes ahead of History (QWW-58), so signed in with History on the order at an end is: the
+singer's own songs sung as written, in the band; other songs sung as written, in the band; the singer's own songs that need a
+jump, in the band; other songs that need a jump, in the band; then the same four groups outside the band. Inside each group the
+order is the closest sum. The Maybe songs still come last, and a song with no tempo comes after every song that has one in its
+group.
 
 The first and last tenth of the track are one stop each. Within 10 of an end Tempo's distance is to the end itself (0 or 100),
 so every thumb from 0 to 10 (or 90 to 100) gives the same list, with labels or without (#38's metronome art keeps moving across
 a stop while the list stays the same). Between the stops the distance is to a target that runs from 0 at the thumb's 10 to
-100 at its 90, so it does not jump when the thumb leaves a stop. Measured to the thumb instead, a thumb at 8 or 10 reached the
-weak labels first, which rest at the top of the slow band (at Tempo 10, 71% of the slow end's top 20 were weak labels; with the
-end as the target, 9.5%), and a target that went from the end straight to the thumb changed the top 20 completely between 10
-and 11 (68% weak labels at 11). With the running target, thumbs 11 to 15 keep 9 to 16% weak labels and 117 to 124 of the
+100 at its 90, so it does not jump when the thumb leaves a stop. That also moves the middle: every setting between the stops
+except 50 aims at a different place than the thumb (20 at 12.5, 30 at 25, 70 at 75, 80 at 87.5), so the middle lists change.
+On production's lists with Tempo alone, the top 20 at 30 shares 6 songs on average with the old one and 69 of the 144 lists
+share none; with the default gears on, 17 to 19 of the top 20 stay. Measured to the thumb instead, a thumb at 8 or 10 reached
+the weak labels first, which rest at the top of the slow band (at Tempo 10, 71% of the slow end's top 20 were weak labels; with
+the end as the target, 9.5%), and a target that went from the end straight to the thumb changed the top 20 completely between
+10 and 11 (68% weak labels at 11). With the running target, thumbs 11 to 15 keep 9 to 16% weak labels and 117 to 124 of the
 144 lists reaching 18 of 20, against 17 to 68% and 63 to 67. The weak labels sit at one place on the track, so they still come
-first where the target lands on them, now at a thumb of about 17 to 20. With Tempo off, the default list, criterion 9 and the
-Hard songs above are as they were.
+first where the target lands on them, now at a thumb of about 17 to 20 (66 to 67% of the slow end's top 20). With Tempo off,
+the default list, criterion 9 and the Hard songs above are as they were.
+
+The band is still a cliff: on the default gears, from Tempo 10 to 11 the slow-labelled songs in the slow end's top 20 fall from
+20 to about 9 on average (9 of the 20 songs are shared; with Tempo alone 16 are).
 
 Why: asked for "Slow jams", the songs sung as written came first and, in a narrow range, filled the top 20 with mid-tempo songs
 before the first slow song that needed a jump. In the release eval (criterion 2, Tempo alone) the soprano's 2020s slow list
@@ -223,9 +231,9 @@ on when Tempo moves) it put the biggest hits back at the top in whichever octave
 lists octave jumps (a bass's 97%), where there had been none. With the band first 3% of those slots are jump songs (96 of
 2,880). On one set of the judge's answers, 128 of the 144 lists of criterion 2 reach 18 of 20 with this rule against 120
 without it, and 115 against 27 on the default gears. Signed in with History on (a made-up library of 200 popular songs of the
-range, three seeds, the same 144 lists), the top 20 at an end held 12.4 of the singer's own songs on average before, 8.9 of
-them outside the band, and 4 of the 144 lists reached 18 of 20; with this rule it holds 4.9, all but 0.1 inside the band, and 114
-of the 144 lists reach 18. It changes Quinn-Wai's QWW-58 decision A and R31 for these two ends only.
+range, three seeds, the same 144 lists), the singer's own songs in the top 20 at an end fall from 12.4 on average, 8.9 of them
+outside the band, to 4.9, all but 0.1 inside the band, and 114 of the 144 lists reach 18 of 20 against 4. It changes Quinn-Wai's
+QWW-58 decision A and R31 for these two ends only, and the middle Tempo settings as above.
 
 **The curve (rule 2, easy leans low).** The strain of a song is the sung-time-weighted average of a note's cost, `t` being
 where the note sits in the singer's range (0 lowest, 1 highest, an octave shift applied): `((t - 0.35) / 0.65)²` from the
