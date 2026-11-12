@@ -270,6 +270,18 @@ language's weight in `LANGUAGE_POPULARITY_WEIGHTS` (`src/lib/songs/score.ts`), k
 (`rankPrepared`'s `languageWeights`, which a future language preference can pass). Signed-in lists are not weighted,
 and a library song never is.
 
+**Deezer match (QWW-37, QWW-59).** `npm run popularity:deezer` searches Deezer for "artist title" and keeps one track
+per song (`song_deezer`): its rank is a popularity signal and its id is the row's ▶. A result is the song when its
+artist and title match the song key (`matchesKey`, `src/lib/popularity/deezer.ts`); a plain bracketed part of the
+title counts as the title too ("Good Riddance (Time of Your Life)" is "Time Of Your Life"), and a tribute or karaoke act
+whose name contains the artist's is not the artist. Among those, `pickDeezerHit` takes the original studio recording:
+a live take, remix, sped-up edit, cover or commentary track is never taken unless our title names that kind; a
+re-recording ("(2023 Version)", "(Taylor's Version)") or a version Deezer names but no rule does is taken only when
+there is no original; the artist named exactly comes before a longer name; then the best rank. Deezer's search does
+not return every original (it has no 2013 "Counting Stars", only the 2023 re-recording and a live take), so a hand fix
+in `song_deezer` stays right only while `--recheck-before` leaves it alone: it rechecks misses and hits ranked under
+50,000, and `--refresh` rechecks everything.
+
 ## Song tempo
 
 The Tempo slider (QWW-40) sorts by beats per minute, 70 to 180, placed by rank like popularity. No

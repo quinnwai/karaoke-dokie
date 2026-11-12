@@ -77,6 +77,9 @@ async function main() {
   let errors = 0;
   let next = 0;
   let inARow = 0;
+  // What each lookup did to the stored row: a miss that now has a match, a match that is now a miss, another track.
+  const changes = { found: 0, lost: 0, switched: 0, same: 0, unchecked: 0 };
+  let shown = 0;
   const flush = async () => {
     const batch = pending.splice(0);
     if (batch.length && !values['dry-run']) await store.putSongDeezer(batch);
@@ -86,7 +89,8 @@ async function main() {
       while (next < todo.length && Date.now() < deadline && inARow < STOP_AFTER_ERRORS) {
         const song = todo[next++]!;
         try {
-          const hit = pickDeezerHit(song.key, await deezer.search(deezerQuery(song.artist, song.title)));
+          // Our title too: a version it names ("(Live at Donington)") is not passed over (QWW-59).
+          const hit = pickDeezerHit(song.key, await deezer.search(deezerQuery(song.artist, song.title)), song.title);
           const record: SongDeezerRecord = { key: song.key, checkedAt: new Date().toISOString() };
           if (hit) {
             record.rank = hit.rank;
@@ -94,6 +98,12 @@ async function main() {
             hits++;
           } else misses++;
           if (values['dry-run'] && hits + misses <= 40) console.log(`${hit ? hit.rank : 'miss'}\t${song.artist} - ${song.title}${hit ? `\t(${hit.artist} - ${hit.title})` : ''}`);
+          const was = checked.get(song.key);
+          const change = !was ? 'unchecked' : was.rank === undefined ? (hit ? 'found' : 'same') : !hit ? 'lost' : was.deezerId === hit.deezerId ? 'same' : 'switched';
+          changes[change]++;
+          if (values['dry-run'] && (change === 'found' || change === 'lost' || change === 'switched') && shown++ < 80) {
+            console.log(`${change}\t${song.artist} - ${song.title}\t${was?.deezerId ?? '-'} -> ${hit ? `${hit.deezerId} ${hit.artist} - ${hit.title} (rank ${hit.rank})` : 'miss'}`);
+          }
           pending.push(record);
           inARow = 0;
           if (pending.length >= BATCH) await flush();
@@ -112,6 +122,11 @@ async function main() {
   console.log(
     `Done: ${hits} hits, ${misses} misses, ${errors} errors${inARow >= STOP_AFTER_ERRORS ? `; stopped after ${inARow} failures in a row` : ''}${left > 0 ? `; ${left} left, run again to carry on` : ''}${values['dry-run'] ? ' (dry run, nothing saved)' : ''}`,
   );
+  if (!values.refresh) {
+    console.log(
+      `Against the stored rows: ${changes.found} misses now matched, ${changes.lost} matches now misses, ${changes.switched} matched to another track, ${changes.same} unchanged, ${changes.unchecked} never looked up before`,
+    );
+  }
 }
 
 main().catch((err) => {
