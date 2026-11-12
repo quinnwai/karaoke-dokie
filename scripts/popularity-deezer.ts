@@ -13,12 +13,13 @@
 // Each lookup is findDeezerTrack's (QWW-67): the plain search, then the artist's top tracks and a search
 // on the title alone when the search has no original. A hit is read by its id once more for its release
 // date, except in a dry run. --save <file> writes what a run would store as JSON, for
-// scripts/deezer-report.ts --overlay to show the lists with it before anything is written.
+// scripts/deezer-report.ts --overlay to show the lists with it before anything is written. --keys <file>
+// (a JSON array of song keys) looks up only those songs, e.g. the ones a list shows.
 // Usage: npm run popularity:deezer [-- --max-minutes 9] [--limit N] [--refresh] [--recheck-before <ISO time>]
-//          [--refresh-before <ISO time>] [--dry-run] [--save <file>]
+//          [--refresh-before <ISO time>] [--keys <file>] [--dry-run] [--save <file>]
 // Needs DATABASE_URL. Then run npm run popularity:calibrate.
 
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { createDeezerClient, findDeezerTrack, type DeezerRoute } from '../src/lib/popularity/deezer';
 import { neonQuery } from '../src/lib/server/getStore';
@@ -52,10 +53,12 @@ async function main() {
       refresh: { type: 'boolean' },
       'recheck-before': { type: 'string' },
       'refresh-before': { type: 'string' },
+      keys: { type: 'string' },
       'dry-run': { type: 'boolean' },
       save: { type: 'string' },
     },
   });
+  const only = values.keys ? new Set(JSON.parse(await readFile(values.keys, 'utf8')) as string[]) : undefined;
   const url = process.env.DATABASE_URL?.trim();
   if (!url) throw new Error('Set DATABASE_URL');
   const query = neonQuery(url);
@@ -80,7 +83,7 @@ async function main() {
   const checkedAt = (key: string) => checked.get(key)?.checkedAt ?? '';
   const due = rows
     .map((r) => ({ key: String(r.song_key), artist: String(r.artist ?? ''), title: String(r.title ?? ''), estimate: r.source === 'artist-typical' }))
-    .filter((s) => s.artist && s.title && !fresh(checked.get(s.key)))
+    .filter((s) => s.artist && s.title && (!only || only.has(s.key)) && !fresh(checked.get(s.key)))
     // Artist estimates first, then never checked, then oldest checked; by key within each.
     .sort(
       (a, b) =>
@@ -89,7 +92,9 @@ async function main() {
         (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
     );
   const todo = due.slice(0, values.limit ? Number(values.limit) : undefined);
-  console.log(`${rows.length} songs, ${rows.length - due.length} checked in the last ${RECHECK_DAYS} days, ${due.length} due; looking up ${todo.length}`);
+  console.log(
+    `${rows.length} songs${only ? ` (${only.size} keys asked for)` : ''}, ${rows.length - due.length} not due, ${due.length} due; looking up ${todo.length}`,
+  );
 
   const deezer = createDeezerClient();
   const pending: SongDeezerRecord[] = [];
