@@ -1,9 +1,10 @@
 // Review item R33 of QWW-57 (Quinn-Wai's iPhone review of #38, 11 Nov): faders are easy to grab by touch. On a phone a gear's fader "either
 // doesn't work or needs a very precise press": a native range input takes a touch only on its own 14 by 20 px thumb (iOS WebKit above all), and
 // `touch-action: none` over the whole strip stopped the sheet scrolling too. The strip now takes the pointer on a hit area of its own
-// (src/components/setlist/GearStrip.tsx, `.faderHit` in sheet.module.css): the track's full width and 44 px tall, centred on the drawn track, over
-// the labels and under the ✕. The input stays under it for the keyboard and screen readers. Checked at 375 and 390 px, expanded and in mini, for
-// all four gears:
+// (src/components/setlist/GearStrip.tsx, `.faderHit` in sheet.module.css): the track's full width and 44 px tall (8 px above the drawn track, 16
+// below it), over the labels, with the ✕'s touch area above it and none of it over it (the second pass, on the thumb at the track's ends, is
+// tests/e2e/setlist-fader-ends.spec.ts). The input stays under it for the keyboard and screen readers. Checked at 375 and 390 px, expanded and in
+// mini, for all four gears:
 //   - the hit area's box, and what is under points above, below and at the ends of the track; a neighbouring strip's is not this one's
 //   - a drag that starts 16 px above the thumb, one that starts on the track 60 px from it (either side) and one on the thumb all take the value to
 //     the finger and follow it, without jumping at the first touch; a tap on the track 60 px from the thumb jumps there
@@ -19,186 +20,38 @@
 // tests/setlist/faderStrip.test.tsx.
 
 import { devices, expect, test, webkit, type Page } from '@playwright/test';
-import { existsSync, mkdirSync } from 'node:fs';
-import path from 'node:path';
+import { existsSync } from 'node:fs';
 import type { AppEvent } from '../../src/lib/contracts';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import type { GearId } from '../../src/lib/setlist/types';
-import { open, rack, slider, strip, tab, tuner, value } from '../helpers/tunerE2e';
+import {
+  boxes,
+  cdpFinger,
+  checkTouchDrags,
+  countCancels,
+  expectValue,
+  GEARS,
+  isOff,
+  line,
+  makeScreensDir,
+  MODES,
+  openAt,
+  setThumb,
+  shot,
+  syntheticFinger,
+  thumb,
+  under,
+  valueAt,
+  type Finger,
+} from '../helpers/faderE2e';
+import { open, rack, slider, tab, tuner, value } from '../helpers/tunerE2e';
 
-const SCREENS = path.resolve('test-results/screens');
-test.beforeAll(() => mkdirSync(SCREENS, { recursive: true }));
+test.beforeAll(() => makeScreensDir());
 
 // A touch phone, 844 px tall so that the expanded sheet opens expanded at either width. Motion is off, so nothing is mid-flicker when it is measured.
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, contextOptions: { reducedMotion: 'reduce' }, screenshot: 'off' });
 
-const GEARS: GearId[] = ['difficulty', 'popularity', 'tempo', 'history'];
 const WIDTHS = [375, 390] as const;
-const MODES = ['expanded', 'mini'] as const;
-type Mode = (typeof MODES)[number];
-
-interface Point {
-  x: number;
-  y: number;
-}
-interface Box {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-  width: number;
-  height: number;
-}
-
-// ---- measuring ----
-
-/** The boxes of a strip's hit area, drawn track, knob and ✕ (null when it has none or it is not shown), in page px. */
-const boxes = (page: Page, gear: GearId) =>
-  strip(page, gear).evaluate((el) => {
-    const box = (e: Element | null): Box | null => {
-      if (!e) return null;
-      const b = e.getBoundingClientRect();
-      return b.width === 0 && b.height === 0 ? null : { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width, height: b.height };
-    };
-    const knob = el.querySelector('[data-knob]')!;
-    return { hit: box(el.querySelector('[data-fader]')), track: box(knob.parentElement)!, knob: box(knob)!, reset: box(el.querySelector('button[data-reset]')) };
-  });
-
-/** Where the drawn knob's centre is, and the track it travels. */
-async function thumb(page: Page, gear: GearId) {
-  const b = await boxes(page, gear);
-  return { x: b.knob.left + b.knob.width / 2, y: b.knob.top + b.knob.height / 2, track: b.track };
-}
-
-/** The value a pointer at `x` should give: the track's length is 0 to 100. */
-const valueAt = (track: Box, x: number) => Math.max(0, Math.min(100, Math.round(((x - track.left) / track.width) * 100)));
-
-/** What is on top at a point: the gear whose hit area it is, or the ✕ of a gear, or the tag of anything else. */
-const under = (page: Page, p: Point) =>
-  page.evaluate(({ x, y }) => {
-    const e = document.elementFromPoint(x, y);
-    const gear = e?.closest('[data-strip]')?.getAttribute('data-gear') ?? null;
-    if (e?.closest('[data-fader]')) return `fader:${gear}`;
-    if (e?.closest('button[data-reset]')) return `reset:${gear}`;
-    return e ? `${e.tagName.toLowerCase()}${gear ? `:${gear}` : ''}` : 'nothing';
-  }, p);
-
-/** A point is in a box as the browser's hit test sees it: the left and top edges are in, the right and bottom edges are not. */
-const inside = (b: Box | null, p: Point) => b !== null && p.x >= b.left && p.x < b.right && p.y >= b.top && p.y < b.bottom;
-
-/** The tuner's state with the gear's value set and nothing else changed, so the thumb is where a test wants it. */
-async function setThumb(page: Page, gear: GearId, v: number) {
-  await page.evaluate(([g, n]) => (window as unknown as { setlist: { setState(patch: object): void } }).setlist.setState({ [g as string]: n }), [gear, v] as const);
-  await expect.poll(() => value(page, gear)).toBe(v);
-}
-
-/** The value is within a step of what the finger's position says, as the tuner reads it. */
-async function expectValue(page: Page, gear: GearId, expected: number, why: string) {
-  await expect.poll(async () => Math.abs((await value(page, gear)) - expected), { message: `${why}: the value should be about ${expected}` }).toBeLessThanOrEqual(1);
-}
-
-const isOff = async (page: Page, gear: GearId) => (await tuner(page)).off.includes(gear);
-
-// ---- the way in, and a finger ----
-
-/** The tuner at a width and in a mode, signed in so that History's slider works too, with a gear's strip on show. */
-async function openAt(page: Page, mode: Mode, gear: GearId = 'difficulty', loggedIn = true) {
-  const opened = await open(page, { mini: mode === 'mini', loggedIn });
-  if (loggedIn) await expect(slider(page, 'history')).toBeEnabled();
-  await expect(page.locator('#app')).toHaveAttribute('data-mode', mode);
-  if (mode === 'mini') await tab(page, gear).click();
-  await expect(strip(page, gear)).toBeVisible();
-  return opened;
-}
-
-interface Finger {
-  /** Down at the first point, along the rest, up. `down` runs after the touch has landed, `end` before it lifts. */
-  drag(path: Point[], hooks?: { down?(): Promise<void>; end?(): Promise<void> }): Promise<void>;
-  tap(p: Point): Promise<void>;
-}
-
-/** Real touch through Chromium's DevTools, which raises the same touch and pointer events a finger does. */
-const cdpFinger = (page: Page): Finger => ({
-  async drag(points, hooks) {
-    const cdp = await page.context().newCDPSession(page);
-    try {
-      const [first, ...rest] = points;
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [first!] });
-      await hooks?.down?.();
-      for (const p of rest) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [p] });
-      await hooks?.end?.();
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    } finally {
-      await cdp.detach();
-    }
-  },
-  tap: (p) => page.touchscreen.tap(p.x, p.y),
-});
-
-/**
- * WebKit: a real tap, and for a drag the PointerEvents a touch raises, dispatched from the page at whatever is on top where the finger lands
- * (the target of its moves is that element, as a touch's is). This checks our handler under WebKit, not iOS's touch handling.
- */
-const syntheticFinger = (page: Page): Finger => {
-  const fire = (type: 'pointerdown' | 'pointermove' | 'pointerup', p: Point) =>
-    page.evaluate(
-      ({ type, p }) => {
-        const w = window as unknown as { __finger?: Element | null };
-        if (type === 'pointerdown') w.__finger = document.elementFromPoint(p.x, p.y);
-        w.__finger?.dispatchEvent(
-          new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerId: 41, pointerType: 'touch', isPrimary: true, clientX: p.x, clientY: p.y, button: 0, buttons: type === 'pointerup' ? 0 : 1 }),
-        );
-        if (type === 'pointerup') w.__finger = null;
-      },
-      { type, p },
-    );
-  return {
-    async drag(points, hooks) {
-      const [first, ...rest] = points;
-      await fire('pointerdown', first!);
-      await hooks?.down?.();
-      for (const p of rest) await fire('pointermove', p);
-      await hooks?.end?.();
-      await fire('pointerup', rest.at(-1) ?? first!);
-    },
-    tap: (p) => page.touchscreen.tap(p.x, p.y),
-  };
-};
-
-/** A straight line of fingers from `a` to `b`, `a` first. */
-const line = (a: Point, b: Point, steps = 10): Point[] => Array.from({ length: steps + 1 }, (_, i) => ({ x: a.x + ((b.x - a.x) * i) / steps, y: a.y + ((b.y - a.y) * i) / steps }));
-
-/** Dots where a finger starts (red) and ends (green), over the sheet, for a screenshot of it. */
-async function shot(page: Page, name: string, from: Point, to: Point) {
-  await page.evaluate(
-    (dots) => {
-      for (const d of dots) {
-        const i = document.createElement('i');
-        i.setAttribute('data-test-mark', '');
-        i.style.cssText = `position:fixed;left:${d.x - 7}px;top:${d.y - 7}px;width:14px;height:14px;border-radius:50%;background:${d.colour};opacity:.9;pointer-events:none;z-index:99999`;
-        document.body.append(i);
-      }
-    },
-    [
-      { ...from, colour: '#ff2d2d' },
-      { ...to, colour: '#27e36a' },
-    ],
-  );
-  await page.locator('#sheet').screenshot({ path: path.join(SCREENS, `${name}.png`) });
-  await page.evaluate(() => document.querySelectorAll('[data-test-mark]').forEach((e) => e.remove()));
-}
-
-/** Listens for the browser taking a touch away from the page (pointercancel, which it sends when it starts a scroll with it). */
-const countCancels = async (page: Page) => {
-  await page.evaluate(() => {
-    const w = window as unknown as { __cancels?: number };
-    if (w.__cancels !== undefined) return;
-    w.__cancels = 0;
-    document.addEventListener('pointercancel', () => w.__cancels!++, true);
-  });
-  const before = await page.evaluate(() => (window as unknown as { __cancels: number }).__cancels);
-  return async () => (await page.evaluate(() => (window as unknown as { __cancels: number }).__cancels)) - before;
-};
 
 // ============================================================================================================
 // What each check does, once for a finger, whichever engine drives it
@@ -215,26 +68,28 @@ async function checkGeometry(page: Page, gears: GearId[], at: string) {
     // The track and half a knob (7 px) more at each end, so the end values are easy to reach.
     expect(hit.left, `${why}: the hit area starts ${b.track.left - hit.left} px before the track`).toBeLessThanOrEqual(b.track.left - 7 + 0.5);
     expect(hit.right, `${why}: the hit area ends ${hit.right - b.track.right} px after the track`).toBeGreaterThanOrEqual(b.track.right + 7 - 0.5);
-    // Centred on the drawn track.
+    // It reaches 8 px above the track (so 16 px above the thumb's centre is inside it) and 16 below, where the ✕'s area ends (setlist-fader-ends.spec.ts).
     const centre = b.track.top + b.track.height / 2;
-    expect(Math.abs(hit.top + hit.height / 2 - centre), `${why}: the hit area is level with the track`).toBeLessThan(1);
+    expect(b.track.top - hit.top, `${why}: the hit area reaches ${b.track.top - hit.top} px above the track`).toBeGreaterThanOrEqual(8 - 0.5);
+    expect(hit.bottom - b.track.bottom, `${why}: the hit area reaches ${hit.bottom - b.track.bottom} px below the track`).toBeGreaterThanOrEqual(16 - 0.5);
     expect(Math.abs(b.knob.top + b.knob.height / 2 - centre), `${why}: the knob is level with the track`).toBeLessThan(1);
     expect(await slider(page, gear).evaluate((el) => getComputedStyle(el).pointerEvents), `${why}: the input takes no pointer`).toBe('none');
     expect(await page.locator(`[data-strip][data-gear="${gear}"] [data-fader]`).evaluate((el) => getComputedStyle(el).touchAction), `${why}: a swipe up or down is the browser's`).toBe('pan-y');
 
-    // What is on top 20 px above and below the track's centre and at both ends of the track, and at the hit area's own corners: the gear's own
-    // hit area, except where its ✕ is (that sits over it, and keeps its tap).
+    // What is on top at the hit area's own corners, its middle and the ends of the track at several heights in it: the gear's own hit area, at every point
+    // (the ✕ is above it, not over it, so there is no point of it that the ✕ takes).
     const xs = [b.track.left, b.track.left + 1, b.track.left + b.track.width / 2, b.track.right - 1, b.track.right, hit.left + 1, hit.right - 1];
-    const ys = [centre - 20, centre - 10, centre, centre + 10, centre + 20, hit.top + 1, hit.bottom - 1];
+    const ys = [hit.top + 1, centre - 10, centre, centre + 10, centre + 20, hit.bottom - 1];
     for (const x of xs) {
       for (const y of ys) {
         const p = { x, y };
-        const expected = inside(b.reset, p) ? `reset:${gear}` : `fader:${gear}`;
-        expect(await under(page, p), `${why}: on top at x ${Math.round(x)}, ${Math.round(y - centre)} px from the track's centre`).toBe(expected);
+        expect(await under(page, p), `${why}: on top at x ${Math.round(x)}, ${Math.round(y - centre)} px from the track's centre`).toBe(`fader:${gear}`);
       }
     }
     // Past the box it is no fader's: not this gear's, and not a neighbour's, whose strip is 6 px away.
     for (const y of [hit.top - 2, hit.bottom + 2]) expect(await under(page, { x: b.track.left + b.track.width / 2, y }), `${why}: 2 px past the hit area`).not.toMatch(/^fader:/);
+    // And nothing of the ✕ is over it: where the hit area ends at the top, the ✕ is above it.
+    if (b.reset) expect(b.reset.bottom, `${why}: the ✕ ends at ${b.reset.bottom}, the hit area begins at ${hit.top}`).toBeLessThanOrEqual(hit.top + 0.01);
   }
   // No two hit areas overlap, so a neighbouring gear's fader is never caught by this one's.
   const all = await Promise.all(gears.map(async (gear) => ({ gear, hit: (await boxes(page, gear)).hit! })));
@@ -244,52 +99,6 @@ async function checkGeometry(page: Page, gears: GearId[], at: string) {
       const overlap = a.hit.left < c.hit.right && c.hit.left < a.hit.right && a.hit.top < c.hit.bottom && c.hit.top < a.hit.bottom;
       expect(overlap, `${at}: the ${a.gear} and ${c.gear} hit areas overlap`).toBe(false);
     }
-  }
-}
-
-/** The three drags and a tap, for a gear that is on: the thumb is set to 25 (or 75, for a drag to the left), and each moves it to the finger. */
-async function checkTouchDrags(page: Page, finger: Finger, gears: GearId[], at: string, shots?: string) {
-  for (const gear of gears) {
-    const cases = (t: Awaited<ReturnType<typeof thumb>>) => [
-      { name: 'starts 16 px above the thumb', start: 25, from: { x: t.x, y: t.y - 16 }, to: { x: t.x + 70, y: t.y - 10 }, file: 'above' },
-      { name: 'starts on the track 60 px right of the thumb', start: 25, from: { x: t.x + 60, y: t.y }, to: { x: Math.min(t.x + 95, t.track.right - 3), y: t.y + 4 }, file: 'away' },
-      { name: 'starts on the thumb', start: 25, from: { x: t.x, y: t.y }, to: { x: t.x + 55, y: t.y + 3 }, file: 'thumb' },
-    ];
-    await setThumb(page, gear, 25);
-    const t25 = await thumb(page, gear);
-    const list = cases(t25);
-    // And one to the left, from a thumb at 75.
-    await setThumb(page, gear, 75);
-    const t75 = await thumb(page, gear);
-    list.push({ name: 'starts on the track 60 px left of the thumb', start: 75, from: { x: t75.x - 60, y: t75.y }, to: { x: Math.max(t75.x - 100, t75.track.left + 3), y: t75.y - 4 }, file: 'left' });
-
-    for (const c of list) {
-      const why = `${at}, ${gear}, a drag that ${c.name}`;
-      await setThumb(page, gear, c.start);
-      const t = await thumb(page, gear);
-      expect(await under(page, c.from), `${why}: the finger lands on the gear's hit area`).toBe(`fader:${gear}`);
-      const wasOff = await isOff(page, gear);
-      await finger.drag(line(c.from, c.to), {
-        down: async () => {
-          // The thumb does not jump at the first touch (it may be about to scroll), and an off gear stays off.
-          await page.waitForTimeout(50);
-          expect(await value(page, gear), `${why}: the thumb jumped at the first touch`).toBe(c.start);
-          expect(await isOff(page, gear), `${why}: the gear changed at the first touch`).toBe(wasOff);
-          if (shots && gear === 'difficulty' && c.file === 'away') await shot(page, `${shots}-first-touch`, c.from, c.from);
-        },
-        end: async () => expectValue(page, gear, valueAt(t.track, c.to.x), `${why} (while the finger is down)`),
-      });
-      await expectValue(page, gear, valueAt(t.track, c.to.x), `${why} (after it lifts)`);
-      expect(await isOff(page, gear), `${why}: the gear is on`).toBe(false);
-      if (shots && gear === 'difficulty') await shot(page, `${shots}-${c.file}`, c.from, c.to);
-    }
-
-    // A tap on the track 60 px from the thumb jumps the thumb there.
-    await setThumb(page, gear, 25);
-    const t = await thumb(page, gear);
-    const target = { x: t.x + 60, y: t.y };
-    await finger.tap(target);
-    await expectValue(page, gear, valueAt(t.track, target.x), `${at}, ${gear}, a tap 60 px from the thumb`);
   }
 }
 
@@ -318,6 +127,55 @@ async function checkVerticalSwipe(page: Page, finger: Finger, gears: GearId[], a
   }
 }
 
+/**
+ * The review of 828aaca: a 120 px swipe down that drifts 15 px sideways in its first 9 px is not a drag, and no gear is turned on or moved by it, whether
+ * the browser cancels the press or (as when it began sideways) does not. `off` leaves the gear off, as Tempo starts.
+ */
+async function checkWobblingSwipe(page: Page, finger: Finger, gear: GearId, at: string, off = false) {
+  if (!off) await setThumb(page, gear, 25);
+  const t = await thumb(page, gear);
+  const from = { x: t.x + 60, y: t.y - 8 };
+  const path = [
+    [0, 0],
+    [7, 4],
+    [15, 9],
+    [15, 20],
+    [15, 40],
+    [15, 70],
+    [15, 100],
+    [15, 120],
+  ].map(([dx, dy]) => ({ x: from.x + dx!, y: from.y + dy! }));
+  const was = await tuner(page);
+  const why = `${at}, ${gear}${off ? ' (off)' : ''}, a swipe 120 px down that drifted 15 px across in its first 9 px`;
+  expect(await under(page, from), `${why}: the finger lands on the gear's hit area`).toBe(`fader:${gear}`);
+  await finger.drag(path, {
+    end: async () => {
+      expect((await tuner(page))[gear], `${why}: the value, before the finger lifts`).toBe(was[gear]);
+      expect((await tuner(page)).off, `${why}: what is off, before the finger lifts`).toEqual(was.off);
+    },
+  });
+  await page.waitForTimeout(100);
+  const now = await tuner(page);
+  expect(now[gear], `${why}: the value`).toBe(was[gear]);
+  expect(now.off, `${why}: what is off`).toEqual(was.off);
+}
+
+/**
+ * The review of 828aaca: a drag that dips 7 px down first and then goes 80 px sideways is a drag, and takes the value to the finger. A finger reports
+ * every few px, so the sideways part is in small steps (2 px): the first move past 8 px in all is then still mostly down, which is what once made
+ * the fader call it a scroll.
+ */
+async function checkDippingDrag(page: Page, finger: Finger, gear: GearId, at: string) {
+  await setThumb(page, gear, 25);
+  const t = await thumb(page, gear);
+  const end = Math.min(t.x + 80, t.track.right - 3);
+  const path = [{ x: t.x, y: t.y }, { x: t.x, y: t.y + 7 }, ...line({ x: t.x + 2, y: t.y + 7 }, { x: end, y: t.y + 8 }, Math.round((end - t.x) / 2) - 1)];
+  const why = `${at}, ${gear}, a drag that dipped 7 px down and then went sideways`;
+  await finger.drag(path, { end: async () => expectValue(page, gear, valueAt(t.track, end), `${why} (while the finger is down)`) });
+  await expectValue(page, gear, valueAt(t.track, end), `${why} (after it lifts)`);
+  expect(await isOff(page, gear), `${why}: the gear is on`).toBe(false);
+}
+
 /** Tapping a gear's ✕ turns the gear off and sets nothing: the hit area under it does not take the tap. */
 async function checkResetTap(page: Page, finger: Finger, gear: GearId, at: string) {
   await setThumb(page, gear, 25);
@@ -328,6 +186,24 @@ async function checkResetTap(page: Page, finger: Finger, gear: GearId, at: strin
   await finger.tap(centre);
   await expect.poll(() => isOff(page, gear), { message: `${at}, ${gear}: the ✕ turned it off` }).toBe(true);
   expect(await value(page, gear), `${at}, ${gear}: the ✕ put it back at its default, not where the tap was`).toBe(DEFAULTS[gear]);
+}
+
+/**
+ * A mouse click on a gear's fader: the browser's own step for a mousedown used to take the focus off the slider (the hit area cannot take it), so the arrow
+ * keys did nothing after a click (the review of 828aaca). Real mouse events, which jsdom cannot give: the focus is the slider's, and a key moves it.
+ */
+async function checkMouseFocus(page: Page, gear: GearId) {
+  await setThumb(page, gear, 25);
+  const t = await thumb(page, gear);
+  await page.mouse.click(t.x + 40, t.y);
+  await expectValue(page, gear, valueAt(t.track, t.x + 40), `${gear}: the click`);
+  expect(await page.evaluate(() => document.activeElement?.id ?? document.activeElement?.tagName), `${gear}: the slider has the focus after the click`).toBe(`slider-${gear}`);
+  const clicked = await value(page, gear);
+  await page.keyboard.press('ArrowRight');
+  await expectValue(page, gear, clicked + 1, `${gear}: an arrow key after the click`);
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expectValue(page, gear, clicked - 1, `${gear}: two arrow keys back`);
 }
 
 // ============================================================================================================
@@ -341,7 +217,7 @@ for (const width of WIDTHS) {
       test.beforeEach(({ browserName }) => test.skip(browserName !== 'chromium', 'touch is driven through Chromium DevTools'));
       const at = `${width} px, ${mode}`;
 
-      test('the hit area is at least 44 px tall and spans the track and 7 px more at each end, centred on it, and the gear is what is on top at points above, below and at its ends', async ({ page }) => {
+      test('the hit area is at least 44 px tall and spans the track and 7 px more at each end, reaching 8 px above it and 16 below, and the gear is what is on top at every point of it', async ({ page }) => {
         test.setTimeout(90_000);
         await openAt(page, mode);
         if (mode === 'expanded') await checkGeometry(page, GEARS, at);
@@ -357,7 +233,7 @@ for (const width of WIDTHS) {
         await openAt(page, mode);
         for (const gear of GEARS) {
           if (mode === 'mini') await tab(page, gear).click();
-          await checkTouchDrags(page, cdpFinger(page), [gear], at, width === 390 && mode === 'expanded' ? `fader-${width}-${mode}` : undefined);
+          await checkTouchDrags(page, cdpFinger(page), [gear], at, { shots: width === 390 && mode === 'expanded' ? `fader-${width}-${mode}` : undefined });
         }
       });
 
@@ -367,6 +243,19 @@ for (const width of WIDTHS) {
         for (const gear of GEARS) {
           if (mode === 'mini') await tab(page, gear).click();
           await checkVerticalSwipe(page, cdpFinger(page), [gear], at, true, width === 390 && mode === 'expanded' ? `fader-${width}-${mode}` : undefined);
+        }
+      });
+
+      test('a 120 px swipe down that drifts 15 px sideways in its first 9 px changes nothing, and a drag that dips 7 px down and then goes 80 px sideways moves the value', async ({ page }) => {
+        test.setTimeout(90_000);
+        await openAt(page, mode, 'tempo');
+        const finger = cdpFinger(page);
+        // Tempo is off to begin with: the swipe must not turn it on.
+        await checkWobblingSwipe(page, finger, 'tempo', at, true);
+        for (const gear of ['difficulty', 'popularity', 'tempo', 'history'] as GearId[]) {
+          if (mode === 'mini') await tab(page, gear).click();
+          if (gear !== 'tempo') await checkWobblingSwipe(page, finger, gear, at);
+          await checkDippingDrag(page, finger, gear, at);
         }
       });
 
@@ -461,6 +350,12 @@ test.describe('at 390 px, expanded, in Chromium', () => {
     expect(await isOff(page, 'popularity')).toBe(false);
   });
 
+  test('a mouse press on the fader leaves the focus on its slider, so the arrow keys carry on from the press (the review of 828aaca)', async ({ page }) => {
+    await openAt(page, 'expanded');
+    await checkMouseFocus(page, 'popularity');
+    await checkMouseFocus(page, 'difficulty');
+  });
+
   test('a gear that cannot be used has no hit area and takes no touch: signed out, History stays off at its default', async ({ page }) => {
     const { events } = await open(page, { loggedIn: false });
     await expect(slider(page, 'history')).toBeDisabled();
@@ -514,6 +409,9 @@ test.describe('in WebKit', () => {
             }
             await checkTouchDrags(page, finger, [gear], at);
             await checkVerticalSwipe(page, finger, [gear], at, false);
+            await checkWobblingSwipe(page, finger, gear, at);
+            await checkDippingDrag(page, finger, gear, at);
+            if (mode === 'expanded' && gear !== 'tempo') await checkMouseFocus(page, gear);
             await checkResetTap(page, finger, gear, at);
           }
           await context.close();

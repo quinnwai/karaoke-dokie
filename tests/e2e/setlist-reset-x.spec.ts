@@ -1,7 +1,10 @@
 // Quinn-Wai's review of the whole build (QWW-57, R34, 12 Nov): each gear's ✕ is vertically centred on its title (DIFFICULTY, ERA, ...).
 //   R34  For every gear (Difficulty, Popularity, Tempo, History, Era), at 375 and 390 px, the centre of the ✕'s icon box and the centre of the title's
-//        text box differ by 1 px or less. The button's own box (what its focus ring and the highlight of a tap are drawn on) is centred on the title too,
-//        and a screenshot per gear is saved. Measured in Chromium and, where it is installed, WebKit (the engine of an iPhone; CI installs Chromium only).
+//        text box differ by 1 px or less, and a screenshot per gear is saved. Measured in Chromium and, where it is installed, WebKit (the engine of an
+//        iPhone; CI installs Chromium only).
+//   The ✕'s touch area (the button's box) is 44 px wide and 20 tall, and it is not centred on the title: it ends 1 px below the title row, where the
+//   icon's box ends, and grows up from there, so that none of it is over the fader's hit area (R33, the gate on 828aaca) or, in the Era panel, the
+//   '20s button (the second pass of the review of #38, item 7). The icon is in the bottom of it, whole.
 // The tuner is reached as the other tuner specs reach it (tests/helpers/tunerE2e.ts).
 
 import { devices, expect, test, webkit, type Page } from '@playwright/test';
@@ -21,7 +24,7 @@ type Part = (typeof PARTS)[number];
 const allOn = (page: Page, mini: boolean) =>
   page.evaluate((m) => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ off: [], eras: ['s80'], mini: m }), mini);
 
-/** Where a part's ✕ and title stand, in page pixels: the icon's box, the button's box, the title element's box and the title's text. */
+/** Where a part's ✕ and title stand, in page pixels: the icon's box, the button's box, the title element's box and the title's text; and what the ✕ must keep clear of. */
 const centres = (page: Page, part: Part) =>
   page.evaluate(async (g) => {
     await document.fonts.ready;
@@ -31,7 +34,21 @@ const centres = (page: Page, part: Part) =>
     const text = document.createRange();
     text.selectNodeContents(title);
     const icon = button.querySelector('svg')!.getBoundingClientRect();
-    return { icon: mid(icon), iconH: icon.height, button: mid(button.getBoundingClientRect()), buttonH: button.getBoundingClientRect().height, title: mid(title.getBoundingClientRect()), text: mid(text.getBoundingClientRect()) };
+    const box = button.getBoundingClientRect();
+    // The first thing that ✕ must not reach: the fader's hit area under a gear's, the row of era buttons under Era's.
+    const below = g === 'era' ? document.querySelector('button[data-era]') : document.querySelector(`[data-strip][data-gear="${g}"] [data-fader]`);
+    return {
+      icon: mid(icon),
+      iconH: icon.height,
+      iconBottom: icon.bottom,
+      iconLeft: icon.left,
+      iconRight: icon.right,
+      iconTop: icon.top,
+      button: { top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width, height: box.height },
+      title: mid(title.getBoundingClientRect()),
+      text: mid(text.getBoundingClientRect()),
+      belowTop: below ? below.getBoundingClientRect().top : null,
+    };
   }, part);
 
 async function expectCentred(page: Page, part: Part, at: string) {
@@ -39,9 +56,14 @@ async function expectCentred(page: Page, part: Part, at: string) {
   expect(c.iconH, `${at}: the ✕ is drawn`).toBe(16);
   expect(Math.abs(c.icon - c.text), `${at}: the ✕'s icon box and the title's text box, centre to centre`).toBeLessThanOrEqual(1);
   expect(Math.abs(c.icon - c.title), `${at}: the ✕'s icon box and the title's own box`).toBeLessThanOrEqual(1);
-  // The 44 x 26 button is centred on the title as well: its focus ring and the highlight of a tap are not off to one side of the ✕.
-  expect(c.buttonH, `${at}: the button is 26 px tall`).toBe(26);
-  expect(Math.abs(c.button - c.title), `${at}: the button's box and the title's own box`).toBeLessThanOrEqual(1);
+  // The 44 x 20 touch area has the whole icon in its bottom, ends 1 px below the title row (where the icon ends) and keeps clear of what is under it.
+  expect(c.button.width, `${at}: the button is 44 px wide`).toBe(44);
+  expect(c.button.height, `${at}: the button is 20 px tall`).toBe(20);
+  expect(Math.abs(c.button.bottom - c.iconBottom), `${at}: the button ends where the icon does`).toBeLessThanOrEqual(0.5);
+  expect(c.iconTop >= c.button.top - 0.01 && c.iconLeft >= c.button.left - 0.01 && c.iconRight <= c.button.right + 0.01, `${at}: the icon is inside the button`).toBe(true);
+  expect(c.belowTop, `${at}: there is something under the ✕`).not.toBeNull();
+  expect(c.button.bottom, `${at}: the ✕'s box ends at ${c.button.bottom}, what is under it begins at ${c.belowTop}`).toBeLessThanOrEqual(c.belowTop! + 0.01);
+  if (part === 'era') expect(c.belowTop! - c.button.bottom, `${at}: the Era ✕ stops short of the era buttons`).toBeGreaterThanOrEqual(2);
 }
 
 for (const width of [375, 390]) {

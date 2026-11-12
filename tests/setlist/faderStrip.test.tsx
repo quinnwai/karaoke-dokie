@@ -7,7 +7,7 @@
 // nothing until it is a tap (the thumb jumps to where it lifted) or a drag past the slop that is mostly sideways. A swipe that is mostly
 // up or down leaves the gear alone. An adjustment is a press that did something, and it ends when its pointer goes.
 
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GearStrip } from '../../src/components/setlist/GearStrip';
@@ -146,6 +146,19 @@ describe('the focus after a press', () => {
   });
 });
 
+describe('the mousedown the browser follows a press with', () => {
+  it('is cancelled on the fader, so the browser\'s own step for it does not take the focus off the slider the press has just given it (a real browser does that; jsdom only shows the cancel)', () => {
+    const { hit } = strip({ value: 30, off: false });
+    expect(fireEvent.mouseDown(hit), 'fireEvent returns false when the event was cancelled').toBe(false);
+  });
+
+  it('is not cancelled on the ✕, which a mouse press takes focus on as a button does', () => {
+    const reset = vi.fn();
+    strip({ value: 30, off: false, onReset: reset });
+    expect(fireEvent.mouseDown(document.querySelector('button[data-reset]')!)).toBe(true);
+  });
+});
+
 describe('a finger on the fader', () => {
   const finger = (x: number, y = 0, id = 1) => ({ kind: 'touch' as const, x, y, id });
 
@@ -213,14 +226,58 @@ describe('a finger on the fader', () => {
     expect(values(onInput)).toEqual([60, 30]);
   });
 
-  it('a swipe mostly up or down leaves the gear alone, whatever it does after: no value, not turned on, nothing recorded', () => {
+  it('a swipe mostly up or down leaves the gear alone: no value, not turned on, nothing recorded', () => {
     const { hit, onInput, onTouch, onDone } = strip();
     faderPointer('pointerDown', hit, finger(faderX(50), 0));
     faderPointer('pointerMove', hit, finger(faderX(50) + 1, 12));
-    // Even if it then goes sideways (and nothing cancels it), it began as a scroll.
-    faderPointer('pointerMove', hit, finger(faderX(50) + 40, 14));
-    faderPointer('pointerUp', hit, finger(faderX(50) + 40, 14));
+    faderPointer('pointerMove', hit, finger(faderX(50) + 3, 40));
+    faderPointer('pointerMove', hit, finger(faderX(50) + 4, 90));
+    faderPointer('pointerUp', hit, finger(faderX(50) + 4, 90));
     expect([onInput, onTouch, onDone].map((fn) => fn.mock.calls.length)).toEqual([0, 0, 0]);
+  });
+
+  it('a 120 px swipe down that drifted 15 px sideways in its first 9 px, and that nothing cancels, changes nothing: it is judged over a stretch, not at its first move (review of 828aaca)', () => {
+    const { hit, onInput, onTouch, onDone } = strip();
+    faderPointer('pointerDown', hit, finger(faderX(50), 0));
+    faderPointer('pointerMove', hit, finger(faderX(50) + 7, 4));
+    faderPointer('pointerMove', hit, finger(faderX(50) + 15, 9));
+    expect([onInput, onTouch, onDone].map((fn) => fn.mock.calls.length), 'nothing yet: it has not shown which way it goes').toEqual([0, 0, 0]);
+    for (let y = 20; y <= 120; y += 20) faderPointer('pointerMove', hit, finger(faderX(50) + 15, y));
+    faderPointer('pointerUp', hit, finger(faderX(50) + 15, 120));
+    expect([onInput, onTouch, onDone].map((fn) => fn.mock.calls.length)).toEqual([0, 0, 0]);
+  });
+
+  it('a swipe that wobbled sideways and lifts before it has gone far turns nothing on either', () => {
+    const { hit, onInput, onTouch, onDone } = strip();
+    faderPointer('pointerDown', hit, finger(faderX(50), 0));
+    faderPointer('pointerMove', hit, finger(faderX(50) + 4, 22));
+    faderPointer('pointerUp', hit, finger(faderX(50) + 4, 22));
+    expect([onInput, onTouch, onDone].map((fn) => fn.mock.calls.length)).toEqual([0, 0, 0]);
+  });
+
+  it('a short drag that lifts before the finger has gone TOUCH_DECIDE_PX still presses the fader where it lifted', () => {
+    const { hit, onInput, onTouch, onDone } = strip();
+    faderPointer('pointerDown', hit, finger(faderX(50), 0));
+    faderPointer('pointerMove', hit, finger(faderX(50) + 12, 3));
+    expect(onInput).not.toHaveBeenCalled();
+    faderPointer('pointerUp', hit, finger(faderX(50) + 12, 3));
+    expect(onTouch).toHaveBeenCalledTimes(1);
+    expect(values(onInput)).toEqual([56]);
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('a drag that dips 7 px down first and then goes 80 px sideways, reported every 2 px as a finger does, takes the thumb to the finger and follows it (review of 828aaca)', () => {
+    const { hit, onInput, onTouch, onDone } = strip();
+    faderPointer('pointerDown', hit, finger(faderX(20), 0));
+    faderPointer('pointerMove', hit, finger(faderX(20), 7));
+    for (let dx = 2; dx <= 14; dx += 2) faderPointer('pointerMove', hit, finger(faderX(20) + dx, 7));
+    expect([onInput, onTouch].map((fn) => fn.mock.calls.length), 'not yet: it has not shown which way it goes').toEqual([0, 0]);
+    for (let dx = 16; dx <= 80; dx += 2) faderPointer('pointerMove', hit, finger(faderX(20) + dx, 8));
+    expect(onTouch).toHaveBeenCalledTimes(1);
+    // The first step past the stretch it was judged over takes the thumb to the finger, and each step after that follows it.
+    expect(values(onInput)).toEqual(Array.from({ length: 33 }, (_, i) => 28 + i));
+    faderPointer('pointerUp', hit, finger(faderX(20) + 80, 8));
+    expect(onDone).toHaveBeenCalledTimes(1);
   });
 
   it('a swipe 8 px across and 60 px down, which the browser then cancels, changes nothing either', () => {
