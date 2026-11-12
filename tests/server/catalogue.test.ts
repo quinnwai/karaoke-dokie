@@ -310,6 +310,25 @@ describe('karaoke popularity (QWW-6)', () => {
       expect(endOf(after, 0)).toEqual(['Double Time Ballad', 'Unlabelled', 'Really Fast']);
     });
 
+    it('ranks a label from a plain-definition pass behind the strict ones at the slow end, still inside the slow band', async () => {
+      const store = createMemoryStore();
+      const strict = song('Strict', 'Strict Ballad', range(57, 63));
+      const loose = song('Loose', 'Loose Ballad', range(57, 63));
+      for (const s of [strict, loose]) await store.putSongRange(s.key, { range: s.range, log: s.log });
+      await store.putSongTempo([{ key: strict.key, deezerBpm: 80 }, { key: loose.key, deezerBpm: 50 }]);
+      await store.putSongFeel([
+        { key: strict.key, feel: 'slow', source: 'claude-opus-5-5/feel-v1' },
+        { key: loose.key, feel: 'slow', source: 'claude-opus-5-5/feel-edge-recheck-v1' },
+      ]);
+      const loaded = await loadCatalogue(store);
+      const by = (key: string) => loaded.find((s) => s.key === key)!;
+      expect(by(strict.key).tempo).toBe(80);
+      expect(by(loose.key)).toMatchObject({ tempoSource: 'deezer' });
+      expect(by(loose.key).tempo).toBeCloseTo(89.5 + 0.4 * ((50 - 40) / 50), 6); // the strip at the top of the slow band
+      // Taken by tempo alone the 50 would come first.
+      expect(endOf(loaded, 0)).toEqual(['Strict Ballad', 'Loose Ballad']);
+    });
+
     it('does no tempo work for a request: the tempos and labels are read once when the cache fills, and never again', async () => {
       const { store } = await withLabels('both');
       const getSongTempos = vi.spyOn(store, 'getSongTempos');
