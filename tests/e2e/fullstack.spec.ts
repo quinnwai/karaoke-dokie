@@ -106,6 +106,7 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
   });
   const connect = page.getByRole('button', { name: 'Connect to Spotify' });
   await connect.click();
+  await page.waitForTimeout(450); // the second tap must not come inside the moment (400 ms) in which the tooltip is read
   await connect.click();
   await expect(page.locator('#slider-history')).toBeEnabled({ timeout: 20_000 });
   await expect(songs.first()).toBeVisible();

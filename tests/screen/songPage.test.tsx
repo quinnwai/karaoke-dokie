@@ -12,19 +12,27 @@
 //   3. a double tap on a row: the song page holds its controls for the same moment (400 ms), so the second tap falls through
 //   5. Back puts the list at the place the singer scrolled it to (the page and the list are one screen's contents in turn)
 //   6. an ignored tap puts the moment off again, so three or four quick taps never get through
-// Layout and a real phone's Back are tests/e2e/setlist-back.spec.ts's, and the real touches of 3 and 5 tests/e2e/setlist-row-tap.spec.ts's; here is
-// the app's behaviour with jsdom's own History API.
+// and of the gate on 1ee41b4:
+//   4a. a tap the song page's hold swallows puts the end of the hold off by another moment, and a finger that went down in it keeps the hold up
+//       until it lifts
+//   4b. a double tap on "Load more": the rows it brings come up under the finger, and a tap on a row in the moment is ignored
+//   4c. a double tap on redo: the quiet step's full-screen button comes up under the finger, and a tap on it in the moment is ignored
+//   9.  a key press is not held (what jsdom can show of it; the real key press is tests/e2e/setlist-row-tap.spec.ts's)
+// Layout and a real phone's Back are tests/e2e/setlist-back.spec.ts's, and the real touches of 3, 4 and 5 tests/e2e/setlist-row-tap.spec.ts's; here is
+// the app's behaviour with jsdom's own History API. jsdom has no hit testing and no PointerEvent: a test here sets up the events the page listens for
+// and reads what the page did with them (its attribute, its styles, its timers); that a tap really falls through is the e2e spec's.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KaraokeApp, TAP_GUARD_MS } from '../../src/components/KaraokeApp';
 import { SongDetail } from '../../src/components/SongDetail';
 import type { Api } from '../../src/lib/client/api';
+import { SHOW_STEP } from '../../src/lib/client/flow';
 import type { Mic, MicRecorder } from '../../src/lib/client/mic';
 import { OVERLAY_STATE_KEY } from '../../src/lib/client/useOverlayHistory';
 import type { MeResponse, RecommendationsResponse, VocalRange } from '../../src/lib/contracts';
 import type { SetlistEngine } from '../../src/lib/setlist/engine';
 import type { SetlistResponse } from '../../src/lib/setlist/types';
-import { allMatches, knownSongs, me, recommendationsPage } from '../fixtures/screen';
+import { allMatches, knownSongs, match, me, recommendationsPage } from '../fixtures/screen';
 import { el, ranked, response, rowIds, SEL } from '../helpers/setlist';
 import { SAMPLE_RATE, voice } from '../helpers/synth';
 
@@ -330,6 +338,7 @@ describe('"Back to songs" on the mic and note steps of a redo (3)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Redo the range test' }));
     await screen.findByRole('button', { name: 'Turn on microphone' });
+    tick(TAP_GUARD_MS); // redo starts the moment too (4c); a tap that is meant comes after it
     fireEvent.click(back());
     await screen.findByText('Plastic Love');
     expect(api.allRecommendations).toHaveBeenCalledTimes(2);
@@ -452,6 +461,16 @@ describe('a double tap lands once (a): taps on the range notes, redo and "Back t
     expect(songPageOpen('Lemon')).toBe(true);
   });
 
+  it.each(GAPS)('a song row is not held by it (4b): the row tapped %i ms after ‹ opens, since only "Load more" brings rows up under a finger', async (gap) => {
+    // The rows have a moment of their own, which only "Load more" starts (the describe for it is below): ‹ has no row under it.
+    await onTheTuner({ engine: engine() });
+    fireEvent.click(await row(/^Plastic Love/));
+    fireEvent.click(back()); // a tap that starts the moment
+    tick(gap);
+    fireEvent.click(await row(/^Lemon/));
+    expect(songPageOpen('Lemon')).toBe(true);
+  });
+
   it('the system Back is not a tap, and starts no moment: redo right after it works', async () => {
     await onTheTuner({ engine: engine() });
     fireEvent.click(await row(/^Plastic Love/));
@@ -464,9 +483,10 @@ describe('a double tap lands once (a): taps on the range notes, redo and "Back t
 });
 
 describe("a double tap on a row lands once (3): the song page holds its controls for a moment after it opens", () => {
-  // jsdom has no hit testing: it dispatches a click at whatever it is told to, `pointer-events` or not. So these check what the page does to hold
-  // its controls: the attribute and the style, when they go on and off, and what they leave alone. That a tap really falls through (the ▶ not
-  // pressed, no tab opened, nothing sent, nothing played) is tests/e2e/setlist-row-tap.spec.ts's, with real touches in Chromium and WebKit.
+  // jsdom has no hit testing: it dispatches a click at whatever it is told to, `pointer-events` or not, and it has no PointerEvent and no key-to-click.
+  // So these check what the page does to hold its controls: the attribute and the style, when they go on and off, what the page's listeners do to
+  // that, and what they leave alone. They do not show that a tap falls through the held controls, or that a key reaches them (the ▶ not pressed, no
+  // tab opened, nothing sent, nothing played): those are tests/e2e/setlist-row-tap.spec.ts's, with real touches and keys in Chromium and WebKit.
   const held = () => document.querySelector<HTMLElement>('[data-hold]');
   const timers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   afterEach(() => void vi.useRealTimers());
@@ -544,13 +564,202 @@ describe("a double tap on a row lands once (3): the song page holds its controls
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('keys are not held: what a key press does, a click at the control, still goes through in the moment', () => {
+  it('keys are not held (9): the held ▶, link and thumbs stay enabled, tabbable and not inert, and the click a key press makes is handled', () => {
+    // jsdom does not turn Enter or Space into a click and has no `inert`, so this reads what a key press needs (a control that is enabled, takes the
+    // focus and is not under an inert or hidden parent) and runs the click it ends in. A hold made with `disabled`, `inert`, a tabindex of -1 or a
+    // handler that skips the click fails it; the key press itself, on a real browser's focus, is the e2e spec's.
     timers();
     const onFeedback = vi.fn();
-    render(page({ holdMs: 400, onFeedback }));
+    render(page({ match: { ...catalogue, deezerId: 4242 }, holdMs: 400, onFeedback })); // a Deezer track, so the ▶ is enabled
     expect(held()).not.toBeNull();
+    const keyed = [...document.querySelectorAll<HTMLElement>('button[data-preview], a[href], button[aria-pressed]')];
+    expect(keyed.map((c) => c.getAttribute('aria-label') ?? c.textContent), 'the ▶, the link and both thumbs').toEqual([
+      'Play 30 s',
+      'Find on Spotify',
+      'It went well',
+      "It didn't go well",
+    ]);
+    for (const control of keyed) {
+      expect((control as HTMLButtonElement).disabled, `${control.tagName} is enabled`).toBeFalsy();
+      expect(control.tabIndex, 'and in the tab order').toBeGreaterThanOrEqual(0);
+      expect(control.closest('[inert], [aria-hidden="true"]'), 'and not inert or hidden').toBeNull();
+      control.focus();
+      expect(document.activeElement, 'and takes the focus').toBe(control);
+    }
+    // What Enter or Space on a focused button ends in is a click on it.
     fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
     expect(onFeedback).toHaveBeenCalledWith('up');
+  });
+
+  describe('a tap the hold swallows puts its end off (4a)', () => {
+    /** A pointer event: jsdom has no PointerEvent, and the page tells one finger from the next by its pointerId. */
+    class TestPointerEvent extends MouseEvent {
+      readonly pointerId: number;
+      readonly pointerType: string;
+      constructor(type: string, init: MouseEventInit & { pointerId?: number; pointerType?: string } = {}) {
+        super(type, { bubbles: true, ...init });
+        this.pointerId = init.pointerId ?? 1;
+        this.pointerType = init.pointerType ?? 'touch';
+      }
+    }
+    const touch = (type: 'pointerdown' | 'pointerup' | 'pointercancel', target: EventTarget, id = 1) => void target.dispatchEvent(new TestPointerEvent(type, { pointerId: id }));
+    /** A finger's tap on the page, where a held control is: down, then up. The page is what the event lands on, as the controls take none. */
+    const tapOn = (target: EventTarget, id = 1) => {
+      touch('pointerdown', target, id);
+      touch('pointerup', target, id);
+    };
+    const pass = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
+
+    it('the second tap, 250 ms in, puts the end of the hold off to 650 ms, not a millisecond less', () => {
+      timers();
+      render(page({ holdMs: 400 }));
+      const root = held()!;
+      pass(250);
+      tapOn(root);
+      pass(399); // 649 ms in: the first 400 ms are long over
+      expect(held(), 'still holding').not.toBeNull();
+      expect(controls().map(style)).toEqual(['none', 'none', 'none', 'none']);
+      pass(1);
+      expect(held()).toBeNull();
+      expect(controls().map(style)).toEqual(['', '', '', '']);
+    });
+
+    it('a third tap, 250 ms after the second, does it again: the hold lasts to 900 ms', () => {
+      timers();
+      render(page({ holdMs: 400 }));
+      const root = held()!;
+      pass(250);
+      tapOn(root);
+      pass(250); // 500 ms in: the hold of the first tap alone would be over by now
+      expect(held()).not.toBeNull();
+      tapOn(root);
+      pass(399);
+      expect(held(), '899 ms in').not.toBeNull();
+      pass(1);
+      expect(held(), '900 ms in').toBeNull();
+    });
+
+    it('a tap that lands on a part of the page that is not a control counts too: the page does not tell which control was under the finger', () => {
+      timers();
+      render(page({ holdMs: 400 }));
+      pass(250);
+      tapOn(screen.getByRole('heading', { level: 2 })); // bubbles to the page
+      pass(399);
+      expect(held()).not.toBeNull();
+      pass(1);
+      expect(held()).toBeNull();
+    });
+
+    it('a finger that went down in the moment keeps the hold up as long as it is down, and the hold ends 400 ms after it lifts', () => {
+      timers();
+      render(page({ holdMs: 400 }));
+      const root = held()!;
+      pass(100);
+      touch('pointerdown', root, 7);
+      pass(5000);
+      expect(held(), 'down for 5 s').not.toBeNull();
+      expect(vi.getTimerCount(), 'no timer runs while a finger is down').toBe(0);
+      touch('pointerup', root, 7);
+      pass(399);
+      expect(held()).not.toBeNull();
+      pass(1);
+      expect(held()).toBeNull();
+    });
+
+    it('pointercancel (a scroll takes the touch) is a lift', () => {
+      timers();
+      render(page({ holdMs: 400 }));
+      const root = held()!;
+      touch('pointerdown', root, 7);
+      pass(2000);
+      touch('pointercancel', root, 7);
+      pass(399);
+      expect(held()).not.toBeNull();
+      pass(1);
+      expect(held()).toBeNull();
+    });
+
+    it('two fingers: the hold waits for the last to lift', () => {
+      timers();
+      render(page({ holdMs: 400 }));
+      const root = held()!;
+      touch('pointerdown', root, 7);
+      pass(100);
+      touch('pointerdown', root, 8);
+      pass(100);
+      touch('pointerup', root, 7);
+      pass(2000);
+      expect(held(), 'one is still down').not.toBeNull();
+      touch('pointerup', root, 8);
+      pass(399);
+      expect(held()).not.toBeNull();
+      pass(1);
+      expect(held()).toBeNull();
+    });
+
+    it('a lift is heard wherever it comes: a button can come up outside the page', () => {
+      timers();
+      render(page({ holdMs: 400 }));
+      touch('pointerdown', held()!, 7);
+      pass(1000);
+      touch('pointerup', document.body, 7);
+      pass(399);
+      expect(held()).not.toBeNull();
+      pass(1);
+      expect(held()).toBeNull();
+    });
+
+    it('a pointer that did not go down on the page does nothing: neither its press nor its lift moves the end', () => {
+      timers();
+      render(page({ holdMs: 400 }));
+      pass(250);
+      tapOn(document.body, 9); // outside the page
+      touch('pointerup', document.body, 4); // a lift of a finger the page never saw
+      pass(150);
+      expect(held(), '400 ms in').toBeNull();
+    });
+
+    it('once the hold is over it is over: a tap on the page holds nothing again, and nothing is left listening', () => {
+      timers();
+      render(page({ holdMs: 400 }));
+      const root = held()!;
+      pass(400);
+      expect(held()).toBeNull();
+      tapOn(root);
+      pass(1);
+      expect(held()).toBeNull();
+      expect(controls().map(style)).toEqual(['', '', '', '']);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('a page with no moment listens to nothing and holds nothing', () => {
+      timers();
+      render(page());
+      tapOn(screen.getByRole('heading', { level: 2 }));
+      expect(vi.getTimerCount()).toBe(0);
+      expect(held()).toBeNull();
+    });
+
+    it.each(['pointerup', 'pointercancel'] as const)('a page that goes while a finger is down leaves no timer and no %s listener behind', (lift) => {
+      timers();
+      const { unmount } = render(page({ holdMs: 400 }));
+      touch('pointerdown', held()!, 7);
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      // A listener left on the window would take the lift of finger 7 and start a timer.
+      touch(lift, document.body, 7);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('a page that goes between taps, with the end of its hold pending, leaves no timer behind', () => {
+      timers();
+      const { unmount } = render(page({ holdMs: 400 }));
+      pass(100);
+      tapOn(held()!); // the end of the hold is pending, 400 ms from this tap
+      expect(vi.getTimerCount()).toBe(1);
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });
 
@@ -637,6 +846,142 @@ describe('a run of quick taps never gets through (6): an ignored tap puts the mo
     await waitFor(() => expect(tunerOpen()).toBe(true));
     tick(TAP_GUARD_MS + 1);
     redoLow(); // works again
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+  });
+});
+
+describe('a double tap on "Load more" (4b): the rows it brings come up under the finger, and a tap on a row in the moment is ignored', () => {
+  clock();
+  /** A list longer than the rows shown at first (SHOW_STEP), so there is a "Load more" and rows behind it. */
+  const LONG = SHOW_STEP + 5;
+  const GAPS = [60, 250, TAP_GUARD_MS - 10];
+  const more = () => screen.getByRole('button', { name: 'Load more songs' });
+  /** The button that opens row n (the song ids are t0, t1, ...; the first row Load more brings is t40). */
+  const rowButton = (n: number) => el(`[data-row][data-id="t${n}"] > button`);
+  const NEW_ROW = SHOW_STEP;
+
+  async function onALongList() {
+    const engine: SetlistEngine = { rank: async () => response(Array.from({ length: LONG }, (_, i) => ranked(match(i)))) };
+    render(<KaraokeApp api={fakeApi(me(RANGE))} track={{ track: vi.fn(), flush: async () => {} }} mic={mic} quietMs={5} setlistEngine={engine} />);
+    await screen.findByRole('button', { name: 'Load more songs' });
+    expect(rowIds()).toHaveLength(SHOW_STEP);
+  }
+
+  it.each(GAPS)('"Load more", then %i ms later the row that came up under it: the second tap is ignored, so no song page opens; a tap after the moment opens it', async (gap) => {
+    await onALongList();
+    fireEvent.click(more()); // the first tap: the rest of the list comes up where the button was
+    expect(rowIds()).toHaveLength(LONG);
+    tick(gap);
+    fireEvent.click(rowButton(NEW_ROW)); // the second tap: on the first new row
+    await settle();
+    expect(rowIds(), 'the new rows are there').toHaveLength(LONG);
+    expect(tunerOpen(), 'and no song page opened').toBe(true);
+    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+
+    tick(TAP_GUARD_MS); // the ignored tap put the moment off again (6)
+    fireEvent.click(rowButton(NEW_ROW));
+    expect(tunerOpen()).toBe(false);
+    expect(songPageOpen('Plastic Love')).toBe(true);
+  });
+
+  it('a run of taps 150 ms apart never gets through: the fourth is 450 ms after Load more and the page is still not open', async () => {
+    await onALongList();
+    fireEvent.click(more());
+    for (let i = 0; i < 3; i++) {
+      tick(150);
+      fireEvent.click(rowButton(NEW_ROW + i));
+    }
+    await settle();
+    expect(tunerOpen()).toBe(true);
+
+    tick(TAP_GUARD_MS);
+    fireEvent.click(rowButton(NEW_ROW));
+    expect(tunerOpen()).toBe(false);
+  });
+
+  it('a row that was already there is held too: the moment is the rows’, not just the new ones’', async () => {
+    await onALongList();
+    fireEvent.click(more());
+    tick(100);
+    fireEvent.click(rowButton(0));
+    expect(tunerOpen()).toBe(true);
+    tick(TAP_GUARD_MS);
+    fireEvent.click(rowButton(0));
+    expect(tunerOpen()).toBe(false);
+  });
+
+  it('Load more itself is not held: a second tap on it (a list with more behind it) loads the next rows', async () => {
+    const engine: SetlistEngine = { rank: async () => response(Array.from({ length: 2 * SHOW_STEP + 5 }, (_, i) => ranked(match(i)))) };
+    render(<KaraokeApp api={fakeApi(me(RANGE))} track={{ track: vi.fn(), flush: async () => {} }} mic={mic} quietMs={5} setlistEngine={engine} />);
+    await screen.findByRole('button', { name: 'Load more songs' });
+    fireEvent.click(more());
+    expect(rowIds()).toHaveLength(2 * SHOW_STEP);
+    tick(100);
+    fireEvent.click(more());
+    expect(rowIds()).toHaveLength(2 * SHOW_STEP + 5);
+  });
+});
+
+describe('a double tap on redo (4c): the quiet step comes up under the finger, and a tap on it in the moment is ignored', () => {
+  clock();
+  const engine = (): SetlistEngine => ({ rank: async () => inOrder(allMatches()) });
+  const GAPS = [60, 250, TAP_GUARD_MS - 10];
+  const redoAll = () => fireEvent.click(screen.getByRole('button', { name: 'Redo the range test' }));
+  const quiet = () => screen.queryByRole('button', { name: /Find a quiet spot/ });
+  const micStep = () => screen.queryByRole('button', { name: 'Turn on microphone' });
+  /** A tap at the spot redo was at: on the quiet step's full-screen button, and, if that has gone, on "Back to songs" at the top left of the step after it. */
+  const tapThere = () => fireEvent.click(quiet() ?? back());
+
+  it.each(GAPS)('redo, then %i ms later the quiet step’s button under it: the second tap is ignored, so "Find a quiet spot" stays; a tap after the moment continues', async (gap) => {
+    await onTheTuner({ engine: engine(), quietMs: 60_000 }); // the quiet step would stay a minute
+    redoAll(); // the first tap: the quiet step comes up
+    expect(quiet()).not.toBeNull();
+    tick(gap);
+    tapThere(); // the second tap
+    await settle();
+    expect(quiet(), 'Find a quiet spot is still up').not.toBeNull();
+    expect(micStep(), 'the mic step is not up early').toBeNull();
+
+    tick(TAP_GUARD_MS); // the ignored tap put the moment off again (6)
+    tapThere();
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+    expect(quiet()).toBeNull();
+  });
+
+  it('redo, then two more taps 150 ms apart: "Back to songs" is never reached and the redo is still running; a tap 450 ms after the first still waits', async () => {
+    await onTheTuner({ engine: engine(), quietMs: 60_000 });
+    redoAll();
+    for (let i = 0; i < 2; i++) {
+      tick(150);
+      tapThere();
+    }
+    tick(150);
+    tapThere(); // the fourth tap, 450 ms after the first: the third put the moment off again
+    await settle();
+    expect(quiet(), 'still on the quiet step').not.toBeNull();
+    expect(micStep()).toBeNull();
+    expect(tunerOpen(), 'the redo was not cancelled').toBe(false);
+    expect(overlayNow()).toBe('redo');
+
+    tick(TAP_GUARD_MS);
+    tapThere();
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+    expect(tunerOpen()).toBe(false);
+  });
+
+  it('the quiet step ends by itself after its own time, whatever was tapped on it', async () => {
+    // quietMs is a real timer here (only Date is faked), so a short one is enough.
+    await onTheTuner({ engine: engine(), quietMs: 120 });
+    redoAll();
+    tapThere(); // ignored
+    await screen.findByRole('button', { name: 'Turn on microphone' });
+    expect(tunerOpen()).toBe(false);
+  });
+
+  it('the first test (Start) is not held: its quiet step can be tapped through at once, as before', async () => {
+    render(<KaraokeApp api={fakeApi(me())} track={{ track: vi.fn(), flush: async () => {} }} mic={mic} quietMs={60_000} setlistEngine={engine()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Find a quiet spot/ }));
     await screen.findByRole('button', { name: 'Turn on microphone' });
   });
 });

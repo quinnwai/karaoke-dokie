@@ -259,6 +259,7 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   // The first tap on a phone shows the button's tooltip (R30); the second connects.
   const connect = page.getByRole('button', { name: 'Connect to Spotify' });
   await connect.click();
+  await page.waitForTimeout(450); // the second tap must not come inside the moment (400 ms) in which the tooltip is read
   await connect.click();
   await expect(page.locator('#slider-history')).toBeEnabled();
   expect(api.savedRanges).toEqual([{ low: 45, high: 72, source: 'test' }]);

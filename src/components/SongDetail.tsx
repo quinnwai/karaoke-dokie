@@ -18,7 +18,8 @@ interface SongDetailProps {
   /**
    * How long, ms, the page's controls but ‹ (the ▶, the Spotify link or player, the thumbs) let a tap through to the screen behind them,
    * from the moment the page is on the screen (KaraokeApp's TAP_GUARD_MS). A double tap on a row puts its second tap here, on whatever
-   * the page has under that spot. Unset, nothing is held.
+   * the page has under that spot. Every tap that lands on the page in that time puts the end of it off by another `holdMs`, and a finger
+   * that went down in it keeps the hold until it lifts. Unset, nothing is held.
    */
   holdMs?: number;
   onBack(): void;
@@ -108,11 +109,43 @@ export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, 
   // pressed, the link does not navigate (a skipped handler would not stop it), no thumb is sent, and Spotify's iframe, which no handler
   // of ours can see into, is held too. Keys are not touched (a key is not a double tap), nor is ‹ (no row sits under it), and nor is
   // anything that is not a control: the text and the chart can still be hit-tested.
+  // A tap that lands in the moment falls through to the page itself, so the page listens there, and each one puts the end of the hold off
+  // by another moment (a third tap 250 ms after the second would otherwise find the controls live). A finger that went down in the moment
+  // keeps it up until it lifts, and the hold ends `holdMs` after that: a touch's click is aimed at the lift (Chromium looks for the
+  // element under the finger then), so a finger that went down on a held control and lifts after the hold would press it.
   const [holding, setHolding] = useState(holdMs > 0);
   useLayoutEffect(() => {
-    if (holdMs <= 0) return;
-    const timer = setTimeout(() => setHolding(false), holdMs);
-    return () => clearTimeout(timer);
+    const page = root.current;
+    if (holdMs <= 0 || !page) return;
+    const down = new Set<number>();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settle = () => {
+      clearTimeout(timer);
+      if (down.size === 0) timer = setTimeout(release, holdMs);
+    };
+    const release = () => {
+      stop();
+      setHolding(false);
+    };
+    const press = (e: PointerEvent) => {
+      down.add(e.pointerId);
+      settle();
+    };
+    const lift = (e: PointerEvent) => {
+      if (down.delete(e.pointerId)) settle();
+    };
+    // A lift is heard on the window: a touch's goes to the page it went down on, but a mouse button can come up anywhere.
+    const stop = () => {
+      clearTimeout(timer);
+      page.removeEventListener('pointerdown', press);
+      window.removeEventListener('pointerup', lift, true);
+      window.removeEventListener('pointercancel', lift, true);
+    };
+    page.addEventListener('pointerdown', press);
+    window.addEventListener('pointerup', lift, true);
+    window.addEventListener('pointercancel', lift, true);
+    settle();
+    return stop;
   }, [holdMs]);
   const held: CSSProperties | undefined = holding ? { pointerEvents: 'none' } : undefined;
   const spotify = <SpotifyPlayer track={match.track} label={catalogue ? 'Find on Spotify' : 'Open in Spotify'} onOpen={onSpotify} style={held} />;

@@ -5,7 +5,9 @@
 //   R18  the "Want personalized recommendations?" block under the list is gone, at every width
 //   R19  the count of songs is at the header's top right, under the Spotify button, and follows every answer; the Era panel no longer shows it
 //   R21  each gear's reset arrow is a ✕ named "Turn off <gear>", and a tap turns the gear off
-//   R30  the Spotify button on touch: the first tap shows its tooltip, a second connects, a tap elsewhere hides it; a desktop keeps hover and click
+//   R30  the Spotify button on touch: the first tap shows its tooltip, a second connects, a tap elsewhere hides it; a desktop keeps hover and click.
+//        A second tap inside TAP_GUARD_MS (400 ms) of the first is a double tap's and is ignored, so the tests here wait the moment out between their
+//        taps; the double tap itself, in Chromium and WebKit, is tests/e2e/setlist-row-tap.spec.ts's (8)
 // The tuner is reached as the other tuner specs reach it (tests/helpers/tunerE2e.ts). tests/setlist/header.test.tsx has the logic in jsdom.
 
 import { expect, test, type Page } from '@playwright/test';
@@ -185,7 +187,7 @@ test.describe('R30. on a touch screen', () => {
     await expect.poll(() => css(tip(page), 'opacity')).toBe('0');
     await spotifyOf(page).tap();
     await expect.poll(() => css(tip(page), 'opacity')).toBe('1');
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(500); // past the moment (400 ms) in which a second tap is a double tap's and is ignored
     expect(requests, 'the first tap connects to nothing').toEqual([]);
     expect(new URL(page.url()).pathname).toBe('/');
 

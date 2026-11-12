@@ -26,6 +26,7 @@ import {
 } from '../lib/client/storage';
 import type { PostHogSettings } from '../lib/contracts';
 import { EVENT } from '../lib/eventNames';
+import { TAP_GUARD_MS } from '../lib/client/tapGuard';
 import { useOverlayHistory } from '../lib/client/useOverlayHistory';
 import { useRankedSetlist } from '../lib/client/useRankedSetlist';
 import { createNetworkEngine, type SetlistEngine } from '../lib/setlist/engine';
@@ -86,8 +87,8 @@ const LIVE_EVERY_MS = 50; // ~20 times a second
 
 /** A slider drag asks on every input event; the server is asked once the thumb has rested this long (an engine passed in is asked at once). */
 const SETLIST_DEBOUNCE_MS = 120;
-/** How long taps on the range notes, redo and "Back to songs" are ignored after a tap has put one of them under the finger (a double tap). */
-export const TAP_GUARD_MS = 400;
+// The guard's length is in lib/client/tapGuard, where ConnectButton reads it too; it is still KaraokeApp's to the tests and to Tv's copy of it.
+export { TAP_GUARD_MS };
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 const defaultReload = () => window.location.reload();
@@ -280,13 +281,25 @@ export function KaraokeApp({
     dispatch({ type: 'select', trackId, position });
   };
   // A double tap puts its second tap on the screen the first one brought up: the song page's ‹ is over the tuner's low note, "Back to
-  // songs" is over its range notes and redo, and a range note is over "Back to songs". So for a moment after a tap changes the screen,
-  // taps on those are ignored (the second review of PR #38). A tap that comes after the moment is a choice, and works. A tap that is
-  // ignored puts the moment off by another one, so a run of quick taps never gets through. (A double tap on a row lands on the song
-  // page, which holds its own controls for the same moment: SongDetail's holdMs.)
+  // songs" is over its range notes and redo, a range note is over "Back to songs", and redo is under the quiet step's full-screen
+  // button. So for a moment after a tap changes the screen, taps on those are ignored (the second review of PR #38; the gate on 1ee41b4
+  // for the quiet step). A tap that comes after the moment is a choice, and works. A tap that is ignored puts the moment off by another
+  // one, so a run of quick taps never gets through. (A double tap on a row lands on the song page, which holds its own controls for the
+  // same moment: SongDetail's holdMs.)
   const quietUntil = useRef(0);
   const hush = () => {
     quietUntil.current = Date.now() + TAP_GUARD_MS;
+  };
+  // The rows have a moment of their own: "Load more" is replaced by the rows it brings, so a double tap on it puts its second tap on one
+  // (the gate on 1ee41b4). Nothing else brings rows up under a finger, so nothing else holds them: a row tapped right after ‹ is a choice.
+  // A row tap that is ignored puts the moment off again, like the others.
+  const rowsQuietUntil = useRef(0);
+  const holdRows = () => {
+    rowsQuietUntil.current = Date.now() + TAP_GUARD_MS;
+  };
+  const tapRow = (trackId: string, position: number) => {
+    if (Date.now() >= rowsQuietUntil.current) openSong(trackId, position);
+    else holdRows();
   };
   const unlessHushed =
     <A extends unknown[]>(act: (...args: A) => void) =>
@@ -444,6 +457,7 @@ export function KaraokeApp({
   };
 
   const redo = () => {
+    hush();
     clearProgress();
     dispatch({ type: 'redo' });
   };
@@ -500,6 +514,7 @@ export function KaraokeApp({
     hush();
     backToSongs();
   });
+  const tapQuiet = unlessHushed(() => dispatch({ type: 'quietDone' }));
   useOverlayHistory(overlay, () => (overlay === 'redo' ? backToSongs() : closeSong()));
   useEffect(() => {
     const id = returnTo.current;
@@ -539,8 +554,11 @@ export function KaraokeApp({
           }}
           onTuner={(action) => dispatch({ type: 'tuner', action })}
           onGearDone={(gear) => dispatch({ type: 'gearDone', gear })}
-          onSelect={openSong}
-          onMore={() => dispatch({ type: 'loadMore' })}
+          onSelect={tapRow}
+          onMore={() => {
+            holdRows();
+            dispatch({ type: 'loadMore' });
+          }}
           onRetry={() => dispatch({ type: 'retryLoad' })}
           onRedo={unlessHushed(redo)}
           onRedoEnd={unlessHushed((end) => {
@@ -580,7 +598,7 @@ export function KaraokeApp({
       )}
 
       {step === 'quiet' && (
-        <button type="button" className={styles.centerButton} onClick={() => dispatch({ type: 'quietDone' })} aria-label="Find a quiet spot. Tap to continue">
+        <button type="button" className={styles.centerButton} onClick={tapQuiet} aria-label="Find a quiet spot. Tap to continue">
           <Lyric text="Find a quiet spot" />
         </button>
       )}
