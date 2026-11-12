@@ -136,7 +136,7 @@ async function mockApi(context: BrowserContext, state: ApiState) {
 async function launchWithMic(wav: string): Promise<Browser> {
   return chromium.launch({
     executablePath: process.env.PW_CHROMIUM_PATH,
-    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wav}`],
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${wav}`, '--disable-audio-output'],
   });
 }
 

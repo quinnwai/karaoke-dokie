@@ -65,6 +65,7 @@ moods are placeholders. Duets and moods are hidden unless `DUETS_AND_MOODS=on` (
 
 End-to-end tests build and start the app in mock mode. In the cloud sandbox, point Playwright at
 the preinstalled Chromium: `PW_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e`.
+Audio a page plays in an e2e spec must be silent (`silentWav` in `tests/helpers/silentWav.ts`), because WebKit has no switch to mute a page and plays it through the speakers of the machine running the tests, and every Chromium launch needs `--disable-audio-output` (`playwright.config.ts`, `tests/e2e/fakeMic.ts`, `tests/e2e/screen.spec.ts`).
 Screenshots of every step land in `test-results/screens/`.
 
 ## Sources and inspiration

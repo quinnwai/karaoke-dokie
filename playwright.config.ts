@@ -28,7 +28,9 @@ export default defineConfig({
     ...devices['iPhone 13'],
     browserName: 'chromium',
     screenshot: 'on',
-    launchOptions: { executablePath },
+    // No page may play out of the speakers of the machine running the tests: Chromium is kept off them here and in every other launch below
+    // (tests/e2e/fakeMic.ts, tests/e2e/screen.spec.ts), and what a page plays is silent (tests/helpers/silentWav.ts), since WebKit has no such switch.
+    launchOptions: { executablePath, args: ['--disable-audio-output'] },
   },
   webServer: [
     {

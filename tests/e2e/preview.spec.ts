@@ -1,6 +1,6 @@
 // The play button in each song row (QWW-48), in the Setlist tuner's first slot (QWW-57, R3), with a real browser's <audio>: Chromium as the Android phone and, where
 // it is installed, WebKit as the iPhone (both emulated: neither is a real phone, so the review guide asks for one).
-// The API is mocked, and /api/preview/<id> answers with a short tone after a delay, in byte ranges as Deezer's CDN does
+// The API is mocked, and /api/preview/<id> answers with a short silence after a delay, in byte ranges as Deezer's CDN does
 // (Safari asks for media in ranges). The app's route answers with a redirect to Deezer's CDN instead, and that hop
 // cannot be stood in for here: Playwright neither fulfils a redirect for a media request nor routes the request a
 // redirect leads to (tried in Chromium and WebKit, Nov 2026: the follow-up goes to the real CDN). So the redirect is
@@ -12,32 +12,12 @@ import path from 'node:path';
 import type { Match, RecommendationsResponse, SetlistRequest } from '../../src/lib/contracts';
 import { allMatches, me } from '../fixtures/screen';
 import { setlistAnswer } from '../helpers/setlistServer';
+import { silentWav } from '../helpers/silentWav';
 
 const SCREENS = path.resolve('test-results/screens');
 
-/** 16-bit mono WAV: `seconds` of a quiet 440 Hz tone. */
-function toneWav(seconds: number, sampleRate = 22050): Buffer {
-  const n = Math.round(seconds * sampleRate);
-  const data = Buffer.alloc(n * 2);
-  for (let i = 0; i < n; i++) data.writeInt16LE(Math.round(0.1 * 32767 * Math.sin((2 * Math.PI * 440 * i) / sampleRate)), i * 2);
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + data.length, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20); // PCM
-  header.writeUInt16LE(1, 22); // mono
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(sampleRate * 2, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(data.length, 40);
-  return Buffer.concat([header, data]);
-}
-
-const TONE = toneWav(30);
+/** What the preview route serves: 30 s of silence, so a WebKit pass plays nothing out of the speakers (tests/helpers/silentWav.ts). */
+const SILENCE = silentWav(30);
 
 /** The fixture songs, each with a Deezer id (1000 + its index) except those in `without`. */
 function songs(without: number[] = []): RecommendationsResponse {
@@ -53,17 +33,17 @@ interface Mock {
   previewCalls: string[];
 }
 
-/** The tone, or the bytes a Range header asks for (206), as Deezer's CDN answers: Safari asks for media in ranges. */
+/** The silence, or the bytes a Range header asks for (206), as Deezer's CDN answers: Safari asks for media in ranges. */
 function audioAnswer(rangeHeader: string | undefined): { status: number; contentType: string; headers: Record<string, string>; body: Buffer } {
   const range = /bytes=(\d+)-(\d*)/.exec(rangeHeader ?? '');
-  if (!range) return { status: 200, contentType: 'audio/wav', headers: { 'accept-ranges': 'bytes' }, body: TONE };
+  if (!range) return { status: 200, contentType: 'audio/wav', headers: { 'accept-ranges': 'bytes' }, body: SILENCE };
   const start = Number(range[1]);
-  const end = Math.min(range[2] ? Number(range[2]) : TONE.length - 1, TONE.length - 1);
+  const end = Math.min(range[2] ? Number(range[2]) : SILENCE.length - 1, SILENCE.length - 1);
   return {
     status: 206,
     contentType: 'audio/wav',
-    headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${TONE.length}` },
-    body: TONE.subarray(start, end + 1),
+    headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${SILENCE.length}` },
+    body: SILENCE.subarray(start, end + 1),
   };
 }
 

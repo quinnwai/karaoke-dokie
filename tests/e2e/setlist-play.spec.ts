@@ -10,7 +10,7 @@
 // R20 (nothing needs hover on a touch screen) is checked here for the row's ▶ and the song page's.
 //
 // The tuner is reached as tests/e2e/setlist.spec.ts reaches it (tests/helpers/tunerE2e.ts), with songs that have a Deezer track, and
-// /api/preview/<id> answers with a few seconds of tone, so a real <audio> plays a preview from its tap to its end. The unit tests
+// /api/preview/<id> answers with a few seconds of silence (tests/helpers/silentWav.ts), so a real <audio> plays a preview from its tap to its end. The unit tests
 // (tests/screen/previewPlay.test.tsx) have what is written to the DOM and when; here is what a browser draws. The WebKit test runs where
 // WebKit is installed (CI installs Chromium only), as tests/e2e/preview.spec.ts does.
 
@@ -19,6 +19,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { open, openButton, rgb, rows } from '../helpers/tunerE2e';
 import type { MockSong } from '../fixtures/setlist';
+import { silentWav } from '../helpers/silentWav';
 
 const SCREENS = path.resolve('test-results/screens');
 test.beforeAll(() => mkdirSync(SCREENS, { recursive: true }));
@@ -37,47 +38,25 @@ const SONGS: MockSong[] = [
   { title: 'Gamma None', artist: 'No Preview', era: 's90', difficulty: 5, history: 50, popularity: 98, tempo: 50 },
 ];
 
-// ---- the preview route: a short tone, so a test can watch a preview to its end ----
-
-/** 16-bit mono WAV: `seconds` of a quiet 440 Hz tone. */
-function toneWav(seconds: number, sampleRate = 22050): Buffer {
-  const n = Math.round(seconds * sampleRate);
-  const data = Buffer.alloc(n * 2);
-  for (let i = 0; i < n; i++) data.writeInt16LE(Math.round(0.1 * 32767 * Math.sin((2 * Math.PI * 440 * i) / sampleRate)), i * 2);
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + data.length, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20);
-  header.writeUInt16LE(1, 22);
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(sampleRate * 2, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(data.length, 40);
-  return Buffer.concat([header, data]);
-}
+// ---- the preview route: a short silence, so a test can watch a preview to its end ----
 
 /**
- * Every /api/preview/<id> answers with `seconds` of tone after `delay` ms, in byte ranges as Deezer's CDN does (Safari asks for media in
- * ranges). A page route, which wins over the one open() puts on the context (a tone of 30 s after 1.2 s).
+ * Every /api/preview/<id> answers with `seconds` of silence (tests/helpers/silentWav.ts: WebKit plays page audio out of the speakers) after `delay` ms, in byte ranges as Deezer's CDN does (Safari asks for media in
+ * ranges). A page route, which wins over the one open() puts on the context (30 s of silence after 1.2 s).
  */
 async function shortPreviews(page: Page, seconds: number, delay = 150) {
-  const tone = toneWav(seconds);
+  const silence = silentWav(seconds);
   await page.route(/\/api\/preview\/\d+$/, async (route) => {
     await new Promise((resolve) => setTimeout(resolve, delay));
     const range = /bytes=(\d+)-(\d*)/.exec(route.request().headers()['range'] ?? '');
-    if (!range) return route.fulfill({ status: 200, contentType: 'audio/wav', headers: { 'accept-ranges': 'bytes' }, body: tone });
+    if (!range) return route.fulfill({ status: 200, contentType: 'audio/wav', headers: { 'accept-ranges': 'bytes' }, body: silence });
     const start = Number(range[1]);
-    const end = Math.min(range[2] ? Number(range[2]) : tone.length - 1, tone.length - 1);
+    const end = Math.min(range[2] ? Number(range[2]) : silence.length - 1, silence.length - 1);
     return route.fulfill({
       status: 206,
       contentType: 'audio/wav',
-      headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${tone.length}` },
-      body: tone.subarray(start, end + 1),
+      headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${silence.length}` },
+      body: silence.subarray(start, end + 1),
     });
   });
 }
