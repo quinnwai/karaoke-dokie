@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EraId, GearId, Match, SetlistInput, SetlistState, SongRange, Track, TunerPart, VocalRange } from '../../src/lib/contracts';
 import { ERA_IDS, GEAR_IDS } from '../../src/lib/contracts';
+import { feelOfTempo } from '../../src/lib/tempo/feel';
 import { catalogueMatches, catalogueTracks, prepareCatalogue, rankCatalogue, type CatalogueTrack } from '../../src/lib/server/catalogue';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { productionSongDeps } from '../../src/lib/server/wiring';
@@ -16,6 +17,7 @@ import {
   EASE_POINT,
   GEAR_WEIGHTS,
   MIN_PLAUSIBLE_SPAN,
+  TEMPO_END_REACH,
   effectiveTempo,
   libraryCandidate,
   noteCost,
@@ -441,12 +443,11 @@ describe('a song we do not know on an active gear is a tier of its own', () => {
       const r = rankPrepared(preparedOf(...songs), state({ off: ['history', 'era'], gears: { tempo } }));
       expect(ids(r), `tempo ${tempo}`).toEqual(['complete', 'no-popularity', 'no-tempo']);
     }
-    // And History above Tempo: a song outside the library sorts after one inside it, even one with no tempo.
-    const lib = [
-      placed('own-no-tempo', { history: 50, tempo: null }, { popularity: 0.1 }),
-      placed('other-has-tempo', { history: null, tempo: 100 }, { popularity: 0.99 }),
-    ];
-    const r = rankPrepared(preparedOf(...lib), state({ off: ['era', 'difficulty', 'popularity'], loggedIn: true, gears: { tempo: 100 } }));
+    // And History above Tempo, away from the Tempo ends: a song outside the library sorts after one inside it, even one with no tempo.
+    // (At an end the songs in its band come first, ahead of History: see "Tempo at an end" below.) Real songs with real tempos.
+    const own = { match: song('own-no-tempo', { low: 50, high: 60, popularity: 0.1 }), listening: 0.8 };
+    const other = { match: song('other-has-tempo', { low: 50, high: 60, popularity: 0.99, tempo: 100 }) };
+    const r = rankPrepared(prepareSetlist([other, own], USER), state({ off: ['era', 'difficulty', 'popularity'], loggedIn: true, gears: { tempo: 50 } }));
     expect(ids(r)).toEqual(['own-no-tempo', 'other-has-tempo']);
   });
 
@@ -456,8 +457,9 @@ describe('a song we do not know on an active gear is a tier of its own', () => {
   });
 
   it('puts a song with no tempo after the songs that have one when Tempo is on, on a real list, in each group (QWW-58)', () => {
+    // Tempo is at its slow end here, so the songs in the slow band come first (QWW-54, tested with the rule); a song with no tempo is not in it.
     const r = rankCatalogue(CATALOGUE, input(TEST_RANGES[0]![1], { gears: { tempo: 0 }, off: [...others, 'difficulty', 'popularity'].filter((p, i, all) => all.indexOf(p) === i) as TunerPart[] }), deps);
-    // The songs sung as written come first, then the jumps; a song with no tempo goes after the others of its own group.
+    // The songs sung as written come first, then the jumps, in the band and out of it; a song with no tempo goes after the others of its own group.
     for (const written of [true, false]) {
       const group = r.songs.filter((s) => s.match.difficulty !== 'maybe' && (s.match.octave === 'none') === written);
       const firstUnknown = group.findIndex((s) => s.gears.tempo === null);
@@ -717,14 +719,14 @@ describe('songs sung as written come before songs that need an octave jump (QWW-
     expect(order([maybeJump, maybeWritten, sure])).toEqual(['sure-jump', 'maybe-written', 'maybe-jump']);
   });
 
-  it('comes before "not known on an active gear" too, so the rule has no exception while Tempo or History is on', () => {
+  it('comes before "not known on an active gear" too, so the rule has no exception while Tempo (short of its ends) or History is on', () => {
     // Decision A says every song sung as written comes before any that needs a jump. A song with no tempo still sorts after the
-    // songs that have one, but only among songs that are sung the same way.
+    // songs that have one, but only among songs that are sung the same way. (Tempo at an end is the one exception, QWW-54, below.)
     const noTempo = sung('written-no-tempo', 'none', 0.2);
     const jumpWithTempo = song('jump-with-tempo', { low: 58, high: 74, shares: flat(58, 74), popularity: 0.9, tempo: 100 });
     expect(effectiveTempo(noTempo)).toBeUndefined();
     const tempoOnly: TunerPart[] = ['history', 'era', 'difficulty', 'popularity'];
-    expect(order([jumpWithTempo, noTempo], { off: tempoOnly, gears: { tempo: 100 } })).toEqual(['written-no-tempo', 'jump-with-tempo']);
+    expect(order([jumpWithTempo, noTempo], { off: tempoOnly, gears: { tempo: 89 } })).toEqual(['written-no-tempo', 'jump-with-tempo']);
     // The same for the singer's own songs: a song of theirs that needs a jump follows the catalogue's songs sung as written.
     const own = { match: sung('own-jump', 'down', 0.3), listening: 0.9 };
     const catalogueWritten = { match: sung('catalogue-written', 'none', 0.3) };
@@ -732,6 +734,152 @@ describe('songs sung as written come before songs that need an octave jump (QWW-
     const r = rankPrepared(prepareSetlist([own, catalogueWritten], USER), state({ off: historyOnly, loggedIn: true }));
     expect(r.applied).toEqual(['history']);
     expect(ids(r)).toEqual(['catalogue-written', 'own-jump']);
+  });
+});
+
+describe('Tempo at an end: the songs at that end come before how a song is sung (QWW-54)', () => {
+  // The same notes as the singer sings them (as in QWW-58 above), written as they are sung, an octave above or an octave below,
+  // each with the tempo a test gives it: under 90 is the slow band, 125 and over the upbeat band (feelOfTempo), between is mid.
+  // Five songs with a tempo get the places 0, 25, 50, 75 and 100 on Tempo, slowest to fastest.
+  const AS_SUNG = { none: [46, 62], down: [58, 74], up: [34, 50] } as const;
+  const timed = (id: string, how: keyof typeof AS_SUNG, tempo: number | undefined, popularity = 0.5) => {
+    const [low, high] = AS_SUNG[how];
+    return song(id, { low, high, shares: flat(low, high), popularity, ...(tempo === undefined ? {} : { tempo }) });
+  };
+  const slowJump = timed('slow-jump', 'down', 60);
+  const FIVE = [slowJump, timed('slow-written', 'none', 70), timed('mid-written', 'none', 110), timed('fast-written', 'none', 150), timed('fast-jump', 'up', 170)];
+  const tempoOnly: TunerPart[] = ['history', 'era', 'difficulty', 'popularity']; // Tempo is the only gear on
+  const at = (tempo: number, ms: Match[] = FIVE, over: Parameters<typeof state>[0] = {}) =>
+    ids(rankPrepared(prepareSetlist(cands(...ms), USER), state({ off: tempoOnly, ...over, gears: { tempo, ...over.gears } })));
+
+  it('puts the slow band first at the slow end and the upbeat band first at the upbeat end, the songs sung as written first inside each', () => {
+    expect([slowJump.octave, FIVE[4]!.octave]).toEqual(['down', 'up']);
+    // A slow song that needs a jump comes before the mid and fast songs sung as written, and after the slow one sung as written.
+    expect(at(0)).toEqual(['slow-written', 'slow-jump', 'mid-written', 'fast-written', 'fast-jump']);
+    expect(at(100)).toEqual(['fast-written', 'fast-jump', 'mid-written', 'slow-written', 'slow-jump']);
+  });
+
+  it('reaches 10 places in from either end: Tempo 10 and 90 are at the end, 11 and 89 are not', () => {
+    expect(TEMPO_END_REACH).toBe(10);
+    expect(at(10)).toEqual(['slow-written', 'slow-jump', 'mid-written', 'fast-written', 'fast-jump']);
+    expect(at(90)).toEqual(['fast-written', 'fast-jump', 'mid-written', 'slow-written', 'slow-jump']);
+    // One place further in, every song sung as written comes first again and the jumps follow, each group nearest first.
+    expect(at(11)).toEqual(['slow-written', 'mid-written', 'fast-written', 'slow-jump', 'fast-jump']);
+    expect(at(89)).toEqual(['fast-written', 'mid-written', 'slow-written', 'fast-jump', 'slow-jump']);
+  });
+
+  // Eleven songs, places 0, 10, ... 100 on Tempo. 'weak-slow' rests at the top of the slow band and 'weak-fast' at the bottom of the upbeat
+  // band, as the weak labels of #49 do (89.5 to 89.9, 125 to 125.4), so a thumb at 10 or at 90 sits exactly on one of them.
+  const eleven = [
+    timed('clear-slow', 'none', 50), timed('weak-slow', 'none', 89.6), timed('mid-1', 'none', 95), timed('mid-2', 'none', 100), timed('mid-3', 'none', 105),
+    timed('mid-4', 'none', 110), timed('mid-5', 'none', 115), timed('mid-6', 'none', 120), timed('mid-7', 'none', 124), timed('weak-fast', 'none', 125.2), timed('clear-fast', 'none', 190),
+  ];
+
+  it('counts a thumb at 6 to 10 (or 90 to 94) as the end itself: the songs in the band go slowest first, not nearest the thumb', () => {
+    expect(at(0, eleven).slice(0, 2)).toEqual(['clear-slow', 'weak-slow']);
+    expect(at(100, eleven).slice(0, 2)).toEqual(['clear-fast', 'weak-fast']);
+    // Measured to the thumb, a thumb at 10 would put the weak song first; at the end it is the same list as at 0.
+    for (const tempo of [6, 8, 10]) expect(at(tempo, eleven), `tempo ${tempo}`).toEqual(at(0, eleven));
+    for (const tempo of [90, 92, 94]) expect(at(tempo, eleven), `tempo ${tempo}`).toEqual(at(100, eleven));
+  });
+
+  it('has no jump when the thumb leaves a stop: the target runs from 0 at the thumb\'s 10 to 100 at its 90', () => {
+    // From the stop's edge straight to the thumb, a thumb at 11 would put the weak song (place 10) first, though at 10 it was second.
+    expect(at(11, eleven).slice(0, 2)).toEqual(['clear-slow', 'weak-slow']);
+    expect(at(89, eleven).slice(0, 2)).toEqual(['clear-fast', 'weak-fast']);
+    // The target moves 1.25 places for each step of the thumb: it reaches the weak song's place, 10, at a thumb of 18 (90 at a thumb of 82).
+    expect(at(18, eleven)[0]).toBe('weak-slow');
+    expect(at(82, eleven)[0]).toBe('weak-fast');
+    // The middle of the track stays the middle.
+    expect(at(50, eleven)[0]).toBe('mid-4');
+  });
+
+  it('keeps the songs sung as written first everywhere else on the track', () => {
+    for (const tempo of [12, 25, 50, 75, 88]) {
+      const r = at(tempo);
+      expect(r.slice(0, 3).sort(), `tempo ${tempo}`).toEqual(['fast-written', 'mid-written', 'slow-written']);
+      expect(r.slice(3).sort(), `tempo ${tempo}`).toEqual(['fast-jump', 'slow-jump']);
+    }
+  });
+
+  it('counts for nothing while Tempo is off, whatever its value', () => {
+    const r = at(0, FIVE, { off: [...tempoOnly, 'tempo'] });
+    expect(r.slice(0, 3).sort()).toEqual(['fast-written', 'mid-written', 'slow-written']);
+    expect(r.slice(3).sort()).toEqual(['fast-jump', 'slow-jump']);
+  });
+
+  it('puts the songs at the end first whatever the other gears say, and still orders inside them by those gears', () => {
+    // Tempo 70, 80 and 110 are places 0, 50 and 100; Popularity 0.1, 0.5 and 0.95 are places 0, 50 and 100 (counted double). With Tempo
+    // at 0 and Popularity at 100 the sums are 200 (slow-obscure), 150 (slow-hit) and 100 (mid-hit): by the sum alone the mid hit is first.
+    const three = [timed('slow-obscure', 'none', 70, 0.1), timed('slow-hit', 'none', 80, 0.5), timed('mid-hit', 'none', 110, 0.95)];
+    const popularityToo: Parameters<typeof state>[0] = { off: ['history', 'era', 'difficulty'], gears: { popularity: 100 } };
+    expect(at(0, three, popularityToo)).toEqual(['slow-hit', 'slow-obscure', 'mid-hit']);
+    // Short of the end nothing is first but the sum.
+    expect(at(50, three, popularityToo)).toEqual(['mid-hit', 'slow-hit', 'slow-obscure']);
+  });
+
+  it('draws the line between the slow and the mid band at 90 and the one between the mid and the upbeat band at 125', () => {
+    // Tempo 89.9 is slow and 90 is mid; 124.9 is mid and 125 is upbeat (feelOfTempo). The two songs next to each line differ in
+    // popularity so that the sum alone would put the popular one of each pair first.
+    const edge = [timed('t-89.9', 'none', 89.9, 0.1), timed('t-90', 'none', 90, 0.99), timed('t-124.9', 'none', 124.9, 0.1), timed('t-125', 'none', 125, 0.99)];
+    const popularityToo: Parameters<typeof state>[0] = { off: ['history', 'era', 'difficulty'], gears: { popularity: 100 } };
+    expect(at(0, edge, popularityToo)).toEqual(['t-89.9', 't-90', 't-125', 't-124.9']);
+    expect(at(100, edge, popularityToo)).toEqual(['t-125', 't-90', 't-124.9', 't-89.9']);
+  });
+
+  it('keeps a big hit sung an octave down behind the songs at the end that are sung as written (QWW-58 inside the band)', () => {
+    // The hit is the most popular song and an octave jump; with Popularity on it would lead whatever the Tempo end said, if the octave
+    // groups were dropped. Both slow songs sung as written are ahead of it, and so is the slow jump song: it is in the band.
+    const songs = [timed('jump-hit', 'down', 75, 0.99), timed('slow-written-a', 'none', 70, 0.2), timed('slow-written-b', 'none', 80, 0.1), timed('mid-written', 'none', 110, 0.5)];
+    const popularityToo: Parameters<typeof state>[0] = { off: ['history', 'era', 'difficulty'], gears: { popularity: 100 } };
+    const r = at(0, songs, popularityToo);
+    expect(r.indexOf('jump-hit')).toBeGreaterThan(r.indexOf('slow-written-a'));
+    expect(r.indexOf('jump-hit')).toBeGreaterThan(r.indexOf('slow-written-b'));
+    expect(r.indexOf('jump-hit')).toBeLessThan(r.indexOf('mid-written'));
+  });
+
+  it('puts the band before the singer\'s own songs too (R31), and sung as written before History: own written, other written, own jump, other jump in the band, then the same four out of it', () => {
+    // Signed in with History on at 100, the way the tuner opens signed in, and Tempo at an end. The singer's own songs are the ones with a
+    // listening share. Sung as written comes ahead of History (QWW-58), so the singer's own jump song is behind a catalogue song sung as
+    // written, and both are ahead of every song out of the band. Fast songs (150 to 180) are in the upbeat band, mid songs (105 to 120) are not.
+    const own = (id: string, how: keyof typeof AS_SUNG, tempo: number) => ({ match: timed(id, how, tempo), listening: 0.9 });
+    const other = (id: string, how: keyof typeof AS_SUNG, tempo: number) => ({ match: timed(id, how, tempo) });
+    const list = prepareSetlist(
+      [
+        other('mid-jump-other', 'up', 120), own('mid-jump-own', 'down', 115), other('mid-written-other', 'none', 105), own('mid-written-own', 'none', 110),
+        other('fast-jump-other', 'up', 180), own('fast-jump-own', 'down', 170), other('fast-written-other', 'none', 160), own('fast-written-own', 'none', 150),
+      ],
+      USER,
+    );
+    const signedIn: Parameters<typeof state>[0] = { off: ['era', 'difficulty', 'popularity'], loggedIn: true };
+    const atEnd = ['fast-written-own', 'fast-written-other', 'fast-jump-own', 'fast-jump-other', 'mid-written-own', 'mid-written-other', 'mid-jump-own', 'mid-jump-other'];
+    for (const tempo of [100, 94]) expect(ids(rankPrepared(list, state({ ...signedIn, gears: { tempo } }))), `tempo ${tempo}`).toEqual(atEnd);
+    // No song is in the slow band, so at the slow end and short of the ends the order is the usual one: sung as written first, the singer's
+    // own songs first inside each, then the jumps the same way.
+    for (const tempo of [0, 50]) {
+      const r = ids(rankPrepared(list, state({ ...signedIn, gears: { tempo } })));
+      expect(r.slice(0, 2).sort(), `tempo ${tempo}`).toEqual(['fast-written-own', 'mid-written-own']);
+      expect(r.slice(2, 4).sort(), `tempo ${tempo}`).toEqual(['fast-written-other', 'mid-written-other']);
+      expect(r.slice(4, 6).sort(), `tempo ${tempo}`).toEqual(['fast-jump-own', 'mid-jump-own']);
+      expect(r.slice(6).sort(), `tempo ${tempo}`).toEqual(['fast-jump-other', 'mid-jump-other']);
+    }
+  });
+
+  it('puts a song with no tempo after the songs that have one inside its group, and the Maybe songs last', () => {
+    const noTempo = timed('written-no-tempo', 'none', undefined, 0.9);
+    expect(effectiveTempo(noTempo)).toBeUndefined();
+    // It is out of the band, so it is in the rest: after the songs sung as written that have a tempo, before the rest's jump songs.
+    expect(at(100, [...FIVE, noTempo])).toEqual(['fast-written', 'fast-jump', 'mid-written', 'slow-written', 'written-no-tempo', 'slow-jump']);
+    const maybe = song('maybe-slow', { low: 40, high: 70, confidence: 'low', popularity: 0.99, tempo: 40 });
+    expect(maybe.difficulty).toBe('maybe');
+    expect(at(0, [maybe, ...FIVE]).at(-1)).toBe('maybe-slow');
+    expect(at(100, [maybe, ...FIVE]).at(-1)).toBe('maybe-slow');
+  });
+
+  it('is the same list however the songs arrive', () => {
+    for (const tempo of [0, 100]) {
+      for (const seed of [1, 2, 3]) expect(at(tempo, shuffled(FIVE, seed)), `tempo ${tempo}, shuffle ${seed}`).toEqual(at(tempo));
+    }
   });
 });
 
@@ -889,9 +1037,16 @@ describe.each(TEST_RANGES)('%s', (_name, range) => {
   it('moves the list along the whole length of every gear (QWW-33): the top 10 differ between neighbouring tenths', () => {
     for (const g of ['difficulty', 'popularity', 'tempo'] as const) {
       const top = (v: number) => ids(rankPrepared(list.prepared, state({ off: ['history', 'era'], gears: { [g]: v, ...(g === 'popularity' ? {} : { popularity: 100 }) } })), 10);
+      // Tempo's first and last tenth are one stop: the thumb counts as the end there (QWW-54), so 0 to 10 and 90 to 100 are flat by design.
+      const flat = g === 'tempo' ? new Set([10, 100]) : new Set<number>();
       let moved = 0;
-      for (let v = 10; v <= 100; v += 10) if (top(v).some((id, i) => id !== top(v - 10)[i])) moved++;
-      expect(moved, g).toBeGreaterThanOrEqual(9);
+      let steps = 0;
+      for (let v = 10; v <= 100; v += 10) {
+        if (flat.has(v)) continue;
+        steps++;
+        if (top(v).some((id, i) => id !== top(v - 10)[i])) moved++;
+      }
+      expect(moved, g).toBeGreaterThanOrEqual(Math.ceil(0.9 * steps));
     }
   });
 });
@@ -914,12 +1069,14 @@ describe.each(VOICE_RANGES)('%s: songs sung as written first (criterion 9)', (_n
     expect(top.filter(sungAsWritten).length).toBeGreaterThanOrEqual(15);
   });
 
-  it('lists every song sung as written before any song that needs a jump, whatever the gears and eras say', () => {
+  it('lists every song sung as written before any song that needs a jump, whatever the gears and eras say (Tempo at an end apart, QWW-54)', () => {
     const settings = [
       state(),
       state({ gears: { difficulty: 100 } }),
       state({ gears: { difficulty: 20 }, off: ['history', 'tempo'], eras: ['s80'] }), // Quinn-Wai's list of 11 Nov: F2 to F4, '80s, Difficulty about 20
-      state({ gears: { popularity: 0, tempo: 100 }, off: ['history', 'era'] }),
+      state({ gears: { popularity: 0, tempo: 89 }, off: ['history', 'era'] }), // Tempo on, one place short of the end
+      state({ gears: { popularity: 0, tempo: 11 }, off: ['history', 'era'] }),
+      state({ gears: { popularity: 0, tempo: 0 }, off: ['history', 'tempo', 'era'] }), // Tempo at an end but off: it counts for nothing
       state({ off: [...GEAR_IDS, 'era'] }),
       ...ERA_IDS.map((era) => state({ off: ['history', 'tempo'], eras: [era] })),
     ];
@@ -930,6 +1087,31 @@ describe.each(VOICE_RANGES)('%s: songs sung as written first (criterion 9)', (_n
         const block = songs.filter((x) => (x.match.difficulty === 'maybe') === maybe).map(sungAsWritten);
         const firstJump = block.indexOf(false);
         expect(firstJump < 0 || !block.slice(firstJump).includes(true), `setting ${i}, ${maybe ? 'Maybe' : 'sure'} songs: a song sung as written after a jump`).toBe(true);
+      }
+    }
+  });
+
+  it('with Tempo at an end, lists the songs at that end first, and inside each part as written before a jump (QWW-54)', () => {
+    for (const [tempo, band] of [[0, 'slow'], [10, 'slow'], [90, 'upbeat'], [100, 'upbeat']] as const) {
+      const { songs } = rankPrepared(prepared, state({ off: ['history', 'era', 'difficulty', 'popularity'], gears: { tempo } }));
+      const sure = songs.filter((x) => x.match.difficulty !== 'maybe');
+      expect(songs.slice(sure.length).every((x) => x.match.difficulty === 'maybe'), `tempo ${tempo}: the Maybe songs are last`).toBe(true);
+      const inBand = (x: { match: Match }) => x.match.tempo !== undefined && feelOfTempo(x.match.tempo) === band;
+      const flags = sure.map(inBand);
+      expect(flags.filter(Boolean).length, `tempo ${tempo}: songs in the ${band} band`).toBeGreaterThan(100);
+      // Songs in the band that need a jump exist, so the check below is about them: they come before every song out of the band.
+      expect(sure.filter((x) => inBand(x) && !sungAsWritten(x)).length, `tempo ${tempo}: jump songs in the band`).toBeGreaterThan(0);
+      expect(flags.indexOf(false) < 0 || !flags.slice(flags.indexOf(false)).includes(true), `tempo ${tempo}: a song in the band after one that is not`).toBe(true);
+      for (const part of [true, false]) {
+        const inPart = sure.filter((x) => inBand(x) === part);
+        const written = inPart.map(sungAsWritten);
+        expect(written.indexOf(false) < 0 || !written.slice(written.indexOf(false)).includes(true), `tempo ${tempo}, ${part ? 'in' : 'out of'} the band: a song sung as written after a jump`).toBe(true);
+        // Nearest the end first inside each group of songs sung the same way (the thumb counts as the end, so Tempo 10 is Tempo 0).
+        const end = band === 'slow' ? 0 : 100;
+        for (const way of [true, false]) {
+          const group = inPart.filter((x) => sungAsWritten(x) === way && x.gears.tempo !== null);
+          for (let i = 1; i < group.length; i++) expect(Math.abs(group[i]!.gears.tempo! - end), `tempo ${tempo}, song ${i}`).toBeGreaterThanOrEqual(Math.abs(group[i - 1]!.gears.tempo! - end) - 1e-6);
+        }
       }
     }
   });
