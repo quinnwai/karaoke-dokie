@@ -127,7 +127,7 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      `data-rank`. The row's button is described by its reason line (`aria-describedby`), by an id made from the row's place, not
      its track id: a catalogue id has spaces ("cat:michael jackson|beat it"), which split the list of ids. The reason line is
      `whyOf` in `src/lib/setlist/rows.ts`: the first two of "In your sweet spot" (Difficulty on, the song's place within 15
-     of it), "Crowd favourite" or "Deep cut" (place on Popularity at least 85, or at most 35), "On repeat" or "Rediscover"
+     of it), "Crowd favourite" or "Wildcard" (place on Popularity at least 85, or at most 35; R35: it was "Deep cut", which misdescribed well-known songs while logged out, and the Popularity gear's end label stays "Deep cuts"), "On repeat" or "Rediscover"
      (History at least 85, or at most 20), and when none holds "For the party people" / "Slow burn" / "Solid pick"
      (Tempo at least 70, at most 25, or unknown; the two tempo words are Quinn-Wai's, R32). The places are the engine's, percentiles among the songs that fit the
      singer; a place that is null skips its rule, so a signed-out singer never sees the History ones. A song that fits only an octave away says "Shifted down to fit range" or "Shifted up to fit range" and nothing else (R13; its badge stays). The badge is the song's
@@ -170,7 +170,15 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      "Connect Spotify to use your listening history" (or the unreachable line, when the engine says the library could
      not be read), drawn as an off gear in place of its end labels, 11 px and shown whole (two lines, three in a narrow strip). Its ✕ is "Turn off", as
      every gear's is (R21): back at 100 and off, and a touch turns it on again from there. A singer who logs out, or whose library cannot be read, keeps the
-     History the tuner holds, and the sheet and the engine count it as off. **Expanded** shows
+     History the tuner holds, and the sheet and the engine count it as off.
+     With every gear off (Difficulty, Popularity, Tempo, History, and Era as a filter aside) the list is not left to the ties: the engine ranks it as the
+     defaults do for this singer, History first when signed in, then popularity, then the easiest (R36, `defaultRanking` in `src/lib/songs/setlist.ts`); the
+     request still has every gear off, the sheet shows them off, and `applied` is empty. Each gear's ✕ is vertically centred on its title, and its 44 x 26 box
+     is centred on it too, so its focus ring and the highlight of a tap are (R34).
+     A gear's fader takes the pointer on a transparent hit area in the track, 44 px tall and as wide as the track with 7 px more at each end (`.faderHit`,
+     `src/lib/setlist/fader.ts`; R33): a drag can start anywhere on the fader's row, a tap on the track jumps the thumb there, and a swipe that is mostly up or down
+     scrolls the sheet and changes nothing (`touch-action: pan-y`, and a finger waits 8 px to see which way it goes). The `<input type="range">` under it takes
+     no pointer and stays for the keyboard and screen readers. **Expanded** shows
      every gear (rack 416 px); **mini** shows one gear and a tab bar (164 px). The grab handle switches by tap, Enter or
      Space, or by a vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live.
      **Which mode it opens in** (`src/lib/setlist/fit.ts`, measured in `useSheetFit`): mini when the expanded sheet
@@ -390,7 +398,7 @@ Chrome and the in-app browsers: granted, refused (and closed without an answer),
 browser's question left unanswered (and the reload after 12 s), a microphone taken away mid-note (our screen again
 though the browser says yes), a quick tap on the record button, and the sizes. What a real iPhone and Android phone do
 with those screens is checked by hand.
-Quinn-Wai's second review of #38 on an iPhone (R14 to R30) has a Playwright check per item: `setlist-header.spec.ts` (R14, R15, R18, R19, R21, R30), `setlist-era.spec.ts` (R22 to R24, with a screenshot of each two-pick row and of Era off), `setlist-history-default.spec.ts` (R31), `setlist-play.spec.ts` (R16, R17, R27), `setlist-song.spec.ts` (R25, R26), `credits.spec.ts` (R28, and Deezer's line staying: R29) and `touch-no-hover.spec.ts` (R20: no rule that applies on a touch screen shows or hides anything on `:hover`).
+Quinn-Wai's second review of #38 on an iPhone (R14 to R30) has a Playwright check per item: `setlist-header.spec.ts` (R14, R15, R18, R19, R21, R30), `setlist-era.spec.ts` (R22 to R24, with a screenshot of each two-pick row and of Era off), `setlist-history-default.spec.ts` (R31), and for the review of the whole build `setlist-fader.spec.ts` (R33), `setlist-reset-x.spec.ts` (R34), `setlist-reasons.spec.ts` (R35) and `setlist-all-off.spec.ts` (R36), `setlist-play.spec.ts` (R16, R17, R27), `setlist-song.spec.ts` (R25, R26), `credits.spec.ts` (R28, and Deezer's line staying: R29) and `touch-no-hover.spec.ts` (R20: no rule that applies on a touch screen shows or hides anything on `:hover`).
 Named screenshots land in `test-results/screens/`. The specs never load Spotify's player from
 Spotify: the screen spec answers `https://open.spotify.com/embed/**` with a stand-in page, and the
 full-stack spec (offline mock, search links only) shows the plain link.
