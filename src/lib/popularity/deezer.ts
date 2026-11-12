@@ -102,6 +102,11 @@ const loose = (part: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+/**
+ * A `loose` part with its spaces dropped, to compare names written with an apostrophe in different places (QWW-67):
+ * "Tell 'Em" and "Tell'em", "O'Mine" and "O' Mine".
+ */
+const joined = (part: string) => part.replace(/ /g, '');
 
 /** Words in an artist name that make it someone else's recording: "OneRepublic Tribute Band", "Karaoke Hits of ...". */
 const COVER_ARTIST = /\b(?:tribute|karaoke|covers?|made famous|in the style of|originally|as performed)\b/;
@@ -117,7 +122,7 @@ const SAME_AFTER = /^$|^(?:and|with|x|vs|feat|featuring|ft) /;
  * words added make it a cover act ("taylor swift tribute").
  */
 function artistMatch(a: string, b: string): 'exact' | 'contained' | null {
-  if (a === b) return 'exact';
+  if (a === b || joined(a) === joined(b)) return 'exact';
   const [short, long] = a.length < b.length ? [a, b] : [b, a];
   const padded = ` ${long} `;
   const at = padded.indexOf(` ${short} `);
@@ -143,6 +148,9 @@ export const ARTIST_ALIASES: ReadonlyMap<string, string> = new Map([
   ['lady antebellum', 'Lady A'],
   ['erste allgemeine verunsicherung', 'EAV'],
   ['bibi and tina', 'Bibi und Tina'],
+  ['puff daddy', 'Diddy'],
+  ['big punisher', 'Big Pun'],
+  ['snoop doggy dogg', 'Snoop Dogg'],
 ]);
 
 /** Deezer's name for an act (a credit or one act of it, as a key reads it), or the act itself. */
@@ -274,9 +282,12 @@ function recordingOf(tag: string, from: 'ours' | 'deezer' | 'deezer-version' = '
   if (kind === 'edition' && /\bedition$/.test(t)) return null; // "(Deluxe Edition)", "(20th Anniversary Edition)"
   if (kind === 'version' || kind === 'edition' || kind === 'edit') {
     if (/remaster/.test(t)) return null;
-    const words = t.split(/[^\p{L}\p{N}']+/u).filter(Boolean);
-    // A year says which mix ("1985 Single Mix"), but which recording when it names a version ("2023 Version").
-    if (words.every((w) => RELEASE_WORDS.has(w) || (kind === 'edit' && /^(?:19|20)\d{2}$/.test(w)))) return null;
+    // Quote marks are not words: "(7'' Version)" is the 7-inch release (QWW-67).
+    const words = t.split(/[^\p{L}\p{N}']+/u).map((w) => (/^\d+'+$/.test(w) ? w.replace(/'/g, '') : w)).filter(Boolean);
+    // A year says which mix ("1985 Single Mix"), but which recording when it names a version ("2023 Version"), unless
+    // the tag says it is the original ("Original Version 1983", QWW-67).
+    const yearOk = kind === 'edit' || words.includes('original');
+    if (words.every((w) => RELEASE_WORDS.has(w) || (yearOk && /^(?:19|20)\d{2}$/.test(w)))) return null;
     return kind === 'edit' ? 'remix' : 'version';
   }
   return null; // remaster, feat, context, tv, video: the original recording, released another way
@@ -307,7 +318,8 @@ export function albumRecordings(album: string, song = ''): Set<Recording> {
     const t = tag.normalize('NFKC').toLowerCase().replace(/[’‘`´]/g, "'");
     if (kind !== 'version' || OTHER_TAKE.test(t) || RE_RECORDED.test(t)) kinds.add(kind);
   }
-  if (LIVE_ALBUM.test(base) || SESSION.test(base)) kinds.add('live');
+  // A release that joins two albums ("Listen Without Prejudice / MTV Unplugged") is live only when both are.
+  if (base.split(/\s+\/\s+/).every((part) => LIVE_ALBUM.test(part) || SESSION.test(part))) kinds.add('live');
   if (REMIX_ALBUM.test(base)) kinds.add('remix');
   if (SPED_UP.test(base)) kinds.add('sped-up');
   return kinds;
@@ -317,13 +329,18 @@ export function albumRecordings(album: string, song = ''): Set<Recording> {
  * The kinds of recording a Deezer track is. Its version part (title_version) is read as a version whatever it says, and its
  * album's title counts as its own tags do (QWW-67) unless the album is named after the song (`song`, as a key reads it).
  */
-function trackRecordings(track: Pick<DeezerTrack, 'title' | 'title_short' | 'title_version' | 'album'>, song = ''): Set<Recording> {
+function trackRecordings(
+  track: Pick<DeezerTrack, 'title' | 'title_short' | 'title_version' | 'album'>,
+  song = '',
+  ours: ReadonlySet<string> = new Set(),
+): Set<Recording> {
   const version = track.title_version?.trim() ? track.title_version : '';
   const title = version ? (track.title_short ?? track.title.replace(version, '')) : track.title;
   // A version part with no brackets ("Live") is one tag.
   const versionTags = version ? (tagsOf(version).length ? tagsOf(version) : [version]) : [];
+  const own = (tag: string) => ours.has(joined(loose(tag.toLowerCase())));
   return new Set([
-    ...tagsOf(title).flatMap((tag) => recordingOf(tag, 'deezer') ?? []),
+    ...tagsOf(title).flatMap((tag) => (own(tag) ? [] : (recordingOf(tag, 'deezer') ?? []))),
     ...versionTags.flatMap((tag) => recordingOf(tag, 'deezer-version') ?? []),
     ...(track.album?.title ? albumRecordings(track.album.title, song) : []),
   ]);
@@ -350,10 +367,10 @@ type Credit = 0 | 1 | 2 | 3;
 function keyMatch(key: string, track: Pick<DeezerTrack, 'title' | 'title_short' | 'artist' | 'album'>): Credit | null {
   if (hasLittleSinging(track.title)) return null; // karaoke and instrumental versions share the title
   const [credit = '', ourTitle = ''] = key.split('|');
-  const title = loose(ourTitle);
+  const title = joined(loose(ourTitle));
   // A medley title counts by its first song: "Hard to Say I'm Sorry / Get Away".
   const titles = [track.title, track.title_short ?? ''].flatMap(titleReadings).flatMap((t) => [t, t.split(' / ')[0]!]);
-  if (!titles.some((t) => loose(songKey('', t).split('|')[1] ?? '') === title)) return null;
+  if (!titles.some((t) => joined(loose(songKey('', t).split('|')[1] ?? '')) === title)) return null;
   const dArtist = creditOf(track.artist.name);
   // For an act Deezer names another way, only Deezer's name counts: an artist with our spelling is a namesake ("Pink").
   const how = artistMatch(creditOf(aliasOf(credit)), dArtist);
@@ -399,11 +416,17 @@ export function pickDeezerHit(key: string, results: DeezerTrack[], title = ''): 
 /** pickDeezerHit's choice and how it ranks: [credit, tier, -rank], lower first. Tier 0 is the original recording. */
 function bestTrack(key: string, results: DeezerTrack[], title: string): { track: DeezerTrack; order: number[] } | undefined {
   const named = recordingsOf(title);
+  // A subtitle in our own title is the title, not a version, in Deezer's too: "(Can't Live Without Your) Love and Affection".
+  const ours = new Set(
+    tagsOf(title)
+      .filter((t) => classifyTag(t) === null && recordingOf(t) === null)
+      .map((t) => joined(loose(t.toLowerCase()))),
+  );
   let best: { track: DeezerTrack; order: number[] } | undefined;
   for (const t of results) {
     const credit = typeof t.rank === 'number' ? keyMatch(key, t) : null;
     if (credit === null) continue;
-    const kinds = [...trackRecordings(t, key.split('|')[1])];
+    const kinds = [...trackRecordings(t, key.split('|')[1], ours)];
     if (kinds.some((k) => NEVER.has(k) && !named.has(k))) continue;
     const tier = kinds.length === 0 ? 0 : kinds.every((k) => named.has(k)) ? 1 : 2;
     const order = [credit, tier, -t.rank];
@@ -434,10 +457,10 @@ export const HAND_CHECKED: ReadonlyMap<string, number> = new Map([
 ]);
 
 /**
- * Where a lookup found its track: the plain search, a search naming every act (`acts`), the artist's top tracks, a search
- * on the title alone, or a hand check.
+ * Where a lookup found its track: the track stored before (`stored`), the plain search, a search naming every act (`acts`),
+ * the artist's top tracks, a search on the title alone, or a hand check.
  */
-export type DeezerRoute = 'search' | 'acts' | 'artist' | 'title' | 'hand';
+export type DeezerRoute = 'stored' | 'search' | 'acts' | 'artist' | 'title' | 'hand';
 
 /** What findDeezerTrack found, and where; `calls` counts the requests it made. */
 export interface DeezerLookup {
@@ -482,14 +505,16 @@ export function everyActQuery(artist: string, title: string): string | null {
  * (SETTLED_SHARE): a search naming every act (everyActQuery), the artist's top 100 tracks (the artist with the name and the
  * most fans; then each act of a shared credit), then a search on the title alone, until one turns up the original.
  * pickDeezerHit's rules decide among everything found, so a fallback can only replace the search's choice with a better
- * one. A song in HAND_CHECKED is read by its id. With `releaseDate`, the chosen track is read by its id too, for its
- * release date (one call more).
+ * one. `stored`, the track a lookup matched before, is read by its id and competes too: Deezer's search does not always
+ * return it again, and a refresh should not swap it for a lower-ranked copy (Lighthouse Family's "High" on its Greatest
+ * Hits, rank 556,607, against 69,261 for the one the search returns now). A song in HAND_CHECKED is read by its id. With
+ * `releaseDate`, the chosen track is read by its id too when it was not already, for its release date.
  */
 export async function findDeezerTrack(
   client: Pick<DeezerClient, 'search' | 'artists' | 'artistTop' | 'track'>,
   artist: string,
   title: string,
-  opts: { releaseDate?: boolean } = {},
+  opts: { releaseDate?: boolean; stored?: number } = {},
 ): Promise<DeezerLookup> {
   const key = songKey(artist, title);
   let calls = 0;
@@ -522,6 +547,12 @@ export async function findDeezerTrack(
     return named !== undefined;
   };
 
+  // The track stored before, read by its id (so it carries its release date). Gone from Deezer, it just drops out.
+  if (opts.stored !== undefined) {
+    calls++;
+    const was = await client.track(opts.stored).catch(() => null);
+    if (was) found.set(was.id, { track: was, route: 'stored' });
+  }
   // Deezer answers an empty query with an error, which the client would retry: a key part can be empty ("(Intro)").
   const plain = deezerQuery(alias ?? artist, title);
   if (loose(plain)) add(await client.search(plain), 'search');
@@ -539,7 +570,7 @@ export async function findDeezerTrack(
   const chosen = best();
   if (!chosen) return { hit: null, calls };
   const route = found.get(chosen.track.id)!.route;
-  if (!opts.releaseDate) return { hit: toHit(chosen.track), route, calls };
+  if (!opts.releaseDate || ('release_date' in chosen.track && chosen.track.release_date)) return { hit: toHit(chosen.track), route, calls };
   calls++;
   // The release date is only kept for audits: a failed read keeps the hit without it.
   const detail = await client.track(chosen.track.id).catch(() => null);

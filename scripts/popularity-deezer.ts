@@ -10,7 +10,7 @@
 // a matcher fix that can replace a wrong version, and the first run that stores the matched track).
 // Pass the same time to every run of one recheck or refresh, so it ends. Stops cleanly after
 // --max-minutes (rerun to carry on).
-// Each lookup is findDeezerTrack's (QWW-67): the plain search, then a search naming every act, the artist's
+// Each lookup is findDeezerTrack's (QWW-67): the track stored before and the plain search, then a search naming every act, the artist's
 // top tracks and a search on the title alone when the search has no original. A hit is read by its id once more for its release
 // date, except in a dry run. --save <file> writes what a run would store as JSON, for
 // scripts/deezer-report.ts --overlay to show the lists with it before anything is written. --keys <file>
@@ -110,7 +110,7 @@ async function main() {
   // What each lookup did to the stored row: a miss that now has a match, a match that is now a miss, another track.
   const changes = { found: 0, lost: 0, switched: 0, same: 0, unchecked: 0 };
   // Where each hit was found (QWW-67).
-  const routes: Record<DeezerRoute, number> = { search: 0, acts: 0, artist: 0, title: 0, hand: 0 };
+  const routes: Record<DeezerRoute, number> = { stored: 0, search: 0, acts: 0, artist: 0, title: 0, hand: 0 };
   let shown = 0;
   const flush = async () => {
     const batch = pending.splice(0);
@@ -122,7 +122,9 @@ async function main() {
         const song = todo[next++]!;
         try {
           // Our title too: a version it names ("(Live at Donington)") is not passed over (QWW-59).
-          const found = await findDeezerTrack(deezer, song.artist, song.title, { releaseDate: !values['dry-run'] });
+          // The track stored before competes too, so a refresh never swaps it for a lower-ranked copy (QWW-67).
+          const was = stored.get(song.key);
+          const found = await findDeezerTrack(deezer, song.artist, song.title, { releaseDate: !values['dry-run'], stored: was?.deezerId });
           calls += found.calls;
           const hit = found.hit;
           const record: SongDeezerRecord = { key: song.key, checkedAt: new Date().toISOString() };
@@ -137,7 +139,6 @@ async function main() {
             hits++;
           } else misses++;
           if (values['dry-run'] && hits + misses <= 40) console.log(`${hit ? hit.rank : 'miss'}\t${song.artist} - ${song.title}${hit ? `\t(${hit.artist} - ${hit.title}, ${found.route})` : ''}`);
-          const was = stored.get(song.key);
           const change = !was ? 'unchecked' : was.rank === undefined ? (hit ? 'found' : 'same') : !hit ? 'lost' : was.deezerId === hit.deezerId ? 'same' : 'switched';
           changes[change]++;
           if (values['dry-run'] && (change === 'found' || change === 'lost' || change === 'switched') && shown++ < 80) {
@@ -164,7 +165,7 @@ async function main() {
     `Done: ${hits} hits, ${misses} misses, ${errors} errors, ${calls} Deezer calls${inARow >= STOP_AFTER_ERRORS ? `; stopped after ${inARow} failures in a row` : ''}${left > 0 ? `; ${left} left, run again to carry on` : ''}${values['dry-run'] ? ' (dry run, nothing saved)' : ''}`,
   );
   console.log(
-    `Hits by route: ${routes.search} plain search, ${routes.acts} search naming every act, ${routes.artist} artist's top tracks, ${routes.title} title alone, ${routes.hand} hand-checked`,
+    `Hits by route: ${routes.stored} the track stored before, ${routes.search} plain search, ${routes.acts} search naming every act, ${routes.artist} artist's top tracks, ${routes.title} title alone, ${routes.hand} hand-checked`,
   );
   console.log(
     `Against the stored rows: ${changes.found} misses now matched, ${changes.lost} matches now misses, ${changes.switched} matched to another track, ${changes.same} unchanged, ${changes.unchecked} never looked up before`,

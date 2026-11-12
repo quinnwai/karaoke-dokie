@@ -274,6 +274,24 @@ describe('pickDeezerHit, after the review of QWW-59', () => {
     expect(pick('Fleetwood Mac', 'Dreams', [dz(1, 900_000, 'Fleetwood Mac', 'Dreams', '(Deluxe Edition)'), dz(2, 300_000, 'Fleetwood Mac', 'Dreams (Live)')])).toBe(1);
   });
 
+  it('matches names written with an apostrophe in another place: "O\'Mine" and "O\' Mine", "Tell \'Em" and "Tell\'em" (QWW-67)', () => {
+    expect(pick("Guns N' Roses", "Sweet Child O'Mine", [dza(1, 934_281, "Guns N' Roses", "Sweet Child O' Mine", 'Appetite For Destruction')])).toBe(1);
+    expect(pick("Soulja Boy Tell 'Em", 'Crank That (Soulja Boy)', [dza(1, 795_043, "Soulja Boy Tell'em", 'Crank That (Soulja Boy)', 'souljaboytellem.com')])).toBe(1);
+  });
+
+  it('reads a subtitle our own title has as the title, not a live take: "(Can\'t Live Without Your) Love and Affection" (QWW-67)', () => {
+    const nelson = [dza(1, 312_000, 'Nelson', "(Can't Live Without Your) Love And Affection (Remastered 2017)", 'After The Rain (Remastered)')];
+    expect(pick('Nelson', "(Can't Live Without Your) Love and Affection", nelson)).toBe(1);
+    // A version tag in our title still loses to the original (QWW-59).
+    expect(pick('Toto', 'Africa', [dz(1, 900_000, 'Toto', 'Africa (Live)'), dz(2, 500_000, 'Toto', 'Africa')], 'Africa (Live)')).toBe(2);
+  });
+
+  it('counts "(Original Version 1983)" and "(7\'\' Version)" as the original release (QWW-67)', () => {
+    expect([...recordingsOf('Words (Original Version 1983)')]).toEqual([]);
+    expect([...recordingsOf("You Sexy Thing (7'' Version)")]).toEqual([]);
+    expect([...recordingsOf('Counting Stars (2023 Version)')]).toEqual(['version']);
+  });
+
   it('counts a version part of release words only as the original: Big Sean\'s "My Last (Album Version Explicit)" (QWW-67)', () => {
     expect(pick('Big Sean', 'My Last', [dz(14539386, 443_385, 'Big Sean', 'My Last', '(Album Version Explicit)')])).toBe(14539386);
     expect(pick('ABBA', 'Chiquitita', [dz(1, 500_000, 'ABBA', 'Chiquitita', '(Spanish Version)')])).toBeNull(); // still a language version
@@ -338,6 +356,7 @@ describe('albumRecordings (QWW-67)', () => {
     'Legend - The Best Of Bob Marley And The Wailers',
     'The Best Of Billy Ray Cyrus: Cover To Cover',
     'The Grenade Sessions',
+    'Listen Without Prejudice / MTV Unplugged (Deluxe)',
   ])('%s says nothing against its tracks', (album) => {
     expect([...albumRecordings(album)]).toEqual([]);
   });
@@ -555,6 +574,33 @@ describe('findDeezerTrack (QWW-67)', () => {
     const none = fakeClient({});
     expect(await findDeezerTrack(none, '(Unknown)', '[Intro]')).toEqual({ hit: null, calls: 0 });
     expect(none.calls).toEqual([]);
+  });
+
+  it('keeps the stored track when the search now returns only a lower-ranked copy: Lighthouse Family\'s "High"', async () => {
+    const stored = { ...dza(2163021, 556_607, 'Lighthouse Family', 'High', 'Greatest Hits'), bpm: 0, release_date: '2002-11-11' };
+    const client = fakeClient({
+      search: { 'lighthouse family high': [dza(1159470, 69_261, 'Lighthouse Family', 'High', 'High')] },
+      tracks: { 2163021: stored },
+    });
+    const found = await findDeezerTrack(client, 'Lighthouse Family', 'High', { stored: 2163021, releaseDate: true });
+    expect(found.hit).toMatchObject({ deezerId: 2163021, releaseDate: '2002-11-11' });
+    expect(found.route).toBe('stored');
+    // Read by its id already, so no call more for the release date.
+    expect(client.calls).toEqual(['track 2163021', 'search lighthouse family high']);
+  });
+
+  it('replaces a stored live take with the original, and drops a stored track Deezer no longer has', async () => {
+    const live = { ...dza(1105734, 636_392, 'Nirvana', 'Come As You Are', 'MTV Unplugged In New York', '(Live)'), bpm: 0 };
+    const original = dza(1105738, 600_000, 'Nirvana', 'Come As You Are', 'Nevermind');
+    const client = fakeClient({ search: { 'nirvana come as you are': [original] }, tracks: { 1105734: live } });
+    expect((await findDeezerTrack(client, 'Nirvana', 'Come As You Are', { stored: 1105734 })).hit?.deezerId).toBe(1105738);
+    const gone = fakeClient({ search: { 'nirvana come as you are': [original] } });
+    expect((await findDeezerTrack(gone, 'Nirvana', 'Come As You Are', { stored: 1 })).hit?.deezerId).toBe(1105738);
+  });
+
+  it('reads renamed acts by their Deezer names: Puff Daddy is Diddy, Snoop Doggy Dogg is Snoop Dogg', () => {
+    expect(matchesKey(songKey('Puff Daddy', "I'll Be Missing You"), dz(1, 1, 'Diddy', "I'll Be Missing You (feat. Faith Evans & 112)"))).toBe(true);
+    expect(matchesKey(songKey('Snoop Doggy Dogg', 'Gin and Juice'), dz(1, 1, 'Snoop Dogg', 'Gin and Juice'))).toBe(true);
   });
 
   it('keeps a hit when its release date cannot be read', async () => {
