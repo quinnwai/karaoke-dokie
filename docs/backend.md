@@ -456,14 +456,14 @@ be switched off (no key) and nothing else changes. What the sink keeps to:
   closes before it is ready loses them from PostHog, not from our log.
 - **Reaching PostHog (QWW-63)**: the browser talks to our own origin only. Ad and privacy blockers
   refuse `*.posthog.com` (AdGuard's tracking list blocks the whole `i.posthog.com` host; EasyPrivacy
-  blocks its retries, its replay data and `posthog-recorder.js`), and a tester with one sent nothing
-  from production. So `api_host` is `POSTHOG_PROXY_PATH` (`/roadie`, in `src/lib/postHogProxy.ts`),
+  blocks its retries and `posthog-recorder.js`), and a tester with one sent nothing from production. So `api_host` is `POSTHOG_PROXY_PATH` (`/roadie`, in `src/lib/postHogProxy.ts`),
   `ui_host` is PostHog's own app, and `app/roadie/[...path]/route.ts` forwards to PostHog
   (`src/lib/server/postHogProxy.ts`): events, replay and flags to its ingest host, `/static/` and
   `/array/` (the recorder, the project's config) to its asset host (`us-assets.i.posthog.com`). Both
   hosts come from `NEXT_PUBLIC_POSTHOG_HOST`, never from the request.
-  - **The path's name.** PostHog's suggested `/ingest` is on the lists (uBlock's privacy list and
-    AdGuard match `/ingest/...ip=`). `/roadie` matched none of EasyList, EasyPrivacy, uBlock filters and
+  - **The path's name.** PostHog's suggested `/ingest` has rules on the lists (uBlock's privacy list and
+    AdGuard match `/ingest/...ip=`; this posthog-js sends no `ip=`, so they miss today, but it is the
+    name lists learn first). `/roadie` matched none of EasyList, EasyPrivacy, uBlock filters and
     privacy, AdGuard base and tracking or Peter Lowe's, for every URL posthog-js asks for under it
     (checked 12 Nov 2026 by loading the lists into `@ghostery/adblocker`). Repeat that before renaming it,
     and rename the folder under `app/` with it (a test keeps the two together).
