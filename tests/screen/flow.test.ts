@@ -53,10 +53,109 @@ describe('boot', () => {
     expect(s).toMatchObject({ step: 'results', mode: 'catalogue', loading: true, range: { low: 45, high: 72, source: 'test' } });
   });
 
-  it('a half-done test wins over a range kept on the device, and Spotify wins over both', () => {
+  it('a half-done test wins over a range kept on the device, and a signed-in singer\'s range sung after the device\'s wins over both', () => {
     expect(run([{ type: 'booted', me: null, progress: { low: 45, high: null }, wantsPick: false, savedRange: { low: 40, high: 60 } }])).toMatchObject({ step: 'mic', mic: { next: 'high' } });
-    const signedIn = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false, savedRange: { low: 40, high: 60 } }]);
+    const signedIn = run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test', measuredAt: 2000 }), progress: null, wantsPick: false, savedRange: { low: 40, high: 60, measuredAt: 1000 } }]);
     expect(signedIn).toMatchObject({ step: 'results', mode: 'library', range: { low: 45, high: 72 } });
+  });
+});
+
+// QWW-66: the signed-in list used the range stored on the account and the signed-out list the one kept on the device,
+// so one singer got two lists (the account held F2 to C4 while the device and its header said F#2 to C5). The range
+// sung last wins, so each range carries the time it was sung.
+describe('boot: the range sung last wins (QWW-66)', () => {
+  const F2_C4 = { low: 41, high: 60 };
+  const FS2_C5 = { low: 42, high: 72 };
+  const OLD = 1_700_000_000_000;
+  const NEW = OLD + 60_000;
+  const signedIn = (account: { low: number; high: number; measuredAt?: number } | null, rest: Partial<Extract<FlowEvent, { type: 'booted' }>> = {}): FlowEvent => ({
+    type: 'booted',
+    me: me(account && { ...account, source: 'test' }),
+    progress: null,
+    wantsPick: false,
+    ...rest,
+  });
+
+  it('a device range sung after the account\'s is saved to the account first, and the list is built on it', () => {
+    const s = run([signedIn({ ...F2_C4, measuredAt: OLD }, { savedRange: { ...FS2_C5, measuredAt: NEW } })]);
+    expect(s).toMatchObject({ step: 'saving', mode: 'library', range: { ...FS2_C5, source: 'test', measuredAt: NEW } });
+    // Saved, the list loads on that range: the header, the request and the account all read `range`.
+    expect(run([{ type: 'rangeSaved' }], s)).toMatchObject({ step: 'results', loading: true, range: { ...FS2_C5, measuredAt: NEW } });
+  });
+
+  it('an older device range never overwrites a newer account range', () => {
+    const s = run([signedIn({ ...FS2_C5, measuredAt: NEW }, { savedRange: { ...F2_C4, measuredAt: OLD } })]);
+    expect(s).toMatchObject({ step: 'results', loading: true, mode: 'library', range: { ...FS2_C5, source: 'test', measuredAt: NEW } });
+  });
+
+  it('the same time on both is one measurement: the list loads, nothing is saved', () => {
+    const s = run([signedIn({ ...FS2_C5, measuredAt: NEW }, { savedRange: { ...FS2_C5, measuredAt: NEW } })]);
+    expect(s).toMatchObject({ step: 'results', range: { ...FS2_C5, measuredAt: NEW } });
+  });
+
+  it('an account range with no time (saved before times were) gives way to the device\'s, with or without a time of its own', () => {
+    for (const measuredAt of [NEW, undefined]) {
+      const s = run([signedIn(F2_C4, { savedRange: { ...FS2_C5, ...(measuredAt ? { measuredAt } : {}) } })]);
+      expect(s, String(measuredAt)).toMatchObject({ step: 'saving', range: { ...FS2_C5, source: 'test' } });
+      expect(s.range?.measuredAt).toBe(measuredAt);
+    }
+  });
+
+  it('a device range with no time does not outrank an account range that has one', () => {
+    const s = run([signedIn({ ...F2_C4, measuredAt: OLD }, { savedRange: FS2_C5 })]);
+    expect(s).toMatchObject({ step: 'results', range: { ...F2_C4, measuredAt: OLD } });
+  });
+
+  it('a device range and no account range: the device\'s is saved, not a new test asked for', () => {
+    const s = run([signedIn(null, { savedRange: { ...FS2_C5, measuredAt: NEW } })]);
+    expect(s).toMatchObject({ step: 'saving', range: { ...FS2_C5, measuredAt: NEW } });
+  });
+
+  it('no device range: the account\'s is used as it was', () => {
+    expect(run([signedIn({ ...F2_C4, measuredAt: OLD })])).toMatchObject({ step: 'results', loading: true, range: { ...F2_C4, measuredAt: OLD } });
+    expect(run([signedIn(null)]).step).toBe('landing');
+  });
+
+  it('the finished test left in storage (the Spotify round trip) carries its own time, and is compared the same way', () => {
+    const newer = run([signedIn({ ...F2_C4, measuredAt: OLD }, { progress: { ...FS2_C5, measuredAt: NEW } })]);
+    expect(newer).toMatchObject({ step: 'saving', range: { ...FS2_C5, source: 'test', measuredAt: NEW } });
+    // Older than the account's range, it is dropped: the account's range is the one sung last.
+    const older = run([signedIn({ ...FS2_C5, measuredAt: NEW }, { progress: { ...F2_C4, measuredAt: OLD } })]);
+    expect(older).toMatchObject({ step: 'results', range: { ...FS2_C5, measuredAt: NEW } });
+    // With no time at all on either (a test started before times were recorded), it is saved, as it always was.
+    expect(run([signedIn(F2_C4, { progress: FS2_C5 })])).toMatchObject({ step: 'saving', range: { ...FS2_C5, source: 'test' } });
+  });
+
+  it('a finished test in storage and a range on the device: the one sung last is the device\'s', () => {
+    const s = run([signedIn({ ...F2_C4, measuredAt: OLD }, { progress: { low: 40, high: 70, measuredAt: OLD + 1 }, savedRange: { ...FS2_C5, measuredAt: NEW } })]);
+    expect(s).toMatchObject({ step: 'saving', range: { ...FS2_C5, measuredAt: NEW } });
+  });
+
+  it('signed out, the range kept on the device keeps its time, for the sign-in that may follow', () => {
+    const s = run([{ type: 'booted', me: null, progress: null, wantsPick: false, savedRange: { ...FS2_C5, measuredAt: NEW } }]);
+    expect(s).toMatchObject({ step: 'results', mode: 'catalogue', range: { ...FS2_C5, source: 'test', measuredAt: NEW } });
+    const confirm = run([{ type: 'booted', me: null, progress: { ...FS2_C5, measuredAt: NEW }, wantsPick: false }]);
+    expect(confirm).toMatchObject({ step: 'signin', range: { ...FS2_C5, measuredAt: NEW } });
+  });
+
+  it('a new test is stamped with the time its last note was let go', () => {
+    const toHigh = run([signedOut, { type: 'start' }, { type: 'quietDone' }, ...micOn, { type: 'holdEnd', midi: 42, at: OLD }]);
+    const out = run([{ type: 'holdEnd', midi: 72, at: NEW }], toHigh);
+    expect(out).toMatchObject({ step: 'signin', range: { ...FS2_C5, source: 'test', measuredAt: NEW } });
+    // Signed in, it goes to the account at once, with that time.
+    const signedInTest = run([signedIn(null), { type: 'start' }, { type: 'quietDone' }, ...micOn, { type: 'holdEnd', midi: 42, at: OLD }, { type: 'holdEnd', midi: 72, at: NEW }]);
+    expect(signedInTest).toMatchObject({ step: 'saving', range: { ...FS2_C5, measuredAt: NEW } });
+  });
+
+  it('a note redone on its own re-stamps the whole range: it is the range sung last', () => {
+    const atList = run([signedIn({ ...F2_C4, measuredAt: OLD })]);
+    const s = run([{ type: 'redoEnd', end: 'high' }, ...micOn, { type: 'holdEnd', midi: 72, at: NEW }], atList);
+    expect(s).toMatchObject({ step: 'saving', range: { low: 41, high: 72, source: 'test', measuredAt: NEW } });
+  });
+
+  it('a test with no time on its note (older callers) makes a range with no time, as before', () => {
+    const toHigh = run([signedOut, { type: 'start' }, { type: 'quietDone' }, ...micOn, { type: 'holdEnd', midi: 42 }]);
+    expect(run([{ type: 'holdEnd', midi: 72 }], toHigh).range).toEqual({ ...FS2_C5, source: 'test' });
   });
 });
 

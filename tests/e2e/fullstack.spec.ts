@@ -21,7 +21,8 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   await context.addInitScript(() => {
     if (!sessionStorage.getItem('kd.e2e')) {
       sessionStorage.setItem('kd.e2e', '1');
-      sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72 }));
+      // The test ended at 1700000000000 (QWW-66): the time goes with the range to the account, and the server keeps it as sent.
+      sessionStorage.setItem('kd.test', JSON.stringify({ low: 45, high: 72, measuredAt: 1700000000000 }));
     }
   });
   const page = await context.newPage();
@@ -87,7 +88,8 @@ test('no Spotify: catalogue songs with chips, then Connect Spotify for library s
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-04-library.png') });
 
   const me = await (await page.request.get('/api/me')).json();
-  expect(me.range).toEqual({ low: 45, high: 72, source: 'test' });
+  // The time the range was sung went from session storage, through the sign-in and the PUT, to the account (QWW-66).
+  expect(me.range).toEqual({ low: 45, high: 72, source: 'test', measuredAt: 1700000000000 });
 
   // Every listed song fits A2 to C5 as written or an octave away, and carries a label.
   const recs = await (await page.request.get('/api/recommendations?offset=0&limit=5')).json();

@@ -42,7 +42,12 @@ export function validateVocalRange(body: unknown): Validated<VocalRange> {
     return { ok: false, error: `Range must span ${SPAN_MIN} to ${SPAN_MAX} semitones` };
   }
   if (!oneOf(source, ['test', 'songs'] as const)) return { ok: false, error: "source must be 'test' or 'songs'" };
-  return { ok: true, value: { low: lo, high: hi, source } };
+  // When the singer sang it (QWW-66). Optional, so a caller that sends none (the catalogue's query, feedback, the Setlist tuner) is as it was.
+  const { measuredAt } = body;
+  if (measuredAt !== undefined && !(typeof measuredAt === 'number' && Number.isSafeInteger(measuredAt) && measuredAt > 0)) {
+    return { ok: false, error: 'measuredAt must be a time in milliseconds' };
+  }
+  return { ok: true, value: { low: lo, high: hi, source, ...(measuredAt === undefined ? {} : { measuredAt }) } };
 }
 
 const TUNER_PARTS: readonly TunerPart[] = [...GEAR_IDS, 'era'];

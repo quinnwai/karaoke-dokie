@@ -231,7 +231,8 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await expect(page.getByRole('button', { name: /^Plastic Love/ })).toBeVisible();
   expect(api.recommendationCalls).toEqual(['catalogue ?low=45&high=72&all=1']);
   expect(api.savedRanges).toEqual([]);
-  expect(await page.evaluate(() => localStorage.getItem('kd.range'))).toBe(JSON.stringify({ low: 45, high: 72 }));
+  // The range stays on the device with the time its high note was let go (QWW-66).
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem('kd.range')))!)).toEqual({ low: 45, high: 72, measuredAt: expect.any(Number) });
   // Catalogue songs are nobody's library: a difficulty slider, but no on-repeat one.
   await expect(page.getByRole('slider', { name: 'Light work to Locked in' })).toBeVisible();
   await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
@@ -241,7 +242,8 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   // ---- Connect Spotify (mocked redirect back to /?signedIn=1): the range carries over ----
   await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
   await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toBeVisible();
-  expect(api.savedRanges).toEqual([{ low: 45, high: 72, source: 'test' }]);
+  // The range carried over with the time it was sung, so the account can tell it from an older one (QWW-66).
+  expect(api.savedRanges).toEqual([{ low: 45, high: 72, source: 'test', measuredAt: expect.any(Number) }]);
   expect(api.recommendationCalls.at(-1)).toBe('library ?all=1');
   await expect(page).toHaveURL(/\/$/);
   await expect(page.locator('ol li')).toHaveCount(5);

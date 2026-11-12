@@ -131,15 +131,15 @@ describe('KaraokeApp', () => {
     const arrow = await screen.findByRole('button', { name: 'Continue' });
     expect(screen.getByTestId('range-low').textContent).toBe('A2');
     expect(screen.getByTestId('range-high').textContent).toBe('C5');
-    expect(JSON.parse(sessionStorage.getItem('kd.test')!)).toEqual({ low: 45, high: 72 });
+    expect(JSON.parse(sessionStorage.getItem('kd.test')!)).toEqual({ low: 45, high: 72, measuredAt: expect.any(Number) });
 
     fireEvent.click(arrow);
     await screen.findByText('Plastic Love');
     expect(navigate).not.toHaveBeenCalled();
     expect(api.catalogue).toHaveBeenCalledWith({ low: 45, high: 72 });
     expect(api.allRecommendations).not.toHaveBeenCalled();
-    // The range stays on this device instead of an account.
-    expect(JSON.parse(localStorage.getItem('kd.range')!)).toEqual({ low: 45, high: 72 });
+    // The range stays on this device instead of an account, with the time it was sung (QWW-66).
+    expect(JSON.parse(localStorage.getItem('kd.range')!)).toEqual({ low: 45, high: 72, measuredAt: expect.any(Number) });
     expect(sessionStorage.getItem('kd.test')).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2);
     // Under the list: one short question, the button, and who can sign in (Spotify adds testers by hand, QWW-53).
@@ -273,7 +273,7 @@ describe('KaraokeApp', () => {
     await hold(/highest note/);
 
     await screen.findByText('Plastic Love');
-    expect(api.saveRange).toHaveBeenCalledWith({ low: 37, high: 72, source: 'test' });
+    expect(api.saveRange).toHaveBeenCalledWith({ low: 37, high: 72, source: 'test', measuredAt: expect.any(Number) });
     expect(screen.getByLabelText('Your range C#2 to C5')).toBeTruthy();
     expect(screen.queryByRole('status')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Keep it' })).toBeNull();
@@ -920,12 +920,15 @@ describe('KaraokeApp', () => {
     api.logout.mockRejectedValueOnce(new Error('offline'));
     render(<KaraokeApp api={api} mic={fakeMic().mic} />);
     await screen.findByText('Plastic Love');
+    // Signed in, the device already keeps the range of the list on screen (QWW-66); a failed Log out leaves it as it was.
+    const kept = localStorage.getItem('kd.range');
+    expect(JSON.parse(kept!)).toEqual({ low: 45, high: 72 });
     fireEvent.click(screen.getByRole('button', { name: 'Spotify account' }));
     fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
 
     expect((await screen.findByRole('alert')).textContent).toBe('Couldn’t log out. Try again.');
     expect(api.catalogue).not.toHaveBeenCalled();
-    expect(localStorage.getItem('kd.range')).toBeNull();
+    expect(localStorage.getItem('kd.range')).toBe(kept);
     expect(screen.getByText('Logged in as Quinn')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Connect to Spotify' })).toBeNull();
 

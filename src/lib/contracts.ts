@@ -9,6 +9,11 @@ export interface VocalRange {
   high: Midi;
   /** How we got it: the hold-to-record test, or songs the user picked. */
   source: 'test' | 'songs';
+  /**
+   * When the singer sang it: milliseconds since 1970, by the clock of the device that measured it. The range sung last
+   * is the one both the device and the account keep (QWW-66). Absent on a range kept before this was recorded.
+   */
+  measuredAt?: number;
 }
 
 /** Where a song's range numbers came from. 'audio-full': measured from the song's full recording. */

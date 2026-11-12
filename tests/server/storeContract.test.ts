@@ -74,6 +74,59 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(await s.getRange('u2')).toEqual({ low: 40, high: 60, source: 'songs' });
   });
 
+  // QWW-66: the account keeps when its range was sung, so the range sung last can win on sign-in.
+  describe('when a vocal range was sung (QWW-66)', () => {
+    // A time in 2026, past what a 32-bit integer holds: the column is a BIGINT.
+    const SUNG = 1_794_000_000_000;
+
+    it('reads the time back with the range', async () => {
+      const s = make();
+      await s.saveRange('u1', { low: 42, high: 72, source: 'test', measuredAt: SUNG });
+      const range = await s.getRange('u1');
+      expect(range).toEqual({ low: 42, high: 72, source: 'test', measuredAt: SUNG });
+      expect(typeof range?.measuredAt).toBe('number');
+    });
+
+    it('has no time key at all on a range saved without one, as every account did before', async () => {
+      const s = make();
+      await s.saveRange('u1', { low: 48, high: 72, source: 'test' });
+      const range = await s.getRange('u1');
+      expect(range).toEqual({ low: 48, high: 72, source: 'test' });
+      expect(range).not.toHaveProperty('measuredAt');
+    });
+
+    it('keeps the time of the last save: a save without one clears the old time, and a save with one sets it', async () => {
+      const s = make();
+      await s.saveRange('u1', { low: 41, high: 60, source: 'test', measuredAt: SUNG });
+      await s.saveRange('u1', { low: 42, high: 72, source: 'test' });
+      const unstamped = await s.getRange('u1');
+      expect(unstamped).toEqual({ low: 42, high: 72, source: 'test' });
+      expect(unstamped).not.toHaveProperty('measuredAt');
+
+      await s.saveRange('u1', { low: 43, high: 70, source: 'test', measuredAt: SUNG + 5_000 });
+      expect(await s.getRange('u1')).toEqual({ low: 43, high: 70, source: 'test', measuredAt: SUNG + 5_000 });
+    });
+
+    it('keeps each user their own time', async () => {
+      const s = make();
+      await s.saveRange('u1', { low: 42, high: 72, source: 'test', measuredAt: SUNG });
+      await s.saveRange('u2', { low: 40, high: 60, source: 'songs' });
+      expect(await s.getRange('u1')).toEqual({ low: 42, high: 72, source: 'test', measuredAt: SUNG });
+      expect(await s.getRange('u2')).toEqual({ low: 40, high: 60, source: 'songs' });
+      await s.saveRange('u2', { low: 40, high: 60, source: 'songs', measuredAt: SUNG - 1 });
+      expect(await s.getRange('u1')).toEqual({ low: 42, high: 72, source: 'test', measuredAt: SUNG });
+      expect(await s.getRange('u2')).toEqual({ low: 40, high: 60, source: 'songs', measuredAt: SUNG - 1 });
+    });
+
+    it('does not hand out the stored object: changing a result changes nothing stored', async () => {
+      const s = make();
+      await s.saveRange('u1', { low: 42, high: 72, source: 'test', measuredAt: SUNG });
+      const got = (await s.getRange('u1'))!;
+      got.measuredAt = 1;
+      expect((await s.getRange('u1'))?.measuredAt).toBe(SUNG);
+    });
+  });
+
   it('reads back song ranges and skipped markers, singly and in batch', async () => {
     const s = make();
     expect(await s.getSongRange('queen|bohemian rhapsody')).toBeNull();
@@ -671,6 +724,31 @@ describe('schema and store selection', () => {
     expect(await s.listFeedback()).toEqual([fresh, old]);
     // A tap saved before the view column existed comes back with no view.
     expect((await s.listFeedback())[1]).not.toHaveProperty('view');
+  });
+
+  // QWW-66. A preview's startup migration runs against the production database while production's own code is still the version
+  // before this one, so the column is only ever added, and everything that worked without it still does.
+  it('migrate adds the time column to a vocal_ranges table made before it, keeps what the table held, and can run again', async () => {
+    // pg-mem rejects CREATE TABLE IF NOT EXISTS on an existing table unless this check is off (Postgres does not).
+    const q = pgMemQuery({ noAstCoverageCheck: true });
+    await q('CREATE TABLE vocal_ranges (user_id TEXT PRIMARY KEY, low INTEGER NOT NULL, high INTEGER NOT NULL, source TEXT NOT NULL)');
+    await q('INSERT INTO vocal_ranges (user_id, low, high, source) VALUES ($1, $2, $3, $4)', ['u1', 41, 60, 'test']);
+    await migrate(q);
+    await migrate(q);
+
+    const s = createPostgresStore(q, { autoMigrate: false });
+    const before = await s.getRange('u1');
+    expect(before).toEqual({ low: 41, high: 60, source: 'test' });
+    expect(before).not.toHaveProperty('measuredAt');
+    await s.saveRange('u1', { low: 42, high: 72, source: 'test', measuredAt: 1_794_000_000_000 });
+    expect(await s.getRange('u1')).toEqual({ low: 42, high: 72, source: 'test', measuredAt: 1_794_000_000_000 });
+
+    // The version before this one saves with the statement it always had, which names no time: the new column stays null.
+    const previousSave = `INSERT INTO vocal_ranges (user_id, low, high, source) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id) DO UPDATE SET low = EXCLUDED.low, high = EXCLUDED.high, source = EXCLUDED.source`;
+    await q(previousSave, ['u2', 45, 72, 'test']);
+    expect(await s.getRange('u2')).toEqual({ low: 45, high: 72, source: 'test' });
+    expect(await s.getRange('u2')).not.toHaveProperty('measuredAt');
   });
 
   it('picks memory unless a DATABASE_URL is set and KARAOKE_STORE is not memory', () => {

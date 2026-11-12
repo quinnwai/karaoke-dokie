@@ -286,6 +286,8 @@ describe('signed-out access', () => {
 });
 
 describe('me and range', () => {
+  afterEach(() => vi.useRealTimers());
+
   it('returns the profile, then the saved range', async () => {
     const jar = await signIn();
     const r1 = await me.GET(req('/api/me', jar));
@@ -294,7 +296,8 @@ describe('me and range', () => {
     expect(put.status).toBe(200);
     expect(await put.json()).toEqual({ ok: true });
     const r2 = (await (await me.GET(req('/api/me', jar))).json()) as MeResponse;
-    expect(r2.range).toEqual({ low: 48, high: 72, source: 'test' });
+    // A page that sends no time gets the time of the save (QWW-66, below).
+    expect(r2.range).toEqual({ low: 48, high: 72, source: 'test', measuredAt: expect.any(Number) });
   });
 
   it.each([
@@ -307,6 +310,12 @@ describe('me and range', () => {
     ['above MIDI 96', { low: 80, high: 97, source: 'test' }],
     ['bad source', { low: 48, high: 72, source: 'guess' }],
     ['strings', { low: '48', high: '72', source: 'test' }],
+    ['a time of 0', { low: 48, high: 72, source: 'test', measuredAt: 0 }],
+    ['a negative time', { low: 48, high: 72, source: 'test', measuredAt: -5 }],
+    ['a time with a fraction', { low: 48, high: 72, source: 'test', measuredAt: 1.5 }],
+    ['a time as text', { low: 48, high: 72, source: 'test', measuredAt: '1700000000000' }],
+    ['a null time', { low: 48, high: 72, source: 'test', measuredAt: null }],
+    ['a time past the safe integers', { low: 48, high: 72, source: 'test', measuredAt: 2 ** 53 }],
   ])('rejects a bad range (%s) with 400', async (_name, body) => {
     const jar = await signIn();
     const init = typeof body === 'string' ? { method: 'PUT', body } : { method: 'PUT', json: body };
@@ -323,6 +332,73 @@ describe('me and range', () => {
     ]) {
       expect((await meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json: body }))).status).toBe(200);
     }
+  });
+
+  // QWW-66: the account keeps when its range was sung, so a range sung on a device after it can replace it at sign-in, and an older one cannot.
+  describe('when the range was sung (QWW-66)', () => {
+    let now = 0;
+    beforeEach(() => {
+      // Only the clock is faked, and it stands still, so "now" is one number for every request in a test.
+      now = Date.now();
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(now);
+    });
+
+    const RANGE = { low: 42, high: 72, source: 'test' as const };
+    const save = (jar: Jar, json: unknown) => meRange.PUT(req('/api/me/range', jar, { method: 'PUT', json }));
+    const account = async (jar: Jar) => ((await (await me.GET(req('/api/me', jar))).json()) as MeResponse).range;
+
+    it('keeps a time in the past as the device sent it, and GET /api/me returns it', async () => {
+      const jar = await signIn();
+      const sung = now - 3 * 24 * 3_600_000;
+      expect((await save(jar, { ...RANGE, measuredAt: sung })).status).toBe(200);
+      expect(await account(jar)).toEqual({ ...RANGE, measuredAt: sung });
+      expect(await getStore().getRange(MOCK_USER.id)).toEqual({ ...RANGE, measuredAt: sung });
+    });
+
+    it('stamps the time of the save when the page sent none (an older page)', async () => {
+      const jar = await signIn();
+      expect((await save(jar, RANGE)).status).toBe(200);
+      expect(await account(jar)).toEqual({ ...RANGE, measuredAt: now });
+    });
+
+    it('never keeps a time later than the server clock, so a device with a wrong clock cannot outrank ranges sung after it', async () => {
+      const jar = await signIn();
+      await save(jar, { ...RANGE, measuredAt: now + 60 * 60_000 });
+      expect((await account(jar))?.measuredAt).toBe(now);
+      await save(jar, { ...RANGE, measuredAt: now + 1 });
+      expect((await account(jar))?.measuredAt).toBe(now);
+      // The server's own time, and the millisecond before it, are not ahead of it and stay as sent.
+      await save(jar, { ...RANGE, measuredAt: now - 1 });
+      expect((await account(jar))?.measuredAt).toBe(now - 1);
+      await save(jar, { ...RANGE, measuredAt: now });
+      expect((await account(jar))?.measuredAt).toBe(now);
+    });
+
+    it('takes the time from the last save: a later save with none is stamped then, and does not keep the old time', async () => {
+      const jar = await signIn();
+      await save(jar, { ...RANGE, measuredAt: now - 10_000 });
+      vi.setSystemTime(now + 5_000);
+      await save(jar, { low: 41, high: 60, source: 'test' });
+      expect(await account(jar)).toEqual({ low: 41, high: 60, source: 'test', measuredAt: now + 5_000 });
+    });
+
+    it('gives a range saved with no time (an account from before this) back with no time at all', async () => {
+      const jar = await signIn();
+      await getStore().saveRange(MOCK_USER.id, { low: 41, high: 60, source: 'test' });
+      const range = await account(jar);
+      expect(range).toEqual({ low: 41, high: 60, source: 'test' });
+      expect(range).not.toHaveProperty('measuredAt');
+    });
+
+    it('says what is wrong with a bad time, and keeps the range the account had', async () => {
+      const jar = await signIn();
+      await save(jar, { ...RANGE, measuredAt: now - 1_000 });
+      const res = await save(jar, { low: 41, high: 60, source: 'test', measuredAt: 0 });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'bad-request', message: 'measuredAt must be a time in milliseconds' });
+      expect(await account(jar)).toEqual({ ...RANGE, measuredAt: now - 1_000 });
+    });
   });
 });
 

@@ -23,6 +23,7 @@ import type {
 import { availableSliders, DEFAULT_VIEW, fitViewTo, pickDecade, pickMood, toggleDuets } from '../songs/browse';
 import type { BrowserInfo } from './browser';
 import type { MicPermission, MicProblem } from './mic';
+import { deviceRangeWins, newestOnDevice } from './rangeSync';
 
 export type Step =
   | 'boot' // asking /api/me who this is
@@ -76,6 +77,8 @@ export interface MicGate {
 export interface TestProgress {
   low: Midi | null;
   high: Midi | null;
+  /** When a finished test (both notes) was sung (QWW-66), so signing in can tell it from the account's range. */
+  measuredAt?: number;
 }
 
 export type KnownSong = KnownSongsResponse['songs'][number];
@@ -156,13 +159,14 @@ export type FlowEvent =
       me: MeResponse | null;
       progress: TestProgress | null;
       wantsPick: boolean;
-      /** A range kept on this device by someone without Spotify. */
-      savedRange?: { low: Midi; high: Midi } | null;
+      /** The range kept on this device (`kd.range`), with the time it was sung when that is known (QWW-66). */
+      savedRange?: { low: Midi; high: Midi; measuredAt?: number } | null;
     }
   | { type: 'start' }
   | { type: 'quietDone' }
   | { type: 'holdStart' }
-  | { type: 'holdEnd'; midi: Midi | null }
+  /** `at` is when the note was let go (QWW-66): the time a test's range is stamped with, so the range sung last can win. */
+  | { type: 'holdEnd'; midi: Midi | null; at?: number }
   /** The mic step looked at the browser and asked what it already knows about the microphone (this never shows a question). */
   | { type: 'micChecked'; env: BrowserInfo; permission: MicPermission }
   /** "Turn on microphone" or "Try again" was tapped: the browser's own question comes up. */
@@ -203,7 +207,7 @@ export type FlowEvent =
   | { type: 'togglePick'; trackId: string }
   | { type: 'pickDone' };
 
-const testRange = (low: Midi, high: Midi): VocalRange => ({ low, high, source: 'test' });
+const testRange = (low: Midi, high: Midi, measuredAt?: number): VocalRange => ({ low, high, source: 'test', ...(measuredAt === undefined ? {} : { measuredAt }) });
 
 /** Clears everything about results so a new range starts from the top, keeping only the sliders. */
 function freshResults(state: FlowState) {
@@ -243,16 +247,24 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       const high = progress?.high ?? null;
       if (me) {
         const base = { ...state, signedIn: true, displayName: me.displayName, low, high, mode: 'library' as const };
-        if (low !== null && high !== null) return { ...base, step: 'saving', range: testRange(low, high) };
+        // The range sung last wins (QWW-66). The device's (a finished test in storage, or the range kept on it) goes to the
+        // account first when it was sung after the account's; the list is then built on it, and the header shows it. The
+        // account's range is what the list used alone before, which left a singer with a newer range on the device with
+        // the older one on their signed-in list.
+        const device = newestOnDevice(
+          low !== null && high !== null ? testRange(low, high, progress?.measuredAt) : null,
+          savedRange ? testRange(savedRange.low, savedRange.high, savedRange.measuredAt) : null,
+        );
+        if (device && (!me.range || deviceRangeWins(device, me.range))) return { ...base, step: 'saving', range: device };
         if (wantsPick) return { ...base, step: 'pick', range: me.range };
         if (me.range) return { ...base, step: 'results', range: me.range, loading: true };
         if (low !== null) return enterMic(base, 'high');
         return { ...base, step: 'landing' };
       }
-      if (low !== null && high !== null) return { ...state, step: 'signin', low, high, range: testRange(low, high) };
+      if (low !== null && high !== null) return { ...state, step: 'signin', low, high, range: testRange(low, high, progress?.measuredAt) };
       if (low !== null) return enterMic({ ...state, low }, 'high');
       if (savedRange) {
-        const range = testRange(savedRange.low, savedRange.high);
+        const range = testRange(savedRange.low, savedRange.high, savedRange.measuredAt);
         return { ...state, ...freshResults(state), step: 'results', mode: 'catalogue', range, loading: true };
       }
       return { ...state, step: 'landing' };
@@ -265,7 +277,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       return isHoldStep(state) ? { ...state, hold: 'holding' } : state;
     case 'holdEnd': {
       if (!isHoldStep(state)) return state;
-      const { midi } = event;
+      const { midi, at } = event;
       if (midi === null) return { ...state, hold: 'short' };
       const done = (low: Midi, high: Midi): FlowState => ({
         ...state,
@@ -273,7 +285,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
         high,
         hold: 'ready',
         redoing: null,
-        range: testRange(low, high),
+        range: testRange(low, high, at),
         step: state.signedIn ? 'saving' : 'signin',
       });
       if (state.step === 'low') {

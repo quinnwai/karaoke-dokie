@@ -68,7 +68,7 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    or below the low one asks to go higher.
 6. **Range + arrow**: "That's your range A2 – C5" and a wordless arrow bouncing bottom-right
    (`aria-label="Continue"`). The arrow goes straight to catalogue results with no sign-in
-   (QWW-2 Track B); the range is kept on the device (`localStorage` `kd.range`). "or use songs from your
+   (QWW-2 Track B); the range is kept on the device (`localStorage` `kd.range`, with the time it was sung, QWW-66). "or use songs from your
    Spotify" under it shows only while `PICK_SONGS=on`, the switch of step 1 (QWW-55); it keeps the range in
    `sessionStorage` (`kd.test`) and goes to `/api/auth/login`. With the switch off, the Spotify logo on the
    results (step 7) is the one way to sign in.
@@ -90,7 +90,8 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    lyric line says what the slider moved last does. Songs whose range is only an estimate
    (`difficulty: 'maybe'`) show last in their own "Maybe" list, without a difficulty pill. In
    catalogue mode "Connect Spotify" saves the range for the sign-in round trip; back from Spotify,
-   it is PUT to `/api/me/range` and library results load. The Spotify logo at the top right shows
+   it is PUT to `/api/me/range` when it was sung after the account's (the range sung last wins, QWW-66; see
+   "The range on the device and on the account" in `backend.md`) and library results load. The Spotify logo at the top right shows
    which mode this is: grey ("Connect to Spotify") without an account, Spotify green when signed in.
    Signed in, pointing at it (or a tap) opens a small box, "Logged in as <display name> · Log out";
    Log out POSTs `/api/auth/logout`, forgets the library and shows catalogue results for the same

@@ -166,4 +166,7 @@ CREATE TABLE IF NOT EXISTS song_canonical (
   source_artist TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS song_canonical_canonical ON song_canonical (canonical_key);
+-- When the singer sang the account's range, in milliseconds since 1970 (QWW-66): the range sung last is the one kept, so
+-- signing in on a device with a newer range replaces the account's, and an older device range does not. Null on a range saved before this was recorded.
+ALTER TABLE vocal_ranges ADD COLUMN IF NOT EXISTS measured_at BIGINT;
 `;

@@ -10,8 +10,8 @@ Route handlers live in `app/api/**/route.ts` and are thin wrappers around
 | GET | `/api/auth/login` | | 302 to Spotify (or straight to the callback with `SPOTIFY_MOCK=1`); sets a 10-minute `kd_oauth_state` cookie |
 | GET | `/api/auth/callback` | `code`, `state` | Checks state, stores the user and tokens, sets the `kd_session` cookie, 302 to `/?signedIn=1`. On failure 302 to `/?authError=<reason>` (`state`, `spotify`, `missing-code`, or Spotify's `error`, which is logged unless it is `access_denied`). Makes no Spotify request while Spotify has told the app to wait (see Spotify rate limit): it is `authError=spotify` at once, and a 429 on the profile step starts that wait |
 | POST | `/api/auth/logout` | | `{ ok: true }`, clears the session cookie |
-| GET | `/api/me` | | `MeResponse` |
-| PUT | `/api/me/range` | `VocalRange` | `{ ok: true }`; 400 unless `low`/`high` are integers, 28 <= low < high <= 96, span 5..48, `source` is `test` or `songs` |
+| GET | `/api/me` | | `MeResponse`; its `range` carries `measuredAt` (when the singer sang it) when the account has one, and has no `measuredAt` key on a range saved before it was kept |
+| PUT | `/api/me/range` | `VocalRange` | `{ ok: true }`; 400 unless `low`/`high` are integers, 28 <= low < high <= 96, span 5..48, `source` is `test` or `songs`, and `measuredAt`, if sent, is a positive whole number of milliseconds since 1970 (QWW-66). `measuredAt` is when the singer sang the range, by the device's clock, so the screen can keep the range sung last: a past time is stored as sent (a range carried over at sign-in keeps the time it was sung), none means the time of the save (an older page), and a time later than the server's clock is stored as the server's clock, so a device with a wrong clock cannot outrank ranges sung after it. The last save wins; the screen decides when its range is newer than the account's and worth saving. Stored in `vocal_ranges.measured_at` (BIGINT, null on a range saved before this) |
 | GET | `/api/recommendations` | `offset` (default 0), `limit` (1..50, default 5), or `all=1` | `RecommendationsResponse`; songs with a low-confidence range come last with `difficulty: 'maybe'` (the Maybe group); 409 `{ error: 'no-range' }` before a range is saved. `all=1` ignores `offset` and `limit` and sends every match (at most 1,000, the best-ranked) with its `year` and `yearSource` (the earlier of USDB's and Spotify's album year, else the Billboard Year-End chart year, `chart`), `genre` (USDB's), USDB views and stars for songs whose range has none, and no pitch histograms; it is ranked with karaoke popularity too (see Song popularity), which is not sent. `complete: true` when that is every match. `complete: false` with a `nextOffset` means lookups ran out of budget (a first visit to a very large library): ask `all=1` again to carry on, not a page from `nextOffset`, since pages rank without the USDB and karaoke popularity. `complete: false` with `nextOffset: null` means the list was cut at 1,000 |
 | GET | `/api/songs/known` | | `KnownSongsResponse` (up to 50 library songs with a known range, play order); `{ songs: [], libraryUnavailable: true }` when the library cannot be read |
 | POST | `/api/feedback` | `FeedbackRequest` (`difficulty` may be `maybe`; optional `view`, the results view the song was found in) | `{ ok: true }`; 400 on bad input, including a `view` without `difficulty`, `familiarity` and `popularity` that are each null or a number from 0 to 1, a `decade` and `mood` that are known or null, and a boolean `duetsOnly`; 409 before a range is saved. Stored with the user's current range, the view (`view_json`) and, when the song is in the cached library, its range at that moment (`range_source` = the log outcome, `range_method`, `range_low`, `range_high`); the tap never loads the library from Spotify |
@@ -32,6 +32,29 @@ screen): when the signed-in user's library cannot be read (429, a 5xx, a network
 `[spotify] could not load the library: ...`. A read that takes longer than `LIBRARY_DEADLINE_MS` (50 s, inside
 the routes' 60 s `maxDuration`) gets the same answer, so a stalled Spotify is never the host's own timeout; the
 read carries on and, if it finishes, is cached for the next request.
+
+### The range on the device and on the account (QWW-66)
+
+A singer's range lives in two places: on the account (`vocal_ranges`, which `GET /api/me` returns and a signed-in list is
+built on) and on the device (`localStorage` `kd.range`, which the signed-out list is built on). They used to drift apart,
+so one singer got two lists: the account held F2 to C4 while the device and its header said F#2 to C5. The range the
+singer sang last now wins in both places. Each range carries the time it was sung, `measuredAt` (milliseconds since 1970,
+by the clock of the device that measured it; `vocal_ranges.measured_at`, null on a range saved before it was recorded),
+and the screen compares them (`src/lib/client/rangeSync.ts`, used by the `booted` step of `src/lib/client/flow.ts`):
+
+| When | What wins |
+| --- | --- |
+| A test has just finished | It is the newest range there is, stamped with the time its last note was let go. Signed in, it is PUT to the account at once; signed out, it is kept on the device when the singer continues. |
+| The page opens signed in, or the singer comes back from Spotify | The device's range (a finished test left in session storage, or `kd.range`) is compared with the account's, and the one sung later wins. When it is the device's, it is PUT to the account with its own time before the list loads, so the list, the header and the account agree. When it is the account's, nothing is saved. |
+| The account's range has no time | It was saved before times were recorded, so nothing says it is newer: the device's wins, whatever its own time. |
+| The device's range has no time, the account's has one | The account's wins: the device's was kept before times were recorded. |
+| The same time on both | The same measurement: nothing is saved. |
+| Neither has a time | The device's wins: the singer is on it now. |
+
+Whichever wins, the device then keeps the range of the list on screen, signed in or not, so a later visit signed out (a
+session that ran out with no Log out) is built on the same range. The header shows `range` from the screen's state,
+which is also what the list's request and the save to the account use, so it always shows the range the list was built on.
+A finished test left in session storage that the account's newer range outranked is dropped once the list shows.
 
 ### Paging
 

@@ -208,16 +208,22 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
       );
     },
     async saveRange(userId, r) {
+      // A range with no time writes null, so an overwrite never keeps the time of the range it replaces (QWW-66).
       await query(
-        `INSERT INTO vocal_ranges (user_id, low, high, source) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (user_id) DO UPDATE SET low = EXCLUDED.low, high = EXCLUDED.high, source = EXCLUDED.source`,
-        [userId, r.low, r.high, r.source],
+        `INSERT INTO vocal_ranges (user_id, low, high, source, measured_at) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (user_id) DO UPDATE SET low = EXCLUDED.low, high = EXCLUDED.high, source = EXCLUDED.source,
+           measured_at = EXCLUDED.measured_at`,
+        [userId, r.low, r.high, r.source, r.measuredAt ?? null],
       );
     },
     async getRange(userId) {
       const rows = await query('SELECT * FROM vocal_ranges WHERE user_id = $1', [userId]);
       const r = rows[0];
-      return r ? { low: num(r.low), high: num(r.high), source: str(r.source) as VocalRange['source'] } : null;
+      if (!r) return null;
+      const range: VocalRange = { low: num(r.low), high: num(r.high), source: str(r.source) as VocalRange['source'] };
+      // A range saved before the time was recorded has none: no key, not an empty one.
+      if (isSet(r.measured_at)) range.measuredAt = num(r.measured_at);
+      return range;
     },
     async getSongRange(songKey) {
       const rows = await query('SELECT * FROM song_ranges WHERE song_key = $1', [songKey]);
