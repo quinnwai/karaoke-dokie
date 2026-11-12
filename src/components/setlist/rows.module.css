@@ -16,7 +16,7 @@
   overflow-anchor: none;
 }
 
-/* Room under the last thing in the list, clear of the handle's touch area, which reaches 11 px above the sheet. It is a
+/* Room under the last thing in the list, clear of the handle's touch area, which reaches 11 px above the sheet (2 px over the list's bottom: the spacer is what is under it). It is a
    spacer at the end of what scrolls, not padding on the box, so the box can still shrink to nothing on a screen with no room
    (padding would keep it 24 px tall and push the sheet off the screen's bottom edge). */
 .listScroll::after {

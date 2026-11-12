@@ -33,21 +33,22 @@
   height: 22px;
 }
 
-/* 140×44 touch area with a 44×5 bar. touch-action: none keeps a drag on the handle from scrolling or pulling the page. Its box ends 1 px above where the first strip's
-   title begins, and reaches 18 px above the sheet's top edge instead of 11, so that none of it is over the title (QWW-57, the gates on 4e324f5 and 5ab0be7): its bottom
-   6 px were, and a tap on the top of "DIFFICULTY" folded the sheet. The bar has not moved, in the middle of the 22 px row: the padding puts the middle of the box's
-   content there. */
+/* 140×37 touch area with a 44×5 bar. touch-action: none keeps a drag on the handle from scrolling or pulling the page. Its box ends 1 px above where the first strip's
+   title begins (26 px down the row; the title is at 27) and starts 11 px above the sheet's top edge, 2 px over the list's bottom: there are only about 36 px between the
+   list's bottom and the title (9 + 22 + 5), so a taller box would cover the title (a tap on "DIFFICULTY" folded the sheet, the gates on 4e324f5 and 5ab0be7) or the list's
+   bottom rows (a swipe up from there expanded the sheet instead of scrolling, a tap on the bottom row toggled it, the gate on 7502275). The bar is in the middle of the
+   22 px row: the padding puts the middle of the box's content there. */
 .handle {
   position: absolute;
   /* Over the strips: the bottom 4 px of its box are the first one's, and the strip's own positioned parts painted over them, so a tap there did nothing in an expanded
      sheet (the gate on 4e324f5). */
   z-index: 2;
   left: 50%;
-  top: -18px;
+  top: -11px;
   width: 140px;
-  height: 44px;
+  height: 37px;
   margin-left: -70px;
-  padding: 14px 0 0;
+  padding: 7px 0 0;
   box-sizing: border-box;
   border: none;
   background: transparent;

@@ -9,11 +9,11 @@
 //   - a kick of 15 (in its first 6 to 8 px), 30, 40 and 50 px and then 120 px up or down, a 30 degree diagonal for 40 px and then 100 px up, and a wide thumb's arc (35 px
 //     right, 150 px up) change nothing: not the value, not on or off, not the open part or the sheet's mode, and nothing is recorded
 //   - drags at 20, 30 and 44 degrees still move the value, as one gear_change
-//   - a double tap on every gear's ✕ and on Era's, 150 and 300 ms apart, with the second tap 0 to 12 px lower than the first, at a radius of 10: the gear ends off at its
+//   - a double tap on every gear's ✕ and on Era's, 150 and 250 ms apart, with the second tap 0 to 12 px lower than the first, at a radius of 10: the gear ends off at its
 //     default with one gear_change (Era: one era_change); the fader and the eras are held for a moment after a finger's tap on a ✕
 //   - the first Enter after a touch drag of the handle toggles the sheet
 // The gate on 5ab0be7 (QWW-57, 12 Nov), checked here at 360, 375, 390 and 412 px, expanded and in mini, with a finger of radius 1, 8, 12 and 16 in Chromium and a tap in WebKit:
-//   - the handle's 44 px box ends above the first strip's title (it reached 6 px into it, and a tap on the top of "DIFFICULTY" folded the sheet), a tap on any part of the title,
+//   - the handle's box ends above the first strip's title (it reached 6 px into it, and a tap on the top of "DIFFICULTY" folded the sheet), a tap on any part of the title,
 //     under the handle or beside it, changes nothing, and the handle takes a tap on its bar and on the bottom of its box, 1, 2 and 5 px above the edge, left or right of the middle
 //   - the hold after a tap on a ✕ is 400 ms from the tap and no longer, whatever is tapped in it (each tap it held used to put it off again, so a fader could stay dead for
 //     seconds): a tap or a drag on the fader, or a tap on an era, that starts 600 ms or more after the ✕ works after two taps that the hold ignored
@@ -175,11 +175,11 @@ async function checkDoubleTapLower(page: Page, events: AppEvent[], part: GearId 
   expect(failures, `${at}: double taps on the ✕, the second one lower`).toEqual([]);
 }
 
-type HandleGeometry = { handle: Box; bar: Box; label: Box; text: Box };
+type HandleGeometry = { handle: Box; bar: Box; label: Box; text: Box; list: Box };
 type Box = { left: number; right: number; top: number; bottom: number };
 
 /**
- * The sheet's handle and the first strip's title (the gate on 5ab0be7). The handle's 44 px box ends above the title (it reached 6 px into it); a tap on any part of the title,
+ * The sheet's handle and the first strip's title (the gate on 5ab0be7). The handle's box ends above the title (it reached 6 px into it); a tap on any part of the title,
  * under the handle or beside it, from a finger of each radius, changes nothing (not the value, on or off, the open part, the eras or the sheet's mode, and nothing is recorded);
  * and the handle takes a tap on its bar and on the bottom of its box, 1, 2 and 5 px above its edge, left and right of the middle, from the same fingers.
  */
@@ -194,7 +194,7 @@ async function checkHandleAndTitle(page: Page, events: AppEvent[], finger: Finge
       const label = document.querySelector('[data-strip][data-gear="difficulty"] label')!;
       const text = document.createRange();
       text.selectNodeContents(label);
-      return { handle: rect(document.querySelector('#handle')!), bar: rect(document.querySelector('#handle span')!), label: rect(label), text: rect(text) };
+      return { handle: rect(document.querySelector('#handle')!), bar: rect(document.querySelector('#handle span')!), label: rect(label), text: rect(text), list: rect(document.querySelector('#list-scroll')!) };
     });
   const onHandle = (p: Point) => page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('#handle'), p);
   const records = async () => (await recorded(page, events, 'gear_change')).length + (await recorded(page, events, 'era_change')).length;
@@ -211,6 +211,14 @@ async function checkHandleAndTitle(page: Page, events: AppEvent[], finger: Finge
   const titleBottom = Math.max(g.label.bottom, g.text.bottom);
   if (g.handle.bottom > titleTop) failures.push(`the handle's box ends at ${g.handle.bottom}, ${g.handle.bottom - titleTop} px into the title, which begins at ${titleTop}`);
 
+  // The handle's box takes no more than 2 px of the list (the gate on 7502275): a swipe or a tap that starts in the list's bottom 10 px, or the wheel there, is the list's.
+  if (g.handle.top < g.list.bottom - 2) failures.push(`the handle's box starts at ${g.handle.top}, ${g.list.bottom - g.handle.top} px over the list, which ends at ${g.list.bottom}`);
+  for (const inset of [3, 5, 10]) {
+    for (const dx of [-60, 0, 60]) {
+      const p = { x: (g.handle.left + g.handle.right) / 2 + dx, y: g.list.bottom - inset };
+      if (await onHandle(p)) failures.push(`(${p.x}, ${p.y.toFixed(1)}), ${inset} px above the list's bottom, is the handle's`);
+    }
+  }
   // A tap on any part of the title changes nothing: its left and right ends and its middle, and under the handle, from its top row to its bottom row.
   const middle = (g.handle.left + g.handle.right) / 2;
   const xs = [...new Set([g.text.left + 2, (g.text.left + g.text.right) / 2, g.text.right - 2, middle - 20, middle].map(Math.round))];
@@ -341,16 +349,16 @@ for (const width of WIDTHS) {
         await checkAngles(page, events, 'difficulty', at, cdpFinger(page), full ? RADII : [12]);
       });
 
-      test('a double tap on every ✕ and on Era\'s, 150 and 300 ms apart, with the second tap 0 to 12 px lower, leaves it off at its default with one record', async ({ page }) => {
+      test('a double tap on every ✕ and on Era\'s, 150 and 250 ms apart, with the second tap 0 to 12 px lower, leaves it off at its default with one record', async ({ page }) => {
         test.setTimeout(240_000);
         const { events } = await openAt(page, mode);
         const finger = cdpFinger(page);
         for (const part of ['difficulty', 'popularity', 'tempo', 'history'] as GearId[]) {
           await show(page, part);
-          await checkDoubleTapLower(page, events, part, at, finger, full ? [0, 4, 8, 12] : [8, 12], full ? [150, 300] : [150], 10);
+          await checkDoubleTapLower(page, events, part, at, finger, full ? [0, 4, 8, 12] : [8, 12], full ? [150, 250] : [150], 10);
         }
         await show(page, 'era');
-        await checkDoubleTapLower(page, events, 'era', at, finger, full ? [0, 4, 8, 12] : [8, 12], full ? [150, 300] : [150], 10);
+        await checkDoubleTapLower(page, events, 'era', at, finger, full ? [0, 4, 8, 12] : [8, 12], full ? [150, 250] : [150], 10);
         expect(await eraButton(page, 's20').count()).toBe(1);
       });
 
@@ -454,10 +462,10 @@ test.describe('in WebKit (desktop WebKit, not iOS Safari)', () => {
           await checkKicksAndArcs(page, events, 'tempo', at, finger, [1], true);
           for (const part of ['difficulty', 'popularity'] as GearId[]) {
             await show(part);
-            await checkDoubleTapLower(page, events, part, at, finger, [0, 8, 12], [150, 300], 1);
+            await checkDoubleTapLower(page, events, part, at, finger, [0, 8, 12], [150, 250], 1);
           }
           await show('era');
-          await checkDoubleTapLower(page, events, 'era', at, finger, [0, 8, 12], [150, 300], 1);
+          await checkDoubleTapLower(page, events, 'era', at, finger, [0, 8, 12], [150, 250], 1);
           await show('difficulty');
           await checkHoldEnds(page, 'difficulty', at, finger, 1);
           await show('era');

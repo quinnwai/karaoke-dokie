@@ -333,6 +333,10 @@ describe('the fader after a finger\'s tap on the ✕ (the gates on 4e324f5 and 5
 
   it('is not started by a key or a screen reader\'s click on the ✕ either (detail 0)', () => {
     const { hit, onInput } = strip({ value: 30, off: false, onReset: vi.fn() });
+    // A finger went down on the ✕ (and lifted off it somewhere else, with no click), so the last press is a finger's, not a mouse's left from an earlier test: the key's
+    // click is then judged on its detail alone.
+    reset().getBoundingClientRect = () => new DOMRect(300, 0, 44, 20);
+    faderPointer('pointerDown', reset(), { kind: 'touch', x: 330, y: 8 });
     fireEvent.click(reset(), { detail: 0 });
     vi.setSystemTime(1_000_000 + 100);
     tapFader(hit, 90);

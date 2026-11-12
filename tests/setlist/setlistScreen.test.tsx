@@ -1123,7 +1123,15 @@ describe('the Era panel after a finger\'s tap on its ✕ (the gates on 4e324f5 a
   it('is not started by a key on the ✕ (a click with detail 0), and does not hold a key on an era: a tap or a key right after is a choice', () => {
     const onTuner = vi.fn<(action: TunerAction) => void>();
     render(<Tuned initial={tunerOf({ off: [], eras: ['s80'] })} onTuner={onTuner} />);
-    fireEvent.click(el('button[data-reset="era"]'), { detail: 0 });
+    // A finger went down on the ✕ with no click after it, so the last press is a finger's, not a mouse's left from an earlier test: the key's click is judged on its detail.
+    const resetEra = el('button[data-reset="era"]');
+    resetEra.getBoundingClientRect = () => new DOMRect(100, 100, 44, 52);
+    const down = createEvent.pointerDown(resetEra);
+    Object.defineProperty(down, 'clientX', { value: 120 });
+    Object.defineProperty(down, 'clientY', { value: 120 });
+    Object.defineProperty(down, 'pointerType', { value: 'touch' });
+    fireEvent(resetEra, down);
+    fireEvent.click(resetEra, { detail: 0 });
     vi.setSystemTime(2_000_000 + 100);
     tap(eraButton('s20'));
     expect(calls(onTuner)).toEqual([{ type: 'reset', gear: 'era' }, { type: 'era', era: 's20' }]);
