@@ -169,7 +169,7 @@ import. The model is the design's distance ranking (round 5 spec section 5), dec
    popularity with difficulty breaking ties: of two songs, the one 10 places less popular needs to be 20 places easier to
    come first, so the single most popular song is first only if it is also easy. `GEAR_WEIGHTS` is the one knob if the top
    of the default list needs to lean harder.
-4. **Order.** The Maybe songs (estimated ranges) come after all the others, as everywhere else. Inside the Maybe songs and
+4. **Order.** The Maybe songs (ranges we are less sure of: estimates, rough recordings, very narrow ranges) come after all the others, as everywhere else. Inside the Maybe songs and
    inside all the others, every song that fits as written comes before any song that needs an octave jump, up or down
    (QWW-58, Quinn-Wai's decision A, 11 Nov; see below). The jump songs still follow, so a range whose popular songs all
    need a jump gets a full list, never an empty one. Within each of those groups, a song we do not know on an active gear

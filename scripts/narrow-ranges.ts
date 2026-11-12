@@ -7,8 +7,12 @@
 // Safe to run again, and to stop and run again: a second run reports `"changed":0`. Every page prints its last song key;
 // `--after <that key>` skips what a stopped run had done. It runs no schema migration, so a dry run reads and nothing else.
 // --show prints the change of a song that has one, --sample the first n changes. Back up song_ranges first (copy it to a
-// song_ranges_bak_<ticket> table and check the row counts match): a row's old range is not kept anywhere else.
-// Afterwards `scripts/octave-fix.ts --dry-run` must still report `"moved":0`: the new low and high stay in the stored octave.
+// song_ranges_bak_<ticket> table and check the row counts match): a row's old range is not kept anywhere else. A restore
+// of the whole table also undoes any write made after the backup (the octave fix, the USDB sync), so keep the --sample
+// output of the write run and restore only the keys it lists.
+// The new low and high stay in the stored octave (`histogramOffOctave` counts the rows where that took a shift: 0 on
+// production). The octave fix reads only a song's typical note, which this never writes, so `scripts/octave-fix.ts --dry-run`
+// afterwards finds the same moves as before this run, no more.
 
 import { parseArgs } from 'node:util';
 import { midiToNoteName } from '../src/lib/audio/notes';

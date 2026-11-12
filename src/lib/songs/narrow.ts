@@ -11,7 +11,9 @@
 //
 // Octave: the stored histogram is in the octave of the stored range (the octave fix moves it along, see
 // shiftRange in octave.ts), and applyNarrowRule keeps the new low and high in that octave, so a range the
-// octave fix has moved does not move back (`scripts/octave-fix.ts --dry-run` still reports 0 moves).
+// octave fix has moved does not move back. `histogramOffOctave` counts the rows where that was not so (0 on
+// production). The octave fix reads only a song's typical note, which this never writes, so a run of
+// `scripts/octave-fix.ts --dry-run` after this one finds the same moves as before it, no more.
 
 import type { SongRange } from '../contracts';
 import type { SongRangeRecord, Store } from '../server/store';
@@ -32,6 +34,8 @@ export interface NarrowFixSummary {
   noHistogram: number;
   /** Of the note files in `narrow`, those whose 1% trim reaches pitches no song has (junk notes in the file): kept at their range and marked, never widened. */
   implausible: number;
+  /** Of the note files in `narrow`, those whose histogram sat in another octave than the stored range, so the new range was moved to the stored octave. 0 when the octave fix moved the histogram along, as it does. */
+  histogramOffOctave: number;
   /** Rows the rule changes (on a dry run, would change): `narrow` less the rows that are already as the rule leaves them. */
   changed: number;
   /** Changes not written because the row changed after it was read; the next run picks them up. */
@@ -60,7 +64,7 @@ const WRITE_BATCH = 10;
  */
 export async function fixNarrowRanges(store: Store, opts: NarrowFixOptions = {}): Promise<NarrowFixSummary> {
   const pageSize = opts.pageSize ?? 1000;
-  const summary: NarrowFixSummary = { checked: 0, narrow: 0, widened: 0, stillNarrow: 0, recordings: 0, noHistogram: 0, implausible: 0, changed: 0, skippedChanged: 0 };
+  const summary: NarrowFixSummary = { checked: 0, narrow: 0, widened: 0, stillNarrow: 0, recordings: 0, noHistogram: 0, implausible: 0, histogramOffOctave: 0, changed: 0, skippedChanged: 0 };
   const same = (a: SongRangeRecord, b: SongRangeRecord | undefined) => b !== undefined && JSON.stringify(a) === JSON.stringify(b);
   let after = opts.after ?? '';
   for (;;) {
@@ -79,7 +83,10 @@ export async function fixNarrowRanges(store: Store, opts: NarrowFixOptions = {})
       } else {
         const finer = gentleRange(rec.range);
         if (!finer) summary.noHistogram++;
-        else if (!isPlausible(finer)) summary.implausible++;
+        else {
+          if (!isPlausible(finer)) summary.implausible++;
+          if (finer.octaves !== 0) summary.histogramOffOctave++;
+        }
         if (range.high - range.low > NARROW_SPAN) summary.widened++;
         else summary.stillNarrow++;
       }

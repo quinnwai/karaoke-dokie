@@ -96,10 +96,10 @@ export function trimmedRange(notes: { midi: number; length: number }[], share = 
  * A note file's range with the NARROW_OUTLIER_SHARE trim, from its stored pitch histogram and in the octave of the
  * stored range; null when there is no histogram, or it does not describe the song (its mean is not the typical note
  * at any whole octave). The octave fix moves a histogram along with the range (shiftRange), so the whole-octave gap
- * between the histogram's mean and the typical note is 0 for every stored range; it is applied all the same, so a
- * histogram left in the file's octave lands the range in the stored one and not an octave away.
+ * between the histogram's mean and the typical note, `octaves`, is 0 for every stored range; it is applied all the
+ * same, so a histogram left in the file's octave lands the range in the stored one and not an octave away.
  */
-export function gentleRange(range: SongRange): { low: number; high: number } | null {
+export function gentleRange(range: SongRange): { low: number; high: number; octaves: number } | null {
   const shares = range.pitchShare;
   if (!shares?.length) return null;
   const total = shares.reduce((sum, [, share]) => sum + share, 0);
@@ -108,7 +108,7 @@ export function gentleRange(range: SongRange): { low: number; high: number } | n
   const octaves = Math.round((range.tessitura - mean) / 12);
   if (Math.abs(range.tessitura - mean - 12 * octaves) > HISTOGRAM_MEAN_TOLERANCE) return null;
   const { low, high } = trimmedRange(shares.map(([midi, length]) => ({ midi, length })), NARROW_OUTLIER_SHARE);
-  return { low: low + 12 * octaves, high: high + 12 * octaves };
+  return { low: low + 12 * octaves, high: high + 12 * octaves, octaves };
 }
 
 /** Whether the narrow-range rule applies to `range`: a note file or a recording of NARROW_SPAN semitones or fewer, and not a duet with parts. */

@@ -267,8 +267,15 @@ describe('the narrow-range rule (QWW-60)', () => {
   });
 
   it('marks what the 1% trim still leaves at 5 semitones or fewer as low confidence, with the widened range (Are You Bored Yet?)', () => {
-    expect(gentleRange(WALLOWS)).toEqual({ low: 54, high: 59 });
+    expect(gentleRange(WALLOWS)).toEqual({ low: 54, high: 59, octaves: 0 });
     expect(applyNarrowRule(WALLOWS)).toEqual({ ...WALLOWS, low: 54, high: 59, confidence: 'low' });
+  });
+
+  it('drops a pitch with exactly 1% of the time, as the 5% trim drops one with exactly 5%, and keeps one with more', () => {
+    // The shares sum to 1, so 0.01 is exactly the cut: at most 1% is dropped at each end.
+    expect(gentleRange(noteFile([[52, 0.01], [56, 0.49], [57, 0.5]]))).toMatchObject({ low: 56, high: 57 });
+    expect(gentleRange(noteFile([[52, 0.011], [56, 0.489], [57, 0.5]]))).toMatchObject({ low: 52, high: 57 });
+    expect(trimmedRange([{ midi: 52, length: 5 }, { midi: 56, length: 45 }, { midi: 57, length: 50 }])).toEqual({ low: 56, high: 57 });
   });
 
   it('counts 5 semitones as narrow and 6 as wide, before and after the 1% trim', () => {
@@ -287,7 +294,7 @@ describe('the narrow-range rule (QWW-60)', () => {
 
   it('marks a recording of 5 semitones or fewer and leaves its range as it is, whatever its histogram would give', () => {
     const recording = noteFile(STRAY, { source: 'audio-full', method: 'pyin-v1/app-range-v1' });
-    expect(gentleRange(recording)).toEqual({ low: 52, high: 61 });
+    expect(gentleRange(recording)).toEqual({ low: 52, high: 61, octaves: 0 });
     expect(applyNarrowRule(recording)).toEqual({ ...recording, confidence: 'low' });
     const wide = { ...recording, low: 50, high: 60 };
     expect(applyNarrowRule(wide)).toBe(wide);
@@ -319,7 +326,7 @@ describe('the narrow-range rule (QWW-60)', () => {
     // 1.5% of the time on a pitch above G6 (as in a production note file that reaches G17): the 5% trim drops it, the 1% trim would keep it.
     const junkHigh = noteFile([[56, 0.5], [57, 0.485], [100, 0.015]]);
     expect(junkHigh).toMatchObject({ low: 56, high: 57 });
-    expect(gentleRange(junkHigh)).toEqual({ low: 56, high: 100 });
+    expect(gentleRange(junkHigh)).toEqual({ low: 56, high: 100, octaves: 0 });
     expect(applyNarrowRule(junkHigh)).toEqual({ ...junkHigh, confidence: 'low' });
     // A pitch below E1, a span of only 14 semitones: still no song's.
     const junkLow = noteFile([[27, 0.015], [40, 0.5], [41, 0.485]]);
@@ -366,7 +373,7 @@ describe('the narrow-range rule (QWW-60)', () => {
     it('puts the new range in the stored octave when the histogram was left in the note file’s octave', () => {
       const file = noteFile(STRAY);
       const moved: SongRange = { ...shiftRange(file, -12), pitchShare: file.pitchShare, octaveFrom: 'recording' };
-      expect(gentleRange(moved)).toEqual({ low: 40, high: 49 });
+      expect(gentleRange(moved)).toEqual({ low: 40, high: 49, octaves: -1 });
       expect(applyNarrowRule(moved)).toMatchObject({ low: 40, high: 49, confidence: 'high' });
     });
 

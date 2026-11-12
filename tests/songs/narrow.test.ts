@@ -51,7 +51,7 @@ const rangeOf = async (store: Store, key: string) => (await store.getSongRange(k
 const snapshot = async (store: Store) => JSON.stringify(await Promise.all([...keysOf, 'z|skipped'].map((k) => store.getSongRange(k))));
 
 describe.each(STORES)('fixNarrowRanges (%s store)', (_name, make) => {
-  const counts = { checked: 9, narrow: 6, widened: 2, stillNarrow: 2, recordings: 2, noHistogram: 0, implausible: 0, changed: 5, skippedChanged: 0 };
+  const counts = { checked: 9, narrow: 6, widened: 2, stillNarrow: 2, recordings: 2, noHistogram: 0, implausible: 0, histogramOffOctave: 0, changed: 5, skippedChanged: 0 };
 
   it('counts what it would change on a dry run, and writes nothing', async () => {
     const store = make();
@@ -93,20 +93,43 @@ describe.each(STORES)('fixNarrowRanges (%s store)', (_name, make) => {
     expect(await snapshot(store)).toBe(written);
   });
 
-  it('puts every changed range around its song’s typical note, and the octave fix still moves nothing', async () => {
+  it('puts every changed range around its song’s typical note, which is what would show a range left an octave away', async () => {
     const store = make();
     await fill(store);
-    const evidence: OctaveEvidence = { songs: { 'b|moved and widens': STORED['b|moved and widens']!.tessitura, 'wallows|are you bored yet?': WALLOWS.tessitura }, artists: {} };
-    const moves = async () => (await fixStoredOctaves(readOnlyStore(store), evidence, { dryRun: true })).moved;
-    expect(await moves()).toBe(0);
     await fixNarrowRanges(store);
-    expect(await moves()).toBe(0);
-    // The check that would catch a range left an octave away: the typical note sits inside the new range.
     for (const key of ['a|widens', 'b|moved and widens', 'c|still narrow', 'wallows|are you bored yet?']) {
       const r = await rangeOf(store, key);
       expect(r.low).toBeLessThanOrEqual(r.tessitura);
       expect(r.high).toBeGreaterThanOrEqual(r.tessitura);
     }
+  });
+
+  it('leaves the typical note alone, so the octave fix finds the same moves after it as before', async () => {
+    const store = make();
+    await fill(store);
+    // The octave fix reads only the typical note, so it cannot see the range: it says the same before and after. A song that
+    // still has a move to make (here a note file the evidence puts an octave lower) makes the count above 0 in both.
+    const evidence: OctaveEvidence = {
+      songs: { 'b|moved and widens': STORED['b|moved and widens']!.tessitura, 'wallows|are you bored yet?': WALLOWS.tessitura, 'a|widens': STORED['a|widens']!.tessitura - 12 },
+      artists: {},
+    };
+    const moves = async () => (await fixStoredOctaves(readOnlyStore(store), evidence, { dryRun: true })).moved;
+    expect(await moves()).toBe(1);
+    await fixNarrowRanges(store);
+    expect(await moves()).toBe(1);
+    // ...and it moves the widened range along with the typical note, whole.
+    await fixStoredOctaves(store, evidence);
+    expect(await rangeOf(store, 'a|widens')).toMatchObject({ low: 52 - 12, high: 61 - 12 });
+    expect(await moves()).toBe(0);
+  });
+
+  it('counts a histogram left in the note file’s octave, and puts the new range in the stored octave', async () => {
+    const store = make();
+    const file = noteFile(STRAY);
+    const left = { ...shiftRange(file, -12), pitchShare: file.pitchShare, octaveFrom: 'recording' as const };
+    await store.putSongRange('a|histogram left', { range: left, log });
+    expect(await fixNarrowRanges(store)).toMatchObject({ narrow: 1, widened: 1, histogramOffOctave: 1, changed: 1 });
+    expect(await rangeOf(store, 'a|histogram left')).toEqual({ ...left, low: 52 - 12, high: 61 - 12 });
   });
 
   it('starts after the key a stopped run printed', async () => {

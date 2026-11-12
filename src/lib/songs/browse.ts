@@ -13,7 +13,7 @@
 //   of the song's beats per minute. Sliders only reorder, so they can never empty
 //   the list either, and every view is computed on the phone in one pass.
 //
-// Maybe songs (estimated ranges) come last in every view. With no slider set the list stays in the
+// Maybe songs (ranges we are less sure of) come last in every view. With no slider set the list stays in the
 // server's Top picks order, which puts songs the singer knows before saved-only ones ("pick a song that
 // you know well"); once any slider is set, the sliders alone order the songs (QWW-33), so that rule
 // does not hold the other sliders back.
