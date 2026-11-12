@@ -10,8 +10,8 @@
 // a matcher fix that can replace a wrong version, and the first run that stores the matched track).
 // Pass the same time to every run of one recheck or refresh, so it ends. Stops cleanly after
 // --max-minutes (rerun to carry on).
-// Each lookup is findDeezerTrack's (QWW-67): the plain search, then the artist's top tracks and a search
-// on the title alone when the search has no original. A hit is read by its id once more for its release
+// Each lookup is findDeezerTrack's (QWW-67): the plain search, then a search naming every act, the artist's
+// top tracks and a search on the title alone when the search has no original. A hit is read by its id once more for its release
 // date, except in a dry run. --save <file> writes what a run would store as JSON, for
 // scripts/deezer-report.ts --overlay to show the lists with it before anything is written. --keys <file>
 // (a JSON array of song keys) looks up only those songs, e.g. the ones a list shows.
@@ -108,7 +108,7 @@ async function main() {
   // What each lookup did to the stored row: a miss that now has a match, a match that is now a miss, another track.
   const changes = { found: 0, lost: 0, switched: 0, same: 0, unchecked: 0 };
   // Where each hit was found (QWW-67).
-  const routes: Record<DeezerRoute, number> = { search: 0, artist: 0, title: 0, hand: 0 };
+  const routes: Record<DeezerRoute, number> = { search: 0, acts: 0, artist: 0, title: 0, hand: 0 };
   let shown = 0;
   const flush = async () => {
     const batch = pending.splice(0);
@@ -161,7 +161,9 @@ async function main() {
   console.log(
     `Done: ${hits} hits, ${misses} misses, ${errors} errors, ${calls} Deezer calls${inARow >= STOP_AFTER_ERRORS ? `; stopped after ${inARow} failures in a row` : ''}${left > 0 ? `; ${left} left, run again to carry on` : ''}${values['dry-run'] ? ' (dry run, nothing saved)' : ''}`,
   );
-  console.log(`Hits by route: ${routes.search} plain search, ${routes.artist} artist's top tracks, ${routes.title} title alone, ${routes.hand} hand-checked`);
+  console.log(
+    `Hits by route: ${routes.search} plain search, ${routes.acts} search naming every act, ${routes.artist} artist's top tracks, ${routes.title} title alone, ${routes.hand} hand-checked`,
+  );
   console.log(
     `Against the stored rows: ${changes.found} misses now matched, ${changes.lost} matches now misses, ${changes.switched} matched to another track, ${changes.same} unchanged, ${changes.unchecked} never looked up before`,
   );

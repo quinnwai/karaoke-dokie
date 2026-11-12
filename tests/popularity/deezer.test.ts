@@ -4,6 +4,7 @@ import {
   createDeezerClient,
   creditedActs,
   deezerQuery,
+  everyActQuery,
   findDeezerTrack,
   HAND_CHECKED,
   matchesKey,
@@ -272,6 +273,11 @@ describe('pickDeezerHit, after the review of QWW-59', () => {
   it('counts "(Deluxe Edition)" as the original release', () => {
     expect(pick('Fleetwood Mac', 'Dreams', [dz(1, 900_000, 'Fleetwood Mac', 'Dreams', '(Deluxe Edition)'), dz(2, 300_000, 'Fleetwood Mac', 'Dreams (Live)')])).toBe(1);
   });
+
+  it('counts a version part of release words only as the original: Big Sean\'s "My Last (Album Version Explicit)" (QWW-67)', () => {
+    expect(pick('Big Sean', 'My Last', [dz(14539386, 443_385, 'Big Sean', 'My Last', '(Album Version Explicit)')])).toBe(14539386);
+    expect(pick('ABBA', 'Chiquitita', [dz(1, 500_000, 'ABBA', 'Chiquitita', '(Spanish Version)')])).toBeNull(); // still a language version
+  });
 });
 
 // ---------- QWW-67: the album, other names for a credit, and the lookup's fallbacks ----------
@@ -296,9 +302,18 @@ describe('albumRecordings (QWW-67)', () => {
     ['Sadnecessary (Acoustic Version)', ['version']],
     ["Red (Taylor's Version)", ['version']],
     ['Party Tyme Karaoke - Pop Male Hits 8 (Vocal Versions)', ['cover']],
-    ['Let Her Go - Tribute to Passenger', ['cover']],
+    ['Caetano e Bethânia Ao Vivo', ['live']],
+    ['The Remixes', ['remix']],
   ])('%s is %j', (album, kinds) => {
     expect([...albumRecordings(album)].sort()).toEqual(kinds);
+  });
+
+  it('says nothing about a single or an EP named after the song: it carries the original beside the other versions', () => {
+    // Alicia Keys' "Girl on Fire" at rank 878,990 is the original mix, on the remix EP; Carly Pearce's is on the single named for its live take.
+    expect([...albumRecordings('Girl on Fire (Remixes) - EP', 'girl on fire')]).toEqual([]);
+    expect([...albumRecordings('I Hope You’re Happy Now (Live)', 'i hope you’re happy now')]).toEqual([]);
+    expect([...albumRecordings('Girl on Fire (Remixes) - EP', 'empire state of mind')]).toEqual(['remix']);
+    expect(pick('Alicia Keys', 'Girl On Fire', [dza(61542462, 878_990, 'Alicia Keys', 'Girl on Fire', 'Girl on Fire (Remixes) - EP')])).toBe(61542462);
   });
 
   it.each([
@@ -314,6 +329,8 @@ describe('albumRecordings (QWW-67)', () => {
     'Stripped',
     'Undercover',
     'Legend - The Best Of Bob Marley And The Wailers',
+    'The Best Of Billy Ray Cyrus: Cover To Cover',
+    'The Grenade Sessions',
   ])('%s says nothing against its tracks', (album) => {
     expect([...albumRecordings(album)]).toEqual([]);
   });
@@ -370,8 +387,9 @@ describe('other names for a credit (QWW-67)', () => {
     ['imagine dragons x j.i.d.', ['imagine dragons', 'j.i.d.']],
     ['bryan adams, rod stewart & sting', ['bryan adams', 'rod stewart', 'sting']],
     ['enrique iglesias with usher', ['enrique iglesias', 'usher']],
-    ['bob marley & the wailers', []],
-    ['florence and the machine', []],
+    ['ariana grande & the weeknd', ['ariana grande', 'the weeknd']],
+    // A band's own name splits too: its acts are tried only after the whole credit.
+    ['bob marley & the wailers', ['bob marley', 'the wailers']],
     ['adele', []],
   ])('creditedActs(%s) is %j', (credit, acts) => {
     expect(creditedActs(credit)).toEqual(acts);
@@ -522,6 +540,52 @@ describe('findDeezerTrack (QWW-67)', () => {
     expect(found.route).toBe('hand');
     expect(client.calls).toEqual(['track 65759979']);
     expect(HAND_CHECKED.get(songKey('Green Day', 'Time Of Your Life'))).toBe(778429);
+  });
+
+  it('Too Close: a copy on a compilation ranked far below the song does not settle it; the artist\'s top tracks have the album\'s', async () => {
+    const client = fakeClient({
+      search: {
+        'alex clare too close': [
+          dza(500090262, 357_456, 'Alex Clare', 'Too Close', 'Three Days at Greenmount', '(Acoustic)'),
+          dza(70042416, 1_806, 'Alex Clare', 'Too Close', 'Ultra Dance 14'),
+        ],
+      },
+      artists: { 'alex clare': [{ id: 1021165, name: 'Alex Clare', nb_fan: 60_000 }] },
+      top: { 1021165: [dza(1762965567, 353_172, 'Alex Clare', 'Too Close', 'The Lateness Of The Hour'), dza(32143941, 143_659, 'Alex Clare', 'Too Close', 'Too Close (Unplugged)', '(Unplugged)')] },
+    });
+    const found = await findDeezerTrack(client, 'Alex Clare', 'Too Close');
+    expect(found.hit?.deezerId).toBe(1762965567);
+    expect(found.route).toBe('artist');
+  });
+
+  it('Break Free: searches again naming the featured act when the plain search has only a live take and an a cappella', async () => {
+    expect(everyActQuery('Ariana Grande feat. Zedd', 'Break Free')).toBe('ariana grande zedd break free');
+    expect(everyActQuery('Luis Fonsi', 'Despacito (feat. Justin Bieber)')).toBe('luis fonsi justin bieber despacito');
+    expect(everyActQuery('Ariana Grande & The Weeknd', 'Love Me Harder')).toBeNull(); // the plain search names both already
+    expect(everyActQuery('Adele', 'Hello')).toBeNull();
+    const client = fakeClient({
+      search: {
+        'ariana grande break free': [
+          dza(841310422, 408_633, 'Ariana Grande', 'break free (live)', 'k bye for now (swt live)', '(live)'),
+          dza(2958872101, 195_507, 'Ariana Grande', 'Break Free (A Cappella)', 'Break Free', '(A Cappella)'),
+        ],
+        'ariana grande zedd break free': [dza(2948131691, 626_344, 'Ariana Grande', 'Break Free', 'My Everything (Tenth Anniversary Edition)')],
+      },
+    });
+    const found = await findDeezerTrack(client, 'Ariana Grande feat. Zedd', 'Break Free');
+    expect(found.hit?.deezerId).toBe(2948131691);
+    expect(found.route).toBe('acts');
+    expect(client.calls).toEqual(['search ariana grande break free', 'search ariana grande zedd break free']);
+  });
+
+  it('The Buggles: the artist lookup takes "The Buggles" for "Buggles", as a credit match does', async () => {
+    const client = fakeClient({
+      artists: { buggles: [{ id: 149264, name: 'The Buggles', nb_fan: 19_247 }, { id: 994, name: 'The Bangles', nb_fan: 118_371 }] },
+      top: { 149264: [dza(3129436, 600_000, 'The Buggles', 'Video Killed The Radio Star', 'The Age Of Plastic')] },
+    });
+    const found = await findDeezerTrack(client, 'Buggles', 'Video Killed The Radio Star');
+    expect(found.hit?.deezerId).toBe(3129436);
+    expect(client.calls).toEqual(['search buggles video killed the radio star', 'artists buggles', 'top 149264']);
   });
 
   it('is a miss when no route finds the song', async () => {

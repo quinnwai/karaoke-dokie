@@ -147,13 +147,15 @@ export const ARTIST_ALIASES: ReadonlyMap<string, string> = new Map([
 
 /** A credit as a key reads it, then as `loose` reads that: the form names are compared in. */
 const creditOf = (name: string) => loose(songKey(name, '').split('|')[0] ?? '');
+/** A title as a key reads it: lower case, without tags. Everything after the key's "|", since a title can hold one. */
+const titlePart = (title: string) => songKey('', title).slice(1);
 
 /**
  * What joins acts in one credit: "U2 and Green Day", "Sean Kingston / Justin Bieber", "Kid Cudi vs. Crookers", "Imagine
- * Dragons x J.I.D.", "Bryan Adams, Rod Stewart & Sting". "And" or "&" before "the" joins a band's own name ("Florence
- * and the Machine", "Bob Marley & The Wailers"), so it is not split there.
+ * Dragons x J.I.D.", "Bryan Adams, Rod Stewart & Sting", "Ariana Grande & The Weeknd". A band's own name splits too
+ * ("Bob Marley & The Wailers"); its acts are only tried after the whole credit.
  */
-const JOIN = /\s*(?:,|\/|\bvs\.?(?=\s)|\bwith\b|\bx\b|(?:&|\+|\band\b)(?!\s+the\b))\s*/;
+const JOIN = /\s*(?:,|\/|\bvs\.?(?=\s)|\bwith\b|\bx\b|&|\+|\band\b)\s*/;
 
 /** The acts a credit names when it names more than one, each as a key part: "u2 and green day" is ["u2", "green day"]. */
 export function creditedActs(credit: string): string[] {
@@ -205,14 +207,15 @@ const RE_RECORDED = /\b(?:19|20)\d\d version\b|\btaylor's version\b|\bre-?record
 /** A take for a radio show or a streaming service, sung live in a studio (QWW-67): "(Recorded at Deezer, Sao Paulo)", "Deezer Session". */
 const SESSION = /\brecorded (?:at|live|in)\b|\b(?:deezer|spotify|bbc|live|peel|tiny desk|mtv|kexp|apple music|amazon music|vevo|youtube) sessions?\b/;
 /**
- * An album title that says its tracks are live, besides a tag (QWW-67): "MTV Unplugged In New York", "Live in São Paulo",
- * "Oral Fixation (20th) and Pies Descalzos (30th) LIVE", "Live 1975-85". A title that only starts with the word, like
- * "Live Through This", is a studio album.
+ * An album title, its tags left out, that says its tracks are live (QWW-67): "MTV Unplugged In New York", "Live at Wembley",
+ * "Oral Fixation and Pies Descalzos LIVE", "Live 1975-85", "Caetano e Bethânia Ao Vivo". A title that only starts with the
+ * word, like "Live Through This", is a studio album.
  */
-const LIVE_ALBUM = /\bunplugged\b|\blive (?:at|in|from|on|aus|au|en)\b|(?:^|\s)live!?$|^live\b(?=\s*(?:$|[\d(:[–-]))|\bin concert\b/;
-/** An album of remixes, karaoke tracks, covers or instrumentals by its title (QWW-67): "The Remixes", "Karaoke Hits", "Covers". */
+const LIVE_ALBUM =
+  /\bunplugged\b|\blive (?:at|in|from|on|aus|au|en)\b|(?:^|\s)live!?$|^live\b(?=\s*(?:$|[\d(:[–-]))|\bin concert\b|\b(?:ao|en|dal) vivo\b|\ben direct[eo]?\b/;
+/** An album of remixes, or of karaoke or instrumental tracks, by its title (QWW-67): "The Remixes", "Karaoke Hits". */
 const REMIX_ALBUM = /\bre-?mix(?:e[sd])?\b|\bmixes\b/;
-const COVER_ALBUM = /\bkaraoke\b|\binstrumentals?\b|\bcovers\b/;
+const KARAOKE_ALBUM = /\bkaraoke\b|\binstrumentals?\b/;
 /** Words that only say how the original recording was released: "(Single Version)", "(Radio Edit)", "(Original Mix)". */
 const RELEASE_WORDS = new Set(
   'single album radio original main lp ep 7 12 inch mono stereo explicit clean edited edit uncensored censored uncut extended short long full deluxe bonus track us uk digital official audio video film movie soundtrack ost mix mixed version ver the a'.split(
@@ -247,7 +250,9 @@ function recordingOf(tag: string, from: 'ours' | 'deezer' | 'deezer-version' = '
   if (kind === 'live' || ((kind !== undefined || from !== 'ours') && (/\blive\b/.test(t) || SESSION.test(t)))) return 'live';
   if (OTHER_TAKE.test(t)) return 'version';
   if (kind === undefined) {
-    // Not a tag the list strips. With a version word it is one title.ts keeps on purpose, a language version or a part.
+    // Not a tag the list strips. Release words alone ("(Album Version Explicit)", QWW-67) still name the original; with
+    // another word beside a version word it is one title.ts keeps on purpose, a language version or a part.
+    if (t.split(/[^\p{L}\p{N}']+/u).filter(Boolean).every((w) => RELEASE_WORDS.has(w))) return null;
     if (/\b(?:version|ver|edit|mix)\b/.test(t)) return 'other-song';
     return from === 'deezer-version' ? 'version' : null;
   }
@@ -271,30 +276,34 @@ export function recordingsOf(title: string): Set<Recording> {
 
 /**
  * The kinds of recording an album's title says its tracks are (QWW-67): a tag as in a track's title ("(Live)", "(Acoustic
- * Version)", "(Taylor's Version)"), or the whole title ("MTV Unplugged In New York", "Deezer Session", "The Remixes").
- * A tag that only says which release it is ("(Deluxe Edition)", "(Original Motion Picture Soundtrack)", "(International
- * Version)") names no kind: an album is reissued far more often than a song is re-recorded.
+ * Version)", "(Taylor's Version)"), or the title itself ("MTV Unplugged In New York", "Deezer Session", "The Remixes",
+ * "Karaoke Hits"). A tag that only says which release it is ("(Deluxe Edition)", "(Original Motion Picture Soundtrack)",
+ * "(International Version)") names no kind: an album is reissued far more often than a song is re-recorded. A single or
+ * an EP named after the song (`song`, a title as a key reads it) says nothing: it carries several versions, each named in
+ * its own title, so "Girl on Fire (Remixes) - EP" and "I Hope You’re Happy Now (Live)" hold the original too.
  */
-export function albumRecordings(album: string): Set<Recording> {
-  const t = album.normalize('NFKC').toLowerCase().replace(/[’‘`´]/g, "'");
+export function albumRecordings(album: string, song = ''): Set<Recording> {
   const kinds = new Set<Recording>();
+  const base = titlePart(album); // lower case, without tags
+  if (song && loose(base) === loose(song)) return kinds;
   for (const tag of tagsOf(album)) {
     const kind = recordingOf(tag, 'deezer');
     if (kind === null || kind === 'other-song') continue;
-    if (kind !== 'version' || OTHER_TAKE.test(tag.toLowerCase()) || RE_RECORDED.test(tag.toLowerCase().replace(/[’‘`´]/g, "'"))) kinds.add(kind);
+    const t = tag.normalize('NFKC').toLowerCase().replace(/[’‘`´]/g, "'");
+    if (kind !== 'version' || OTHER_TAKE.test(t) || RE_RECORDED.test(t)) kinds.add(kind);
   }
-  if (LIVE_ALBUM.test(t) || SESSION.test(t)) kinds.add('live');
-  if (REMIX_ALBUM.test(t)) kinds.add('remix');
-  if (SPED_UP.test(t)) kinds.add('sped-up');
-  if (COVER.test(t) || COVER_ALBUM.test(t)) kinds.add('cover');
+  if (LIVE_ALBUM.test(base) || SESSION.test(base)) kinds.add('live');
+  if (REMIX_ALBUM.test(base)) kinds.add('remix');
+  if (SPED_UP.test(base)) kinds.add('sped-up');
+  if (KARAOKE_ALBUM.test(base)) kinds.add('cover');
   return kinds;
 }
 
 /**
  * The kinds of recording a Deezer track is. Its version part (title_version) is read as a version whatever it says, and its
- * album's title counts as its own tags do (QWW-67).
+ * album's title counts as its own tags do (QWW-67) unless the album is named after the song (`song`, as a key reads it).
  */
-function trackRecordings(track: Pick<DeezerTrack, 'title' | 'title_short' | 'title_version' | 'album'>): Set<Recording> {
+function trackRecordings(track: Pick<DeezerTrack, 'title' | 'title_short' | 'title_version' | 'album'>, song = ''): Set<Recording> {
   const version = track.title_version?.trim() ? track.title_version : '';
   const title = version ? (track.title_short ?? track.title.replace(version, '')) : track.title;
   // A version part with no brackets ("Live") is one tag.
@@ -302,7 +311,7 @@ function trackRecordings(track: Pick<DeezerTrack, 'title' | 'title_short' | 'tit
   return new Set([
     ...tagsOf(title).flatMap((tag) => recordingOf(tag, 'deezer') ?? []),
     ...versionTags.flatMap((tag) => recordingOf(tag, 'deezer-version') ?? []),
-    ...(track.album?.title ? albumRecordings(track.album.title) : []),
+    ...(track.album?.title ? albumRecordings(track.album.title, song) : []),
   ]);
 }
 
@@ -381,7 +390,7 @@ function bestTrack(key: string, results: DeezerTrack[], title: string): { track:
   for (const t of results) {
     const credit = typeof t.rank === 'number' ? keyMatch(key, t) : null;
     if (credit === null) continue;
-    const kinds = [...trackRecordings(t)];
+    const kinds = [...trackRecordings(t, key.split('|')[1])];
     if (kinds.some((k) => NEVER.has(k) && !named.has(k))) continue;
     const tier = kinds.length === 0 ? 0 : kinds.every((k) => named.has(k)) ? 1 : 2;
     const order = [credit, tier, -t.rank];
@@ -411,8 +420,11 @@ export const HAND_CHECKED: ReadonlyMap<string, number> = new Map([
   ['green day|time of your life', 778429],
 ]);
 
-/** Where a lookup found its track: the plain search, the artist's top tracks, a search on the title alone, or a hand check. */
-export type DeezerRoute = 'search' | 'artist' | 'title' | 'hand';
+/**
+ * Where a lookup found its track: the plain search, a search naming every act (`acts`), the artist's top tracks, a search
+ * on the title alone, or a hand check.
+ */
+export type DeezerRoute = 'search' | 'acts' | 'artist' | 'title' | 'hand';
 
 /** What findDeezerTrack found, and where; `calls` counts the requests it made. */
 export interface DeezerLookup {
@@ -421,19 +433,43 @@ export interface DeezerLookup {
   calls: number;
 }
 
-/** Of the artists a search found, the one named `name` (as a credit reads) with the most fans. */
+/**
+ * The search's original settles a lookup only when it ranks near the best-ranked track of the song under the artist's
+ * own credit, of any version (QWW-67). A copy on a compilation can rank under 1% of that: "Too Close" on "Ultra Dance 14"
+ * is 1,806 against 357,456 for the acoustic take, and Alex Clare's top tracks have the album's at 353,172.
+ */
+const SETTLED_SHARE = 0.25;
+
+/** Of the artists a search found, the one named `name` (the same act as a credit reads it, "The Buggles" for "Buggles") with the most fans. */
 function namedArtist(artists: DeezerArtist[], name: string): DeezerArtist | undefined {
   const wanted = creditOf(name);
-  return artists.filter((a) => creditOf(a.name) === wanted).sort((a, b) => (b.nb_fan ?? 0) - (a.nb_fan ?? 0))[0];
+  return artists.filter((a) => artistMatch(wanted, creditOf(a.name)) === 'exact').sort((a, b) => (b.nb_fan ?? 0) - (a.nb_fan ?? 0))[0];
+}
+
+/** Words that join acts, left out when comparing two searches. */
+const JOIN_WORDS = /\b(?:and|feat|ft|featuring|with|vs|x)\b/g;
+const bare = (q: string) => loose(q.toLowerCase()).replace(JOIN_WORDS, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * The search with every act the credit and the title name (QWW-67), or null when it is the plain search: "Ariana Grande
+ * feat. Zedd" and "Break Free" is "ariana grande zedd break free". A key leaves the featured acts out, and Deezer's
+ * search often finds the original only with them: the plain search has "Break Free" as a live take and an a cappella only.
+ */
+export function everyActQuery(artist: string, title: string): string | null {
+  const featured = [...title.matchAll(/[([](?:feat|ft|featuring|with)\.?\s+([^)\]]+)[)\]]/gi)].map((m) => m[1]!);
+  const acts = `${artist} ${featured.join(' ')}`.toLowerCase().replace(/\b(?:feat|ft|featuring)\b\.?/g, ' ');
+  const query = `${acts} ${titlePart(title)}`.replace(/\s+/g, ' ').trim();
+  return bare(query) === bare(deezerQuery(artist, title)) ? null : query;
 }
 
 /**
  * The song's Deezer track (QWW-67). First the plain search, "artist title" (with Deezer's name for the act, ARTIST_ALIASES).
- * When that has no original recording under the artist's own credit, the artist's top 100 tracks (the artist named exactly
- * so with the most fans; then each act of a shared credit), and then a search on the title alone, until one turns up the
- * original. pickDeezerHit's rules decide among everything found, so a fallback can only replace the search's choice with a
- * better one. A song in HAND_CHECKED is read by its id. With `releaseDate`, the chosen track is read by its id too, for
- * its release date (one call more).
+ * When that has no original recording under the artist's own credit, or only a copy ranked far below the song's best
+ * (SETTLED_SHARE): a search naming every act (everyActQuery), the artist's top 100 tracks (the artist with the name and the
+ * most fans; then each act of a shared credit), then a search on the title alone, until one turns up the original.
+ * pickDeezerHit's rules decide among everything found, so a fallback can only replace the search's choice with a better
+ * one. A song in HAND_CHECKED is read by its id. With `releaseDate`, the chosen track is read by its id too, for its
+ * release date (one call more).
  */
 export async function findDeezerTrack(
   client: Pick<DeezerClient, 'search' | 'artists' | 'artistTop' | 'track'>,
@@ -456,13 +492,17 @@ export async function findDeezerTrack(
     for (const t of tracks) if (!found.has(t.id)) found.set(t.id, { track: t, route });
   };
   const best = () => bestTrack(key, [...found.values()].map((f) => f.track), title);
-  /** An original recording under the artist's own credit: enough, so no more calls. */
+  /** An original recording under the artist's own credit, ranked near the song's best: enough, so no more calls. */
   const settled = () => {
     const b = best();
-    return b !== undefined && b.order[0] === 0 && b.order[1] === 0;
+    if (b === undefined || b.order[0] !== 0 || b.order[1] !== 0) return false;
+    const top = Math.max(...[...found.values()].map(({ track }) => (keyMatch(key, track) === 0 ? track.rank : 0)));
+    return b.track.rank >= SETTLED_SHARE * top;
   };
 
   add(await client.search(deezerQuery(alias ?? artist, title)), 'search');
+  const acts = everyActQuery(alias ?? artist, title);
+  if (!settled() && acts !== null) add(await client.search(acts), 'acts');
   if (!settled()) {
     for (const name of alias ? [alias] : [credit, ...creditedActs(credit)]) {
       calls++;
