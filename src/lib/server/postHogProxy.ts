@@ -6,8 +6,8 @@
 // The browser's cookies do arrive here (the call is same-origin), so never log this request's headers.
 //
 // It is not a relay either: it answers only the calls posthog-js makes with our settings, to our own project, and 404 to
-// everything else. PostHog's hosts also serve source maps of several MB and a REST API, which a free relay on our domain
-// would hand to anyone at our cost.
+// everything else. PostHog's hosts also serve source maps and whole-library bundles of several hundred KB to MB and a REST
+// API, which a free relay on our domain would hand to anyone at our cost.
 
 import { fromProxyPath, POSTHOG_PROXY_PATH } from '../postHogProxy';
 import type { PostHogUpstream } from './config';
@@ -33,15 +33,22 @@ const TYPES: [RegExp, string][] = [
 const PLAIN = 'text/plain; charset=utf-8';
 /** Long enough for PostHog to start answering a replay chunk, short enough to stay under Vercel's 10 s function default and answer 502 ourselves. */
 const TIMEOUT_MS = 8_000;
-/** Vercel refuses a function's request body above 4.5 MB; so do we, anywhere else. */
+/** Vercel refuses a function's request body above 4.5 MB; so do we, counted as it arrives, wherever this runs. */
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 /** What posthog-js POSTs to PostHog's ingest host: events, replay and feature flags (and the newer capture path for events). */
 const POST_PATH = /^\/(e|s|flags|i\/v0\/e)\/?$/;
+/**
+ * The scripts posthog-js loads from PostHog's asset host with our settings: the replay recorder (the project's config says
+ * which of these it is) and web vitals (a project setting; our beforeSend drops what they make). Its other lazy scripts
+ * (surveys, conversations, dead clicks, exceptions...) are switched off in postHogConfig, and its whole-library bundles
+ * (array.full.js and the like, 400 to 800 KB) are never fetched, so none of those is served from here.
+ */
+export const SCRIPT_NAMES = ['posthog-recorder', 'lazy-recorder', 'recorder-v2', 'recorder', 'web-vitals', 'web-vitals-with-attribution', 'web-vitals-soft-navs', 'web-vitals-with-attribution-soft-navs'];
 /** A version number, as in PostHog's /static/1.447.7/ folder. */
 const VERSION = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`;
-/** The scripts it loads from PostHog's asset host: the recorder and the like, a .js file and never a source map. */
-const SCRIPT_PATH = new RegExp(String.raw`^/static/(?:${VERSION}/)?[A-Za-z0-9_-][A-Za-z0-9._-]*\.js$`);
+/** /static/<version>/<name>.js, or the older /static/<name>.js?v=<version>. */
+const SCRIPT_PATH = new RegExp(String.raw`^/static/(?:${VERSION}/)?(?:${SCRIPT_NAMES.join('|')})\.js$`);
 
 /** The path PostHog is asked for, and which of its hosts has it; null when the screen has no business asking. */
 function route(method: string, path: string, upstream: PostHogUpstream): { host: string; path: string } | null {
@@ -49,6 +56,31 @@ function route(method: string, path: string, upstream: PostHogUpstream): { host:
   // The project's config, ours alone: another project's would be a script of theirs served from our origin.
   if (path === `/array/${upstream.key}/config` || path === `/array/${upstream.key}/config.js`) return { host: upstream.assets, path };
   return SCRIPT_PATH.test(path) ? { host: upstream.assets, path } : null;
+}
+
+/** The request's body, or null once it is over `max` bytes: counted as it arrives, so a body with no length cannot fill memory first. */
+async function readBody(req: Request, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!req.body) return new Uint8Array(0);
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return body;
 }
 
 export async function proxyToPostHog(
@@ -78,11 +110,12 @@ export async function proxyToPostHog(
 
   let answer: Response;
   try {
-    let body: ArrayBuffer | undefined;
+    let body: Uint8Array<ArrayBuffer> | undefined;
     if (req.method === 'POST') {
       if (Number(req.headers.get('content-length')) > MAX_BODY_BYTES) return new Response(null, { status: 413 });
-      body = await req.arrayBuffer();
-      if (body.byteLength > MAX_BODY_BYTES) return new Response(null, { status: 413 });
+      const read = await readBody(req, MAX_BODY_BYTES);
+      if (!read) return new Response(null, { status: 413 });
+      body = read;
     }
     // Not followed: a redirect would send the visitor's address and browser name to wherever it points.
     answer = await doFetch(target, { method: req.method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });

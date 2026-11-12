@@ -459,12 +459,14 @@ be switched off (no key) and nothing else changes. What the sink keeps to:
   blocks its retries and `posthog-recorder.js`), and a tester with one sent nothing from production. So `api_host` is `POSTHOG_PROXY_PATH` (`/roadie`, in `src/lib/postHogProxy.ts`),
   `ui_host` is PostHog's own app, and `app/roadie/[...path]/route.ts` forwards to PostHog
   (`src/lib/server/postHogProxy.ts`): events, replay and flags (POST `/e/`, `/s/`, `/flags/`) to its
-  ingest host, the recorder and the like (GET `/static/<version>/<name>.js`) and our own project's config
-  (GET `/array/<our key>/config` and `.js`) to its asset host (`us-assets.i.posthog.com`). Both hosts
-  come from `NEXT_PUBLIC_POSTHOG_HOST`, never from the request. It is not a relay: everything else is a
-  404, because PostHog's hosts also serve source maps of several MB and a REST API, and a free relay on
-  our domain would hand them to anyone at our cost. (A new posthog-js that asks for another path needs
-  it added to `POST_PATH` or `SCRIPT_PATH`; the e2e shows which call fails.)
+  ingest host, the replay recorder and web vitals scripts (GET `/static/<version>/<name>.js`, the names in
+  `SCRIPT_NAMES`) and our own project's config (GET `/array/<our key>/config` and `.js`) to its asset host
+  (`us-assets.i.posthog.com`). Both hosts come from `NEXT_PUBLIC_POSTHOG_HOST`, never from the request.
+  It is not a relay: everything else is a 404, because PostHog's hosts also serve source maps and
+  whole-library bundles of several hundred KB to MB and a REST API, and a free relay on our domain would
+  hand them to anyone at our cost. A new posthog-js that asks for another path needs it added to
+  `POST_PATH` or `SCRIPT_NAMES`; a test walks the installed posthog-js's own file list, so an upgrade that
+  adds or renames a script shows up there and not as lost analytics.
   - **The path's name.** PostHog's suggested `/ingest` has rules on the lists (uBlock's privacy list and
     AdGuard match `/ingest/...ip=`; this posthog-js sends no `ip=`, so they miss today, but it is the
     name lists learn first). `/roadie` matched none of EasyList, EasyPrivacy, uBlock filters and
@@ -491,7 +493,8 @@ be switched off (no key) and nothing else changes. What the sink keeps to:
     retries and our log carry on. A 502 also logs a `[posthog] could not forward ...` line (the host and
     why, never a header), the one sign of a host that is mistyped in the environment. A redirect from
     PostHog is not followed (502). PostHog off here: 404. Another site's page calling the route (it says
-    `Sec-Fetch-Site: cross-site`): 403. A body above 4 MB, which is Vercel's limit as well: 413. Any
+    `Sec-Fetch-Site: cross-site`; a courtesy, since only browsers send it): 403. A body above 4 MB, which
+    is Vercel's limit as well and is counted as it arrives, so one with no length cannot fill memory: 413. Any
     method but GET and POST that reaches the route: 405 (Next answers OPTIONS itself).
     `next.config.ts` sets `skipTrailingSlashRedirect` because PostHog's paths end in a slash (`/e/`,
     `/s/`); the site's own pages then serve `/credits/` as they serve `/credits`, with no redirect.

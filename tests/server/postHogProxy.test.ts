@@ -3,13 +3,13 @@
 // another host, and the route answers only the calls posthog-js makes, to our own project (it is not a free relay for
 // PostHog's source maps and REST API). The rest is plumbing: which of PostHog's two hosts gets which path, and what happens
 // when it is down.
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as proxyRoute from '../../app/roadie/[...path]/route';
 import { fromProxyPath, POSTHOG_PROXY_PATH, toProxyPath } from '../../src/lib/postHogProxy';
 import type { PostHogUpstream } from '../../src/lib/server/config';
-import { proxyToPostHog } from '../../src/lib/server/postHogProxy';
+import { proxyToPostHog, SCRIPT_NAMES } from '../../src/lib/server/postHogProxy';
 
 const KEY = 'phc_testtoken';
 const UPSTREAM: PostHogUpstream = { api: 'https://us.i.posthog.com', assets: 'https://us-assets.i.posthog.com', key: KEY };
@@ -62,7 +62,7 @@ describe('proxyToPostHog: where each path goes', () => {
     ]);
     for (const c of calls) {
       expect(c.init.method).toBe('POST');
-      expect(new Uint8Array(c.init.body as ArrayBuffer)).toEqual(body);
+      expect(new Uint8Array(c.init.body as Uint8Array)).toEqual(body);
       expect(sentHeaders(c.init)['content-type']).toBe('text/plain');
     }
   });
@@ -110,6 +110,13 @@ describe('proxyToPostHog: it is not a relay', () => {
     for (const p of [
       '/static/1.447.7/array.full.js.map', // 3 MB of source map for a 100-byte request
       '/static/1.447.7/recorder.js.map',
+      '/static/1.447.7/array.full.js', // the whole library, 726 KB, which posthog-js never fetches from here
+      '/static/1.447.7/module.full.js',
+      '/static/1.447.7/all-external-dependencies.js',
+      '/static/1.447.7/surveys.js', // switched off in postHogConfig
+      '/static/1.447.7/recorder.js/x',
+      '/static/1.447.7/xrecorder.js',
+      '/static/1.447.7/recorder.jsx',
       '/static/1.447.7/', // a folder, not a script
       '/static/1.447.7/sub/dir.js',
       '/static/notaversion/x/y.js',
@@ -139,6 +146,44 @@ describe('proxyToPostHog: it is not a relay', () => {
     expect(doFetch).not.toHaveBeenCalled();
     expect((await proxyToPostHog(request(`${POSTHOG_PROXY_PATH}/array/${KEY}/config.js`), UPSTREAM, doFetch)).status).toBe(200);
     expect(calls).toHaveLength(1);
+  });
+
+  it('serves exactly the scripts of posthog-js\'s own manifest that it loads with our settings, and none of its whole-library bundles', async () => {
+    // The installed library's own list of files: every one is asked for, and only the recorder and web vitals come through.
+    // So a new posthog-js that loads another script, or renames one of these, shows up here and not as lost analytics.
+    const manifest = JSON.parse(readFileSync('node_modules/posthog-js/dist/integrity.json', 'utf8')) as { version: string; files: Record<string, unknown> };
+    const scripts = Object.keys(manifest.files).filter((file) => file.endsWith('.js'));
+    expect(scripts.length).toBeGreaterThan(20);
+    const { doFetch } = fakeFetch();
+    const served: string[] = [];
+    for (const file of scripts) {
+      const res = await proxyToPostHog(request(`${POSTHOG_PROXY_PATH}/static/${manifest.version}/${file}`), UPSTREAM, doFetch);
+      expect([200, 404], file).toContain(res.status);
+      if (res.status === 200) served.push(file);
+    }
+    expect(served.sort()).toEqual(SCRIPT_NAMES.map((name) => `${name}.js`).sort());
+  });
+
+  it('stops reading a body that has no length once it is over 4 MB, instead of holding all of it first', async () => {
+    const { doFetch } = fakeFetch();
+    let pulled = 0;
+    let cancelled = false;
+    let chunks = 64; // 64 MB in all, which a reader that holds on to everything would take
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        if (chunks-- > 0) controller.enqueue(new Uint8Array(1024 * 1024));
+        else controller.close();
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const req = new Request(`${SITE}${POSTHOG_PROXY_PATH}/s/`, { method: 'POST', body: stream, duplex: 'half' } as RequestInit);
+    expect((await proxyToPostHog(req, UPSTREAM, doFetch)).status).toBe(413);
+    expect(pulled).toBeLessThan(12); // 5 MB, give or take what the stream reads ahead; not 64
+    expect(cancelled).toBe(true);
+    expect(doFetch).not.toHaveBeenCalled();
   });
 
   it('keeps each method to its own paths: GET fetches scripts and config, POST sends events, and not the other way round', async () => {
@@ -178,6 +223,8 @@ describe('proxyToPostHog: it is not a relay', () => {
   });
 
   it('can only ever call the two hosts it was given, whatever the path or query says', async () => {
+    // The allowlist turns most of these away before any call is made; the rest only carry the trick in a query, which cannot
+    // change the host either. The target is also built on a fixed origin, never resolved against it, as a second line.
     const { doFetch, calls } = fakeFetch();
     const sneaky = [
       '//evil.example.com/steal',
