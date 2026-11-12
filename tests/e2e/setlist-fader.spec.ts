@@ -278,6 +278,8 @@ for (const width of WIDTHS) {
 
         // Off again by its ✕, then a drag from 16 px above the knob.
         await checkResetTap(page, finger, 'tempo', at);
+        // A finger's presses on the fader are held for 400 ms after its tap on the ✕ (the second tap of a double tap), so this drag comes after the moment.
+        await page.waitForTimeout(450);
         t = await thumb(page, 'tempo');
         const from = { x: t.x, y: t.y - 16 };
         await finger.drag(line(from, { x: t.x + 60, y: from.y + 5 }));

@@ -418,6 +418,19 @@ describe('dragging the handle', () => {
     expect(rackHeight()).toBe('164px');
   });
 
+  it('swallows the click a drag ends in, and only that one: the first Enter or screen reader\'s activation after a touch drag, which has no click of its own, toggles (the gate on 4e324f5)', async () => {
+    const { onTuner } = draw([rankedSong('a')], { tuner: tunerOf({ mini: true }) });
+    const handle = el(SEL.handle);
+    pointer('pointerDown', handle, 300);
+    pointer('pointerMove', handle, 220);
+    pointer('pointerUp', handle, 220);
+    expect(onTuner).toHaveBeenCalledTimes(1); // the drag's own
+    // No click came (a finger's drag has none), a moment later the key does:
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    fireEvent.click(handle, { detail: 0 });
+    expect(onTuner).toHaveBeenCalledTimes(2);
+  });
+
   it('swallows the click that follows a drag, once', () => {
     const { onTuner } = draw([rankedSong('a')], { tuner: tunerOf({ mini: true }) });
     const handle = el(SEL.handle);
@@ -1047,6 +1060,52 @@ describe('moving a gear', () => {
 });
 
 // ---- Era ----
+
+describe('the Era panel after a finger\'s tap on its ✕ (the gate on 4e324f5)', () => {
+  const eraButton = (era: EraId) => el(`${SEL.eraPanel} [data-era="${era}"]`);
+  /** A finger's tap: a press at the box's middle, then the click (`detail` 1). */
+  const tap = (target: Element, kind: 'touch' | 'mouse' = 'touch') => {
+    target.getBoundingClientRect = () => new DOMRect(100, 100, 44, 52);
+    const event = createEvent.pointerDown(target);
+    Object.defineProperty(event, 'clientX', { value: 120 });
+    Object.defineProperty(event, 'clientY', { value: 120 });
+    Object.defineProperty(event, 'pointerType', { value: kind });
+    fireEvent(target, event);
+    fireEvent.click(target, { detail: 1 });
+  };
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(2_000_000);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('holds the era buttons for 400 ms: the second tap of a double tap on the ✕ lands on the \'20s, which turned Era back on with only the \'20s picked', () => {
+    const onTuner = vi.fn<(action: TunerAction) => void>();
+    render(<Tuned initial={tunerOf({ off: [], eras: ['s80'] })} onTuner={onTuner} />);
+    tap(el('button[data-reset="era"]'));
+    expect(calls(onTuner)).toEqual([{ type: 'reset', gear: 'era' }]);
+    vi.setSystemTime(2_000_000 + 150);
+    tap(eraButton('s20'));
+    vi.setSystemTime(2_000_000 + 399);
+    tap(eraButton('s20'));
+    expect(calls(onTuner)).toEqual([{ type: 'reset', gear: 'era' }]);
+    // Each tap it held put the moment off again; after 400 ms of quiet a tap is a choice.
+    vi.setSystemTime(2_000_000 + 399 + 401);
+    tap(eraButton('s20'));
+    expect(calls(onTuner)).toEqual([{ type: 'reset', gear: 'era' }, { type: 'era', era: 's20' }]);
+  });
+
+  it('is a finger\'s: a mouse click on the ✕ and one on an era right after are two choices, and so is a key', () => {
+    const onTuner = vi.fn<(action: TunerAction) => void>();
+    render(<Tuned initial={tunerOf({ off: [], eras: ['s80'] })} onTuner={onTuner} />);
+    tap(el('button[data-reset="era"]'), 'mouse');
+    vi.setSystemTime(2_000_000 + 100);
+    tap(eraButton('s20'), 'mouse');
+    expect(calls(onTuner)).toHaveLength(2);
+  });
+});
 
 describe('the Era panel', () => {
   const buttons = () => all(`${SEL.eraPanel} [data-era]`);

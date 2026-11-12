@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { gearColor } from '../../lib/setlist/art';
-import { dragStanding, faderValue, liftsOnTheFader, touchIntent } from '../../lib/setlist/fader';
+import { faderValue, liftsOnTheFader, takesBack, touchIntent } from '../../lib/setlist/fader';
 import { GEAR_META, RESET_TITLE } from '../../lib/setlist/gears';
-import { pressWasOn, trackPresses } from '../../lib/setlist/rawPress';
+import { TAP_GUARD_MS } from '../../lib/client/tapGuard';
+import { pressWasOn, pressWasTouch, trackPresses } from '../../lib/setlist/rawPress';
 import { neonVars } from '../../lib/setlist/sheet';
 import type { GearId } from '../../lib/setlist/types';
 import { GearArt } from './GearArt';
@@ -52,8 +53,9 @@ interface Press {
   touch: boolean;
   /** It is on the fader: the gear is on and the value follows it. */
   live: boolean;
-  /** The drag it was called stands for good (dragStanding): it follows the finger wherever it goes now. Until then it can be taken back. */
-  final: boolean;
+  /** The farthest the finger has been from where it landed, to either side and up or down: a drag that is called can be taken back for them (takesBack). */
+  reachX: number;
+  reachY: number;
   /** It went up or down, so the browser takes it for a scroll: the fader leaves it alone. */
   scrolling: boolean;
   /** The last value it sent, so a drag sends each step once. */
@@ -90,6 +92,9 @@ export function GearStrip(props: GearStripProps) {
   const title = useRef<HTMLLabelElement>(null);
   // A mouse or pen press on the fader has not yet given the slider the focus its click will give it (see `afterClick`).
   const focusAfterClick = useRef(false);
+  // A finger's tap on the ✕ turns the gear off and the ✕ goes, so the second tap of a double tap lands where it was, a few px above the fader's area or a little lower,
+  // in it: a finger's presses on the fader are held for a moment after, and an ignored one puts the moment off again (the gate on 4e324f5).
+  const heldUntil = useRef(0);
 
   // The browser's `change` event ends one adjustment by the keyboard or a screen reader: a key step or a swipe.
   // (`input` fires on every step. A press on the fader never sets the input's own value, so it sends neither.)
@@ -120,7 +125,7 @@ export function GearStrip(props: GearStripProps) {
     props.onInput(next);
   };
 
-  // A drag that was called early and then turned up or down is a scroll after all (dragStanding): the gear goes back as it was, and nothing is recorded.
+  // A drag that was called and then went up or down is a scroll after all (takesBack): the gear goes back as it was, and nothing is recorded.
   const revoke = (p: Press) => {
     p.scrolling = true;
     p.live = false;
@@ -143,7 +148,11 @@ export function GearStrip(props: GearStripProps) {
     if (!area || e.clientX < area.left || e.clientX >= area.right || e.clientY < area.top || e.clientY >= area.bottom) return;
     // A right or middle click is not a press, and a second finger is not the first one's.
     if (e.button > 0 || (press.current && press.current.id !== e.pointerId)) return;
-    const p: Press = { id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch', live: false, final: false, scrolling: false, sent: value, changed: false };
+    if (e.pointerType === 'touch' && Date.now() < heldUntil.current) {
+      heldUntil.current = Date.now() + TAP_GUARD_MS;
+      return;
+    }
+    const p: Press = { id: e.pointerId, x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch', live: false, reachX: 0, reachY: 0, scrolling: false, sent: value, changed: false };
     press.current = p;
     focusAfterClick.current = !p.touch;
     try {
@@ -160,6 +169,8 @@ export function GearStrip(props: GearStripProps) {
     if (p.touch) {
       const dx = e.clientX - p.x;
       const dy = e.clientY - p.y;
+      p.reachX = Math.max(p.reachX, Math.abs(dx));
+      p.reachY = Math.max(p.reachY, Math.abs(dy));
       if (!p.live) {
         const intent = touchIntent(dx, dy);
         if (intent === 'wait') return;
@@ -168,14 +179,10 @@ export function GearStrip(props: GearStripProps) {
           return;
         }
       }
-      // The drag that was called stands once the finger has gone far enough sideways, and is taken back if the finger turns up or down before that.
-      if (!p.final) {
-        const standing = dragStanding(dx, dy);
-        if (standing === 'revoke') {
-          revoke(p);
-          return;
-        }
-        if (standing === 'final') p.final = true;
+      // A drag that was called is a swipe up or down after all if the finger has been more than 1.5 times as far up or down as to the side, at any time (takesBack).
+      if (takesBack(p.reachX, p.reachY)) {
+        revoke(p);
+        return;
       }
     }
     grip(p, e.clientX);
@@ -250,6 +257,7 @@ export function GearStrip(props: GearStripProps) {
               // finger's tap near the thumb, or a second tap of a double tap on the ✕, which has gone by then). A key or a screen reader's click has no
               // press (`detail` 0) and counts.
               if (e.detail > 0 && !pressWasOn(e.currentTarget)) return;
+              if (e.detail > 0 && pressWasTouch()) heldUntil.current = Date.now() + TAP_GUARD_MS;
               props.onReset();
               input.current?.focus();
             }}

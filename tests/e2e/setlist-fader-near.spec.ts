@@ -27,9 +27,11 @@ import {
   makeScreensDir,
   MODES,
   openAt,
+  recorded,
   setThumb,
   setThumbOn,
   syntheticFinger,
+  stateOf,
   thumb,
   valueAt,
   type Box,
@@ -46,19 +48,6 @@ test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true
 
 const WIDTHS = [360, 375, 390] as const;
 const centreOf = (b: Box): Point => ({ x: b.left + b.width / 2, y: b.top + b.height / 2 });
-
-/** The gear_change (or era_change) records so far, once the page has sent what it holds. */
-async function recorded(page: Page, events: AppEvent[], name: 'gear_change' | 'era_change') {
-  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
-  await page.waitForTimeout(150);
-  return events.filter((e) => e.name === name);
-}
-
-/** The state a test compares: a gear's value, what is off, which part is open, the eras and the sheet's mode (the handle, at the top of the first strip, is near a title). */
-const stateOf = async (page: Page, gear: GearId) => {
-  const t = await tuner(page);
-  return { value: t[gear], off: [...t.off].sort(), open: t.open, eras: [...t.eras].sort(), mini: t.mini };
-};
 
 const clampTo = (track: Box, x: number) => Math.min(Math.max(x, track.left + 3), track.right - 3);
 

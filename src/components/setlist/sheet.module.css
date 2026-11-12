@@ -37,6 +37,9 @@
    from scrolling or pulling the page. */
 .handle {
   position: absolute;
+  /* Over the strips: its box reaches 11 px into the first one, and the strip's own positioned parts painted over the handle's bottom 6 px, so a tap there did nothing
+     in an expanded sheet (the gate on 4e324f5). */
+  z-index: 2;
   left: 50%;
   top: -11px;
   width: 140px;

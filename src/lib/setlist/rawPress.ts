@@ -4,8 +4,9 @@
 // event names says nothing: a ✕ that is sent a click can ask whether the press began on it, and a fader whose area the finger is in can take the press whoever the
 // browser named.
 
-/** The position of the last press, in the page's px; null before the first. */
+/** The position of the last press, in the page's px, and whether it was a finger's; null before the first. */
 let last: { x: number; y: number } | null = null;
+let lastWasTouch = false;
 let installed = false;
 
 /** Starts noting the position of every press in the document (the first press is noted too, so call it when a control mounts). It can be called any number of times. */
@@ -16,7 +17,10 @@ export function trackPresses(): void {
     'pointerdown',
     (e) => {
       // (A press with no position, as a test's synthetic one may be, says nothing.)
-      if (Number.isFinite(e.clientX) && Number.isFinite(e.clientY)) last = { x: e.clientX, y: e.clientY };
+      if (Number.isFinite(e.clientX) && Number.isFinite(e.clientY)) {
+        last = { x: e.clientX, y: e.clientY };
+        lastWasTouch = e.pointerType === 'touch';
+      }
     },
     true,
   );
@@ -43,7 +47,13 @@ export function pointIsOn(el: Element, x: number, y: number): boolean {
   return x >= box.left && x < box.right && y >= box.top && y < box.bottom;
 }
 
+/** Whether the last press was a finger's (a mouse's click on a ✕ is not the second tap of a double tap). */
+export function pressWasTouch(): boolean {
+  return lastWasTouch;
+}
+
 /** Forgets the last press (a test's). */
 export function forgetPresses(): void {
   last = null;
+  lastWasTouch = false;
 }

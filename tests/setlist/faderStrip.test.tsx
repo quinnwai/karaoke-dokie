@@ -9,7 +9,7 @@
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import type { ComponentProps } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GearStrip } from '../../src/components/setlist/GearStrip';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { TOUCH_SLOP_PX } from '../../src/lib/setlist/fader';
@@ -238,6 +238,78 @@ describe('the ✕\'s click', () => {
   });
 });
 
+describe('the fader after a finger\'s tap on the ✕ (the gate on 4e324f5)', () => {
+  const reset = () => document.querySelector<HTMLElement>('button[data-reset]')!;
+  /** A finger's tap on the ✕ (a press on its box, then the click), or a mouse's. */
+  const tapReset = (kind: 'touch' | 'mouse') => {
+    reset().getBoundingClientRect = () => new DOMRect(300, 0, 44, 20);
+    faderPointer('pointerDown', reset(), { kind, x: 330, y: 8 });
+    fireEvent.click(reset(), { detail: 1 });
+  };
+  /** A tap on the fader a little below where the ✕ was, in its area (the strip's area starts at y 0 in jsdom). */
+  const tapFader = (hit: HTMLElement, value: number, kind: 'touch' | 'mouse' = 'touch') => {
+    faderPointer('pointerDown', hit, { kind, x: faderX(value), y: 12 });
+    faderPointer('pointerUp', hit, { kind, x: faderX(value), y: 12 });
+  };
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_000_000);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('holds a finger\'s presses on the fader for 400 ms, so the second tap of a double tap, a little lower than the first, in the fader\'s area, does not turn the gear back on', () => {
+    const onReset = vi.fn();
+    const { hit, onInput, onTouch, onDone } = strip({ value: 30, off: false, onReset });
+    tapReset('touch');
+    expect(onReset).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(1_000_000 + 150);
+    tapFader(hit, 96);
+    vi.setSystemTime(1_000_000 + 399);
+    tapFader(hit, 96);
+    expect([onInput, onTouch, onDone].map((fn) => fn.mock.calls.length)).toEqual([0, 0, 0]);
+  });
+
+  it('is a moment: a tap after it is a choice, and works', () => {
+    const { hit, onInput, onDone } = strip({ value: 30, off: false, onReset: vi.fn() });
+    tapReset('touch');
+    vi.setSystemTime(1_000_000 + 401);
+    tapFader(hit, 70);
+    expect(values(onInput)).toEqual([70]);
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('is put off by each press it holds, so a run of quick taps never gets through', () => {
+    const { hit, onInput } = strip({ value: 30, off: false, onReset: vi.fn() });
+    tapReset('touch');
+    for (const at of [300, 600, 900, 1200]) {
+      vi.setSystemTime(1_000_000 + at);
+      tapFader(hit, 90);
+    }
+    expect(onInput).not.toHaveBeenCalled();
+    vi.setSystemTime(1_000_000 + 1200 + 401);
+    tapFader(hit, 90);
+    expect(values(onInput)).toEqual([90]);
+  });
+
+  it('is not a mouse\'s: a click on the ✕ with a mouse and a click on the track right after are two choices', () => {
+    const { hit, onInput } = strip({ value: 30, off: false, onReset: vi.fn() });
+    tapReset('mouse');
+    vi.setSystemTime(1_000_000 + 100);
+    tapFader(hit, 90, 'mouse');
+    expect(values(onInput)).toEqual([90]);
+  });
+
+  it('is not started by a key or a screen reader\'s click on the ✕ either (detail 0)', () => {
+    const { hit, onInput } = strip({ value: 30, off: false, onReset: vi.fn() });
+    fireEvent.click(reset(), { detail: 0 });
+    vi.setSystemTime(1_000_000 + 100);
+    tapFader(hit, 90);
+    expect(values(onInput)).toEqual([90]);
+  });
+});
+
 describe('a finger on the fader', () => {
   const finger = (x: number, y = 0, id = 1) => ({ kind: 'touch' as const, x, y, id });
 
@@ -358,7 +430,10 @@ describe('a finger on the fader', () => {
     ['15 px across in the first 7 px, then 120 px up', 15, -7, -120],
     ['15 px across in the first 8 px, then 120 px down', 15, 8, 120],
     ['18 px across in the first 6 px, then 120 px down', 18, 6, 120],
-  ])('a swipe that kicks sideways, %s, and nothing cancels, changes nothing in the end: the gear that it turned on or moved is put back, and no adjustment is recorded (the gate on 1ee41b4)', (_name, kx, ky, toY) => {
+    ['30 px across in the first 4 px, then 120 px up', 30, -4, -120],
+    ['40 px across in the first 4 px, then 120 px down', 40, 4, 120],
+    ['50 px across in the first 6 px, then 120 px up', 50, -6, -120],
+  ])('a swipe that kicks sideways, %s, and nothing cancels, changes nothing in the end: the gear that it turned on or moved is put back, and no adjustment is recorded (the gates on 1ee41b4 and 4e324f5)', (_name, kx, ky, toY) => {
     const { hit, onInput, onTouch, onDone, onRevert } = strip();
     const { x0, path } = kickThenSwipe(kx, ky, toY);
     faderPointer('pointerDown', hit, finger(x0, 0));
@@ -373,6 +448,25 @@ describe('a finger on the fader', () => {
     expect(onRevert, 'the gear is put back once if it was changed').toHaveBeenCalledTimes(didSomething ? 1 : 0);
   });
 
+  it('a 30 degree diagonal for 40 px and then 100 px up, and a wide thumb\'s arc, 35 px right and 150 px up, change nothing either (the gate on 4e324f5)', () => {
+    for (const path of [
+      // 30 degrees up and to the right for 40 px, then straight up.
+      [...Array.from({ length: 8 }, (_, i) => [5 * 0.866 * (i + 1), -5 * 0.5 * (i + 1)]), ...Array.from({ length: 17 }, (_, i) => [34.64, -20 - 6 * (i + 1)])],
+      // an arc: out 35 px to the right while going up 10, then up to 150.
+      [...Array.from({ length: 7 }, (_, i) => [5 * (i + 1), -1.5 * (i + 1)]), ...Array.from({ length: 24 }, (_, i) => [35, -10 - 6 * (i + 1)])],
+    ]) {
+      const { hit, onDone, onRevert, onInput, onTouch } = strip();
+      const x0 = faderX(20);
+      faderPointer('pointerDown', hit, finger(x0, 0));
+      for (const [dx, dy] of path) faderPointer('pointerMove', hit, finger(x0 + dx!, dy!));
+      faderPointer('pointerUp', hit, finger(x0 + path.at(-1)![0]!, path.at(-1)![1]!));
+      expect(onDone).not.toHaveBeenCalled();
+      const changed = onTouch.mock.calls.length + onInput.mock.calls.length > 0;
+      expect(onRevert).toHaveBeenCalledTimes(changed ? 1 : 0);
+      cleanup();
+    }
+  });
+
   it('a swipe that kicks and then goes up or down on a gear that is on, and that puts it back the same way, never calls it done', () => {
     const { hit, onInput, onDone, onRevert } = strip({ value: 40, off: false });
     const { x0, path } = kickThenSwipe(15, 6, 120);
@@ -384,16 +478,54 @@ describe('a finger on the fader', () => {
     expect(onInput.mock.calls.length).toBeLessThanOrEqual(1);
   });
 
-  it('a drag that has gone 40 px sideways stands for good: it is not taken back when the finger then goes up or down', () => {
+  it('a drag is taken back for how far up or down the finger has been compared with how far to the side, not for where it is: it follows a moderate drift, and is taken back once the drift is more than 1.5 times the reach', () => {
     const { hit, onInput, onDone, onRevert } = strip({ value: 10, off: false });
     faderPointer('pointerDown', hit, finger(faderX(20), 0));
-    faderPointer('pointerMove', hit, finger(faderX(20) + 18, 6)); // called, still provisional
-    faderPointer('pointerMove', hit, finger(faderX(20) + 44, 8)); // final
-    faderPointer('pointerMove', hit, finger(faderX(20) + 50, 120)); // and then straight down: it keeps following
-    faderPointer('pointerUp', hit, finger(faderX(20) + 50, 120));
+    faderPointer('pointerMove', hit, finger(faderX(20) + 18, 6));
+    faderPointer('pointerMove', hit, finger(faderX(20) + 44, 8));
+    faderPointer('pointerMove', hit, finger(faderX(20) + 50, 70)); // 70 up or down against a reach of 50: 1.4 times, so far kept
     expect(onRevert).not.toHaveBeenCalled();
+    faderPointer('pointerMove', hit, finger(faderX(20) + 50, 80)); // 80 against 50: more than 1.5 times, taken back
+    expect(onRevert).toHaveBeenCalledTimes(1);
+    faderPointer('pointerMove', hit, finger(faderX(20) + 90, 4)); // a taken-back finger is a scroll for good
+    faderPointer('pointerUp', hit, finger(faderX(20) + 90, 4));
     expect(values(onInput)).toEqual([29, 42, 45]);
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  /** A finger that goes out `out` px, comes back to `back` px (negative: the other side of where it landed), with `drift` px of wander up or down, reported every 2 px. */
+  const nudge = (hit: HTMLElement, start: number, out: number, back: number, drift: number) => {
+    const x0 = faderX(start);
+    faderPointer('pointerDown', hit, finger(x0, 0));
+    const steps = (from: number, to: number, y: (i: number) => number) => {
+      for (let i = 1; i <= Math.ceil(Math.abs(to - from) / 2); i++) faderPointer('pointerMove', hit, finger(x0 + from + Math.sign(to - from) * Math.min(2 * i, Math.abs(to - from)), y(i)));
+    };
+    steps(0, out, (i) => (i % 2 ? drift : 0));
+    steps(out, back, (i) => (i % 2 ? drift : 1));
+    faderPointer('pointerUp', hit, finger(x0 + back, drift));
+    return x0 + back;
+  };
+
+  it.each([16, 20, 24, 30])('fine-tuning that goes out %s px and comes back to within 8 px of where it landed, with up to 4 px of drift, ends where the finger is, as one adjustment (the gate on 4e324f5)', (out) => {
+    for (const back of [-8, -4, 0, 4, 8]) {
+      for (const drift of [0, 2, 4]) {
+        const { hit, onInput, onDone, onRevert } = strip({ value: 50, off: false });
+        const endX = nudge(hit, 50, out, back, drift);
+        expect(onRevert, `out ${out}, back ${back}, drift ${drift}: never taken back`).not.toHaveBeenCalled();
+        expect(onDone, `out ${out}, back ${back}, drift ${drift}: one adjustment`).toHaveBeenCalledTimes(1);
+        expect(values(onInput).at(-1), `out ${out}, back ${back}, drift ${drift}: ends at the finger`).toBe(Math.round(((endX - faderX(0)) / (faderX(100) - faderX(0))) * 100));
+        cleanup();
+      }
+    }
+  });
+
+  it('the same on an off gear: Tempo turns on, stays on through the correction, and ends at the finger as one adjustment', () => {
+    const { hit, onInput, onTouch, onDone, onRevert } = strip();
+    nudge(hit, 50, 24, -16, 2);
+    expect(onTouch).toHaveBeenCalledTimes(1);
+    expect(onRevert).not.toHaveBeenCalled();
     expect(onDone).toHaveBeenCalledTimes(1);
+    expect(values(onInput).at(-1)).toBe(42);
   });
 
   it('deliberate drags are not taken back: sideways with a little up and down along the way, in either direction', () => {
@@ -441,13 +573,13 @@ describe('a finger on the fader', () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
-  it('a finger that began sideways keeps following when it drifts up or down', () => {
+  it('a finger that began sideways keeps following when it drifts up or down, as far as 1.5 times its sideways reach', () => {
     const { hit, onInput, onDone } = strip({ value: 10, off: false });
     faderPointer('pointerDown', hit, finger(faderX(20), 0));
     faderPointer('pointerMove', hit, finger(faderX(45), 2));
     faderPointer('pointerMove', hit, finger(faderX(60), 90));
-    faderPointer('pointerMove', hit, finger(faderX(70), 200));
-    faderPointer('pointerUp', hit, finger(faderX(70), 200));
+    faderPointer('pointerMove', hit, finger(faderX(70), 120));
+    faderPointer('pointerUp', hit, finger(faderX(70), 120));
     expect(values(onInput)).toEqual([45, 60, 70]);
     expect(onDone).toHaveBeenCalledTimes(1);
   });

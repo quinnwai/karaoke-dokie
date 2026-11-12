@@ -5,6 +5,7 @@
 import { expect, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import type { AppEvent } from '../../src/lib/contracts';
 import type { GearId } from '../../src/lib/setlist/types';
 import { open, slider, strip, tab, tuner, value } from './tunerE2e';
 
@@ -282,3 +283,17 @@ export async function checkTouchDrags(
     }
   }
 }
+
+/** The gear_change (or era_change) records so far, once the page has sent what it holds. */
+export async function recorded(page: Page, events: AppEvent[], name: 'gear_change' | 'era_change') {
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await page.waitForTimeout(150);
+  return events.filter((e) => e.name === name);
+}
+
+/** The state a test compares: a gear's value, what is off, which part is open, the eras and the sheet's mode (the handle, at the top of the first strip, is near a title). */
+export const stateOf = async (page: Page, gear: GearId) => {
+  const t = await tuner(page);
+  return { value: t[gear], off: [...t.off].sort(), open: t.open, eras: [...t.eras].sort(), mini: t.mini };
+};
+

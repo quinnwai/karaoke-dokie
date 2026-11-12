@@ -19,11 +19,11 @@ export const TOUCH_DECIDE_PX = 16;
 export const TOUCH_VERDICT_PX = 32;
 
 /**
- * How far a finger must have gone, still more sideways than up or down, for the drag that was called early to stand for good. Before that the call is provisional:
- * a swipe that began with a kick to one side and then went up or down is taken back (`dragStanding`), so no swipe that ends mostly vertical has turned a gear on
- * or moved it (the gate on 1ee41b4).
+ * A drag that was called is taken back (`takesBack`) if the finger's vertical reach, the farthest it has been up or down from where it landed, goes past this many
+ * times its sideways reach, the farthest it has been to either side. 1.5 puts a swipe that kicked 30 to 79 px to one side and then went 120 px up or down on the
+ * wrong side of it, and leaves every drag along a line up to about 56 degrees, which no deliberate drag of a fader is steeper than, on the right one.
  */
-export const TOUCH_FINAL_PX = 40;
+export const TAKE_BACK_RATIO = 1.5;
 
 /**
  * The value, 0 to 100 in the whole steps the range input has, for a pointer at `x` over a hit area that starts at `left` and is `width`
@@ -66,14 +66,13 @@ export function liftsOnTheFader(dx: number, dy: number): boolean {
   return Math.hypot(dx, dy) < TOUCH_SLOP_PX || Math.abs(dx) >= Math.abs(dy);
 }
 
-export type DragStanding = 'keep' | 'final' | 'revoke';
-
 /**
- * What becomes of a drag that `touchIntent` called as a finger moved (`dx`, `dy`) px from where it landed, and that has put the gear on or moved it: it is
- * taken back ('revoke') if the finger is then more up or down than sideways before it has gone TOUCH_FINAL_PX, it stands for good ('final') once it has
- * gone that far still more sideways than up or down, and until then it is kept ('keep'). A drag that stands follows the finger wherever it goes after.
+ * Whether a drag that `touchIntent` called, and that has put the gear on or moved it, was a swipe up or down after all, given how far the finger has been from where
+ * it landed, to either side (`reachX`) and up or down (`reachY`), at any time since (the gate on 1ee41b4). It is the reaches that count and not where the finger is
+ * now: a finger that goes out 24 px, comes back past where it landed and drifts 4 px up is fine-tuning, and was taken back for being, at that moment, more up
+ * or down than to the side of where it landed. A swipe that kicks 30 px sideways and then goes 120 px up has been 4 times as far up as sideways, and is taken back
+ * (the gear goes back as it was and nothing is recorded) however far the kick; a drag with no such excursion is never taken back, wherever it goes.
  */
-export function dragStanding(dx: number, dy: number): DragStanding {
-  if (Math.abs(dy) > Math.abs(dx)) return 'revoke';
-  return Math.hypot(dx, dy) >= TOUCH_FINAL_PX ? 'final' : 'keep';
+export function takesBack(reachX: number, reachY: number): boolean {
+  return reachY > TAKE_BACK_RATIO * reachX;
 }

@@ -2,7 +2,7 @@
 // so on a 200 px track it is 214 px wide, and the knob's centre travels the 200 px between the two margins.
 
 import { describe, expect, it } from 'vitest';
-import { dragStanding, faderValue, KNOB_PX, liftsOnTheFader, touchIntent, TOUCH_DECIDE_PX, TOUCH_FINAL_PX, TOUCH_SLOP_PX, TOUCH_VERDICT_PX } from '../../src/lib/setlist/fader';
+import { faderValue, KNOB_PX, liftsOnTheFader, takesBack, TAKE_BACK_RATIO, touchIntent, TOUCH_DECIDE_PX, TOUCH_SLOP_PX, TOUCH_VERDICT_PX } from '../../src/lib/setlist/fader';
 
 describe('faderValue', () => {
   // A hit area that starts at x = 50 and is 214 px wide: the track runs from 57 to 257.
@@ -126,22 +126,45 @@ describe('liftsOnTheFader', () => {
   });
 });
 
-describe('dragStanding', () => {
-  it('keeps a drag that is still more sideways than up or down before it has gone TOUCH_FINAL_PX, and makes it final from there', () => {
-    expect(dragStanding(16, 6)).toBe('keep');
-    expect(dragStanding(30, 20)).toBe('keep');
-    expect(dragStanding(20, 20)).toBe('keep'); // level is not up or down
-    expect(dragStanding(TOUCH_FINAL_PX, 0)).toBe('final');
-    expect(dragStanding(-60, 30)).toBe('final');
-    expect(dragStanding(36, 20)).toBe('final');
+describe('takesBack', () => {
+  /** The farthest a finger has been to the side and up or down along a path of points (from where it landed, at 0, 0). */
+  const reach = (path: [number, number][]) => ({ x: Math.max(...path.map(([x]) => Math.abs(x))), y: Math.max(...path.map(([, y]) => Math.abs(y))) });
+  const takenBack = (path: [number, number][]) => takesBack(reach(path).x, reach(path).y);
+
+  it('is by the reaches, not by where the finger is: fine-tuning that goes out, comes back past where it landed and drifts a little is never taken back (the gate on 4e324f5)', () => {
+    // Out 24 px, back to 16 px the other side of where it landed, with 2 px of drift: at that moment the finger is 16 px to the side and 2 up, which the old rule
+    // compared, and while it passed through the landing point (0 to the side, 2 up) it was more up than to the side.
+    expect(takenBack([[24, 0], [12, 1], [0, 2], [-16, 2]])).toBe(false);
+    expect(takenBack([[30, 4], [8, 3], [-8, 4]])).toBe(false);
+    expect(takenBack([[16, 0], [4, 4], [-4, 4], [-6, 0]])).toBe(false);
+    for (const out of [16, 20, 24, 30]) for (const back of [-8, -4, 0, 4, 8]) for (const drift of [0, 2, 4]) expect(takenBack([[out, drift], [(out + back) / 2, drift], [back, drift]])).toBe(false);
   });
 
-  it('takes a drag back when the finger is more up or down than sideways before it has gone that far: a kick to one side, then a swipe', () => {
-    expect(dragStanding(15, 16)).toBe('revoke');
-    expect(dragStanding(15, 20)).toBe('revoke');
-    expect(dragStanding(15, -60)).toBe('revoke');
-    expect(dragStanding(-15, 120)).toBe('revoke');
-    // Even if the finger is far by then: it never went sideways that far.
-    expect(dragStanding(30, 90)).toBe('revoke');
+  it('takes back a swipe that kicked to the side and then went up or down, however far the kick, until the kick is more than the swipe\'s share of its length: 30, 50 and 70 px, then 120', () => {
+    for (const kick of [15, 30, 40, 50, 70]) {
+      expect(takenBack([[kick, 6], [kick, 40], [kick, 120]]), `a kick of ${kick} px, then 120 px down`).toBe(true);
+      expect(takenBack([[kick, -6], [kick, -40], [kick, -120]]), `a kick of ${kick} px, then 120 px up`).toBe(true);
+    }
+    // A 30 degree diagonal for 40 px, then 100 px up; and a wide thumb's arc, 35 px right and 150 px up.
+    expect(takenBack([[17, -10], [34.6, -20], [34.6, -60], [34.6, -120]])).toBe(true);
+    expect(takenBack([[10, -30], [30, -80], [35, -150]])).toBe(true);
+  });
+
+  it('keeps a drag along a line up to about 56 degrees, and drags with the wander of a thumb\'s arc', () => {
+    for (const degrees of [10, 20, 30, 44, 50]) {
+      const t = Math.tan((degrees * Math.PI) / 180);
+      expect(takenBack([[40, 40 * t], [100, 100 * t], [150, 150 * t]]), `${degrees} degrees`).toBe(false);
+    }
+    // With 4 px of jitter on every sample.
+    expect(takenBack([[20, 20 + 4], [40, 38 + 4], [60, 61 + 4]])).toBe(false);
+    expect(takenBack([[30, 8], [90, 40], [140, 60], [100, 20]])).toBe(false);
+  });
+
+  it('is on the ratio: more than TAKE_BACK_RATIO times the sideways reach takes it back, and exactly that does not', () => {
+    expect(TAKE_BACK_RATIO).toBe(1.5);
+    expect(takesBack(40, 60)).toBe(false);
+    expect(takesBack(40, 60.1)).toBe(true);
+    expect(takesBack(0, 0)).toBe(false);
+    expect(takesBack(0, 1)).toBe(true);
   });
 });

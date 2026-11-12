@@ -59,6 +59,11 @@ export function Sheet({ tuner, historyAvailable, historyHint, canExpand, onTuner
     press.current = null;
     if (p.dragged) {
       swallowClick.current = true;
+      // The click a mouse drag ends in follows in the same task; a touch drag has none, and its flag used to wait for the next click, which was the first Enter or screen
+      // reader's activation after it (the gate on 4e324f5).
+      window.setTimeout(() => {
+        swallowClick.current = false;
+      }, 0);
       if (canExpand) onTuner({ type: 'mini', mini: modeAfterDrag(tuner.mini, dy) });
     }
     setDragY(null);
