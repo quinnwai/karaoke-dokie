@@ -5,9 +5,11 @@
 // Catalogue songs are shown as tracks nobody has played. Familiarity is 1, so comfort alone
 // decides the fit part of the score, and known is false, so no reason says the user listens to
 // them (score.ts). Popularity comes from the song's USDB views and stars and from our karaoke
-// popularity (KaraFun views, Billboard Year-End rank), whatever measured its range.
+// popularity (KaraFun views, Billboard Year-End rank), whatever measured its range. The genre is
+// USDB's, or Deezer's album genres for a song USDB lists none for (QWW-61, genres/genres.ts).
 
 import type { DataSourceLogEntry, Match, RecommendationsResponse, SetlistInput, SongRange, Track, VocalRange } from '../contracts';
+import { readSongGenres, shownGenre } from '../genres/genres';
 import { applyCanonical, type SongCanonical } from '../songs/canonical';
 import { partRange } from '../songs/match';
 import { hasLittleSinging } from '../songs/resolve';
@@ -32,6 +34,8 @@ export interface CatalogueEntry extends CatalogueSong {
   tempo?: number;
   /** Where `tempo` came from: a measurement, a checked tempo, or the song's feel label. */
   tempoSource?: EffectiveSource;
+  /** Deezer's genres for the song's album ("Pop, Rock"; song_genre, QWW-61), when it has some: shown only when USDB lists none. */
+  deezerGenres?: string;
 }
 
 /** A catalogue song and the track it is shown as. Its log line carries the track id. */
@@ -74,14 +78,15 @@ async function readCanonical(
 }
 
 /**
- * Reads the catalogue, most popular first, and its songs' karaoke popularity, measured tempo and feel
- * labels in batched reads. The cache keeps all of it, so requests read none of it, and the one tempo of
+ * Reads the catalogue, most popular first, and its songs' karaoke popularity, measured tempo, feel
+ * labels and Deezer genres in batched reads. The cache keeps all of it, so requests read none of it, and the one tempo of
  * each song is worked out here, once per cache fill (effectiveTempo), never per request. A store with no
- * feel labels, or one that cannot give them, leaves every song on its measured tempo. With `canonical`, one
+ * feel labels, or one that cannot give them, leaves every song on its measured tempo, and one with no Deezer genres
+ * leaves every song with USDB's genre only (genres/genres.ts readSongGenres). With `canonical`, one
  * row per song with its clean title and artist line, from the stored one-song-one-row mapping when there is one.
  */
 export async function loadCatalogue(
-  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'> & Partial<Pick<Store, 'getSongCanonical' | 'getSongFeels'>>,
+  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'> & Partial<Pick<Store, 'getSongCanonical' | 'getSongFeels' | 'getSongGenres'>>,
   size: number = CATALOGUE_SIZE,
   opts: LoadOptions = {},
 ): Promise<LoadedCatalogue> {
@@ -89,11 +94,17 @@ export async function loadCatalogue(
   const read = opts.canonical ? await readCanonical(store, listed.map((s) => s.key)) : { mapping: new Map<string, SongCanonical>(), failed: false };
   const songs = applyCanonical(listed, read.mapping);
   const keys = songs.map((s) => s.key);
-  const [popularity, tempos, feels] = await Promise.all([store.getSongPopularity(keys), store.getSongTempos(keys), readSongFeels(store, keys)]);
+  const [popularity, tempos, feels, genres] = await Promise.all([
+    store.getSongPopularity(keys),
+    store.getSongTempos(keys),
+    readSongFeels(store, keys),
+    readSongGenres(store, keys),
+  ]);
   const entries: LoadedCatalogue = songs.map((s) => {
     const p = popularity.get(s.key);
     const t = effectiveTempo({ key: s.key, record: tempos.get(s.key), feel: feels.get(s.key)?.feel });
-    return { ...s, ...(p ? { popularity: p } : {}), ...(t ? { tempo: t.tempo, tempoSource: t.source } : {}) };
+    const g = genres.get(s.key);
+    return { ...s, ...(p ? { popularity: p } : {}), ...(t ? { tempo: t.tempo, tempoSource: t.source } : {}), ...(g ? { deezerGenres: g } : {}) };
   });
   if (read.failed) entries.degraded = true;
   return entries;
@@ -179,7 +190,8 @@ export function catalogueMatches(
       m.year = song.popularity.chartYear;
       m.yearSource = 'chart';
     }
-    if (song.usdb?.genre) m.genre = song.usdb.genre;
+    const genre = shownGenre(song.usdb?.genre, song.deezerGenres);
+    if (genre !== undefined) m.genre = genre;
     if (song.tempo !== undefined) m.tempo = song.tempo;
     if (song.popularity?.deezerId !== undefined) m.deezerId = song.popularity.deezerId;
     matches.push(m);
