@@ -15,6 +15,7 @@ import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { SHEET_GEARS, SHEET_PARTS } from '../../src/lib/setlist/gears';
 import { initialTuner, tunerReducer, type TunerAction } from '../../src/lib/setlist/tuner';
 import { GEAR_IDS, TUNER_PARTS, type EmptyReason, type EraId, type GearId, type SetlistSong, type TunerState } from '../../src/lib/setlist/types';
+import { fader, faderPointer, faderX } from '../helpers/fader';
 import { all, el, RANGE, rankedSong, rowIds, SEL, setlistProps } from '../helpers/setlist';
 
 // Every test is a page's first load as far as the strips' turn-on flicker goes (it plays once per page).
@@ -86,9 +87,6 @@ function pointer(type: 'pointerDown' | 'pointerMove' | 'pointerUp' | 'pointerCan
   if (button !== undefined) Object.defineProperty(event, 'button', { value: button });
   fireEvent(target, event);
 }
-
-/** Lets the zero-delay timer a slider uses to look at a finished press run. */
-const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
 
 const hidden = (selector: string) => el(selector).hasAttribute('hidden');
 
@@ -801,7 +799,7 @@ describe('History', () => {
 
   it('a press on it, signed in, asks for it to be switched on', () => {
     const { onTuner } = draw([rankedSong('a')], signedIn());
-    fireEvent.pointerDown(el(SEL.slider('history')));
+    faderPointer('pointerDown', fader('history'), { x: faderX(DEFAULTS.history) });
     expect(calls(onTuner)).toEqual([{ type: 'touch', gear: 'history' }]);
   });
 });
@@ -894,28 +892,24 @@ describe('moving a gear', () => {
     expect(calls(onGearDone)).toEqual(['difficulty']);
   });
 
-  it('a tap on an off gear that moves nothing turns it on, and is one adjustment', async () => {
-    // Tempo starts off. A tap exactly on the default fires no input and no change, so the press itself has to say so.
+  // The pointer goes to the fader's hit area, not to the input (R33): `fader`, `faderX` and `faderPointer` aim at it (tests/helpers/fader.ts).
+  it('a press on an off gear exactly on its default turns it on, and is one adjustment', () => {
+    // Tempo starts off. A press that lands on the default sets no new value, so the press itself has to say so.
     const { onTuner, onGearDone } = draw();
-    const slider = el(SEL.slider('tempo'));
-    fireEvent.pointerDown(slider);
+    const hit = fader('tempo');
+    faderPointer('pointerDown', hit, { x: faderX(DEFAULTS.tempo) });
     expect(calls(onTuner)).toEqual([{ type: 'touch', gear: 'tempo' }]);
     expect(onGearDone).not.toHaveBeenCalled();
-    fireEvent.pointerUp(slider);
-    await settle();
+    faderPointer('pointerUp', hit, { x: faderX(DEFAULTS.tempo) });
     expect(calls(onGearDone)).toEqual(['tempo']);
     expect(onTuner).toHaveBeenCalledTimes(1);
   });
 
-  it('a tap on an off gear that does move ends once, not twice', async () => {
+  it('a press on an off gear away from its default turns it on and sets the value there, and ends once', () => {
     const { onTuner, onGearDone } = draw();
-    const slider = el(SEL.slider('tempo'));
-    fireEvent.pointerDown(slider);
-    fireEvent.input(slider, { target: { value: '60' } });
-    fireEvent.pointerUp(slider);
-    // The browser's change follows the pointer-up in the same task, when the value moved.
-    fireEvent.change(slider);
-    await settle();
+    const hit = fader('tempo');
+    faderPointer('pointerDown', hit, { x: faderX(60) });
+    faderPointer('pointerUp', hit, { x: faderX(60) });
     expect(calls(onTuner)).toEqual([
       { type: 'touch', gear: 'tempo' },
       { type: 'input', gear: 'tempo', value: 60 },
@@ -923,70 +917,56 @@ describe('moving a gear', () => {
     expect(calls(onGearDone)).toEqual(['tempo']);
   });
 
-  it('a press on a gear that is on changes nothing and ends nothing', async () => {
+  it('a press on a gear that is on, on its knob, changes nothing and ends nothing', () => {
     const { onTuner, onGearDone } = draw();
-    const slider = el(SEL.slider('difficulty'));
-    fireEvent.pointerDown(slider);
-    fireEvent.pointerUp(slider);
-    await settle();
+    const hit = fader('difficulty');
+    faderPointer('pointerDown', hit, { x: faderX(DEFAULTS.difficulty) });
+    faderPointer('pointerUp', hit, { x: faderX(DEFAULTS.difficulty) });
     expect(onTuner).not.toHaveBeenCalled();
     expect(onGearDone).not.toHaveBeenCalled();
   });
 
-  it('a press of the primary button (button 0) turns an off gear on, as a plain press does', async () => {
-    const { onTuner, onGearDone } = draw();
-    const slider = el(SEL.slider('tempo'));
-    pointer('pointerDown', slider, undefined, 0);
-    pointer('pointerUp', slider, undefined, 0);
-    await settle();
-    expect(calls(onTuner)).toEqual([{ type: 'touch', gear: 'tempo' }]);
-    expect(calls(onGearDone)).toEqual(['tempo']);
-  });
-
-  // A right or middle click is not a tap: it must not switch a gear on, or end an adjustment that never began.
+  // A right or middle click is not a press: it must not switch a gear on, or end an adjustment that never began.
   it.each([
     ['middle', 1],
     ['right', 2],
-  ] as const)('a %s-button press on an off gear turns nothing on and ends nothing, and the next plain tap still counts once', async (_name, button) => {
+  ] as const)('a %s-button press on an off gear turns nothing on and ends nothing, and the next plain press still counts once', (_name, button) => {
     const { onTuner, onGearDone } = draw();
-    const slider = el(SEL.slider('tempo'));
-    pointer('pointerDown', slider, undefined, button);
-    pointer('pointerUp', slider, undefined, button);
-    await settle();
+    const hit = fader('tempo');
+    faderPointer('pointerDown', hit, { x: faderX(DEFAULTS.tempo), button });
+    faderPointer('pointerUp', hit, { x: faderX(DEFAULTS.tempo), button });
     expect(onTuner).not.toHaveBeenCalled();
     expect(onGearDone).not.toHaveBeenCalled();
 
-    fireEvent.pointerDown(slider);
-    fireEvent.pointerUp(slider);
-    await settle();
+    faderPointer('pointerDown', hit, { x: faderX(DEFAULTS.tempo) });
+    faderPointer('pointerUp', hit, { x: faderX(DEFAULTS.tempo) });
     expect(calls(onTuner)).toEqual([{ type: 'touch', gear: 'tempo' }]);
     expect(calls(onGearDone)).toEqual(['tempo']);
   });
 
-  it('a cancelled press on an off gear (the browser took it for a scroll) turns it on and ends that adjustment once', async () => {
-    // No pointer-up and no change follow a cancelled press, so the cancel is what ends it.
+  it('a finger that lands on an off gear and is then taken by the browser for a scroll turns nothing on and records nothing', () => {
+    // The thumb must not jump on the first pointerdown of a touch that then turns vertical (R33): a finger waits to see which way it goes.
     const { onTuner, onGearDone } = draw();
-    const slider = el(SEL.slider('tempo'));
-    fireEvent.pointerDown(slider);
-    fireEvent.pointerCancel(slider);
-    expect(calls(onTuner)).toEqual([{ type: 'touch', gear: 'tempo' }]);
-    await settle();
-    expect(calls(onGearDone)).toEqual(['tempo']);
+    const hit = fader('tempo');
+    faderPointer('pointerDown', hit, { kind: 'touch', x: faderX(80), y: 0 });
+    expect(onTuner).not.toHaveBeenCalled();
+    faderPointer('pointerMove', hit, { kind: 'touch', x: faderX(80) + 1, y: 12 });
+    faderPointer('pointerCancel', hit, { kind: 'touch' });
+    expect(onTuner).not.toHaveBeenCalled();
+    expect(onGearDone).not.toHaveBeenCalled();
   });
 
-  it('a press the browser cancelled for a scroll does not make the next plain tap look like an adjustment', async () => {
+  it('a press that turned a gear on and was then cancelled ends that adjustment once, and the next plain tap does not look like another', () => {
     const onGearDone = vi.fn<(gear: GearId) => void>();
     render(<Tuned initial={tunerOf({ off: ['tempo'] })} onGearDone={onGearDone} />);
-    const slider = el(SEL.slider('tempo'));
-    fireEvent.pointerDown(slider);
-    fireEvent.pointerCancel(slider);
-    await settle();
-    // The cancelled press turned Tempo on, and that was the one adjustment.
+    const hit = fader('tempo');
+    faderPointer('pointerDown', hit, { x: faderX(DEFAULTS.tempo) });
+    faderPointer('pointerCancel', hit);
+    // The press turned Tempo on, and that was the one adjustment.
     expect(calls(onGearDone)).toEqual(['tempo']);
-    // Tempo is on now. A later tap on it that moves nothing is not another one.
-    fireEvent.pointerDown(slider);
-    fireEvent.pointerUp(slider);
-    await settle();
+    // Tempo is on now. A later tap on its knob that moves nothing is not another one.
+    faderPointer('pointerDown', hit, { x: faderX(DEFAULTS.tempo) });
+    faderPointer('pointerUp', hit, { x: faderX(DEFAULTS.tempo) });
     expect(calls(onGearDone)).toEqual(['tempo']);
   });
 });

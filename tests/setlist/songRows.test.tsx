@@ -93,7 +93,7 @@ describe('a row', () => {
   it('gives each row its reason line, from the song\'s own places', () => {
     draw(songs);
     // Difficulty is on at 0: Alpha (place 5) is in the sweet spot; Cello is a crowd favourite; Bravo has only a tempo.
-    expect(rows().map((r) => r.querySelector('[data-row-why]')?.textContent)).toEqual(['Crowd favourite', 'In your sweet spot · Deep cut', 'For the party people']);
+    expect(rows().map((r) => r.querySelector('[data-row-why]')?.textContent)).toEqual(['Crowd favourite', 'In your sweet spot · Wildcard', 'For the party people']);
   });
 
   it('says a shifted song fits an octave away in its reason line, and nothing else, in place of the sweet spot, and keeps its badge (R13)', () => {
@@ -124,7 +124,7 @@ describe('a row', () => {
     }
     expect(rows().map((r) => document.getElementById(button(r).getAttribute('aria-describedby')!)?.textContent)).toEqual([
       'Crowd favourite',
-      'In your sweet spot · Deep cut',
+      'In your sweet spot · Wildcard',
       'For the party people',
     ]);
   });
@@ -164,7 +164,7 @@ describe('a row', () => {
   it('reads the Difficulty gear for its sweet spot: the reasons change when the slider moves', () => {
     const tuner = { difficulty: 80, history: 100, popularity: 100, tempo: 50, eras: [], off: ['history', 'tempo', 'era'], open: 'difficulty', mini: false } as const;
     draw(songs, { tuner: { ...tuner, eras: [], off: [...tuner.off] } });
-    expect(rows().map((r) => r.querySelector('[data-row-why]')?.textContent)).toEqual(['In your sweet spot · Crowd favourite', 'Deep cut', 'For the party people']);
+    expect(rows().map((r) => r.querySelector('[data-row-why]')?.textContent)).toEqual(['In your sweet spot · Crowd favourite', 'Wildcard', 'For the party people']);
   });
 
   it('says nothing of the sweet spot while Difficulty is off', () => {

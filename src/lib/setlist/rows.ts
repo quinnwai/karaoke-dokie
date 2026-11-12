@@ -63,10 +63,11 @@ export function whyOf(song: SetlistSong, tuner: WhyTuner): string {
   const reasons: string[] = [];
   // 1. Difficulty counts, and the song sits near where it is set.
   if (!tuner.off.includes('difficulty') && difficulty !== null && Math.abs(difficulty - tuner.difficulty) <= SWEET_SPOT) reasons.push('In your sweet spot');
-  // 2. Among the best known songs, or the least known.
+  // 2. Among the best known songs, or the least known (QWW-57, R35: "Wildcard", since even the bottom of the scale holds well-known songs
+  // while logged out; the Popularity gear's end label stays "Deep cuts").
   if (popularity !== null) {
     if (popularity >= 85) reasons.push('Crowd favourite');
-    else if (popularity <= 35) reasons.push('Deep cut');
+    else if (popularity <= 35) reasons.push('Wildcard');
   }
   // 3. In the singer's top and liked songs, or the least played.
   if (history !== null) {

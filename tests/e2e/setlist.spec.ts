@@ -25,13 +25,13 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { AppEvent, EventsRequest, MeResponse, SetlistRequest, VocalRange } from '../../src/lib/contracts';
+import type { AppEvent, EventsRequest, MeResponse, SetlistRequest, SetlistResponse, VocalRange } from '../../src/lib/contracts';
 import { easeProgress, SLIDE_MS } from '../../src/components/setlist/flip';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import type { GearId, TunerPart, TunerState } from '../../src/lib/setlist/types';
 import { setlistAnswer } from '../helpers/setlistServer';
 import { MOCK_SONGS, mockPage, titlesOf, type MockSong } from '../fixtures/setlist';
-import { DEFAULT_RANKING, ALL_RESET_RANKING, ONLY_80S, RANGE, ME, Opened, mockApi, open, rows, openButton, titles, strip, tab, eraButton, resetButton, slider, handle, tuner, rack, value, onTrack, pressKey, dragHandle, touchDrag, centre, rgb, UNLIT, PINK, AMBER, VIOLET, OFF_TEXT, TEXT_3, css, art, tabArt } from '../helpers/tunerE2e';
+import { DEFAULT_RANKING, ONLY_80S, RANGE, ME, Opened, mockApi, open, rows, openButton, titles, strip, tab, eraButton, resetButton, slider, handle, tuner, rack, value, onTrack, pressKey, dragHandle, touchDrag, centre, rgb, UNLIT, PINK, AMBER, VIOLET, OFF_TEXT, TEXT_3, css, art, tabArt } from '../helpers/tunerE2e';
 
 const SCREENS = path.resolve('test-results/screens');
 test.beforeAll(() => mkdirSync(SCREENS, { recursive: true }));
@@ -340,11 +340,18 @@ test('17. with Era reset, tapping the 80s picks just the 80s (the default picks 
   expect((await tuner(page)).eras).toEqual(['s80', 's90']);
 });
 
-test('18. every gear reset: all 25 songs, most popular first, every value its default', async ({ page }) => {
+test('18. every gear reset: all 25 songs in the default order (R36: it was the most popular first), every value its default', async ({ page }) => {
   await open(page);
+  const defaults = await titles(page);
+  expect(defaults).toHaveLength(25);
+  // The engine's answer is read, not only the screen: the default list is what the screen shows before the answer too.
+  const answered = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/setlist' && (r.request().postDataJSON() as SetlistRequest).off.length === 5);
   await resetButton(page, 'difficulty').click();
   await resetButton(page, 'popularity').click();
-  await expect.poll(() => titles(page)).toEqual(ALL_RESET_RANKING);
+  const answer = (await (await answered).json()) as SetlistResponse;
+  expect(answer.applied).toEqual([]);
+  expect(answer.songs.map((s) => s.match.track.title)).toEqual(defaults);
+  await expect.poll(() => titles(page)).toEqual(defaults);
   const t = await tuner(page);
   expect([t.difficulty, t.history, t.popularity, t.tempo]).toEqual([DEFAULTS.difficulty, DEFAULTS.history, DEFAULTS.popularity, DEFAULTS.tempo]);
   expect(t.eras).toEqual([...DEFAULTS.eras]);

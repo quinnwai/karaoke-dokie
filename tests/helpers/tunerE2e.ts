@@ -21,13 +21,6 @@ export const DEFAULT_RANKING = [
   'I Will Always Love You',
   'I Want It That Way',
 ];
-/** Test 18: every gear reset. The engine has nothing to rank by, so the songs come most popular first. */
-export const ALL_RESET_RANKING = [
-  "Don't Stop Believin'", 'Bohemian Rhapsody', 'Mr. Brightside', 'Dancing Queen', 'Rolling in the Deep', "Livin' on a Prayer", 'I Will Always Love You',
-  'Sweet Caroline', 'I Want It That Way', 'Africa', 'I Will Survive', 'good 4 u', 'Shallow', 'Stand by Me', 'Levitating', 'Wannabe',
-  "Can't Help Falling in Love", 'Respect', 'Since U Been Gone', 'Valerie', "These Boots Are Made for Walkin'", 'Bizarre Love Triangle', 'Harvest Moon',
-  'Motion Sickness', 'A Case of You',
-];
 /** Test 6: only the 80s, for the real defaults. */
 export const ONLY_80S = ["Don't Stop Believin'", "Livin' on a Prayer", 'Africa', 'Bizarre Love Triangle'];
 

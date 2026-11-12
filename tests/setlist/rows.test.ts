@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Label, OctaveShift } from '../../src/lib/contracts';
 import { ERA_LABEL } from '../../src/lib/setlist/eras';
+import { GEAR_META } from '../../src/lib/setlist/gears';
 import { badgeOf, SHIFT_REASON, SWEET_SPOT, toRow, toRows, whyOf, type WhyTuner } from '../../src/lib/setlist/rows';
 import { ERA_IDS, type EraId, type SetlistSong } from '../../src/lib/setlist/types';
 import { ranked, rankedSong, song, type Places } from '../helpers/setlist';
@@ -138,15 +139,15 @@ describe('whyOf: In your sweet spot (needs Difficulty on, and a place on it)', (
   });
 });
 
-describe('whyOf: Crowd favourite and Deep cut (the song\'s own place on Popularity)', () => {
+describe('whyOf: Crowd favourite and Wildcard (the song\'s own place on Popularity)', () => {
   it.each<[number, string | null]>([
     [100, 'Crowd favourite'],
     [85, 'Crowd favourite'],
     [84.9, null],
     [50, null],
     [35.1, null],
-    [35, 'Deep cut'],
-    [0, 'Deep cut'],
+    [35, 'Wildcard'],
+    [0, 'Wildcard'],
   ])('a place of %s says %s', (popularity, word) => {
     const why = whyOf(placed({ popularity }), START);
     expect(why).toBe(word ?? 'Solid pick');
@@ -154,6 +155,18 @@ describe('whyOf: Crowd favourite and Deep cut (the song\'s own place on Populari
 
   it('is skipped for a song whose popularity is unknown', () => {
     expect(whyOf(placed({ popularity: null }), START)).toBe('Solid pick');
+  });
+
+  it('R35 (QWW-57): the least known songs say "Wildcard" and no place says "Deep cut"; the Popularity gear keeps its "Deep cuts" end label', () => {
+    // Logged out, the bottom of the scale still holds well-known songs, so "Deep cut" misdescribed them; the rule (35 or less) is as it was.
+    const said = new Set<string>();
+    for (let popularity = 0; popularity <= 100; popularity += 0.5) said.add(whyOf(placed({ popularity }), START));
+    expect([...said].sort()).toEqual(['Crowd favourite', 'Solid pick', 'Wildcard']);
+    expect([...said].some((why) => /Deep cut/.test(why))).toBe(false);
+    // The two words that can share a line are the longest it can have, and are cut by nothing here (the fit at 360 px is tests/e2e/setlist-rows.spec.ts).
+    expect(whyOf(placed({ difficulty: 0, popularity: 10 }), START)).toBe('In your sweet spot · Wildcard');
+    // The gear's own end label is a different thing, and stays.
+    expect(GEAR_META.popularity.left).toBe('Deep cuts');
   });
 
   it('does not look at the slider: the tuner has no Popularity in it, only the song\'s own place counts', () => {
@@ -205,11 +218,11 @@ describe('whyOf: the order, and at most two', () => {
 
   it('keeps the first two when three hold', () => {
     expect(whyOf(placed({ difficulty: 50, popularity: 95, history: 95 }), sweetAt(50))).toBe('In your sweet spot · Crowd favourite');
-    expect(whyOf(placed({ difficulty: 50, popularity: 10, history: 5 }), sweetAt(50))).toBe('In your sweet spot · Deep cut');
+    expect(whyOf(placed({ difficulty: 50, popularity: 10, history: 5 }), sweetAt(50))).toBe('In your sweet spot · Wildcard');
   });
 
-  it('puts a Deep cut and a Rediscover together too', () => {
-    expect(whyOf(placed({ popularity: 10, history: 5 }), START)).toBe('Deep cut · Rediscover');
+  it('puts a Wildcard and a Rediscover together too', () => {
+    expect(whyOf(placed({ popularity: 10, history: 5 }), START)).toBe('Wildcard · Rediscover');
   });
 
   it('joins two with a middle dot between spaces', () => {

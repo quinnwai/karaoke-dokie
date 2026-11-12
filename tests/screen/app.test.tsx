@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KaraokeApp } from '../../src/components/KaraokeApp';
 import type { Api } from '../../src/lib/client/api';
@@ -11,6 +11,7 @@ import type { SetlistEngine } from '../../src/lib/setlist/engine';
 import { libraryCandidate, rankSetlist } from '../../src/lib/songs/setlist';
 import { ERA_IDS, GEAR_IDS, type SetlistRequest, type SetlistResponse } from '../../src/lib/setlist/types';
 import { noise, SAMPLE_RATE, voice } from '../helpers/synth';
+import { fader, faderPointer, faderX } from '../helpers/fader';
 import { all, el, ranked, response, rowIds, SEL } from '../helpers/setlist';
 import { allMatches, allMatchesWithFacts, knownSongs, match, me, recommendationsPage } from '../fixtures/screen';
 
@@ -1265,9 +1266,11 @@ describe('the Setlist tuner screen', () => {
       expect(el(SEL.strip('tempo')).hasAttribute('data-off')).toBe(true);
       expect(el(SEL.reset('tempo')).hasAttribute('hidden')).toBe(true);
 
-      // A tap that lands exactly on the default moves nothing, so no input event comes: the press itself turns the gear on.
-      fireEvent.pointerDown(slider);
-      fireEvent.pointerUp(slider);
+      // A press that lands exactly on the default moves nothing, so no input comes: the press itself turns the gear on. (The pointer goes to
+      // the fader's hit area, not the input: R33.)
+      const hit = fader('tempo');
+      faderPointer('pointerDown', hit, { x: faderX(DEFAULTS.tempo) });
+      faderPointer('pointerUp', hit, { x: faderX(DEFAULTS.tempo) });
       expect(slider.hasAttribute('aria-valuetext')).toBe(false);
       expect(el(SEL.strip('tempo')).hasAttribute('data-off')).toBe(false);
       expect(el(SEL.reset('tempo')).hasAttribute('hidden')).toBe(false);
@@ -1275,12 +1278,9 @@ describe('the Setlist tuner screen', () => {
       expect(gearEvents(tracked)[0]).toEqual({ name: 'gear_change', props: { gear: 'tempo', value: DEFAULTS.tempo, on: true, mode: 'library' } });
       expect(requests.at(-1)!.off).toEqual(['era']);
 
-      // Another press on a gear that is already on records nothing (let the pointer-up timer run first).
-      fireEvent.pointerDown(slider);
-      fireEvent.pointerUp(slider);
-      await act(async () => {
-        await new Promise<void>((done) => setTimeout(done, 0));
-      });
+      // Another press on a gear that is already on records nothing.
+      faderPointer('pointerDown', hit, { x: faderX(DEFAULTS.tempo) });
+      faderPointer('pointerUp', hit, { x: faderX(DEFAULTS.tempo) });
       expect(gearEvents(tracked)).toHaveLength(1);
 
       // Reset hides its own button, so the focus goes to the slider and not to the page.
@@ -1291,22 +1291,23 @@ describe('the Setlist tuner screen', () => {
       expect(gearEvents(tracked).at(-1)).toEqual({ name: 'gear_change', props: { gear: 'tempo', value: DEFAULTS.tempo, on: false, mode: 'library' } });
     });
 
-    it('a press the browser cancels (it took the gesture for a scroll) ends like a release: recorded once, and the next plain tap adds nothing', async () => {
+    it('a finger the browser takes for a scroll records nothing and leaves the gear off, and the next tap on it records one adjustment and no more', async () => {
       const { tracked } = await signedInWithEngine();
-      const slider = el(SEL.slider('tempo'));
-      const letTimersRun = () =>
-        act(async () => {
-          await new Promise<void>((done) => setTimeout(done, 0));
-        });
-      fireEvent.pointerDown(slider);
-      fireEvent.pointerCancel(slider);
-      await letTimersRun();
+      const hit = fader('tempo');
+      const finger = { kind: 'touch' } as const;
+      faderPointer('pointerDown', hit, { ...finger, x: faderX(DEFAULTS.tempo), y: 0 });
+      faderPointer('pointerMove', hit, { ...finger, x: faderX(DEFAULTS.tempo), y: 14 });
+      faderPointer('pointerCancel', hit, finger);
+      expect(el(SEL.strip('tempo')).hasAttribute('data-off')).toBe(true);
+      expect(gearEvents(tracked)).toEqual([]);
+
+      faderPointer('pointerDown', hit, { ...finger, x: faderX(DEFAULTS.tempo) });
+      faderPointer('pointerUp', hit, { ...finger, x: faderX(DEFAULTS.tempo) });
       expect(gearEvents(tracked)).toEqual([{ name: 'gear_change', props: { gear: 'tempo', value: DEFAULTS.tempo, on: true, mode: 'library' } }]);
 
-      // Tempo is on now: a plain tap on it that moves nothing is not an adjustment.
-      fireEvent.pointerDown(slider);
-      fireEvent.pointerUp(slider);
-      await letTimersRun();
+      // Tempo is on now: a plain tap on its knob that moves nothing is not an adjustment.
+      faderPointer('pointerDown', hit, { ...finger, x: faderX(DEFAULTS.tempo) });
+      faderPointer('pointerUp', hit, { ...finger, x: faderX(DEFAULTS.tempo) });
       expect(gearEvents(tracked)).toHaveLength(1);
     });
 
@@ -1316,14 +1317,9 @@ describe('the Setlist tuner screen', () => {
     ])('a click of button %i (%s) on a gear that is off does not turn it on', async (button) => {
       const { requests, tracked } = await signedInWithEngine();
       const slider = el(SEL.slider('tempo'));
-      // jsdom has no PointerEvent, so the button is set by hand.
-      const press = createEvent.pointerDown(slider);
-      Object.defineProperty(press, 'button', { value: button });
-      fireEvent(slider, press);
-      fireEvent.pointerUp(slider);
-      await act(async () => {
-        await new Promise<void>((done) => setTimeout(done, 0));
-      });
+      const hit = fader('tempo');
+      faderPointer('pointerDown', hit, { x: faderX(DEFAULTS.tempo), button });
+      faderPointer('pointerUp', hit, { x: faderX(DEFAULTS.tempo), button });
       expect(slider.getAttribute('aria-valuetext')).toBe('Off');
       expect(el(SEL.strip('tempo')).hasAttribute('data-off')).toBe(true);
       expect(el(SEL.reset('tempo')).hasAttribute('hidden')).toBe(true);
@@ -1766,7 +1762,7 @@ describe('the Setlist tuner screen', () => {
       expect(history.value).toBe('100');
       expect(history.getAttribute('aria-valuetext')).toBe('Off');
       expect(el(SEL.reset('history')).hasAttribute('hidden')).toBe(true);
-      fireEvent.pointerDown(history);
+      faderPointer('pointerDown', fader('history'), { x: faderX(DEFAULTS.history) });
       expect(history.hasAttribute('aria-valuetext')).toBe(false);
       expect(el(SEL.reset('history')).hasAttribute('hidden')).toBe(false);
       signedIn.unmount();

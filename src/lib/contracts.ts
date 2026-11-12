@@ -283,7 +283,10 @@ export interface SetlistResponse {
   nextOffset: number | null;
   /** Data-source lines for the songs on this page, keyed by track id (the song page's info button). */
   sources: Record<string, DataSourceLogEntry>;
-  /** The parts that counted: not the ones in `off`, and not History unless the singer's library was read. */
+  /**
+   * The parts that counted: not the ones in `off`, and not History unless the singer's library was read. With none of the four gears counting (QWW-57, R36)
+   * the list is in the default order all the same, and this says none counted.
+   */
   applied: TunerPart[];
   /**
    * Why there are no songs: Era is on with no era picked ('no-era-picked', the design's "Pick an era to see songs."),

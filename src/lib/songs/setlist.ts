@@ -31,8 +31,12 @@
 // put octave jumps at the top of a bass's list. The places do not change: a jump song keeps the Difficulty and
 // Popularity place it is shown at, it just comes after the songs sung as written.
 //
-// The default state (setlistConfig.ts) is Popularity on at 100, Difficulty on at 0, the rest off. With
-// Popularity counting double, that is a blend that leans on popularity: of two songs sung the same way, the one
+// With none of the four gears on (QWW-57, R36: Quinn-Wai, "when all are disabled, go back to default ordering") the list
+// is not left to the ties below: it is ranked as the default state ranks it for this singer. The request still says
+// every gear is off, the sheet shows them off, and `applied` says none counted; only the order is the default's.
+//
+// The default state (setlistConfig.ts) is Popularity on at 100, Difficulty on at 0, the rest off, and History on at 100
+// too when the singer is signed in (R31). With Popularity counting double, that is a blend that leans on popularity: of two songs sung the same way, the one
 // that is 10 places less popular needs to be 20 places easier to come first (QWW-42 rule 3, "most popular
 // first, then easiest"). It is a blend, not a sort by popularity with difficulty breaking ties: the single most
 // popular song is first only if it is also easy. The weights are GEAR_WEIGHTS, the one knob if the top of the
@@ -49,7 +53,7 @@ import type { EraId, GearId, Match, SetlistInput, SetlistSong, SetlistState, Tun
 import { GEAR_IDS } from '../contracts';
 import { familiarityScore } from './score';
 import { difficultyFromEdgeTime, edgeTime, pitchTime } from './match';
-import { eraOf } from './setlistConfig';
+import { DEFAULTS, defaultOff, eraOf } from './setlistConfig';
 
 /**
  * How much a gear's distance counts. Popularity counts double (model A), which is what makes the default state lean
@@ -270,6 +274,18 @@ export function prepareSetlist(candidates: SetlistCandidate[], range: Pick<Vocal
 
 const compareIds = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+/**
+ * The gears that rank, and where they are set, when the tuner has none on (QWW-57, R36): the defaults of setlistConfig.ts for this singer. History is
+ * one of them only for a singer whose library was read (`loggedIn` here), as in the default state, where it starts on at 100 for them alone (R31).
+ */
+function defaultRanking(loggedIn: boolean): { by: GearId[]; gears: Record<GearId, number> } {
+  const off = new Set<TunerPart>(defaultOff(loggedIn));
+  return {
+    by: GEAR_IDS.filter((g) => !off.has(g)),
+    gears: { difficulty: DEFAULTS.difficulty, history: DEFAULTS.history, popularity: DEFAULTS.popularity, tempo: DEFAULTS.tempo },
+  };
+}
+
 /** The era filter and the sort: what changes when a slider moves. */
 export function rankPrepared(prepared: PreparedSetlist, state: SetlistState & { loggedIn: boolean }): RankedSetlist {
   const off = new Set<TunerPart>(state.off);
@@ -277,15 +293,17 @@ export function rankPrepared(prepared: PreparedSetlist, state: SetlistState & { 
   const eraOn = !off.has('era');
   const applied: TunerPart[] = eraOn ? [...active, 'era'] : active;
   const picked = new Set<EraId>(state.eras);
+  // R36: no gear counts, so the order is the defaults' (the era filter above is still the request's).
+  const ranking = active.length > 0 ? { by: active, gears: state.gears } : defaultRanking(state.loggedIn);
 
   const passing = prepared.songs.filter((s) => !eraOn || (s.era !== null && picked.has(s.era)));
   const scored = passing.map((s) => {
     let distance = 0;
     let missing = 0;
-    for (const g of active) {
+    for (const g of ranking.by) {
       const place = s.gears[g];
       if (place === null) missing += MISSING_RANK[g];
-      else distance += GEAR_WEIGHTS[g] * Math.abs(place - state.gears[g]);
+      else distance += GEAR_WEIGHTS[g] * Math.abs(place - ranking.gears[g]);
     }
     const m = s.candidate.match;
     // 0 for a song sung as written, 1 for one that needs an octave jump, up or down (QWW-58).

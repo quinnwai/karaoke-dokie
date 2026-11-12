@@ -552,7 +552,8 @@ describe('sheet.module.css (QWW-57: R5, R6, R8, R10; the review of #38: findings
     const tracking = declared('.stripBody .eyebrow', 'letter-spacing');
     // The room the label has beside the reset button: its 44 px box, 8 px of it past the row's edge, and no gap before it.
     expect(rule('.resetButton')).toContain('width: 44px;');
-    expect(rule('.resetButton')).toContain('margin: -8px -8px -4px 0;');
+    // (The 8 px past the row's edge is the right margin; the vertical margins, 6 px above and below since R34, do not change the room the label has.)
+    expect(rule('.resetButton')).toMatch(/margin: -\d+px -8px -\d+px 0;/);
     expect(rule('.stripBody .gearHead')).toContain('gap: 0;');
     expect(rule('.gearHead')).toContain('gap: 8px;'); // the Era panel's header
     const BUTTON = 36;

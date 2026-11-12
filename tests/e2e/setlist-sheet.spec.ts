@@ -189,8 +189,8 @@ const labelBox = (page: Page, gear: GearId) =>
     });
 
 /**
- * What is under the centre of a strip's drawn knob (`hits`: the gear's own slider, or something in it) and how far below the
- * slider's own vertical centre the knob's centre is, in px. A label that wraps adds a line to the head, which drops the track
+ * What is under the centre of a strip's drawn knob (`hits`: the gear's own fader hit area, which takes the pointer since R33, or, for a gear that
+ * cannot be used and has none, something in its strip) and how far below the slider's own vertical centre the knob's centre is, in px. A label that wraps adds a line to the head, which drops the track
  * and leaves the slider above the knob; an end label that wraps adds one under the track and leaves the slider below it.
  */
 const knobBox = (page: Page, gear: GearId) =>
@@ -201,7 +201,8 @@ const knobBox = (page: Page, gear: GearId) =>
     const under = document.elementFromPoint(x, y);
     const input = document.getElementById(`slider-${g}`)!;
     const box = input.getBoundingClientRect();
-    return { hits: under === input || input.contains(under), under: under ? `${under.tagName.toLowerCase()}${under.id ? `#${under.id}` : ''}` : null, below: y - (box.top + box.height / 2) };
+    const hit = el.querySelector('[data-fader]');
+    return { hits: hit ? hit.contains(under) : el.contains(under), under: under ? `${under.tagName.toLowerCase()}${under.id ? `#${under.id}` : ''}` : null, below: y - (box.top + box.height / 2) };
   }, gear);
 
 /** 6A's end-label pairs, which every strip keeps word for word. */

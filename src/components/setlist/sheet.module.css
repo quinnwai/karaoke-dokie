@@ -192,18 +192,19 @@
   white-space: nowrap;
 }
 
-/* 44×26 touch area. The negative margins keep the head row 14 px tall, so the rack's height does not change, and put
-   the icon's right edge on the track's right edge. It sits above the invisible slider, which a tap on the track's
-   right end must still move. */
+/* 44×26 touch area, centred on the title (QWW-57, R34): the same 6 px above and below the 14 px head row, so the icon, the button's own box (its
+   focus ring and the highlight of a tap) and the title's text all share one centre. The negative margins keep the head row 14 px tall, so the rack's
+   height does not change, and the right margin and padding put the icon's right edge on the track's right edge. It sits above the fader's hit area
+   (R33), which a tap on the track's right end must still move. */
 .resetButton {
   position: relative;
   z-index: 1;
   flex-shrink: 0;
   width: 44px;
   height: 26px;
-  margin: -8px -8px -4px 0;
+  margin: -6px -8px -6px 0;
   box-sizing: border-box;
-  padding: 4px 8px 0 0;
+  padding: 0 8px 0 0;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -338,9 +339,24 @@
   gap: 2px;
 }
 
-/* The real <input type="range">, laid invisibly over the whole strip body. It starts 7 px before the track and ends 7 px
-   after it, and its thumb is 14 px wide (the drawn knob's width), so the thumb's centre travels exactly the track's
-   length: a tap lands on the value the drawn knob shows. */
+/* The fader's hit area (QWW-57, R33): a transparent box in the track, centred on the drawn track, 44 px tall (the track is 20) and as wide as
+   the track with 7 px more at each end, half the knob, so the end values are easy to reach and a pointer at x gives the value the knob then
+   shows (src/lib/setlist/fader.ts has the arithmetic). It is the last thing in the track, so it is over the strip's labels; the reset button
+   (z-index 1) is over it and keeps its tap. The track is centred in a strip that is 76 px tall (94 in mini), so the box stops 16 px short of
+   the strip's edge and never reaches the next gear's. A swipe up or down is the browser's, to scroll with (the script ignores it); a
+   sideways one is the fader's. */
+.faderHit {
+  position: absolute;
+  left: -7px;
+  right: -7px;
+  top: -12px;
+  height: 44px;
+  cursor: ew-resize;
+  touch-action: pan-y;
+}
+
+/* The real <input type="range">, laid invisibly over the whole strip body, for the keyboard and screen readers. It takes no pointer: a
+   native one takes a touch only on its own 14 by 20 px thumb (on iOS nowhere else on its track), so the hit area above does that. */
 .sliderInput {
   position: absolute;
   left: -7px;
@@ -350,38 +366,10 @@
   margin: 0;
   padding: 0;
   opacity: 0;
-  cursor: ew-resize;
+  pointer-events: none;
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
-  /* A drag that drifts up or down must stay with the thumb, not scroll or pull the page. */
-  touch-action: none;
-}
-
-.sliderInput:disabled {
-  cursor: default;
-}
-
-.sliderInput::-webkit-slider-runnable-track {
-  height: 100%;
-  background: transparent;
-}
-
-.sliderInput::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 14px;
-  height: 20px;
-}
-
-.sliderInput::-moz-range-track {
-  height: 100%;
-  background: transparent;
-}
-
-.sliderInput::-moz-range-thumb {
-  width: 14px;
-  height: 20px;
-  border: none;
 }
 
 /* ===== Era (README §8) ===== */
