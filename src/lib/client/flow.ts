@@ -23,7 +23,7 @@ import type {
 import { availableSliders, DEFAULT_VIEW, fitViewTo, pickDecade, pickMood, toggleDuets } from '../songs/browse';
 import type { BrowserInfo } from './browser';
 import type { MicPermission, MicProblem } from './mic';
-import { deviceRangeWins, newestOnDevice } from './rangeSync';
+import { deviceRangeWins, fitsServer, newestOnDevice } from './rangeSync';
 
 export type Step =
   | 'boot' // asking /api/me who this is
@@ -251,9 +251,11 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
         // account first when it was sung after the account's; the list is then built on it, and the header shows it. The
         // account's range is what the list used alone before, which left a singer with a newer range on the device with
         // the older one on their signed-in list.
+        // A range kept on the device that the account would refuse (the test accepts any low note under the high one) is not
+        // offered to it: the signed-in list never depended on that range before, and must not start to dead-end on it.
         const device = newestOnDevice(
           low !== null && high !== null ? testRange(low, high, progress?.measuredAt) : null,
-          savedRange ? testRange(savedRange.low, savedRange.high, savedRange.measuredAt) : null,
+          savedRange && fitsServer(savedRange) ? testRange(savedRange.low, savedRange.high, savedRange.measuredAt) : null,
         );
         if (device && (!me.range || deviceRangeWins(device, me.range))) return { ...base, step: 'saving', range: device };
         if (wantsPick) return { ...base, step: 'pick', range: me.range };

@@ -59,11 +59,14 @@ async function startTest() {
   return screen.findByRole('button', { name: /lowest note/ });
 }
 
+/** The button is pressed at T_PRESSED and the note let go at T_SUNG, so a range stamped at the press instead of the release shows. */
 async function hold(label: RegExp) {
   const button = screen.getByRole('button', { name: label });
+  vi.mocked(Date.now).mockReturnValue(T_PRESSED);
   await act(async () => {
     fireEvent.pointerDown(button);
   });
+  vi.mocked(Date.now).mockReturnValue(T_SUNG);
   await act(async () => {
     fireEvent.pointerUp(button);
   });
@@ -84,6 +87,7 @@ const A2 = 110;
 const C5 = 523.25;
 const T_OLD = 1_700_000_000_000;
 const T_SUNG = T_OLD + 3_600_000;
+const T_PRESSED = T_SUNG - 5_000;
 const FS2_C5 = { low: 42, high: 72 };
 const F2_C4 = { low: 41, high: 60 };
 

@@ -362,7 +362,7 @@ describe('me and range', () => {
       expect(await account(jar)).toEqual({ ...RANGE, measuredAt: now });
     });
 
-    it('never keeps a time later than the server clock, so a device with a wrong clock cannot outrank ranges sung after it', async () => {
+    it('never keeps a time later than the server clock: no time on the account is in the future', async () => {
       const jar = await signIn();
       await save(jar, { ...RANGE, measuredAt: now + 60 * 60_000 });
       expect((await account(jar))?.measuredAt).toBe(now);

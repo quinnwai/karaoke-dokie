@@ -111,7 +111,9 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
    data came from (for Maybe songs, also that the range is an estimate), Spotify's own player
    (see below), and "How'd it go?" thumbs that POST `/api/feedback`.
 9. **Returning user** with a saved range lands on results; "redo" restarts the test. Someone
-   without Spotify whose range is kept on the device lands on catalogue results.
+   without Spotify whose range is kept on the device lands on catalogue results. A signed-in singer whose device holds a
+   range sung after the account's has it saved first, so the list is built on it (QWW-66; see "The range on the device and
+   on the account" in `backend.md`).
 10. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
    low and highest high become the range (`source: 'songs'`). Signed-out users sign in first.
 

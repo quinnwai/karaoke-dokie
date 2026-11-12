@@ -131,6 +131,19 @@ describe('boot: the range sung last wins (QWW-66)', () => {
     expect(s).toMatchObject({ step: 'saving', range: { ...FS2_C5, measuredAt: NEW } });
   });
 
+  it('a range kept on the device that the account cannot store is never offered to it: the account\'s list shows, not a save that cannot succeed', () => {
+    // The server takes notes from MIDI 28 to 96 spanning 5 to 48 semitones. The singing test accepts any low note under the high one,
+    // and a signed-in singer's list never depended on the range kept on the device before this change.
+    for (const bad of [{ low: 60, high: 63 }, { low: 30, high: 90 }, { low: 20, high: 50 }]) {
+      const s = run([signedIn({ ...F2_C4, measuredAt: OLD }, { savedRange: { ...bad, measuredAt: NEW } })]);
+      expect(s, JSON.stringify(bad)).toMatchObject({ step: 'results', range: { ...F2_C4, measuredAt: OLD } });
+    }
+    // With no account range to fall back on, there is no range at all: the singer starts the test.
+    expect(run([signedIn(null, { savedRange: { low: 60, high: 63, measuredAt: NEW } })]).step).toBe('landing');
+    // A kept range the account can store is still saved, whatever else is on the device.
+    expect(run([signedIn({ ...F2_C4, measuredAt: OLD }, { savedRange: { ...FS2_C5, measuredAt: NEW } })])).toMatchObject({ step: 'saving', range: { ...FS2_C5, measuredAt: NEW } });
+  });
+
   it('signed out, the range kept on the device keeps its time, for the sign-in that may follow', () => {
     const s = run([{ type: 'booted', me: null, progress: null, wantsPick: false, savedRange: { ...FS2_C5, measuredAt: NEW } }]);
     expect(s).toMatchObject({ step: 'results', mode: 'catalogue', range: { ...FS2_C5, source: 'test', measuredAt: NEW } });

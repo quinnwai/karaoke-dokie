@@ -2,6 +2,7 @@ import {
   ERA_IDS,
   GEAR_IDS,
   MOODS,
+  RANGE_LIMITS,
   SLIDER_IDS,
   type AppEvent,
   type Decade,
@@ -18,10 +19,10 @@ import {
 import { ANON_ID, EVENT_NAME, isEventValue, MAX_EVENTS_PER_REQUEST, MAX_PROP_STRING, MAX_PROPS, PROP_KEY } from '../eventRules';
 import { SETLIST_PAGE } from '../songs/setlistConfig';
 
-export const MIDI_MIN = 28;
-export const MIDI_MAX = 96;
-export const SPAN_MIN = 5;
-export const SPAN_MAX = 48;
+export const MIDI_MIN = RANGE_LIMITS.midiMin;
+export const MIDI_MAX = RANGE_LIMITS.midiMax;
+export const SPAN_MIN = RANGE_LIMITS.spanMin;
+export const SPAN_MAX = RANGE_LIMITS.spanMax;
 
 export type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
 

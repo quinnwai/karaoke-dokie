@@ -219,8 +219,9 @@ export async function putRange(req: Request, ctx: AppContext): Promise<Response>
   const v = validateVocalRange(parsed.body);
   if (!v.ok) return errorJson(400, 'bad-request', v.error);
   // When the singer sang it (QWW-66), by the device's clock. A past time is kept as sent: a range carried over at sign-in was sung earlier.
-  // None sent (an older page) means just now. Never later than the server's clock, so a device with a wrong clock cannot outrank every range
-  // sung after it. The last save wins here; the screen decides when a device's range is newer than the account's and so is worth saving.
+  // None sent (an older page) means just now. Never later than the server's clock, so no time on the account is in the future (the device
+  // keeps the time it measured by its own clock, so a device whose clock is wrong still compares wrongly: see docs/backend.md). The last
+  // save wins here; the screen decides when a device's range is newer than the account's and so is worth saving.
   const now = Date.now();
   await ctx.store.saveRange(user.id, { ...v.value, measuredAt: Math.min(v.value.measuredAt ?? now, now) });
   return json({ ok: true });

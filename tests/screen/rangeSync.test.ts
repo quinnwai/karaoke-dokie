@@ -1,6 +1,6 @@
 // QWW-66: the range the singer sang last wins, on the device and on the account.
 import { describe, expect, it } from 'vitest';
-import { deviceRangeWins, newestOnDevice, sungAfter } from '../../src/lib/client/rangeSync';
+import { deviceRangeWins, fitsServer, newestOnDevice, sungAfter } from '../../src/lib/client/rangeSync';
 import type { VocalRange } from '../../src/lib/contracts';
 
 const range = (low: number, high: number, measuredAt?: number): VocalRange => ({ low, high, source: 'test', ...(measuredAt === undefined ? {} : { measuredAt }) });
@@ -28,6 +28,24 @@ describe('deviceRangeWins: signing in with a range on the device and one on the 
     ['only the account has a time: the device range is older than that', undefined, 1000, false],
   ])('%s', (_name, device, account, expected) => {
     expect(deviceRangeWins({ measuredAt: device }, { measuredAt: account })).toBe(expected);
+  });
+});
+
+describe('fitsServer: a range the account can store', () => {
+  // The same limits as PUT /api/me/range: whole notes from MIDI 28 to 96, spanning 5 to 48 semitones.
+  it.each<[string, number, number, boolean]>([
+    ['an ordinary range', 41, 72, true],
+    ['the widest the server takes', 28, 76, true],
+    ['the top of the scale', 91, 96, true],
+    ['the narrowest the server takes', 60, 65, true],
+    ['one semitone too narrow', 60, 64, false],
+    ['one semitone too wide', 28, 77, false],
+    ['a note below MIDI 28', 27, 50, false],
+    ['a note above MIDI 96', 80, 97, false],
+    ['notes that are not whole', 41.5, 72, false],
+    ['a low note at or above the high note', 72, 72, false],
+  ])('%s', (_name, low, high, expected) => {
+    expect(fitsServer({ low, high })).toBe(expected);
   });
 });
 

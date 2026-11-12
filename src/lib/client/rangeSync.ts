@@ -3,7 +3,7 @@
 // F2 to C4 while the device and its header said F#2 to C5, so the same singer got two lists. The range sung last wins in
 // both places, so each range carries the time it was sung (`VocalRange.measuredAt`).
 
-import type { VocalRange } from '../contracts';
+import { RANGE_LIMITS, type VocalRange } from '../contracts';
 
 type Timed = Pick<VocalRange, 'measuredAt'>;
 
@@ -19,6 +19,20 @@ export const sungAfter = (a: Timed, b: Timed): boolean => a.measuredAt != null &
  * singer is on it now. The same time on both is the same measurement, with nothing to save.
  */
 export const deviceRangeWins = (device: Timed, account: Timed): boolean => account.measuredAt == null || sungAfter(device, account);
+
+/**
+ * Whether the account can store this range: the server refuses notes outside MIDI 28 to 96 and a span outside 5 to 48
+ * semitones. The singing test accepts any low note under the high one, and the screen keeps what it was given, so a range
+ * on the device may be one the server would answer with a 400. Offering it at sign-in would leave the singer on a save that
+ * cannot succeed, where before this change the account's list showed.
+ */
+export const fitsServer = ({ low, high }: Pick<VocalRange, 'low' | 'high'>): boolean =>
+  Number.isInteger(low) &&
+  Number.isInteger(high) &&
+  low >= RANGE_LIMITS.midiMin &&
+  high <= RANGE_LIMITS.midiMax &&
+  high - low >= RANGE_LIMITS.spanMin &&
+  high - low <= RANGE_LIMITS.spanMax;
 
 /**
  * The range this device holds, for two candidates: the finished test left in session storage (the one in flight, across

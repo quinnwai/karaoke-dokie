@@ -16,6 +16,12 @@ export interface VocalRange {
   measuredAt?: number;
 }
 
+/**
+ * What the server takes as a vocal range, in MIDI notes and semitones (`validateVocalRange`): whole notes from `midiMin` to
+ * `midiMax`, spanning `spanMin` to `spanMax`. The screen reads them too, so it never offers the server a range it would refuse.
+ */
+export const RANGE_LIMITS = { midiMin: 28, midiMax: 96, spanMin: 5, spanMax: 48 } as const;
+
 /** Where a song's range numbers came from. 'audio-full': measured from the song's full recording. */
 export type RangeSource = 'note-file' | 'audio-full' | 'artist-typical' | 'artist-external';
 
