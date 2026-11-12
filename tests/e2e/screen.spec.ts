@@ -154,11 +154,12 @@ async function holdButton(page: Page, name: RegExp, ms: number, midway?: () => P
 const freshState = (): ApiState => ({ user: null, savedRanges: [], feedback: [], catalogueFeedback: [], recommendationCalls: [], logouts: 0 });
 /**
  * The `view` a feedback request carries when nothing on the Setlist tuner was touched: its defaults, as feedbackView
- * (src/lib/client/funnel.ts) lists them. Difficulty and Popularity are on; History, Tempo and Era start off.
+ * (src/lib/client/funnel.ts) lists them, for a signed-in singer (both of its users are): Difficulty, Popularity and, since QWW-57's R31,
+ * History are on; Tempo and Era start off.
  */
 const DEFAULT_VIEW = {
   difficulty: DEFAULTS.difficulty / 100,
-  familiarity: null,
+  familiarity: DEFAULTS.history / 100,
   popularity: DEFAULTS.popularity / 100,
   tempo: null,
   decade: null,
@@ -525,8 +526,10 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 1280, height: 800 
       }
       return before;
     };
-    // Difficulty alone: Popularity, on by default, counts double and would lead with its own songs.
+    // Difficulty alone: Popularity, on by default, counts double and would lead with its own songs, and History (on at 100 for a signed-in
+    // singer: R31) would lead with the singer's own.
     await page.locator('button[data-reset="popularity"]').click();
+    await page.locator('button[data-reset="history"]').click();
     const slider = page.locator('#slider-difficulty');
     const lists: string[] = [];
     const labels: (string | undefined)[] = [];

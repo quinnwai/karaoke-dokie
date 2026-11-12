@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Sources and credits (QWW-57): the page at /credits, kept for direct visits (its analytics note, its list, its "‹ Back"), and the panel
-// inside the TV that the link in the chin opens (R28; R29 puts Deezer in it). The panel's layout, its touch targets and what the real
+// inside the TV that the link in the chin opens (R28; Deezer's own credit stays in the line under the list, R29). The panel's layout, its touch targets and what the real
 // browser does with `inert` and focus are tests/e2e/credits.spec.ts; here the DOM, the focus, the keys and the timers, in jsdom.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useEffect } from 'react';
@@ -136,7 +136,7 @@ describe('/credits: "‹ Back" (QWW-57)', () => {
   });
 });
 
-// ---- the panel inside the TV (R28, R29) ----
+// ---- the panel inside the TV (R28) ----
 
 /** What a "Sources and credits" shows, read from the DOM: each source's name, address and what we use it for, and the notes after them. */
 const shown = (root: HTMLElement) => ({
@@ -171,30 +171,24 @@ describe('/credits and the panel say the same thing, from the same data (R28)', 
   });
 });
 
-describe('Deezer in Sources and credits (R29)', () => {
-  it('is named with its logo, and the words about private listening and the audio we do not keep are as they were', () => {
+describe('Deezer in Sources and credits', () => {
+  it('is named with the words about private listening and the audio we do not keep, in the panel and on the page, and has no logo there: the logo is in the line under the list (R29)', () => {
     const deezer = CREDITS.find((c) => c.name === 'Deezer')!;
-    // The data says where the logo goes: Deezer's API terms ask for it where its previews are, and no other source has one.
-    expect(CREDITS.filter((c) => c.mark).map((c) => c.name)).toEqual(['Deezer']);
     expect(deezer.what).toMatch(/streamed from Deezer for your own private, non-commercial listening/);
     expect(deezer.what).toMatch(/We never keep the audio/);
 
-    render(<Tv>a step</Tv>);
+    const { unmount } = render(<Tv>a step</Tv>);
     fireEvent.click(screen.getByRole('button', { name: 'Sources and credits' }));
     const panel = screen.getByRole('dialog', { name: 'Sources and credits' });
-    // The logo is inside Deezer's own link, and the link's name is still just "Deezer".
     const link = within(panel).getByRole('link', { name: 'Deezer' });
-    const logo = link.querySelector('svg')!;
-    expect(logo.getAttribute('aria-hidden')).toBe('true');
-    expect(logo.getAttribute('viewBox')).toBe('0 0 24 24');
-    expect(panel.querySelectorAll('li svg')).toHaveLength(1);
+    expect(link.querySelector('svg')).toBeNull();
+    expect(panel.querySelectorAll('li svg')).toHaveLength(0);
     expect(link.nextElementSibling?.textContent).toBe(deezer.what);
-  });
+    unmount();
 
-  it('is on the /credits page too, with the same logo', () => {
     render(<Credits />);
-    expect(screen.getByRole('link', { name: 'Deezer' }).querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
-    expect(document.querySelectorAll('li svg')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: 'Deezer' }).querySelector('svg')).toBeNull();
+    expect(document.querySelectorAll('li svg')).toHaveLength(0);
   });
 });
 

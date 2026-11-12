@@ -141,11 +141,11 @@ describe('funnel events', () => {
     const empty = { ...allMatches(0) };
     expect(names(atResults, { type: 'allLoaded', page: empty })).toEqual(['list_view', 'results_empty']);
     const loaded = run([{ type: 'allLoaded', page: allMatches() }], atResults);
-    // An untouched tuner, signed in or not: Difficulty and Popularity on at their defaults; History, Tempo and Era start off.
+    // An untouched tuner, signed in (R31): Difficulty, Popularity and History on at their defaults; Tempo and Era start off.
     const untouched = {
       mode: 'library',
       difficulty: DEFAULTS.difficulty / 100,
-      familiarity: null,
+      familiarity: DEFAULTS.history / 100,
       popularity: DEFAULTS.popularity / 100,
       tempo: null,
       eras: null,
@@ -356,7 +356,8 @@ describe('the Setlist tuner events', () => {
 
     it('viewProps reads the tuner as it stands', () => {
       expect(viewProps(tuned)).toEqual(props);
-      expect(viewProps(loaded)).toEqual({ mode: 'library', difficulty: 0, familiarity: null, popularity: 1, tempo: null, eras: null });
+      // Signed in, History starts on at 100 (R31), so it is a target of 1.
+      expect(viewProps(loaded)).toEqual({ mode: 'library', difficulty: 0, familiarity: 1, popularity: 1, tempo: null, eras: null });
     });
 
     it('all three carry it', () => {

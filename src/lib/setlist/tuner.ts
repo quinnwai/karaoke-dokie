@@ -1,19 +1,22 @@
 // The tuner's state and what each control does to it (spec §2, §4 and §4a), as a pure reducer. Nothing here ranks
 // songs: it only says which gears are on, where they are set, and which eras are picked.
 
-import { DEFAULTS } from './defaults';
+import { DEFAULTS, defaultOff } from './defaults';
 import type { EraId, GearId, SetlistRequest, TunerPart, TunerState } from './types';
 import type { Midi } from '../contracts';
 
-/** The state on first load: every gear at its default value, those in `DEFAULTS.off` off. */
-export function initialTuner(opts: { mini?: boolean } = {}): TunerState {
+/**
+ * The state on first load: every gear at its default value, those in `defaultOff` off. Signed in (QWW-57, R31) History starts on, at 100,
+ * where it brings the singer's own top and liked songs to the front; signed out there is no history, and it starts off.
+ */
+export function initialTuner(opts: { mini?: boolean; signedIn?: boolean } = {}): TunerState {
   return {
     difficulty: DEFAULTS.difficulty,
     history: DEFAULTS.history,
     popularity: DEFAULTS.popularity,
     tempo: DEFAULTS.tempo,
     eras: [...DEFAULTS.eras],
-    off: [...DEFAULTS.off],
+    off: [...defaultOff(opts.signedIn === true)],
     open: DEFAULTS.open,
     mini: opts.mini ?? DEFAULTS.mini,
   };

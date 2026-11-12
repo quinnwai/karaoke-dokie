@@ -21,13 +21,6 @@
   line-height: 1.45;
 }
 
-/* Deezer's logo, which its API terms ask for where its previews are (R29): Deezer's purple, beside the name it links. */
-.deezer {
-  margin-right: 6px;
-  vertical-align: -3px;
-  color: #a238ff;
-}
-
 .note {
   margin-top: 32px;
 }

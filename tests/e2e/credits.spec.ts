@@ -1,9 +1,10 @@
-// Sources and credits inside the TV (QWW-57, the review of the 6A preview, R28 and R29), and the credits page that stays for direct visits.
+// Sources and credits inside the TV (QWW-57, the review of the 6A preview, R28; R29 for Deezer's credit), and the credits page that stays for direct visits.
 //   R28  The link is in the frame's bottom left, on every step. A tap opens a panel inside the TV's screen, on the same page: the address does
 //        not change, no tab opens, and nothing under the panel is unmounted. ✕ and Escape close it. While it is open the step under it is inert
 //        (nothing in it takes a tap, a key, the focus or a screen reader), the focus is in the panel, and on close it goes back to the link; the
 //        step is as it was (its gears, its list and its scroll, a running microphone). The panel scrolls inside the frame when the text is taller.
-//   R29  No credit line over the list; Sources and credits names Deezer, with its logo.
+//   R29  Deezer's credit stays where it is: the line under the list (tests/e2e/preview.spec.ts, setlist-rows.spec.ts). Sources and credits names Deezer
+//        in words too, with no logo of its own.
 //   /credits  A plain page, for a direct visit: the same content, and its "‹ Back" closes a tab of its own and goes back anywhere else.
 // The tuner is reached as the other tuner specs reach it (tests/helpers/tunerE2e.ts). tests/screen/credits.test.tsx has the DOM, the keys and the
 // timers in jsdom; here it is the real browser, on the production build: layout, touch targets, `inert`, focus, scrolling, a real swipe.
@@ -553,28 +554,26 @@ test.describe('on a desktop', () => {
 });
 
 // ============================================================================================================
-// R29. Deezer is in Sources and credits, with its logo; there is no credit line over the list
+// R29. Deezer's credit stays where it is, under the list; Sources and credits names Deezer in words too
 // ============================================================================================================
 
-test('R29. there is no credit line over the list, and no link to the credits in it, even with a song that has a preview to play; Sources and credits names Deezer with its logo', async ({ page }) => {
+test('R29. the line under the list is there with a song that has a preview to play, as it was; Sources and credits names Deezer in words, with no logo of its own', async ({ page }) => {
   await open(page, { extra: [WITH_PREVIEW] });
-  // The row that brought the line is on screen, with its ▶ ready.
   await expect(page.getByRole('button', { name: 'Play Can Play by Has Preview' })).toBeVisible();
-  await expect(page.getByText('Previews from')).toHaveCount(0);
-  await expect(page.locator('#app').getByText('Deezer')).toHaveCount(0);
-  await expect(page.locator('#app a[href="/credits"]')).toHaveCount(0);
   await page.locator('#list-scroll').evaluate((el) => el.scrollTo(0, el.scrollHeight));
-  await expect(page.getByText('Previews from')).toHaveCount(0);
+  const line = page.getByRole('link', { name: /^Previews from Deezer/ });
+  await expect(line).toBeVisible();
+  await expect(line).toHaveAttribute('href', '/credits');
+  await expect(line).toHaveAttribute('target', '_blank');
+  // The only credits link in the list is that line: the book is in the TV's chin (R28), and no row shows a Deezer mark.
+  await expect(page.locator('#list-scroll a[href="/credits"]')).toHaveCount(1);
+  await expect(page.locator('#list-scroll [data-row]').getByText('Deezer')).toHaveCount(0);
 
   await link(page).tap();
   const deezer = panel(page).getByRole('link', { name: 'Deezer' });
   await deezer.scrollIntoViewIfNeeded();
   await expect(deezer).toBeVisible();
-  const logo = deezer.locator('svg');
-  await expect(logo).toBeVisible();
-  const b = (await logo.boundingBox())!;
-  expect([b.width, b.height], 'the logo is 16 px').toEqual([16, 16]);
-  expect(await css(logo, 'color'), 'in Deezer\'s purple').toBe('rgb(162, 56, 255)');
+  await expect(deezer.locator('svg')).toHaveCount(0);
   // Its words: what the previews are for, and that no audio is kept.
   const words = (await deezer.locator('xpath=following-sibling::p').innerText()).replace(/\s+/g, ' ');
   expect(words).toContain('streamed from Deezer for your own private, non-commercial listening');
@@ -599,7 +598,9 @@ test('/credits is the same list and the same note as the panel, for a direct vis
   await expect(page.getByRole('heading', { name: 'Sources and credits' })).toBeVisible();
   expect(await page.locator('main li').allInnerTexts()).toEqual(inPanel.sources);
   expect((await page.locator('main section').innerText()).replace(/\s+/g, ' ')).toBe(inPanel.note);
-  await expect(page.getByRole('link', { name: 'Deezer' }).locator('svg')).toBeVisible();
+  // Deezer is named in words here too, and the logo stays in the line under the list (R29).
+  await expect(page.getByRole('link', { name: 'Deezer' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Deezer' }).locator('svg')).toHaveCount(0);
 });
 
 /**

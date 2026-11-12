@@ -15,17 +15,43 @@ import { mockPage } from '../fixtures/setlist';
 import { setlistAnswer } from '../helpers/setlistServer';
 
 const run = (s: TunerState, ...actions: TunerAction[]) => actions.reduce(tunerReducer, s);
-/** The tuner everyone starts from: it takes no sign-in state, the ranking engine decides what counts. */
+/** The tuner a singer who is not signed in starts from. Signed in, History starts on too (R31): `signedInStart`. */
 const start = initialTuner();
+const signedInStart = initialTuner({ signedIn: true });
 
 describe('first load (spec §2, §11)', () => {
-  it('starts every gear at its default value, with History, Tempo and Era off', () => {
+  it('starts every gear at its default value, with History, Tempo and Era off (signed out)', () => {
     expect(start).toMatchObject({ difficulty: DEFAULTS.difficulty, history: DEFAULTS.history, popularity: DEFAULTS.popularity, tempo: DEFAULTS.tempo, mini: false });
     expect(start.eras).toEqual(DEFAULTS.eras);
     expect(start.off).toEqual(DEFAULTS.off);
     expect([...start.off].sort()).toEqual(['era', 'history', 'tempo']);
-    // It is the same for a signed-in singer: initialTuner has no sign-in argument.
+    // No sign-in argument, or a false one, is the signed-out start.
     expect(initialTuner({})).toEqual(start);
+    expect(initialTuner({ signedIn: false })).toEqual(start);
+  });
+
+  it('starts History on, at 100, when the singer is signed in (R31), and nothing else differs', () => {
+    expect(signedInStart.history).toBe(100);
+    expect(signedInStart.history).toBe(DEFAULTS.history);
+    expect(signedInStart.off).toEqual(['tempo', 'era']);
+    expect(isOn(signedInStart, 'history')).toBe(true);
+    expect(isOn(start, 'history')).toBe(false);
+    expect({ ...signedInStart, off: start.off }).toEqual(start);
+    // The first request says so: History is not among the parts that are off, and its target is 100.
+    const range = { low: 45, high: 72 };
+    expect(toRequest(signedInStart, range)).toMatchObject({ gears: { history: 100 }, off: ['tempo', 'era'] });
+    expect(toRequest(start, range)).toMatchObject({ gears: { history: 100 }, off: ['history', 'tempo', 'era'] });
+  });
+
+  it('turns History off with its button and back on from 100, signed in (R31 keeps the button what R21 says it is)', () => {
+    const moved = run(signedInStart, { type: 'input', gear: 'history', value: 40 });
+    expect(moved.history).toBe(40);
+    const reset = run(moved, { type: 'reset', gear: 'history' });
+    expect(reset.history).toBe(DEFAULTS.history);
+    expect(isOn(reset, 'history')).toBe(false);
+    const touched = run(reset, { type: 'touch', gear: 'history' });
+    expect(isOn(touched, 'history')).toBe(true);
+    expect(touched.history).toBe(100);
   });
 
   it('is the ranking decision QWW-47 posted: Difficulty 0, History 100, Popularity 100, Tempo 50, Era with no picks', () => {

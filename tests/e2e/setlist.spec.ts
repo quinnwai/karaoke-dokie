@@ -245,11 +245,17 @@ test('13. the reset buttons: five exist, and only those of the gears that are on
   await expect(resetButton(page, 'popularity')).toBeVisible();
 });
 
-test('13b. signed in, History starts off too, but it can be switched on', async ({ page }) => {
+test('13b. signed in, History starts on at 100 (R31), its ✕ turns it off, and a nudge turns it on again from its default', async ({ page }) => {
   await open(page, { loggedIn: true });
-  await expect(page.locator('button[data-reset]:visible')).toHaveCount(2);
-  await expect(strip(page, 'history')).toHaveAttribute('data-off', 'true');
+  // Signed in it starts on, "that's the purpose of logging in": Difficulty, Popularity and History show their ✕, Tempo and Era do not.
+  await expect(page.locator('button[data-reset]:visible')).toHaveCount(3);
+  await expect(strip(page, 'history')).not.toHaveAttribute('data-off', /.*/);
   await expect(slider(page, 'history')).toBeEnabled();
+  expect(await value(page, 'history')).toBe(DEFAULTS.history);
+  expect((await tuner(page)).off).toEqual(['tempo', 'era']);
+  // Its ✕ is "Turn off", as every gear's is (R21): back at 100 and off.
+  await resetButton(page, 'history').click();
+  await expect(strip(page, 'history')).toHaveAttribute('data-off', 'true');
   expect(await value(page, 'history')).toBe(DEFAULTS.history);
   // Signed out it cannot be switched on; signed in a nudge turns it on from its default.
   await pressKey(page, 'history', 'ArrowLeft');
@@ -504,8 +510,10 @@ test('the sheet does not cover the last row: scrolled to the end, it and the end
     // The scroller ends where the sheet starts.
     const scroller = (await page.locator('#list-scroll').boundingBox())!;
     expect(Math.round(scroller.y + scroller.height)).toBeLessThanOrEqual(Math.round(sheetTop));
-    // The last row, at the very end (the credits link is in the TV's chin now, R28), is above the handle's touch area (it reaches 11 px above the sheet) and receives its own taps.
-    for (const target of [rows(page).last().locator('button').first()]) {
+    // The last row and the Deezer line, at the very end when a row on screen has a preview (the credits link is in the TV's chin now, R28), are above the
+    // handle's touch area (it reaches 11 px above the sheet) and receive their own taps.
+    const deezer = page.getByRole('link', { name: /^Previews from Deezer/ });
+    for (const target of [rows(page).last().locator('button').first(), ...((await deezer.count()) > 0 ? [deezer] : [])]) {
       const b = (await target.boundingBox())!;
       expect(b.y + b.height, `${mode}: bottom of the last thing in the list`).toBeLessThanOrEqual(sheetTop - 11 + 1);
       const c = await centre(target);
@@ -1177,7 +1185,7 @@ test('25b. an off gear\'s end labels are the raised grey too, and a gear that is
   expect(await css(page.locator('#era-label'), 'color')).toBe(PINK);
 });
 
-test('26. the notes and bolts light by the thresholds: at History 65 five notes, at Popularity 80 six bolts, the rest drawn unlit and not gone (R7); at the real defaults the seven bolts are lit and the seven notes are not, History being off', async ({ page }) => {
+test('26. the notes and bolts light by the thresholds: at History 65 five notes, at Popularity 80 six bolts, the rest drawn unlit and not gone (R7); at the real defaults, signed in (R31), the seven bolts and the seven notes are lit', async ({ page }) => {
   await open(page, { loggedIn: true });
   // R7: a note or bolt the value does not reach is drawn unlit at full opacity, not hidden, so all seven are always drawn (their
   // computed opacity is 1) and `data-lit` says which of them are lit. A gear that is off lights none.
@@ -1186,8 +1194,8 @@ test('26. the notes and bolts light by the thresholds: at History 65 five notes,
       drawn: els.filter((el) => getComputedStyle(el).opacity === '1').length,
       lit: els.filter((el) => el.getAttribute('data-lit') === 'true').length,
     }));
-  // The real defaults are History 100 (off) and Popularity 100 (on): every bolt is lit, every note is drawn and unlit.
-  expect(await state('[data-strip][data-gear="history"] [data-note]')).toEqual({ drawn: 7, lit: 0 });
+  // The real defaults, signed in, are History 100 and Popularity 100, both on (R31: History starts on when signed in): every bolt and every note is lit.
+  expect(await state('[data-strip][data-gear="history"] [data-note]')).toEqual({ drawn: 7, lit: 7 });
   expect(await state('[data-strip][data-gear="popularity"] [data-bolt]')).toEqual({ drawn: 7, lit: 7 });
   await page.evaluate(() => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ history: 65, popularity: 80, off: ['tempo', 'era'] }));
   await expect.poll(() => state('[data-strip][data-gear="history"] [data-note]')).toEqual({ drawn: 7, lit: 5 });

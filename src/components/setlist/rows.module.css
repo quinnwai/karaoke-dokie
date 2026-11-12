@@ -146,6 +146,20 @@
   visibility: visible;
 }
 
+/* Deezer's credit (QWW-48): the line under the list, over the credits link, in the tuner's quiet text colour. The element is also
+   given the app's .deezerCredit, which sets a negative margin for the earlier screens and the app's own colours, so this names the
+   element too, to be the more specific. */
+p.deezer {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 10px 0 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--sl-text-3);
+  --ink: var(--sl-text-2);
+}
+
 .rowOpen {
   flex: 1;
   min-width: 0;

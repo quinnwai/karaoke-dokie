@@ -233,12 +233,21 @@ for (const engine of engines) {
   });
 }
 
-test('the row and its play button fit a 375 px phone, with no credit line under the list', async ({ browser, baseURL }) => {
+test('the row and its play button fit a 375 px phone, with Deezer named under the list', async ({ browser, baseURL }) => {
   const mock: Mock = { response: songs([1]), missing: new Set(), previewCalls: [] };
   for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
     const { context, page } = await open(browser, baseURL, mock, viewport);
-    // Deezer is named in Sources and credits (R29, tests/e2e/credits.spec.ts), not by a line under the list: the list ends at its last row.
-    await expect(page.getByText('Previews from')).toHaveCount(0);
+    // Deezer is named under the list (#34's notes; it stays there: QWW-57, R29): below the last row, at the end of what scrolls.
+    const credit = page.getByText('Previews from');
+    await credit.scrollIntoViewIfNeeded();
+    await expect(credit).toBeVisible();
+    expect(
+      await page.evaluate(() => {
+        const line = [...document.querySelectorAll('p')].find((p) => /Previews from/.test(p.textContent ?? ''))!;
+        const last = [...document.querySelectorAll('[data-row]')].at(-1)!;
+        return line.getBoundingClientRect().top >= last.getBoundingClientRect().bottom;
+      }),
+    ).toBe(true);
     await page.locator('#list-scroll').evaluate((el) => el.scrollTo(0, 0));
     const button = (await play(page, 'Plastic Love').boundingBox())!;
     expect(button.width).toBeGreaterThanOrEqual(44);

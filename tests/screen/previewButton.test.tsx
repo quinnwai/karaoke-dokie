@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 // The play button in each song row (QWW-48), alone and in the Setlist tuner's rows (QWW-57 moved it from the earlier results
 // screen into the tuner's slot, where hovering swaps the rank number for it).
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PreviewButton, PreviewPlayerContext } from '../../src/components/PreviewButton';
+import { DeezerCredit, PreviewButton, PreviewPlayerContext } from '../../src/components/PreviewButton';
 import { SetlistScreen } from '../../src/components/setlist/SetlistScreen';
 import type { Match } from '../../src/lib/contracts';
 import { createPreviewPlayer, type PreviewCheck } from '../../src/lib/client/preview';
@@ -200,18 +200,36 @@ describe('play button in the tuner rows', () => {
     expect(screen.getByRole('button', { name: 'Play Lemon by Kenshi Yonezu' }).getAttribute('data-preview')).toBe('idle');
   });
 
-  // R29 (QWW-57): Deezer is named in Sources and credits, in the TV's panel (tests/screen/credits.test.tsx), not by a line over the list.
-  it('has no credit line over or under the list, with a song on it that has a preview or none, and no link to the credits', () => {
+  // R29 (QWW-57): the line stays where it is. The book icon's link that used to follow it is the TV's chin now (R28), so nothing follows it here.
+  it("shows Deezer's logo under the list when a song on it has a preview, and not otherwise", () => {
     const { wrap } = withPlayer();
     const { unmount } = render(wrap(<SetlistScreen {...setlistProps(RANGE, [withId(plastic(), 101), lemon()], { renderPlay: play })} />));
-    // A row with a preview to play is on the screen (what used to bring the line), and the screen says nothing of Deezer.
-    expect(screen.getByRole('button', { name: 'Play Plastic Love by Mariya Takeuchi' })).toBeTruthy();
-    expect(screen.queryByText('Previews from')).toBeNull();
-    expect(screen.queryByText('Deezer')).toBeNull();
-    expect(screen.queryByRole('link', { name: /Deezer|credits/i })).toBeNull();
-    expect(document.querySelector('a[href="/credits"]')).toBeNull();
+    expect(screen.getByText('Previews from')).toBeTruthy();
+    expect(screen.getByText('Deezer')).toBeTruthy();
+    // Under the list: after the rows.
+    const credit = screen.getByText('Previews from').closest('p')!;
+    const rows = document.getElementById('list')!;
+    expect(rows.compareDocumentPosition(credit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // And it is the list's only link to the credits, and no row carries a Deezer mark.
+    expect(document.querySelectorAll('a[href="/credits"]')).toHaveLength(1);
+    expect(within(rows).queryByText('Deezer')).toBeNull();
     unmount();
     render(wrap(<SetlistScreen {...setlistProps(RANGE, [plastic(), lemon()], { renderPlay: play })} />));
     expect(screen.queryByText('Previews from')).toBeNull();
+  });
+
+  it('shows no Deezer line where no play button is offered (the screen was given no renderPlay)', () => {
+    render(<SetlistScreen {...setlistProps(RANGE, [withId(plastic(), 101)])} />);
+    expect(screen.queryByText('Previews from')).toBeNull();
+  });
+
+  it('the Deezer line names Deezer in words beside its logo, and links to the credits, which say the previews are for private listening', () => {
+    render(<DeezerCredit />);
+    const link = screen.getByRole('link', { name: 'Previews from Deezer, for private listening. Sources and credits' });
+    expect(link.getAttribute('href')).toBe('/credits');
+    // It opens in a new tab, so reading the credits does not cost the singer their range and tuning (QWW-57).
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(link.textContent).toBe('Previews fromDeezer');
   });
 });

@@ -78,30 +78,39 @@ describe('boot', () => {
 });
 
 describe('boot: the tuner a singer starts from', () => {
-  const boots: [string, FlowEvent][] = [
-    ['a new visitor on the landing screen', signedOut],
-    ['a half-done test', { type: 'booted', me: null, progress: { low: 45, high: null }, wantsPick: false }],
-    ['a finished test waiting at the arrow', { type: 'booted', me: null, progress: { low: 45, high: 72 }, wantsPick: false }],
-    ['a range kept on the device', { type: 'booted', me: null, progress: null, wantsPick: false, savedRange: { low: 45, high: 72 } }],
-    ['a signed-in singer with a saved range', { type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }],
-    ['a signed-in singer with a finished test to save', { type: 'booted', me: me(), progress: { low: 45, high: 72 }, wantsPick: false }],
-    ['a signed-in singer with half a test', { type: 'booted', me: me(), progress: { low: 45, high: null }, wantsPick: false }],
-    ['a signed-in singer who asked to pick songs', { type: 'booted', me: me(), progress: null, wantsPick: true }],
-    ['a signed-in singer with no range yet', { type: 'booted', me: me(), progress: null, wantsPick: false }],
+  // [who, the boot event, whether they are signed in]: the defaults depend on it (R31).
+  const boots: [string, FlowEvent, boolean][] = [
+    ['a new visitor on the landing screen', signedOut, false],
+    ['a half-done test', { type: 'booted', me: null, progress: { low: 45, high: null }, wantsPick: false }, false],
+    ['a finished test waiting at the arrow', { type: 'booted', me: null, progress: { low: 45, high: 72 }, wantsPick: false }, false],
+    ['a range kept on the device', { type: 'booted', me: null, progress: null, wantsPick: false, savedRange: { low: 45, high: 72 } }, false],
+    ['a signed-in singer with a saved range', { type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false }, true],
+    ['a signed-in singer with a finished test to save', { type: 'booted', me: me(), progress: { low: 45, high: 72 }, wantsPick: false }, true],
+    ['a signed-in singer with half a test', { type: 'booted', me: me(), progress: { low: 45, high: null }, wantsPick: false }, true],
+    ['a signed-in singer who asked to pick songs', { type: 'booted', me: me(), progress: null, wantsPick: true }, true],
+    ['a signed-in singer with no range yet', { type: 'booted', me: me(), progress: null, wantsPick: false }, true],
   ];
 
-  it.each(boots)('%s gets the defaults', (_who, event) => {
-    expect(run([event]).tuner).toEqual(initialTuner());
+  it.each(boots)('%s gets the defaults', (_who, event, signedIn) => {
+    expect(run([event]).tuner).toEqual(initialTuner({ signedIn }));
   });
 
-  it('is the same for everyone, signed in or not: History, Tempo and Era start off for both', () => {
+  it('starts History on when the singer is signed in, and off when not (R31); Tempo and Era start off for both', () => {
     const signedOutTuner = run([signedOut]).tuner;
     const signedInTuner = run([{ type: 'booted', me: me(), progress: null, wantsPick: false }]).tuner;
-    expect(signedInTuner).toEqual(signedOutTuner);
+    // Signed out, as it always was: there is no history, so History is off.
     expect(signedOutTuner.off).toEqual(['history', 'tempo', 'era']);
+    // Signed in, "that's the purpose of logging in": History is on at 100 ("On repeat"), so the singer's own top and liked songs come first.
+    expect(signedInTuner.off).toEqual(['tempo', 'era']);
+    expect(signedInTuner.history).toBe(100);
+    expect(isOn(signedInTuner, 'history')).toBe(true);
+    // Nothing else differs, and the sheet opens on the same gear.
+    expect({ ...signedInTuner, off: [] }).toEqual({ ...signedOutTuner, off: [] });
     expect(signedOutTuner.open).toBe('difficulty');
-    // Before anything has booted, the state is the same.
+    expect(signedInTuner.open).toBe('difficulty');
+    // Before anything has booted, the state is the signed-out one.
     expect(initialState.tuner).toEqual(initialTuner());
+    expect(initialTuner().off).toEqual(['history', 'tempo', 'era']);
   });
 
   it('starts the sheet in mini mode when asked (?mini=1), and expanded otherwise', () => {
@@ -111,7 +120,7 @@ describe('boot: the tuner a singer starts from', () => {
     expect(mini).toEqual(initialTuner({ mini: true }));
     // Signed in too, whichever way the boot goes.
     expect(run([{ type: 'booted', me: me({ low: 45, high: 72, source: 'test' }), progress: null, wantsPick: false, mini: true }]).tuner).toEqual(
-      initialTuner({ mini: true }),
+      initialTuner({ mini: true, signedIn: true }),
     );
     expect(run([{ type: 'booted', me: null, progress: null, wantsPick: false, savedRange: { low: 45, high: 72 }, mini: true }]).tuner.mini).toBe(true);
   });
@@ -486,12 +495,12 @@ describe('the Setlist tuner in the flow', () => {
   const withoutTuner = (s: FlowState) => ({ ...s, tuner: null });
 
   // One action of each kind, and what the tuner is afterwards (the reducer's own rules are in tests/setlist/tuner.test.ts).
-  // It starts with History, Tempo and Era off, and no era picked.
+  // This is a signed-in boot, so it starts with History on (R31) and Tempo and Era off, and no era picked.
   const actions: [string, TunerAction, Partial<FlowState['tuner']>][] = [
-    ['a slider moving', { type: 'input', gear: 'tempo', value: 90 }, { tempo: 90, open: 'tempo', off: ['history', 'era'] }],
-    ['a press on an off slider', { type: 'touch', gear: 'tempo' }, { tempo: DEFAULTS.tempo, open: 'tempo', off: ['history', 'era'] }],
-    ['a reset', { type: 'reset', gear: 'popularity' }, { popularity: DEFAULTS.popularity, open: 'popularity', off: ['history', 'tempo', 'era', 'popularity'] }],
-    ['an era button', { type: 'era', era: 's80' }, { eras: ['s80'], open: 'era', off: ['history', 'tempo'] }],
+    ['a slider moving', { type: 'input', gear: 'tempo', value: 90 }, { tempo: 90, open: 'tempo', off: ['era'] }],
+    ['a press on an off slider', { type: 'touch', gear: 'tempo' }, { tempo: DEFAULTS.tempo, open: 'tempo', off: ['era'] }],
+    ['a reset', { type: 'reset', gear: 'popularity' }, { popularity: DEFAULTS.popularity, open: 'popularity', off: ['tempo', 'era', 'popularity'] }],
+    ['an era button', { type: 'era', era: 's80' }, { eras: ['s80'], open: 'era', off: ['tempo'] }],
     ['a tab', { type: 'open', gear: 'era' }, { open: 'era' }],
     ['the handle', { type: 'mini', mini: true }, { mini: true }],
     ['the test hook', { type: 'patch', patch: { difficulty: 5 } }, { difficulty: 5 }],
@@ -546,8 +555,9 @@ describe('the Setlist tuner in the flow', () => {
   });
 
   describe('listening history needs a library', () => {
-    // Someone with a range kept on the device: catalogue songs. History starts off for everyone, so a press or a move would
-    // change it if nothing stopped it.
+    // Someone with a range kept on the device: catalogue songs. History starts off for them (R31: it starts on only when signed in), so a
+    // press or a move would change it if nothing stopped it. A signed-in singer's History starts on, and is not rewritten when the library
+    // turns out unreadable (below): the sheet and the engine count it as off.
     const catalogue = run([{ type: 'booted', me: null, progress: null, wantsPick: false, savedRange: { low: 45, high: 72 } }, { type: 'allLoaded', page: allMatches() }]);
     const unreadable = run([{ type: 'allLoaded', page: { ...allMatches(), libraryUnavailable: true } }], atResults);
 
@@ -558,9 +568,10 @@ describe('the Setlist tuner in the flow', () => {
       expect(historyAvailable(catalogue)).toBe(false);
     });
 
-    it('ignores moving the slider and pressing it while it is unavailable, so History stays off', () => {
+    it('ignores moving the slider and pressing it while it is unavailable, so History stays as it was', () => {
+      expect(isOn(catalogue.tuner, 'history')).toBe(false);
+      expect(isOn(unreadable.tuner, 'history')).toBe(true); // signed in: on at the start, and counted as off because there is no library
       for (const state of [catalogue, unreadable]) {
-        expect(isOn(state.tuner, 'history')).toBe(false);
         for (const action of [{ type: 'input', gear: 'history', value: 90 }, { type: 'touch', gear: 'history' }] as TunerAction[]) {
           expect(run(tune(action), state)).toBe(state);
         }
@@ -574,18 +585,19 @@ describe('the Setlist tuner in the flow', () => {
       expect(run(tune({ type: 'reset', gear: 'history' }), catalogue).tuner).toMatchObject({ history: DEFAULTS.history, open: 'history' });
     });
 
-    it('works in library mode: History starts off, the slider switches it on at the value it is set to, and a press switches it on at its default', () => {
-      expect(isOn(loaded.tuner, 'history')).toBe(false);
+    it('works in library mode: History starts on at 100 (R31), the slider moves it, a reset turns it off, and a press switches it on again at its default', () => {
+      expect(isOn(loaded.tuner, 'history')).toBe(true);
+      expect(loaded.tuner.history).toBe(100);
       const moved = run(tune({ type: 'input', gear: 'history', value: 30 }), loaded);
       expect(moved.tuner).toMatchObject({ history: 30, open: 'history' });
       expect(isOn(moved.tuner, 'history')).toBe(true);
-      const pressed = run(tune({ type: 'touch', gear: 'history' }), loaded);
+      // A reset puts it back at its default value and off, like any other gear (R21: the button says "Turn off"), after which a press switches it on again at 100.
+      const reset = run(tune({ type: 'input', gear: 'history', value: 30 }, { type: 'reset', gear: 'history' }), loaded);
+      expect(reset.tuner).toMatchObject({ history: DEFAULTS.history });
+      expect(isOn(reset.tuner, 'history')).toBe(false);
+      const pressed = run(tune({ type: 'touch', gear: 'history' }), reset);
       expect(isOn(pressed.tuner, 'history')).toBe(true);
       expect(pressed.tuner.history).toBe(DEFAULTS.history);
-      // And it can be reset like any other gear, after which a press switches it on again.
-      const reset = run(tune({ type: 'input', gear: 'history', value: 30 }, { type: 'reset', gear: 'history' }, { type: 'touch', gear: 'history' }), loaded);
-      expect(reset.tuner).toMatchObject({ history: DEFAULTS.history });
-      expect(isOn(reset.tuner, 'history')).toBe(true);
     });
 
     it('a library the server could not read counts as the catalogue from then on, and the tuner itself is left alone', () => {
@@ -677,7 +689,13 @@ describe('logging out', () => {
     expect(isOn(s.tuner, 'history')).toBe(true);
     // Nothing can change it while there is no library, and a History that was off stays off.
     expect(run(tune({ type: 'input', gear: 'history', value: 90 }, { type: 'touch', gear: 'history' }), s)).toBe(s);
-    const wasOff = run([{ type: 'booted', me: me(signedInRange), progress: null, wantsPick: false }, { type: 'loggedOut' }, { type: 'allLoaded', page: allMatches() }]);
+    // (Signed in, History starts on: R31. This one was reset, which turns it off, before the singer logged out.)
+    const wasOff = run([
+      { type: 'booted', me: me(signedInRange), progress: null, wantsPick: false },
+      ...tune({ type: 'reset', gear: 'history' }),
+      { type: 'loggedOut' },
+      { type: 'allLoaded', page: allMatches() },
+    ]);
     expect(isOn(wasOff.tuner, 'history')).toBe(false);
     expect(run(tune({ type: 'input', gear: 'history', value: 90 }, { type: 'touch', gear: 'history' }), wasOff)).toBe(wasOff);
     expect(isOn(run(tune({ type: 'touch', gear: 'history' }), wasOff).tuner, 'history')).toBe(false);

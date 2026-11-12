@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 import { createPreviewPlayer, type PreviewPlayer, type PreviewSnapshot, type PreviewStatus } from '../lib/client/preview';
+import { DeezerIcon } from './Icon';
 import styles from './screen.module.css';
 
 // The ▶ in a song row (QWW-48): it plays the song's 30 s Deezer preview without leaving the list. Self-contained, so
@@ -172,5 +173,25 @@ export function PreviewButton({ id, deezerId, title, artist, position, large, cl
       </svg>
       {large && <span className={styles.previewWords}>{words}</span>}
     </button>
+  );
+}
+
+/**
+ * Deezer's API terms ask every app that uses it to show Deezer's logo where it can be seen, and to tell listeners the
+ * previews are for private use. One quiet line over the list says where they come from and links to the credits
+ * page, which says the rest. The page opens in a new tab: the tuner holds the singer's range and settings, which leaving
+ * would cost them (QWW-57).
+ */
+export function DeezerCredit({ className }: { className?: string }) {
+  return (
+    <p className={className ? `${styles.deezerCredit} ${className}` : styles.deezerCredit}>
+      <a href="/credits" target="_blank" rel="noopener noreferrer" aria-label="Previews from Deezer, for private listening. Sources and credits">
+        Previews from
+        <span className={styles.deezerMark}>
+          <DeezerIcon />
+          Deezer
+        </span>
+      </a>
+    </p>
   );
 }

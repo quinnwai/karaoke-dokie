@@ -17,6 +17,7 @@ import { toRows } from '../../lib/setlist/rows';
 import { HISTORY_HINT_LOGGED_OUT, HISTORY_HINT_UNREACHABLE } from '../../lib/setlist/gears';
 import type { TunerAction } from '../../lib/setlist/tuner';
 import type { EmptyReason, GearId, SetlistSong, TunerState } from '../../lib/setlist/types';
+import { DeezerCredit } from '../PreviewButton';
 import { SpotifyAccount } from '../SpotifyAccount';
 import { Sheet } from './Sheet';
 import { ConnectButton } from './ConnectButton';
@@ -231,6 +232,9 @@ export function SetlistScreen(props: SetlistScreenProps) {
         {mode === 'library' && !waiting && !error && rows.length > 0 && visible.length >= rows.length && nextOffset === null && (
           <p className={listStyles.note}>That’s every song that fits, for now.</p>
         )}
+        {/* Deezer's API terms ask for its logo where its previews are (QWW-48): one quiet line under the list, which tells listeners the rest
+            (it stays where it is: QWW-57, R29). Only while a row on screen has a preview to play. */}
+        {props.renderPlay && visible.some((r) => r.match.deezerId !== undefined) && <DeezerCredit className={listStyles.deezer} />}
       </div>
 
       <Sheet

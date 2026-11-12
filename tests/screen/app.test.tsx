@@ -159,11 +159,12 @@ async function signedInWithEngine(answer?: (request: SetlistRequest) => SetlistR
 
 /**
  * The tuner as the feedback request carries it (feedbackView in src/lib/client/funnel.ts): each gear's target, 0 to 1, or
- * null when it is not factored in. An untouched tuner has Difficulty and Popularity on; History, Tempo and Era start off.
+ * null when it is not factored in. An untouched tuner has Difficulty and Popularity on, and Tempo and Era off; History is on when the singer is
+ * signed in (R31) and off when not.
  */
-const defaultView = () => ({
+const defaultView = (signedIn = false) => ({
   difficulty: DEFAULTS.difficulty / 100,
-  familiarity: null,
+  familiarity: signedIn ? DEFAULTS.history / 100 : null,
   popularity: DEFAULTS.popularity / 100,
   tempo: null,
   decade: null,
@@ -890,7 +891,7 @@ describe('KaraokeApp', () => {
     expect(screen.getByRole('button', { name: 'It went well' }).getAttribute('aria-pressed')).toBe('true');
     expect([screen.getByRole('button', { name: 'It went well' }), screen.getByRole('button', { name: "It didn't go well" })].map((b) => (b as HTMLButtonElement).disabled)).toEqual([true, true]);
     // The feedback request keeps the shape the server has always validated, built from the tuner's gears.
-    expect(api.feedback).toHaveBeenCalledWith({ trackId: 't2', thumbs: 'up', difficulty: 'hard', octave: 'down', view: defaultView() });
+    expect(api.feedback).toHaveBeenCalledWith({ trackId: 't2', thumbs: 'up', difficulty: 'hard', octave: 'down', view: defaultView(true) });
     // Tapping a thumb must not reload the player: that would restart the song.
     expect(screen.getByTitle('Spotify player: Yoru ni Kakeru by YOASOBI')).toBe(player);
 
@@ -1080,11 +1081,11 @@ describe('KaraokeApp', () => {
     fireEvent.pointerUp(slider);
     fireEvent.change(slider);
     expect(tracked.map((e) => e.name)).toEqual(['list_view', 'song_open', 'feedback_tapped', 'gear_change']);
-    // History, Tempo and Era start off, so they are null (Era's picks are only sent while Era is on).
+    // Signed in, History starts on (R31); Tempo and Era start off, so they are null (Era's picks are only sent while Era is on).
     expect(tracked[1]!.props).toEqual({
       mode: 'library',
       difficulty: DEFAULTS.difficulty / 100,
-      familiarity: null,
+      familiarity: DEFAULTS.history / 100,
       popularity: DEFAULTS.popularity / 100,
       tempo: null,
       eras: null,
@@ -1153,19 +1154,20 @@ describe('the Setlist tuner screen', () => {
 
       await act(async () => page.resolve(allMatches()));
       await screen.findByText('Plastic Love');
-      // QWW-47's defaults: Difficulty and Popularity on; History, Tempo and Era start off, and Era has no picks. The engine
-      // knows who is signed in, so the request does not say.
+      // QWW-47's defaults: Difficulty and Popularity on, and Era has no picks; Tempo and Era start off. Signed in, History starts on at
+      // 100 as well (R31: "that's the purpose of logging in"). The engine knows who is signed in, so the request does not say.
       expect(requests).toEqual([
         {
           range: { low: 45, high: 72 },
           gears: { difficulty: DEFAULTS.difficulty, history: DEFAULTS.history, popularity: DEFAULTS.popularity, tempo: DEFAULTS.tempo },
-          off: ['history', 'tempo', 'era'],
+          off: ['tempo', 'era'],
           eras: [],
         },
       ]);
+      expect(DEFAULTS.history).toBe(100);
     });
 
-    it('sends a singer without Spotify the same request: it does not say who is signed in', async () => {
+    it('sends a singer without Spotify the same request but for History, which is off for them (R31): it does not say who is signed in', async () => {
       const { requests: signedIn } = await signedInWithEngine();
       cleanup();
 
@@ -1174,9 +1176,10 @@ describe('the Setlist tuner screen', () => {
       render(<KaraokeApp api={fakeApi(null)} mic={fakeMic().mic} setlistEngine={engine} />);
       await screen.findByText('Plastic Love');
       expect(requests).toHaveLength(1);
-      expect(requests[0]).toEqual(signedIn[0]);
+      // Signed in, History starts on; without Spotify there is no history to use, and it starts off. Nothing else differs.
+      expect(requests[0]).toEqual({ ...signedIn[0], off: ['history', 'tempo', 'era'] });
       expect(requests[0]).not.toHaveProperty('loggedIn');
-      expect(requests[0]!.off).toEqual(['history', 'tempo', 'era']);
+      expect(signedIn[0]!.off).toEqual(['tempo', 'era']);
     });
 
     it('sends the tuner as it is: History switched on stays in the request when the library could not be read, and the engine decides', async () => {
@@ -1186,7 +1189,7 @@ describe('the Setlist tuner screen', () => {
       const { engine, requests } = fakeEngine();
       render(<KaraokeApp api={api} mic={mic} setlistEngine={engine} />);
       await screen.findByText('Plastic Love');
-      // A signed-in singer can switch History on: it starts off, but it is theirs to use.
+      // A signed-in singer's History starts on (R31) and is theirs to move.
       fireEvent.change(el(SEL.slider('history')), { target: { value: '60' } });
       await waitFor(() => expect(requests).toHaveLength(2));
       expect(requests[1]).toEqual({ ...requests[0], gears: { ...requests[0]!.gears, history: 60 }, off: ['tempo', 'era'] });
@@ -1210,7 +1213,7 @@ describe('the Setlist tuner screen', () => {
       fireEvent.change(el(SEL.slider('tempo')), { target: { value: '35' } });
       await waitFor(() => expect(requests).toHaveLength(2));
       // Tempo leaves the parts that do not count; the rest of `off` keeps its order.
-      expect(requests[1]).toEqual({ ...first, gears: { ...first.gears, tempo: 35 }, off: ['history', 'era'] });
+      expect(requests[1]).toEqual({ ...first, gears: { ...first.gears, tempo: 35 }, off: ['era'] });
     });
 
     it('Reset sends the gear back at its default value and off, added after the parts that were already off', async () => {
@@ -1220,14 +1223,14 @@ describe('the Setlist tuner screen', () => {
       fireEvent.click(el(SEL.reset('popularity')));
       await waitFor(() => expect(requests).toHaveLength(3));
       // The tuner keeps `off` in the order things were switched off, and a reset goes on the end.
-      expect(requests[2]).toEqual({ ...requests[0], off: ['history', 'tempo', 'era', 'popularity'] });
+      expect(requests[2]).toEqual({ ...requests[0], off: ['tempo', 'era', 'popularity'] });
     });
 
     it('picking an era turns Era on with just that era, and resetting Era puts it off again with no picks', async () => {
       const { requests } = await signedInWithEngine();
       fireEvent.click(el(SEL.era('s80')));
       await waitFor(() => expect(requests).toHaveLength(2));
-      expect(requests[1]).toEqual({ ...requests[0], eras: ['s80'], off: ['history', 'tempo'] });
+      expect(requests[1]).toEqual({ ...requests[0], eras: ['s80'], off: ['tempo'] });
 
       fireEvent.click(el(SEL.era('s90')));
       await waitFor(() => expect(requests).toHaveLength(3));
@@ -1270,7 +1273,7 @@ describe('the Setlist tuner screen', () => {
       expect(el(SEL.reset('tempo')).hasAttribute('hidden')).toBe(false);
       await waitFor(() => expect(gearEvents(tracked)).toHaveLength(1));
       expect(gearEvents(tracked)[0]).toEqual({ name: 'gear_change', props: { gear: 'tempo', value: DEFAULTS.tempo, on: true, mode: 'library' } });
-      expect(requests.at(-1)!.off).toEqual(['history', 'era']);
+      expect(requests.at(-1)!.off).toEqual(['era']);
 
       // Another press on a gear that is already on records nothing (let the pointer-up timer run first).
       fireEvent.pointerDown(slider);
@@ -1441,7 +1444,7 @@ describe('the Setlist tuner screen', () => {
       fireEvent.click(el(SEL.era('s80')));
       await waitFor(() => expect(requests).toHaveLength(3));
       const last = requests[2]!;
-      expect(last).toMatchObject({ gears: { tempo: 35 }, eras: ['s80'], off: ['history'] });
+      expect(last).toMatchObject({ gears: { tempo: 35 }, eras: ['s80'], off: [] });
 
       fireEvent.click(screen.getByRole('button', { name: /^Lemon/ }));
       expect(screen.getByRole('heading', { name: 'Lemon' })).toBeTruthy();
@@ -1565,7 +1568,7 @@ describe('the Setlist tuner screen', () => {
       fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
       expect(screen.getByText('Thanks! That helps.')).toBeTruthy();
       expect(api.feedback).toHaveBeenCalledTimes(1);
-      expect(api.feedback).toHaveBeenCalledWith({ trackId: 't15', thumbs: 'up', difficulty: 'hard', octave: 'none', view: defaultView() });
+      expect(api.feedback).toHaveBeenCalledWith({ trackId: 't15', thumbs: 'up', difficulty: 'hard', octave: 'none', view: defaultView(true) });
       expect(api.catalogueFeedback).not.toHaveBeenCalled();
 
       // And back to the list, which still has it.
@@ -1637,9 +1640,10 @@ describe('the Setlist tuner screen', () => {
 
     it('Difficulty puts the Easy songs first at 0 and the Hard songs first at 100, the songs sung as written before the octave jumps, and the Maybe songs last either way', async () => {
       await withFacts();
-      // Difficulty alone: Popularity is reset. Each label has a third of the track, so the labels come in blocks, but a song that
+      // Difficulty alone: Popularity and History (which a signed-in singer starts with on: R31) are reset. Each label has a third of the track, so the labels come in blocks, but a song that
       // fits only an octave away (t1 Lemon, t2 Yoru ni Kakeru, t4 Dancing Queen) follows every song sung as written (QWW-58, #37).
       fireEvent.click(el(SEL.reset('popularity')));
+      fireEvent.click(el(SEL.reset('history')));
       await waitFor(() => expect(words()).toEqual(['Easy', 'Easy', 'Medium', 'Hard', 'Hard', 'Medium', 'Medium', 'Hard', 'Maybe', 'Maybe']));
       expect(rowIds().slice(0, 5).sort()).toEqual(['t0', 't3', 't5', 't6', 't7']); // sung as written
       expect(rowIds().slice(5, 8).sort()).toEqual(['t1', 't2', 't4']); // the octave jumps
@@ -1744,16 +1748,24 @@ describe('the Setlist tuner screen', () => {
   });
 
   describe('signed in and out, and the sheet mode', () => {
-    it('History is usable but starts off when signed in, and is disabled with a hint when there is no library', async () => {
+    it('History is usable and starts on at 100 when signed in (R31), and is disabled with a hint when there is no library', async () => {
       const signedIn = render(<KaraokeApp api={fakeApi(me({ low: 45, high: 72, source: 'test' }))} mic={fakeMic().mic} />);
       await screen.findByText('Plastic Love');
       const history = el<HTMLInputElement>(SEL.slider('history'));
       expect(history.disabled).toBe(false);
-      // Off like Tempo and Era: the default view does not use it until the singer does.
+      // "That's the purpose of logging in": On repeat, with its turn-off button showing, unlike Tempo and Era, which start off.
+      expect(history.value).toBe('100');
+      expect(history.hasAttribute('aria-valuetext')).toBe(false);
+      expect(el(SEL.strip('history')).hasAttribute('data-off')).toBe(false);
+      expect(el(SEL.reset('history')).hasAttribute('hidden')).toBe(false);
+      expect(el(SEL.strip('tempo')).hasAttribute('data-off')).toBe(true);
+      expect(screen.queryByText(HISTORY_HINT)).toBeNull();
+      // Its button turns it off like any gear's (R21), back at 100, and touching it turns it on again from there.
+      fireEvent.change(history, { target: { value: '40' } });
+      fireEvent.click(el(SEL.reset('history')));
+      expect(history.value).toBe('100');
       expect(history.getAttribute('aria-valuetext')).toBe('Off');
       expect(el(SEL.reset('history')).hasAttribute('hidden')).toBe(true);
-      expect(screen.queryByText(HISTORY_HINT)).toBeNull();
-      // Touching it turns it on.
       fireEvent.pointerDown(history);
       expect(history.hasAttribute('aria-valuetext')).toBe(false);
       expect(el(SEL.reset('history')).hasAttribute('hidden')).toBe(false);
@@ -1776,7 +1788,7 @@ describe('the Setlist tuner screen', () => {
       fireEvent.click(el(SEL.era('s80')));
       await waitFor(() => expect(requests).toHaveLength(4));
       const tuned = requests[3]!;
-      expect(tuned).toMatchObject({ gears: { tempo: 35, difficulty: 60 }, eras: ['s80'], off: ['history'] });
+      expect(tuned).toMatchObject({ gears: { tempo: 35, difficulty: 60 }, eras: ['s80'], off: [] });
 
       fireEvent.click(screen.getByRole('button', { name: 'Spotify account' }));
       fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
@@ -1825,7 +1837,7 @@ describe('the Setlist tuner screen', () => {
       await screen.findByText('Plastic Love');
       expect(el(SEL.app).dataset.mode).toBe('mini');
       expect(el(SEL.handle).getAttribute('aria-expanded')).toBe('false');
-      // The first gear that is on, signed in or not: History is off for everyone to begin with.
+      // The first gear that is on, signed in or not: Difficulty.
       expect(el(SEL.app).dataset.open).toBe('difficulty');
       signedIn.unmount();
 

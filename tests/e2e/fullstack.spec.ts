@@ -9,6 +9,7 @@
 
 import { devices, expect, test } from '@playwright/test';
 import path from 'node:path';
+import type { SetlistRequest } from '../../src/lib/contracts';
 
 /** A row's song button, which opens the song page (the row's play button, QWW-48, comes first). */
 const SONG_BUTTON = 'button:not([data-preview])';
@@ -48,10 +49,10 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
   await expect(credits).toBeVisible();
   await expect(page.locator('#list-scroll').getByRole('link', { name: 'Sources and credits' })).toHaveCount(0);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-01b-catalogue-end.png') });
-  // It opens inside the TV, on the same page, and names Deezer with its logo and who else the songs and the know-how come from (R28, R29).
+  // It opens inside the TV, on the same page, and names Deezer and who else the songs and the know-how come from (R28).
   await credits.click();
   const panel = page.getByRole('dialog', { name: 'Sources and credits' });
-  await expect(panel.getByRole('link', { name: 'Deezer' }).locator('svg')).toBeVisible();
+  await expect(panel.getByRole('link', { name: 'Deezer' })).toBeVisible();
   await expect(panel.getByRole('link', { name: 'USDB (UltraStar DataBase)' })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe('/');
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-01c-credits.png') });
@@ -99,11 +100,21 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
 
   // ---- Connect Spotify (mock): the range carries over and library songs load; History is on now ----
   // On a phone the first tap on the header's Spotify button shows its tooltip (R30) and the second connects.
+  const asked: SetlistRequest[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/setlist') asked.push(r.postDataJSON() as SetlistRequest);
+  });
   const connect = page.getByRole('button', { name: 'Connect to Spotify' });
   await connect.click();
   await connect.click();
   await expect(page.locator('#slider-history')).toBeEnabled({ timeout: 20_000 });
   await expect(songs.first()).toBeVisible();
+  // R31: signed in, the tuner starts with History on, at 100 ("that's the purpose of logging in"), and the first request after the round trip said so.
+  await expect(page.locator('[data-strip][data-gear="history"]')).not.toHaveAttribute('data-off', /.*/);
+  expect(await page.locator('#slider-history').inputValue()).toBe('100');
+  expect(asked.length).toBeGreaterThan(0);
+  expect(asked.at(-1)!.gears.history).toBe(100);
+  expect(asked.at(-1)!.off).toEqual(['tempo', 'era']);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-04-library.png') });
 
   const me = await (await page.request.get('/api/me')).json();

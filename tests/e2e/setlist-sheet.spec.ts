@@ -112,15 +112,15 @@ for (const loggedIn of [false, true]) {
       await expect(page.locator('#app')).toHaveAttribute('data-mode', 'expanded');
     };
 
-    // As first load leaves them: Difficulty and Popularity on, Tempo, Era and History off, and History disabled when signed out.
+    // As first load leaves them: Difficulty and Popularity on, Tempo and Era off, and History on when signed in (R31) and off, and disabled, when not.
     await expect(strip(page, 'tempo')).toHaveAttribute('data-off', 'true');
-    await expect(strip(page, 'history')).toHaveAttribute('data-off', 'true');
+    if (loggedIn) await expect(strip(page, 'history')).not.toHaveAttribute('data-off', /.*/);
+    else await expect(strip(page, 'history')).toHaveAttribute('data-off', 'true');
     await expect(page.locator('#era-panel')).toHaveAttribute('data-off', 'true');
     await expectGreyBorders(page, 'as first load leaves them');
     await tabsInMini('as first load leaves them');
 
-    // Everything on that can be (History cannot be signed out): the border does not take the gear's colour.
-    if (loggedIn) await pressKey(page, 'history', 'ArrowLeft');
+    // Everything on that can be (History starts on when signed in, and cannot be turned on signed out): the border does not take the gear's colour.
     await pressKey(page, 'tempo', 'ArrowRight');
     await eraButton(page, 's80').click();
     for (const g of GEARS.filter((gear) => loggedIn || gear !== 'history')) await expect(strip(page, g)).not.toHaveAttribute('data-off', /.*/);
@@ -294,10 +294,12 @@ for (const state of ['disabled', 'off', 'on'] as const) {
   test(`R6. the strip reads "${LABEL[state]}" on one line, not cut off, at 360, 375, 390 and 412 px, expanded and in mini, with History ${state}`, async ({ page }) => {
     await openTuner(page, { loggedIn: state !== 'disabled' });
     if (state === 'on') {
-      await pressKey(page, 'history', 'ArrowLeft');
+      // Signed in, History starts on (R31).
       await expect(strip(page, 'history')).not.toHaveAttribute('data-off', /.*/);
       await expect(resetButton(page, 'history')).toBeVisible();
     } else {
+      // Off but usable is signed in with History turned off by its ✕, since it starts on (R31).
+      if (state === 'off') await resetButton(page, 'history').click();
       await expect(strip(page, 'history')).toHaveAttribute('data-off', 'true');
     }
     // The tag is " · OFF" after the label for a History that is off but usable, and not at all for a disabled one.
@@ -340,13 +342,13 @@ test.describe('R6 on a desktop', () => {
     test(`R6. inside the phone-shaped frame the label is on one line and not cut off either, expanded and in mini (${loggedIn ? 'signed in' : 'signed out'})`, async ({ page }) => {
       await openTuner(page, { loggedIn });
       await fontsReady(page);
-      const states: HistoryState[] = loggedIn ? ['off', 'on'] : ['disabled'];
+      const states: HistoryState[] = loggedIn ? ['on', 'off'] : ['disabled'];
       for (const state of states) {
-        if (state === 'on') {
-          // Expanded first: the slider can be focused there.
+        if (state === 'off') {
+          // Signed in, History starts on (R31): its ✕ turns it off. Expanded first: the button can be pressed there.
           await showStrip(page, 'history', 'expanded');
-          await pressKey(page, 'history', 'ArrowLeft');
-          await expect(strip(page, 'history')).not.toHaveAttribute('data-off', /.*/);
+          await resetButton(page, 'history').click();
+          await expect(strip(page, 'history')).toHaveAttribute('data-off', 'true');
         }
         for (const mode of ['expanded', 'mini'] as const) await expectLabelFits(page, state, 1280, mode);
       }

@@ -5,8 +5,6 @@ export interface Credit {
   name: string;
   url: string;
   what: string;
-  /** A logo drawn beside the name where the source's terms ask for it (Deezer's API terms ask for its logo where its previews are). */
-  mark?: 'deezer';
 }
 
 export const CREDITS: Credit[] = [
@@ -85,7 +83,6 @@ export const CREDITS: Credit[] = [
   {
     name: 'Deezer',
     url: 'https://www.deezer.com/',
-    mark: 'deezer',
     what: 'The 30-second previews behind the play button on each song, streamed from Deezer for your own private, non-commercial listening. We never keep the audio. Deezer’s track ranks are also one of the signs of how well known a song is.',
   },
 ];

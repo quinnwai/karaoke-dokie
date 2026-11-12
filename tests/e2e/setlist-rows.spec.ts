@@ -21,7 +21,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { launchWithMic, writeTone } from './fakeMic';
-import { centre, css, DEFAULT_RANKING, eraButton, mockApi, open, openButton, pressKey, resetButton, rgb, rows, TEXT_3, titles } from '../helpers/tunerE2e';
+import { centre, css, DEFAULT_RANKING, eraButton, mockApi, open, openButton, pressKey, resetButton, rgb, rows, TEXT_3, titles, tuner } from '../helpers/tunerE2e';
 import type { MockSong } from '../fixtures/setlist';
 
 const SCREENS = path.resolve('test-results/screens');
@@ -899,8 +899,8 @@ test('R3, R17. on a phone the ▶ always shows, in its circle: the full pink whe
 });
 
 // ============================================================================================================
-// The second adversarial review of PR #38 (QWW-57): a screen reader reads each row's reason line (the credits links that were tested here
-// are tests/e2e/credits.spec.ts now: R28 moved them into the TV)
+// The second adversarial review of PR #38 (QWW-57): a screen reader reads each row's reason line, and the Deezer line opens the credits in a
+// new tab (the book icon that was tested here is the TV's chin now, R28: tests/e2e/credits.spec.ts)
 // ============================================================================================================
 
 test('a row button is described by its own reason line, also when the track ids have spaces, as catalogue ids do', async ({ page }) => {
@@ -920,4 +920,25 @@ test('a row button is described by its own reason line, also when the track ids 
     // The browser's own accessible description: what a screen reader reads after the row's name.
     await expect(openButton(row)).toHaveAccessibleDescription(why);
   }
+});
+
+test('the Deezer line opens /credits in a new tab, and the tuner is as it was (it stays where it is: R29)', async ({ page, context }) => {
+  await open(page, { extra: WITH_AND_WITHOUT });
+  const before = await tuner(page);
+  const deezer = page.getByRole('link', { name: /^Previews from Deezer/ });
+  await deezer.scrollIntoViewIfNeeded();
+  await expect(deezer).toHaveAttribute('href', '/credits');
+  await expect(deezer).toHaveAttribute('target', '_blank');
+  await expect(deezer).toHaveAttribute('rel', 'noopener noreferrer');
+  const opened = context.waitForEvent('page');
+  await deezer.tap();
+  const tab = await opened;
+  await tab.waitForLoadState();
+  expect(new URL(tab.url()).pathname).toBe('/credits');
+  await expect(tab.getByRole('heading', { name: 'Sources and credits' })).toBeVisible();
+  await tab.close();
+  // This tab never moved: the tuner, and its list, are as they were.
+  expect(new URL(page.url()).pathname).toBe('/');
+  expect(await tuner(page)).toEqual(before);
+  await expect(rows(page).first()).toBeVisible();
 });

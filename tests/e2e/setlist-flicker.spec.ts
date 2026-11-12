@@ -183,18 +183,18 @@ test.describe('a phone tall enough to open expanded', () => {
     }
   });
 
-  test('flicker: first load signed in plays the same two strips, and a reload is a first load again', async ({ page }) => {
+  test('flicker: first load signed in plays the three strips that are on, History among them (R31), and a reload is a first load again', async ({ page }) => {
     await record(page);
     await open(page, { loggedIn: true });
-    // Signed in, History is usable (it starts off, as it does for everyone), so the app got here by another road than a signed-out singer's.
+    // Signed in, History is usable and starts on (R31), so the app got here by another road than a signed-out singer's.
     await expect(slider(page, 'history')).toBeEnabled();
     await untilOver(page);
-    expect([...(await started(page))].sort(), 'first load').toEqual(['difficulty', 'popularity']);
+    expect([...(await started(page))].sort(), 'first load').toEqual(['difficulty', 'history', 'popularity']);
     // The page's memory is the page's own: a new page flickers its strips again.
     await page.reload();
     await expect(rows(page).first()).toBeVisible();
     await untilOver(page);
-    expect([...(await started(page))].sort(), 'after a reload').toEqual(['difficulty', 'popularity']);
+    expect([...(await started(page))].sort(), 'after a reload').toEqual(['difficulty', 'history', 'popularity']);
   });
 });
 

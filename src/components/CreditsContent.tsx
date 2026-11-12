@@ -1,5 +1,4 @@
 import { ANALYTICS_NOTE, CREDITS } from '../lib/credits';
-import { DeezerIcon } from './Icon';
 import styles from './CreditsContent.module.css';
 
 /**
@@ -13,7 +12,6 @@ export function CreditsContent() {
         {CREDITS.map((c) => (
           <li key={c.name}>
             <a href={c.url} target="_blank" rel="noreferrer">
-              {c.mark === 'deezer' && <DeezerIcon className={styles.deezer} />}
               {c.name}
             </a>
             <p>{c.what}</p>

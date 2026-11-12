@@ -239,8 +239,8 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       const { me, progress, wantsPick, savedRange } = event;
       const low = progress?.low ?? null;
       const high = progress?.high ?? null;
-      // The tuner starts from its defaults (a reload, as after the Spotify round trip, starts it over).
-      const fresh = { ...state, tuner: initialTuner({ mini: event.mini }) };
+      // The tuner starts from its defaults (a reload, as after the Spotify round trip, starts it over). Signed in, History starts on (R31).
+      const fresh = { ...state, tuner: initialTuner({ mini: event.mini, signedIn: me != null }) };
       if (me) {
         const base = { ...fresh, signedIn: true, displayName: me.displayName, low, high, mode: 'library' as const };
         if (low !== null && high !== null) return { ...base, step: 'saving', range: testRange(low, high) };
