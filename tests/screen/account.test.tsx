@@ -35,18 +35,17 @@ describe('Spotify logo without an account', () => {
     expect(screen.queryByText(/Logged in/)).toBeNull();
   });
 
-  it('the text button under the list connects too, and only appears once songs are listed', () => {
+  it('has no connect block under the list, with songs or without (R18): the header\'s button is the one way to connect', () => {
     const onConnect = vi.fn();
     const { rerender } = render(<SetlistScreen {...setlistProps(range, [], { onConnect })} />);
     expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1);
     expect(screen.queryByText('Want personalized recommendations?')).toBeNull();
 
     rerender(<SetlistScreen {...setlistProps(range, songs, { onConnect })} />);
-    const buttons = screen.getAllByRole('button', { name: 'Connect to Spotify' });
-    expect(buttons).toHaveLength(2);
-    expect(screen.getByText('Want personalized recommendations?')).toBeTruthy();
-    fireEvent.click(buttons[1]!);
-    expect(onConnect).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1);
+    expect(screen.queryByText('Want personalized recommendations?')).toBeNull();
+    expect(screen.queryByText('Invited testers only for now.')).toBeNull();
+    expect(onConnect).not.toHaveBeenCalled();
   });
 });
 

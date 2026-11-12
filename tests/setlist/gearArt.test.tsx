@@ -18,6 +18,9 @@
 //     out of the component's tree what that adds (the filter's `defs`, the group that names it, the rays split into lit and unlit),
 //     expects `overflow="visible"` on the root (the glow reaches past the icon's box) and no filter in the root's style. What the glow
 //     is and what it reaches are asserted on their own below;
+//   - the Era tab's jukebox buttons (QWW-57, R24). The reference draws two, lit amber by how many eras are picked and a dark rose when
+//     not; this build draws three, lit amber by which are picked and the unlit grey when not. The walk takes them out of both trees
+//     (withoutJukeboxButtons), and they are asserted on their own below;
 //   - the hooks the component adds for the browser tests (data-note, data-bolt, ...), asserted on their own below.
 // Both trees are parsed with jsdom's DOMParser, the engine this test already runs on; `new JSDOM` would need @types/jsdom.
 
@@ -48,7 +51,6 @@ const COLOR = {
   violet: '#B583FF',
   easy: '#4DE89A',
   hard: '#FF5A8A',
-  lightOff: '#3A2A33',
   grid: '#1F1D26',
 };
 
@@ -402,6 +404,17 @@ function withoutTabGlow(root: Element): Element {
   return copy;
 }
 
+/**
+ * An Era tab icon without its jukebox buttons (QWW-57, R24). The reference draws two, amber or a dark rose by how many eras are
+ * picked; this build draws three, amber or the unlit grey by which eras are picked. So the walk compares the rest of the icon (the body, the
+ * window and the bars, the root's stroke and glow), and the buttons are asserted on their own in the jukebox tests below.
+ */
+function withoutJukeboxButtons(root: Element): Element {
+  const copy = root.cloneNode(true) as Element;
+  for (const button of copy.querySelectorAll('circle')) button.remove();
+  return copy;
+}
+
 function compare(ref: Element, got: Element, ctx: Context): Walk {
   const out: Walk = { problems: [], pairs: [] };
   walk(ref, ctx.variant === 'tab' ? withoutTabGlow(got) : got, ref.localName, ctx, out);
@@ -438,7 +451,13 @@ function drawn(part: Part, state: ReferenceState) {
       off,
     };
   }
-  return { label: 'era tab', ref: referenceEraTab(), got: eraTab(state.eras, off), variant: 'tab' as const, off };
+  return {
+    label: 'era tab',
+    ref: withoutJukeboxButtons(referenceEraTab()),
+    got: withoutJukeboxButtons(eraTab(state.eras, off)),
+    variant: 'tab' as const,
+    off,
+  };
 }
 
 /** Draws `parts` for a state and compares each with the reference's art for that state. Returns every difference. */
@@ -821,7 +840,7 @@ describe('GearArt: tempo follows the value (the metronome)', () => {
   });
 });
 
-describe('EraTabArt: the jukebox (README §9, test 27)', () => {
+describe('EraTabArt: the jukebox (README §9, test 27; QWW-57, R24)', () => {
   const jukebox = (eras: EraId[], off: boolean) => {
     const root = eraTab(eras, off);
     return {
@@ -831,14 +850,23 @@ describe('EraTabArt: the jukebox (README §9, test 27)', () => {
     };
   };
 
+  const { pink, amber, unlit } = COLOR;
+  // The buttons are left, middle, right: before the '90s, the '90s, after them. One case for each row of R24's table (all 21 pairs
+  // are in art.test.ts); a button is amber where the picked eras light it and the unlit grey where they do not.
   const CASES: Array<{ name: string; eras: EraId[]; off: boolean; body: string; buttons: string[] }> = [
-    { name: 'the default three eras: body pink, both buttons amber', eras: ['s90', 's00', 's10'], off: false, body: COLOR.pink, buttons: [COLOR.amber, COLOR.amber] },
-    { name: 'only the 80s: left amber, right dark', eras: ['s80'], off: false, body: COLOR.pink, buttons: [COLOR.amber, COLOR.lightOff] },
-    { name: 'two eras: both amber', eras: ['s70', 's20'], off: false, body: COLOR.pink, buttons: [COLOR.amber, COLOR.amber] },
-    { name: 'all seven eras: both amber', eras: [...ERA_IDS], off: false, body: COLOR.pink, buttons: [COLOR.amber, COLOR.amber] },
-    { name: 'Era on and none picked: body pink, both buttons dark', eras: [], off: false, body: COLOR.pink, buttons: [COLOR.lightOff, COLOR.lightOff] },
-    { name: 'Era off with nothing parked (every gear reset): body unlit, both buttons dark', eras: [], off: true, body: COLOR.unlit, buttons: [COLOR.lightOff, COLOR.lightOff] },
-    { name: 'Era off with picks parked: body unlit, both buttons still dark', eras: ['s90', 's00', 's10'], off: true, body: COLOR.unlit, buttons: [COLOR.lightOff, COLOR.lightOff] },
+    { name: "the '90s alone: the middle button", eras: ['s90'], off: false, body: pink, buttons: [unlit, amber, unlit] },
+    { name: "the '80s alone: the left button", eras: ['s80'], off: false, body: pink, buttons: [amber, unlit, unlit] },
+    { name: "the '10s alone: the right button", eras: ['s10'], off: false, body: pink, buttons: [unlit, unlit, amber] },
+    { name: "the '70s and the '00s, one before and one after: left and right", eras: ['s70', 's00'], off: false, body: pink, buttons: [amber, unlit, amber] },
+    { name: "the '70s and the '80s, both before the '90s: left and middle", eras: ['s70', 's80'], off: false, body: pink, buttons: [amber, amber, unlit] },
+    { name: "the '80s and the '90s, both the '90s or earlier: left and middle", eras: ['s80', 's90'], off: false, body: pink, buttons: [amber, amber, unlit] },
+    { name: "the '90s and the '00s, both the '90s or later: middle and right", eras: ['s90', 's00'], off: false, body: pink, buttons: [unlit, amber, amber] },
+    { name: "the '10s and the '20s, both after the '90s: middle and right", eras: ['s10', 's20'], off: false, body: pink, buttons: [unlit, amber, amber] },
+    { name: 'three eras: all three', eras: ['s90', 's00', 's10'], off: false, body: pink, buttons: [amber, amber, amber] },
+    { name: 'all seven eras: all three', eras: [...ERA_IDS], off: false, body: pink, buttons: [amber, amber, amber] },
+    { name: 'Era on and none picked: body pink, no button lit', eras: [], off: false, body: pink, buttons: [unlit, unlit, unlit] },
+    { name: 'Era off with nothing parked (every gear reset): body unlit, all three buttons unlit', eras: [], off: true, body: unlit, buttons: [unlit, unlit, unlit] },
+    { name: 'Era off with picks parked: body unlit, all three buttons unlit, none lit', eras: ['s90', 's00', 's10'], off: true, body: unlit, buttons: [unlit, unlit, unlit] },
   ];
 
   for (const { name, eras, off, body, buttons } of CASES) {
@@ -847,12 +875,12 @@ describe('EraTabArt: the jukebox (README §9, test 27)', () => {
     });
   }
 
-  it('matches the reference Era tab art, element by element, whatever is picked and whether Era is on or off', () => {
+  it('matches the reference Era tab art but for its buttons, element by element, whatever is picked and whether Era is on or off', () => {
     const picks: EraId[][] = [[], ['s90'], ['s20', 'pre'], ['s90', 's00', 's10'], [...ERA_IDS]];
     for (const eras of picks) {
       for (const off of [false, true]) {
         const vm = viewModelFor({ eras, off: off ? ['era'] : [] });
-        expectSameMarkup(referenceEraTab(), eraTab(eras, off), contextFor(vm, 'tab'));
+        expectSameMarkup(withoutJukeboxButtons(referenceEraTab()), withoutJukeboxButtons(eraTab(eras, off)), contextFor(vm, 'tab'));
       }
     }
   });
@@ -868,14 +896,34 @@ describe('EraTabArt: the jukebox (README §9, test 27)', () => {
     });
   });
 
-  it('has one body path and two button circles, marked for the browser tests', () => {
+  it('has one body path and three button circles, left to right, marked for the browser tests', () => {
     const root = eraTab(['s90'], false);
     expect(all(root, '[data-jukebox]').map((el) => [el.localName, el.getAttribute('data-jukebox'), el.getAttribute('data-i')])).toEqual([
       ['path', 'body', null],
       ['circle', 'button', '0'],
       ['circle', 'button', '1'],
+      ['circle', 'button', '2'],
     ]);
-    expect(all(root, '[data-i]')).toHaveLength(2);
+    expect(all(root, '[data-i]')).toHaveLength(3);
+  });
+
+  it("draws the three buttons in the style of the reference's two: its radius and height, in a row centred on the body, inside the window", () => {
+    const buttons = all(eraTab(['s90'], false), '[data-jukebox="button"]');
+    const reference = all(referenceEraTab(), 'circle');
+    expect(reference).toHaveLength(2);
+    for (const button of buttons) {
+      expect(attrs(button, ['cy', 'r', 'stroke'])).toEqual({ cy: reference[0]?.getAttribute('cy'), r: reference[0]?.getAttribute('r'), stroke: 'none' });
+    }
+    const cx = buttons.map((button) => Number(button.getAttribute('cx')));
+    const r = Number(buttons[0]?.getAttribute('r'));
+    expect(cx).toEqual([8, 14, 20]);
+    // The body's arch runs from x 3 to 25, so its middle is 14: the middle button is on it, the outer two as far each side.
+    expect(cx[1]).toBe(14);
+    expect(cx[1]! - cx[0]!).toBe(cx[2]! - cx[1]!);
+    // The window runs from x 6.2 to 21.8: the outer buttons are inside it, and each gap between buttons is at least 2 units.
+    expect(cx[0]! - r).toBeGreaterThanOrEqual(6.2);
+    expect(cx[2]! + r).toBeLessThanOrEqual(21.8);
+    expect(cx[1]! - cx[0]! - 2 * r).toBeGreaterThanOrEqual(2);
   });
 
   it('puts the parent className on the root svg', () => {
@@ -926,8 +974,8 @@ describe('GearArt: an off gear is a switched-off sign (README §7, test 25)', ()
         expect(paints(art(gear, variant, 50, true)), `${gear} ${variant}`).toEqual([COLOR.unlit]);
       }
     }
-    // The jukebox's two lights are a dark rose of their own, not the unlit grey.
-    expect(paints(eraTab(['s90'], true))).toEqual([COLOR.lightOff, COLOR.unlit].sort());
+    // The jukebox's three buttons are the unlit grey too, with nothing of 6A's dark rose left (R24).
+    expect(paints(eraTab(['s90'], true))).toEqual([COLOR.unlit]);
   });
 
   it('lights none of an off gear\'s notes, bolts and rays, whatever the value: all seven are drawn, unlit (R7)', () => {
@@ -1020,8 +1068,10 @@ describe('GearArt: a lit gear is drawn in its colours (README §3.1, §6, §9)',
     for (const variant of VARIANTS) expect(paints(art('tempo', variant, 50, false)), variant).toEqual([COLOR.violet]);
   });
 
-  it('Era is a pink jukebox with amber lights', () => {
-    expect(paints(eraTab(['s90', 's00'], false))).toEqual([COLOR.pink, COLOR.amber].sort());
+  it('Era is a pink jukebox with amber lights, and the unlit grey for a button that is not lit (R24)', () => {
+    expect(paints(eraTab(['s90', 's00'], false))).toEqual([COLOR.pink, COLOR.amber, COLOR.unlit].sort());
+    // Every button lit, nothing is left grey.
+    expect(paints(eraTab(['s90', 's00', 's10'], false))).toEqual([COLOR.pink, COLOR.amber].sort());
   });
 
   it('glows a lit Difficulty, Tempo or Era tab icon with a 3 px drop-shadow in its gear colour on its root (README §7, §9)', () => {
@@ -1268,7 +1318,7 @@ describe('GearArt: the hooks the browser tests use', () => {
     for (const variant of VARIANTS) {
       expect(counts(art('tempo', variant, 50, false)), variant).toEqual({ ...NONE, pendulums: 1, weights: 1 });
     }
-    expect(counts(eraTab([], false))).toEqual({ ...NONE, jukebox: 3, indexed: 2 });
+    expect(counts(eraTab([], false))).toEqual({ ...NONE, jukebox: 4, indexed: 3 });
   });
 
   it('puts them on the elements the tests read: notes and bolts on their group, rays on their path, the weight on its rect', () => {

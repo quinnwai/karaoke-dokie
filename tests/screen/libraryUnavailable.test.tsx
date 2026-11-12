@@ -47,7 +47,7 @@ describe('results when the Spotify library could not be read', () => {
     expect(screen.queryByRole('status')).toBeNull();
     rerender(<SetlistScreen {...setlistProps(range, songs, { mode: 'catalogue', displayName: null })} />);
     expect(screen.queryByText(NOTE)).toBeNull();
-    expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1);
   });
 
   it('turns listening history off and says it could not be reached, not that Spotify needs connecting', () => {

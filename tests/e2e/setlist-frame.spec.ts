@@ -45,7 +45,7 @@ const headerBox = (page: Page) =>
     return {
       bar: box(bar),
       range: box(bar.querySelector('[role="group"]')),
-      redo: box(bar.querySelector('button[aria-label="Redo the singing test"]')),
+      redo: box(bar.querySelector('button[aria-label="Redo the range test"]')),
       sign: box(sign),
       signShown: getComputedStyle(sign).visibility !== 'hidden' && getComputedStyle(sign).display !== 'none',
       size: Number.parseFloat(getComputedStyle(sign).fontSize),
@@ -90,7 +90,7 @@ const gapsAt13 = (page: Page) =>
     const before = sign.style.fontSize;
     sign.style.fontSize = '13px';
     const s = sign.getBoundingClientRect();
-    const redo = bar.querySelector('button[aria-label="Redo the singing test"]')!.getBoundingClientRect();
+    const redo = bar.querySelector('button[aria-label="Redo the range test"]')!.getBoundingClientRect();
     const logo = bar.querySelector('button[aria-label="Connect to Spotify"], button[aria-label="Spotify account"]')!.getBoundingClientRect();
     sign.style.fontSize = before;
     return { redo: s.left - redo.right, logo: logo.left - s.right };
@@ -144,11 +144,13 @@ for (const [signedIn, who] of WHO) {
 }
 
 // Where the sign used to go (the adversarial review of #38: at 360 px even the default range hid it, at 390 px any range with sharps at
-// both ends did), it now shrinks to the largest size, 13 px at the least, that keeps its 8 px gaps.
+// both ends did), it shrinks to the largest size, 13 px at the least, that keeps its 8 px gaps. R14's round redo (a 28 px circle where a
+// 56 px "redo" button stood) gave the room back: at 360 px even C#2 to G#5 is at full size now, so the narrow cases are narrower
+// windows than a phone's (a 320 px phone shows A2 to C5 at full size).
 for (const [signedIn, who] of WHO) {
   for (const { width, note, low, high } of [
-    { width: 390, note: 'C#3 to C#5', low: 49, high: 73 },
-    { width: 360, note: 'A2 to C5', low: 45, high: 72 }, // the default range
+    { width: 350, note: 'C#2 to G#5', low: 37, high: 80 }, // the longest range, 10 px under the phones
+    { width: 310, note: 'A2 to C5', low: 45, high: 72 }, // the default range, 50 px under
   ]) {
     test(`R1. ${who}, at ${width} px with ${note} the sign shrinks to keep 8 px clear of redo, and is centred`, async ({ page }) => {
       await page.setViewportSize({ width, height: 740 });
@@ -163,12 +165,12 @@ for (const [signedIn, who] of WHO) {
 }
 
 for (const [signedIn, who] of WHO) {
-  test(`R1. ${who}, at 360 px with C#2 to G#5 the sign is hidden, left at 16 px, and nothing overlaps`, async ({ page }) => {
-    await page.setViewportSize({ width: 360, height: 740 });
+  test(`R1. ${who}, at 330 px with C#2 to G#5 the sign is hidden, left at 16 px, and nothing overlaps`, async ({ page }) => {
+    await page.setViewportSize({ width: 330, height: 740 });
     await openWith(page, { low: 37, high: 80 }, signedIn); // C#2 to G#5
     await expect(page.getByRole('group', { name: 'Your range C#2 to G#5' })).toBeVisible();
     const h = await headerBox(page);
-    expect(h.signShown, 'the long range leaves even a 13 px sign no room at 360 px').toBe(false);
+    expect(h.signShown, 'the long range leaves even a 13 px sign no room at 330 px').toBe(false);
     // Hidden because 13 px, laid out, does not keep the gap, not because the rule gave up early.
     const at13 = await gapsAt13(page);
     expect(Math.min(at13.redo, at13.logo)).toBeLessThan(8);
@@ -181,29 +183,30 @@ for (const [signedIn, who] of WHO) {
 }
 
 test('R1. the sign comes back when the room does, and goes again when it does not (a phone turned)', async ({ page }) => {
-  await page.setViewportSize({ width: 360, height: 740 });
+  await page.setViewportSize({ width: 330, height: 740 });
   await open(page, { range: { low: 37, high: 80 } });
   expect((await headerBox(page)).signShown).toBe(false);
   await page.setViewportSize({ width: 430, height: 740 });
   await expect.poll(async () => (await headerBox(page)).signShown).toBe(true);
   expect((await headerBox(page)).size, 'back at full size, not at a size left over from before').toBe(16);
-  await page.setViewportSize({ width: 360, height: 740 });
+  await page.setViewportSize({ width: 330, height: 740 });
   await expect.poll(async () => (await headerBox(page)).signShown).toBe(false);
 });
 
 test('R1. the sign grows and shrinks with the room: 16 px on a bigger phone, and the same size again when the phone is back', async ({ page }) => {
-  await open(page, { range: { low: 49, high: 73 } }); // C#3 to C#5, 390 px
+  await page.setViewportSize({ width: 350, height: 844 });
+  await open(page, { range: { low: 37, high: 80 } }); // C#2 to G#5, 350 px
   const shrunk = (await headerBox(page)).size;
   expect(shrunk).toBeLessThan(16);
   expect(await sampled(page), 'it settles on one size').toHaveLength(1);
   await page.setViewportSize({ width: 430, height: 844 });
   await expect.poll(async () => (await headerBox(page)).size).toBe(16);
   expect(await sampled(page)).toHaveLength(1);
-  await page.setViewportSize({ width: 360, height: 844 });
+  await page.setViewportSize({ width: 330, height: 844 });
   await expect.poll(async () => (await headerBox(page)).signShown).toBe(false);
   expect((await headerBox(page)).size, 'hidden at 16 px, not at the last small size').toBe(16);
   expect(await sampled(page)).toHaveLength(1);
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 350, height: 844 });
   await expect.poll(async () => (await headerBox(page)).signShown).toBe(true);
   expect((await headerBox(page)).size, 'sized from scratch, so the same as the first time').toBe(shrunk);
   expect(await sampled(page)).toHaveLength(1);
@@ -212,12 +215,13 @@ test('R1. the sign grows and shrinks with the room: 16 px on a bigger phone, and
 // On Linux's hinted text the sign's width was not exactly proportional to its size, and a size worked out from its width at 16 px left it
 // 0.2 to 0.4 px inside the 8 px gap. The size is now checked on the sign as laid out, so the gap holds whatever the width does.
 test('R1. the 8 px gap holds when the sign\'s width is not proportional to its size, across every width from hidden to full size', async ({ page }) => {
-  await open(page, { range: { low: 49, high: 73 } }); // C#3 to C#5
+  await page.setViewportSize({ width: 330, height: 844 });
+  await open(page, { range: { low: 37, high: 80 } }); // C#2 to G#5
   // A letter-spacing in px does not scale with the type: the width is 4 x (type + 1.5 px), not proportional to it, so a size worked out
   // from the width at 16 px comes out too big at every smaller size.
   await page.addStyleTag({ content: '[data-sign] { letter-spacing: 1.5px !important; }' });
   const phases = new Set<string>();
-  for (let width = 380; width <= 404; width++) {
+  for (let width = 330; width <= 364; width++) {
     await page.setViewportSize({ width, height: 844 });
     const h = await headerBox(page);
     if (h.signShown) {
@@ -256,7 +260,7 @@ test.describe('R9, with a pointer', () => {
 
   const note = (page: Page) => page.getByRole('button', { name: /^Redo your low note/ });
   const noteMark = (page: Page) => note(page).locator('span').first();
-  const redo = (page: Page) => page.getByRole('button', { name: 'Redo the singing test' });
+  const redo = (page: Page) => page.getByRole('button', { name: 'Redo the range test' });
 
   test('R9. hovering a range note turns its text and its dotted underline pink, and leaving puts them back', async ({ page }) => {
     await open(page);
@@ -303,7 +307,7 @@ test.describe('R9, with a pointer', () => {
     await focus(/^Redo your low note/);
     await expect.poll(() => css(noteMark(page), 'color')).toBe(PINK_TEXT);
     await expect.poll(() => css(noteMark(page), 'border-bottom-color')).toBe(PINK_TEXT);
-    await focus(/^Redo the singing test/);
+    await focus(/^Redo the range test/);
     await expect.poll(() => css(redo(page), 'color')).toBe(PINK_TEXT);
     await expect.poll(() => css(redo(page), 'border-top-color')).toBe(PINK_TEXT);
     await expect.poll(() => css(noteMark(page), 'color')).not.toBe(PINK_TEXT);
@@ -312,7 +316,7 @@ test.describe('R9, with a pointer', () => {
 
 test('R9. in a touch context there is no hover, so nothing turns pink and stays pink after a tap', async ({ page }) => {
   await open(page);
-  const redo = page.getByRole('button', { name: 'Redo the singing test' });
+  const redo = page.getByRole('button', { name: 'Redo the range test' });
   expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(false);
   const before = await css(redo, 'color');
   await redo.hover();

@@ -23,14 +23,10 @@ export function songCountText(count: number): string {
 }
 
 /**
- * What the Era panel's header says after "ERA" (Round 6A §8): how many songs fit the range and the picked eras while Era
- * is on, and "OFF · all eras" while it is off. `total` is `SetlistResponse.total`, every song that fits, not just the
- * page on screen; null until the engine has answered once, when there is nothing to say yet.
+ * What the Era panel's header says after "ERA" while Era is off (Round 6A §8): every era is in the list. While Era is on it
+ * says nothing more: the song count is the screen header's now (QWW-57, R19).
  */
-export function eraCountText(total: number | null, off: boolean): string {
-  if (off) return '· OFF · all eras';
-  return total === null ? '' : `· ${songCountText(total)}`;
-}
+export const ERA_OFF_NOTE = '· OFF · all eras';
 
 /** The era of a release year, or null for a song with no year. */
 export function eraOf(year: number | undefined): EraId | null {

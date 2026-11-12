@@ -324,10 +324,10 @@ describe('the Setlist tuner events', () => {
       ]);
     });
 
-    it('takes the last pick out to an empty string, with Era still on (an empty list, not an off gear)', () => {
+    it('takes the last pick out to an empty string, with Era now off (R23: unpicking the last era turns it off)', () => {
       const one = run(tune({ type: 'era', era: 's80' }), loaded);
       expect(eventsFor(one, tuner({ type: 'era', era: 's80' }))).toEqual([
-        { name: 'era_change', props: { era: 's80', picked: false, on: true, eras: '', mode: 'library' } },
+        { name: 'era_change', props: { era: 's80', picked: false, on: false, eras: '', mode: 'library' } },
       ]);
     });
 
@@ -386,9 +386,15 @@ describe('the Setlist tuner events', () => {
       expect(viewProps(catalogue)).toEqual({ mode: 'catalogue', difficulty: 0, familiarity: null, popularity: 1, tempo: null, eras: null });
     });
 
-    it('Era on with nothing picked is an empty string, not null: the filter is on', () => {
+    it('is null for eras once the last pick is taken out, because Era is then off (R23)', () => {
       const none = run(tune({ type: 'era', era: 's90' }, { type: 'era', era: 's90' }), loaded);
       expect(none.tuner.eras).toEqual([]);
+      expect(viewProps(none).eras).toBeNull();
+    });
+
+    it('Era on with nothing picked, which only the test hook sets now, is an empty string, not null: the filter is on', () => {
+      const none = run(tune({ type: 'patch', patch: { eras: [], off: DEFAULTS.off.filter((part) => part !== 'era') } }), loaded);
+      expect(isOn(none.tuner, 'era')).toBe(true);
       expect(viewProps(none).eras).toBe('');
     });
   });

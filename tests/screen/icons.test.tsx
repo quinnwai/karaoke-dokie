@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FastLyricsIcon, OctaveIcon, ResetIcon } from '../../src/components/Icon';
 import { SetlistScreen } from '../../src/components/setlist/SetlistScreen';
 import { SongDetail } from '../../src/components/SongDetail';
+import { Tv } from '../../src/components/Tv';
 import type { Match } from '../../src/lib/contracts';
 import { initialTuner } from '../../src/lib/setlist/tuner';
 import { TUNER_PARTS } from '../../src/lib/setlist/types';
@@ -58,9 +59,9 @@ describe('Reset icon', () => {
     expect(screen.queryByRole('img')).toBeNull();
   });
 
-  // The Setlist screen's own arrow (spec §4a): one on each gear and one on Era, every one an icon with no words.
-  it('is on the reset button of every gear: a named button with no text on screen, drawn as the spec gives it', () => {
-    // Signed in with every gear on, so every reset button is shown (History needs the library: off in the catalogue).
+  // The Setlist screen's own ✕ (R21; spec §4a drew a reset arrow here): one on each gear and one on Era, every one an icon with no words.
+  it('is on the turn-off button of every gear: a named button with no text on screen, drawn as a ✕', () => {
+    // Signed in with every gear on, so every ✕ is shown (History needs the library: off in the catalogue).
     render(
       <SetlistScreen
         {...setlistProps({ low: 45, high: 72, source: 'test' }, [ranked(match(0))], { mode: 'library', tuner: { ...initialTuner(), off: [] } })}
@@ -70,18 +71,15 @@ describe('Reset icon', () => {
     expect(buttons.map((b) => b.length)).toEqual([1, 1, 1, 1, 1]);
     for (const [button] of buttons) {
       expect(button!.hidden).toBe(false);
-      expect(button!.getAttribute('title')).toBe("Reset: don't factor in");
-      expect(button!.getAttribute('aria-label')).toMatch(/^Reset .+ \(stop factoring it in\)$/);
+      expect(button!.getAttribute('title')).toBe("Turn off: don't factor in");
+      expect(button!.getAttribute('aria-label')).toMatch(/^Turn off .+$/);
       expect(button!.textContent).toBe('');
       const svg = button!.querySelector('svg')!;
       expect(svg.getAttribute('aria-hidden')).toBe('true');
       expect(svg.getAttribute('viewBox')).toBe('0 0 24 24');
       expect(svg.getAttribute('stroke')).toBe('currentColor');
       expect(svg.getAttribute('stroke-width')).toBe('2');
-      expect(Array.from(svg.querySelectorAll('path')).map((path) => path.getAttribute('d'))).toEqual([
-        'M4.5 12A7.5 7.5 0 1 0 12 4.5',
-        'M14.5 1.75L11.75 4.5L14.5 7.25',
-      ]);
+      expect(Array.from(svg.querySelectorAll('path')).map((path) => path.getAttribute('d'))).toEqual(['M6 6L18 18M18 6L6 18']);
     }
   });
 });
@@ -98,16 +96,20 @@ describe('SongDetail', () => {
 });
 
 describe('sources', () => {
-  it('shows Sources and credits as a book icon under the results', () => {
-    render(<SetlistScreen {...setlistProps(range, [ranked(match(0))])} />);
-    const credits = screen.getByRole('link', { name: 'Sources and credits' });
-    expect(credits.getAttribute('href')).toBe('/credits');
-    // In a new tab, so reading it does not cost the singer their range and tuning (QWW-57).
-    expect(credits.getAttribute('target')).toBe('_blank');
-    expect(credits.getAttribute('rel')).toBe('noopener noreferrer');
-    // Just the book icon: no words on screen.
+  // R28 (QWW-57): the link moved from the end of the list to the TV's chin, where Tv draws it on every step.
+  it('shows Sources and credits as a book icon in the TV, and no longer at the end of the results', () => {
+    const { unmount } = render(<SetlistScreen {...setlistProps(range, [ranked(match(0))])} />);
+    expect(screen.queryByRole('link', { name: 'Sources and credits' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sources and credits' })).toBeNull();
+    unmount();
+
+    render(<Tv>a step</Tv>);
+    const credits = screen.getByRole('button', { name: 'Sources and credits' });
+    // Just the book icon: no words on screen, and the book is decorative (the button carries the name).
     expect(credits.textContent).toBe('');
-    expect(credits.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    const svg = credits.querySelector('svg')!;
+    expect(svg.getAttribute('aria-hidden')).toBe('true');
+    expect(svg.getAttribute('viewBox')).toBe('0 -960 960 960');
   });
 
   it('credits MGPHot as an offline check of the mood labels, with its licence', async () => {

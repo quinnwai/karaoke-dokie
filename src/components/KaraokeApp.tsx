@@ -15,8 +15,10 @@ import { browserMic, classifyMicError, MicError, type Mic, type MicRecorder } fr
 import { createPostHogSink } from '../lib/client/posthog';
 import {
   clearProgress,
+  loadFeedback,
   loadProgress,
   loadSavedRange,
+  saveFeedback,
   saveProgress,
   saveRangeOnDevice,
   setWantsPick,
@@ -442,7 +444,10 @@ export function KaraokeApp({
   const sendFeedback = (trackId: string, thumbs: 'up' | 'down') => {
     const match = matchOf(trackId);
     if (!match || !state.range) return;
+    // A like or dislike stays and cannot be changed (R26): a second tap, from a double tap or from another tab's answer, is for nothing.
+    if (stateRef.current.feedback[trackId] ?? loadFeedback(trackId)) return;
     dispatch({ type: 'feedback', trackId, thumbs });
+    saveFeedback(trackId, thumbs);
     const body = { trackId, thumbs, difficulty: match.difficulty, octave: match.octave, view: feedbackView(state) };
     const sent =
       state.mode === 'catalogue'
@@ -636,7 +641,7 @@ export function KaraokeApp({
           key={selected.track.id}
           match={selected}
           userRange={state.range}
-          feedback={state.feedback[selected.track.id]}
+          feedback={state.feedback[selected.track.id] ?? loadFeedback(selected.track.id)}
           onFeedback={(thumbs) => sendFeedback(selected.track.id, thumbs)}
           onSpotify={() => tracker.track('spotify_link_pressed', viewProps(state))}
           onBack={() => {

@@ -40,12 +40,24 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
   // Catalogue songs are nobody's library: there is no listening history to tune by.
   await expect(page.locator('#slider-history')).toBeDisabled();
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-01-catalogue.png') });
-  // The end of the list: one short question with the button, and the book icon for sources.
-  const credits = page.getByRole('link', { name: 'Sources and credits' });
-  await credits.scrollIntoViewIfNeeded();
-  await expect(page.getByText('Want personalized recommendations?')).toBeVisible();
+  // The end of the list: Sources and credits is the book in the TV's chin now (R28), not at the end of the list, and it is there with the list at its end.
+  const credits = page.getByRole('button', { name: 'Sources and credits' });
+  await page.locator('#list-scroll').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  // R18 took the "Want personalized recommendations?" block away: the header's Spotify button is the one way to connect.
+  await expect(page.getByText('Want personalized recommendations?')).toHaveCount(0);
   await expect(credits).toBeVisible();
+  await expect(page.locator('#list-scroll').getByRole('link', { name: 'Sources and credits' })).toHaveCount(0);
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-01b-catalogue-end.png') });
+  // It opens inside the TV, on the same page, and names Deezer with its logo and who else the songs and the know-how come from (R28, R29).
+  await credits.click();
+  const panel = page.getByRole('dialog', { name: 'Sources and credits' });
+  await expect(panel.getByRole('link', { name: 'Deezer' }).locator('svg')).toBeVisible();
+  await expect(panel.getByRole('link', { name: 'USDB (UltraStar DataBase)' })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe('/');
+  await page.screenshot({ path: path.join(SCREENS, 'fullstack-01c-credits.png') });
+  await panel.getByRole('button', { name: 'Close sources and credits' }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(songs.first()).toBeVisible();
 
   // The catalogue route needs no session, and every song it lists fits A2 to C5 (as written or an
   // octave away). Catalogue songs never include the mock library's estimates.
@@ -86,7 +98,10 @@ test('no Spotify: catalogue songs on the Setlist tuner, then Connect Spotify for
   await page.getByRole('button', { name: 'Back to songs' }).click();
 
   // ---- Connect Spotify (mock): the range carries over and library songs load; History is on now ----
-  await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
+  // On a phone the first tap on the header's Spotify button shows its tooltip (R30) and the second connects.
+  const connect = page.getByRole('button', { name: 'Connect to Spotify' });
+  await connect.click();
+  await connect.click();
   await expect(page.locator('#slider-history')).toBeEnabled({ timeout: 20_000 });
   await expect(songs.first()).toBeVisible();
   await page.screenshot({ path: path.join(SCREENS, 'fullstack-04-library.png') });
@@ -206,9 +221,9 @@ test('Spotify (mock) account: the green logo names the singer, and Log out reall
   await expect(page.getByRole('button', { name: 'Connect to Spotify' }).first()).toBeVisible();
   await expect(logo).toHaveCount(0);
   await expect(page.locator('#slider-history')).toBeDisabled();
-  // Catalogue songs for the same range (only catalogue results end with the invitation to connect).
+  // Catalogue songs for the same range, and the header's Spotify button to connect again (nothing under the list invites it now, R18).
   await expect(songs.first()).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Want personalized recommendations?')).toBeAttached();
+  await expect(page.getByText('Want personalized recommendations?')).toHaveCount(0);
   expect((await page.request.get('/api/me')).status()).toBe(401);
 
   // The same range stays on this device: a reload is still the catalogue, not the start screen.

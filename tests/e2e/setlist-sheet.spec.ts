@@ -328,7 +328,7 @@ for (const state of ['disabled', 'off', 'on'] as const) {
 test('R6. the tab still says "History" and the reset button\'s name still says "listening history"', async ({ page }) => {
   await openTuner(page, { loggedIn: true });
   await expect(tab(page, 'history')).toHaveText('History');
-  await expect(resetButton(page, 'history')).toHaveAttribute('aria-label', 'Reset listening history (stop factoring it in)');
+  await expect(resetButton(page, 'history')).toHaveAttribute('aria-label', 'Turn off listening history');
   await expect(page.getByRole('slider', { name: 'LISTENING HISTORY' })).toHaveCount(1);
 });
 

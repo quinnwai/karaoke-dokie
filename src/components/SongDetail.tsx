@@ -1,8 +1,10 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Match, VocalRange } from '../lib/contracts';
-import { difficultyLabel, duetPartLine, isCatalogueTrack, octaveWording, rangeBar } from '../lib/client/display';
+import { difficultyLabel, duetPartLine, isCatalogueTrack, NAMES_APART, octaveWording, rangeBar, type Span } from '../lib/client/display';
+import { spotifyEmbedUrl } from '../lib/client/spotifyEmbed';
 import { MOOD_LABELS } from '../lib/songs/browse';
 import { FastLyricsIcon, OctaveIcon } from './Icon';
+import { PreviewButton } from './PreviewButton';
 import styles from './screen.module.css';
 import { SpotifyPlayer } from './SpotifyPlayer';
 
@@ -16,9 +18,20 @@ interface SongDetailProps {
   onBack(): void;
 }
 
+/** One bar's two note names, each under its end (R25). A bar too short for that (NAMES_APART) has them outside its ends, so they never touch. */
+function EndNames({ span, className }: { span: Span; className: string | undefined }) {
+  const apart = span.width < NAMES_APART || undefined;
+  return (
+    <>
+      <span className={className} data-end="low" data-apart={apart} style={{ left: `${span.left}%` }}>{span.low}</span>
+      <span className={className} data-end="high" data-apart={apart} style={{ left: `${span.left + span.width}%` }}>{span.high}</span>
+    </>
+  );
+}
+
 export function RangeBarView({ userRange, match }: { userRange: VocalRange; match: Match }) {
   const bar = rangeBar(userRange, match.range, match.octave, match.shape);
-  // Note names stay out of the way until wanted: hover or focus shows them, and so does a tap on a phone.
+  // The note names are always there (R25). The legend under them waits for a hover, or a tap on a phone, which has no hover (R20).
   const [open, setOpen] = useState(false);
   return (
     <div
@@ -41,10 +54,8 @@ export function RangeBarView({ userRange, match }: { userRange: VocalRange; matc
         <div className={styles.barSong} style={{ left: `${bar.song.left}%`, width: `${bar.song.width}%` }} />
       </div>
       <div className={styles.barNames} aria-hidden>
-        <span className={styles.barNameSong} style={{ left: `${bar.song.left}%` }}>{bar.song.low}</span>
-        <span className={styles.barNameSong} style={{ left: `${bar.song.left + bar.song.width}%` }}>{bar.song.high}</span>
-        <span className={styles.barNameUser} style={{ left: `${bar.user.left}%` }}>{bar.user.low}</span>
-        <span className={styles.barNameUser} style={{ left: `${bar.user.left + bar.user.width}%` }}>{bar.user.high}</span>
+        <EndNames span={bar.song} className={styles.barNameSong} />
+        <EndNames span={bar.user} className={styles.barNameUser} />
       </div>
       <div className={styles.barLegend} aria-hidden>
         <span><i className={styles.legendSong} /> song range</span>
@@ -55,12 +66,13 @@ export function RangeBarView({ userRange, match }: { userRange: VocalRange; matc
   );
 }
 
-function Thumb({ down }: { down?: boolean }) {
+/** An outline, and filled once it is the one that was picked, so what was picked is not told by its colour alone. */
+function Thumb({ down, picked }: { down?: boolean; picked?: boolean }) {
   return (
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden style={down ? { transform: 'rotate(180deg)' } : undefined}>
       <path
         d="M7 10v10H4V10h3zm2 10h8.2a2 2 0 0 0 2-1.6l1.2-6A2 2 0 0 0 18.4 10H14l.8-4a1.6 1.6 0 0 0-2.9-1.2L9 10v10z"
-        fill="none"
+        fill={picked ? 'currentColor' : 'none'}
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinejoin="round"
@@ -75,6 +87,9 @@ export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, 
   const duet = duetPartLine(match);
   const facts = [match.year, match.genre].filter((f) => f !== undefined && f !== '').join(' · ');
   const catalogue = isCatalogueTrack(match.track.id);
+  // Spotify's own player (an iframe) where the song's link is a track to embed; the plain link otherwise (the catalogue's search links).
+  const embedded = spotifyEmbedUrl(match.track.spotifyUrl) !== null;
+  const spotify = <SpotifyPlayer track={match.track} label={catalogue ? 'Find on Spotify' : 'Open in Spotify'} onOpen={onSpotify} />;
 
   // The screen is one scroller shared with the song list. With the player, a long title can make this page
   // taller than the screen, and it would open scrolled to wherever the list was, past the back button.
@@ -94,6 +109,11 @@ export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, 
         <p className={styles.detailArtist}>{match.track.artist}</p>
         {facts && <p className={styles.detailFacts}>{facts}</p>}
       </div>
+
+      {/* The page's first action (R27): the Deezer ▶ with its ring, on the list's one-at-a-time player (leaving the page stops it). Under it,
+          the secondary one: "Find on Spotify" as an outlined button. Spotify's own player, where there is one to embed, stays lower down. */}
+      <PreviewButton id={match.track.id} deezerId={match.deezerId} title={match.track.title} artist={match.track.artist} large />
+      {!embedded && spotify}
 
       <RangeBarView userRange={userRange} match={match} />
 
@@ -123,28 +143,20 @@ export function SongDetail({ match, userRange, feedback, onFeedback, onSpotify, 
 
       {match.reasons && match.reasons.length > 0 && <p className={styles.detailReasons}>{match.reasons.join(' · ')}</p>}
 
-      <SpotifyPlayer
-        track={match.track}
-        label={catalogue ? 'Find on Spotify' : 'Open in Spotify'}
-        onOpen={onSpotify}
-      />
+      {embedded && spotify}
 
+      {/* A like or dislike stays (R26): after a tap the thanks takes the question's place and stays, and the thumbs stay, the picked one selected
+          and neither of them to be tapped again, on later visits too. One live region for both, so a screen reader says the thanks once. */}
       <div className={styles.feedback}>
-        {feedback ? (
-          <p className={styles.thanks} aria-live="polite">
-            Thanks! That helps.
-          </p>
-        ) : (
-          <>
-            <span className={styles.feedbackQ}>How’d it go?</span>
-            <button type="button" className={styles.thumb} aria-label="It went well" onClick={() => onFeedback('up')}>
-              <Thumb />
-            </button>
-            <button type="button" className={styles.thumb} aria-label="It didn't go well" onClick={() => onFeedback('down')}>
-              <Thumb down />
-            </button>
-          </>
-        )}
+        <p className={feedback ? styles.thanks : styles.feedbackQ} aria-live="polite">
+          {feedback ? 'Thanks! That helps.' : 'How’d it go?'}
+        </p>
+        <button type="button" className={styles.thumb} aria-label="It went well" aria-pressed={feedback === 'up'} disabled={feedback !== undefined} onClick={() => onFeedback('up')}>
+          <Thumb picked={feedback === 'up'} />
+        </button>
+        <button type="button" className={styles.thumb} aria-label="It didn't go well" aria-pressed={feedback === 'down'} disabled={feedback !== undefined} onClick={() => onFeedback('down')}>
+          <Thumb down picked={feedback === 'down'} />
+        </button>
       </div>
     </div>
   );

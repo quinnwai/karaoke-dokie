@@ -105,7 +105,7 @@ describe('KaraokeApp with PostHog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Spotify account' }));
     fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1));
     await waitFor(() => expect(posthog.startSessionRecording).toHaveBeenCalledTimes(1));
   });
 

@@ -83,8 +83,8 @@ test('a refused sign-in says so under the range and under the list, and Cancel o
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.locator('[data-row]').first()).toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Couldn’t sign in. Spotify sign-in is for invited testers only right now.');
-  // Still the plain list, with both ways to try again.
-  await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(2);
+  // Still the plain list, with the header's way to try again (the block under the list is gone, R18).
+  await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(1);
   await expect(page.getByText('Couldn’t load songs.')).toHaveCount(0);
   await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(SCREENS, 'qww55-sign-in-refused-list-375px.png') });

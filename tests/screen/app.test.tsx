@@ -254,10 +254,11 @@ describe('KaraokeApp', () => {
     // The range stays on this device instead of an account.
     expect(JSON.parse(localStorage.getItem('kd.range')!)).toEqual({ low: 45, high: 72 });
     expect(sessionStorage.getItem('kd.test')).toBeNull();
-    expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2);
-    // Under the list: one short question, the button, and who can sign in (Spotify adds testers by hand, QWW-53).
-    expect(screen.getByText('Want personalized recommendations?')).toBeTruthy();
-    expect(screen.getByText('Invited testers only for now.')).toBeTruthy();
+    // One Spotify button, the header's (R18 took the block under the list away: "Want personalized recommendations?", the link and
+    // "Invited testers only for now." while few people can sign in; R30 gives the header's button its touch behaviour).
+    expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1);
+    expect(screen.queryByText('Want personalized recommendations?')).toBeNull();
+    expect(screen.queryByText('Invited testers only for now.')).toBeNull();
     expect(screen.queryByText(/every song that fits|invite-only|from our catalogue/)).toBeNull();
     // Catalogue songs are nobody's library, so the History gear is off and cannot be used; the others can.
     expect(el<HTMLInputElement>(SEL.slider('history')).disabled).toBe(true);
@@ -304,7 +305,7 @@ describe('KaraokeApp', () => {
       await screen.findByText('Plastic Love');
       expect(screen.getByRole('status').textContent).toBe('Couldn’t sign in. Spotify sign-in is for invited testers only right now.');
       // The logo and the prompt under the list stay, to try again; the failed-load screen is not what this is.
-      expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2);
+      expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1);
       expect(screen.queryByText('Couldn’t load songs.')).toBeNull();
     });
 
@@ -885,6 +886,9 @@ describe('KaraokeApp', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'It went well' }));
     expect(screen.getByText('Thanks! That helps.')).toBeTruthy();
+    // The answer stays (R26, tests/screen/songFeedback.test.tsx has the rest): the picked thumb is selected, and neither can be tapped again.
+    expect(screen.getByRole('button', { name: 'It went well' }).getAttribute('aria-pressed')).toBe('true');
+    expect([screen.getByRole('button', { name: 'It went well' }), screen.getByRole('button', { name: "It didn't go well" })].map((b) => (b as HTMLButtonElement).disabled)).toEqual([true, true]);
     // The feedback request keeps the shape the server has always validated, built from the tuner's gears.
     expect(api.feedback).toHaveBeenCalledWith({ trackId: 't2', thumbs: 'up', difficulty: 'hard', octave: 'down', view: defaultView() });
     // Tapping a thumb must not reload the player: that would restart the song.
@@ -904,7 +908,7 @@ describe('KaraokeApp', () => {
     render(<KaraokeApp api={api} mic={fakeMic().mic} quietMs={60_000} />);
     await screen.findByText('Plastic Love');
     expect(api.saveRange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Redo the singing test' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Redo the range test' }));
     await waitFor(() => expect(lyrics()).toContain('Find a quiet spot'));
   });
 
@@ -927,7 +931,7 @@ describe('KaraokeApp', () => {
     expect(api.logout).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1));
 
     // The session ended first, then the catalogue was asked for the same range; the library was not asked again.
     expect(api.logout).toHaveBeenCalledTimes(1);
@@ -953,7 +957,7 @@ describe('KaraokeApp', () => {
     await screen.findByText('Plastic Love');
     fireEvent.click(screen.getByRole('button', { name: 'Spotify account' }));
     fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1));
     unmount();
 
     // The server no longer knows this browser (the session cookie is gone): /api/me says 401.
@@ -961,7 +965,7 @@ describe('KaraokeApp', () => {
     render(<KaraokeApp api={reloaded} mic={fakeMic().mic} />);
     await screen.findByText('Plastic Love');
     expect(reloaded.catalogue).toHaveBeenCalledWith({ low: 45, high: 72 });
-    expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1);
   });
 
   it('if Log out fails, nothing changes: still signed in, the box says so, and a second try works', async () => {
@@ -979,7 +983,7 @@ describe('KaraokeApp', () => {
     expect(screen.queryByRole('button', { name: 'Connect to Spotify' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Connect to Spotify' })).toHaveLength(1));
     expect(api.logout).toHaveBeenCalledTimes(2);
     expect(api.catalogue).toHaveBeenCalledWith({ low: 45, high: 72 });
   });
@@ -1657,7 +1661,7 @@ describe('the Setlist tuner screen', () => {
       for (const id of SERVER_ORDER.slice(0, 8)) expect(label(id).endsWith(', Maybe')).toBe(false);
     });
 
-    it('era buttons filter the list, Era with nothing picked is empty, and Reset shows every song again', async () => {
+    it('era buttons filter the list, unpicking the last era turns Era off and shows every song (R23), and Reset shows every song again', async () => {
       await withFacts();
       expect(rowIds()).toHaveLength(10);
       // Era starts off with no picks: no button is pressed and none is outlined.
@@ -1680,18 +1684,47 @@ describe('the Setlist tuner screen', () => {
       await waitFor(() => expect([...rowIds()].sort()).toEqual(['t0', 't1', 't2', 't7', 't8']));
       expect(ERA_IDS.filter((era) => el(SEL.era(era)).getAttribute('aria-pressed') === 'true')).toEqual(['s80', 's10']);
 
-      // Deselect every era by hand: Era stays on with nothing picked, so the list is empty and says so.
-      for (const era of ['s80', 's10'] as const) fireEvent.click(el(SEL.era(era)));
-      await waitFor(() => expect(rowIds()).toEqual([]));
-      expect(el(SEL.empty).textContent).toBe('Pick an era to see songs.');
-      expect(el(SEL.reset('era')).hasAttribute('hidden')).toBe(false);
+      // Unpick the 80s and Era stays on with the 10s alone.
+      fireEvent.click(el(SEL.era('s80')));
+      await waitFor(() => expect([...rowIds()].sort()).toEqual(['t1', 't2']));
+      expect(el(SEL.eraPanel).hasAttribute('data-off')).toBe(false);
 
-      // Reset: Era is off again, every song is back, and nothing is pressed.
+      // Unpick the last one: Era is off, so every song is back (R23), not the empty "Pick an era" screen, and nothing is pressed.
+      fireEvent.click(el(SEL.era('s10')));
+      await waitFor(() => expect(rowIds()).toHaveLength(10));
+      expect(document.querySelector(SEL.empty)).toBeNull();
+      expect(screen.queryByText('Pick an era to see songs.')).toBeNull();
+      expect(el(SEL.eraPanel).hasAttribute('data-off')).toBe(true);
+      expect(el(SEL.reset('era')).hasAttribute('hidden')).toBe(true);
+      for (const era of ERA_IDS) expect(el(SEL.era(era)).getAttribute('aria-pressed')).toBe('false');
+
+      // Reset, from a pick, is Era off again with every song back, and the focus goes to the first era button.
+      fireEvent.click(el(SEL.era('s80')));
+      await waitFor(() => expect([...rowIds()].sort()).toEqual(['t0', 't7', 't8']));
       fireEvent.click(el(SEL.reset('era')));
       await waitFor(() => expect(rowIds()).toHaveLength(10));
       expect(screen.queryByText('Pick an era to see songs.')).toBeNull();
       for (const era of ERA_IDS) expect(el(SEL.era(era)).getAttribute('aria-pressed')).toBe('false');
       expect(document.activeElement).toBe(el(SEL.era('pre')));
+    });
+
+    it('R22, R23: Era off asks for no era: picking one era and unpicking it sends the request first load sent, and the list is the same', async () => {
+      const { requests } = await signedInWithEngine();
+      const first = requests[0]!;
+      expect(first.off).toContain('era');
+      expect(first.eras).toEqual([]);
+      const before = rowIds();
+      expect(before).toHaveLength(10);
+
+      fireEvent.click(el(SEL.era('s80')));
+      await waitFor(() => expect(requests).toHaveLength(2));
+      expect(requests[1]).toMatchObject({ eras: ['s80'] });
+      expect(requests[1]!.off).not.toContain('era');
+
+      fireEvent.click(el(SEL.era('s80')));
+      await waitFor(() => expect(requests).toHaveLength(3));
+      expect(requests[2]).toEqual(first);
+      expect(rowIds()).toEqual(before);
     });
 
     it('an era with no song in it says so, which is not the same as no era picked, and Reset brings every song back', async () => {

@@ -15,8 +15,6 @@ interface SheetProps {
   historyAvailable: boolean;
   /** What the History strip says in the place of its end labels when it is not available. */
   historyHint: string;
-  /** `SetlistResponse.total`: every song that fits the range and the picked eras, for the Era panel's header; null before the first answer. */
-  songCount: number | null;
   /**
    * False where the expanded sheet cannot fit inside the screen at all (an iPhone SE with Safari's bars, a phone on its
    * side): the handle then keeps the sheet in its mini mode. The screen measures it.
@@ -30,7 +28,7 @@ interface SheetProps {
  * The bottom sheet (spec §3, §4): a grab handle, then a rack that shows every gear (expanded) or one gear and a tab bar
  * (mini). The handle switches modes by a tap, Enter or Space, or by a vertical drag that resizes the rack live.
  */
-export function Sheet({ tuner, historyAvailable, historyHint, songCount, canExpand, onTuner, onGearDone }: SheetProps) {
+export function Sheet({ tuner, historyAvailable, historyHint, canExpand, onTuner, onGearDone }: SheetProps) {
   // How far the handle has been dragged, px (negative = up); null when idle. Only the sheet cares about it.
   const [dragY, setDragY] = useState<number | null>(null);
   const press = useRef<{ startY: number; dragged: boolean; lastDy: number } | null>(null);
@@ -123,7 +121,6 @@ export function Sheet({ tuner, historyAvailable, historyHint, songCount, canExpa
         <EraPanel
           eras={tuner.eras}
           off={!isOn(tuner, 'era')}
-          songCount={songCount}
           hidden={compact && tuner.open !== 'era'}
           onToggle={(era) => onTuner({ type: 'era', era })}
           onReset={() => onTuner({ type: 'reset', gear: 'era' })}

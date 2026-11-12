@@ -26,12 +26,14 @@ interface GearStripProps {
   onDone(): void;
 }
 
-/** The reset arrow: counterclockwise, 2 px stroke, in the colour of the text, drawn 16 px by the button (spec §4a). */
-export function ResetIcon() {
+/**
+ * The ✕ that turns a gear off (QWW-57, R21): the spec drew a counterclockwise reset arrow here, but the button does not undo anything,
+ * it takes the gear out of the ranking, so it says so. 2 px stroke, in the colour of the text, drawn 16 px by the button.
+ */
+export function TurnOffIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4.5 12A7.5 7.5 0 1 0 12 4.5" />
-      <path d="M14.5 1.75L11.75 4.5L14.5 7.25" />
+      <path d="M6 6L18 18M18 6L6 18" />
     </svg>
   );
 }
@@ -110,7 +112,7 @@ export function GearStrip(props: GearStripProps) {
               input.current?.focus();
             }}
           >
-            <ResetIcon />
+            <TurnOffIcon />
           </button>
         </div>
         {/* The data-* hooks are stable names for the browser tests, which read computed styles and cannot see CSS-module classes. */}

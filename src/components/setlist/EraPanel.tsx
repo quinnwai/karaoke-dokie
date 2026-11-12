@@ -1,32 +1,29 @@
 import { useRef, type CSSProperties } from 'react';
 import { PINK } from '../../lib/setlist/art';
-import { ERA_LABEL, eraCountText } from '../../lib/setlist/eras';
+import { ERA_LABEL, ERA_OFF_NOTE } from '../../lib/setlist/eras';
 import { ERA_META, RESET_TITLE } from '../../lib/setlist/gears';
 import { neonVars } from '../../lib/setlist/sheet';
 import type { EraId } from '../../lib/setlist/types';
 import { ERA_IDS } from '../../lib/setlist/types';
 import { EraIcon } from './GearArt';
-import { ResetIcon } from './GearStrip';
+import { TurnOffIcon } from './GearStrip';
 import styles from './sheet.module.css';
 
 interface EraPanelProps {
   eras: EraId[];
   off: boolean;
-  /** `SetlistResponse.total`, for the header's count; null before the first answer. */
-  songCount: number | null;
   hidden: boolean;
   onToggle(era: EraId): void;
   onReset(): void;
 }
 
 /**
- * The multi-select Era picker (spec §4, §4a; Round 6A §8). The header says "ERA" and how many songs fit, or "OFF · all
- * eras". Off, a default pick would show dashed ("parked") instead of lit and counts for nothing: every era is in the list.
- * On with nothing picked, the list is empty.
+ * The multi-select Era picker (spec §4, §4a; Round 6A §8). The header says "ERA", and "OFF · all eras" while Era is off; the
+ * song count is the screen header's (R19). Off, a default pick would show dashed ("parked") instead of lit and counts for
+ * nothing: every era is in the list. Unpicking the last era turns Era off (R23), so it is never on with nothing picked.
  */
-export function EraPanel({ eras, off, songCount, hidden, onToggle, onReset }: EraPanelProps) {
+export function EraPanel({ eras, off, hidden, onToggle, onReset }: EraPanelProps) {
   const grid = useRef<HTMLDivElement>(null);
-  const count = eraCountText(songCount, off);
   return (
     <div
       id="era-panel"
@@ -40,11 +37,11 @@ export function EraPanel({ eras, off, songCount, hidden, onToggle, onReset }: Er
       <div className={styles.gearHead}>
         <span className={styles.eyebrow} id="era-label">
           {ERA_META.eyebrow}
-          {count && (
+          {off && (
             <>
               {' '}
-              <span className={styles.eraCount} data-count="">
-                {count}
+              <span className={styles.eraNote} data-off-note="">
+                {ERA_OFF_NOTE}
               </span>
             </>
           )}
@@ -62,7 +59,7 @@ export function EraPanel({ eras, off, songCount, hidden, onToggle, onReset }: Er
             grid.current?.querySelector<HTMLButtonElement>('button')?.focus();
           }}
         >
-          <ResetIcon />
+          <TurnOffIcon />
         </button>
       </div>
       <div ref={grid} className={styles.eraGrid}>

@@ -97,9 +97,9 @@ describe('the end note of the list', () => {
     expect(screen.getByRole('button', { name: 'Load more songs' })).toBeTruthy();
   });
 
-  it('does not say it in the catalogue, which has its own closing note', () => {
+  it('does not say it in the catalogue, which has no closing note now (R18 took the Connect block away)', () => {
     draw({ mode: 'catalogue', songs: [rankedSong('a'), rankedSong('b')], nextOffset: null });
     expect(screen.queryByText(END)).toBeNull();
-    expect(screen.getByText('Want personalized recommendations?')).toBeTruthy();
+    expect(screen.queryByText('Want personalized recommendations?')).toBeNull();
   });
 });

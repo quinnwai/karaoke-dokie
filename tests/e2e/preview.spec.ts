@@ -147,12 +147,12 @@ for (const engine of engines) {
 
       await play(page, titles[0]!).click();
       await expect(play(page, titles[0]!)).toHaveAttribute('data-preview', 'playing');
-      // In the tuner's slot (QWW-57, R3) the playing row shows the pause glyph where the rank number was, and the progress ring
-      // the button draws is in the page but not drawn: no ring or circle in any state.
+      // In the tuner's slot (QWW-57, R3) the playing row shows the pause glyph where the rank number was, in the ring the button draws
+      // (R17): the track circle and the fill that runs over it, with the glyph, and nothing else of the row's number.
       const slot = page.locator('[data-row]', { has: play(page, titles[0]!) }).locator('[data-play-slot]');
-      await expect(slot.locator('[data-preview] > svg').first()).toBeHidden();
-      await expect(slot.locator('circle:visible')).toHaveCount(0);
-      await expect(slot.locator('svg:visible')).toHaveCount(1);
+      await expect(slot.locator('[data-preview] > svg').first()).toBeVisible();
+      await expect(slot.locator('circle:visible')).toHaveCount(2);
+      await expect(slot.locator('svg:visible')).toHaveCount(2);
       await expect(slot.locator('[data-rank-number]')).toBeHidden();
       await shot(page, `qww-48-${engine.key}-playing-375x667`);
 
@@ -206,6 +206,25 @@ for (const engine of engines) {
       await expect.poll(async () => (await audio(page)).paused).toBe(true);
       expect((await audio(page)).src).toBeNull();
 
+      // R27: the page's own ▶ ("Play 30 s") is its first action: above the fold of this 375 x 667 phone and above the range chart, while Spotify's
+      // own player (an embed for this song) stays below the chart, where it was.
+      await expect(page.locator('button[data-preview]')).toHaveAccessibleName('Play 30 s');
+      const at = await page.evaluate(() => {
+        const big = document.querySelector('button[data-preview]')!;
+        const rect = (e: Element) => e.getBoundingClientRect();
+        let scroller: HTMLElement | null = big.parentElement;
+        while (scroller && getComputedStyle(scroller).overflowY !== 'auto') scroller = scroller.parentElement;
+        return {
+          wordsBottom: rect(big.querySelector('span')!).bottom,
+          chart: rect(document.querySelector('[role="img"][aria-label^="Song goes from"]')!),
+          frameTop: rect(document.querySelector('iframe[title^="Spotify player"]')!).top,
+          fold: scroller!.getBoundingClientRect().bottom,
+        };
+      });
+      expect(at.wordsBottom).toBeLessThanOrEqual(at.fold);
+      expect(at.wordsBottom).toBeLessThanOrEqual(at.chart.top);
+      expect(at.frameTop).toBeGreaterThanOrEqual(at.chart.bottom);
+
       await page.getByRole('button', { name: 'Back to songs' }).click();
       await expect(play(page, 'Plastic Love')).toHaveAttribute('data-preview', 'idle');
       await context.close();
@@ -214,21 +233,12 @@ for (const engine of engines) {
   });
 }
 
-test('the row and its play button fit a 375 px phone, with Deezer named under the list', async ({ browser, baseURL }) => {
+test('the row and its play button fit a 375 px phone, with no credit line under the list', async ({ browser, baseURL }) => {
   const mock: Mock = { response: songs([1]), missing: new Set(), previewCalls: [] };
   for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
     const { context, page } = await open(browser, baseURL, mock, viewport);
-    // Deezer is named under the list (#34's notes), over the credits link: below the last row, at the end of what scrolls.
-    const credit = page.getByText('Previews from');
-    await credit.scrollIntoViewIfNeeded();
-    await expect(credit).toBeVisible();
-    expect(
-      await page.evaluate(() => {
-        const line = [...document.querySelectorAll('p')].find((p) => /Previews from/.test(p.textContent ?? ''))!;
-        const last = [...document.querySelectorAll('[data-row]')].at(-1)!;
-        return line.getBoundingClientRect().top >= last.getBoundingClientRect().bottom;
-      }),
-    ).toBe(true);
+    // Deezer is named in Sources and credits (R29, tests/e2e/credits.spec.ts), not by a line under the list: the list ends at its last row.
+    await expect(page.getByText('Previews from')).toHaveCount(0);
     await page.locator('#list-scroll').evaluate((el) => el.scrollTo(0, 0));
     const button = (await play(page, 'Plastic Love').boundingBox())!;
     expect(button.width).toBeGreaterThanOrEqual(44);

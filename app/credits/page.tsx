@@ -1,28 +1,16 @@
 import { CreditsBack } from '../../src/components/CreditsBack';
-import { ANALYTICS_NOTE, CREDITS } from '../../src/lib/credits';
+import { CreditsContent } from '../../src/components/CreditsContent';
 import styles from './credits.module.css';
 
 export const metadata = { title: 'Sources and credits · karaoke-dokie' };
 
+// The app opens Sources and credits in a panel inside its TV (QWW-57, R28); this page is the same content for a direct visit and for old links.
 export default function Credits() {
   return (
     <main className={styles.page}>
       <CreditsBack className={styles.back} />
       <h1 className={styles.title}>Sources and credits</h1>
-      <ul className={styles.list}>
-        {CREDITS.map((c) => (
-          <li key={c.name}>
-            <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a>
-            <p>{c.what}</p>
-          </li>
-        ))}
-      </ul>
-      <section className={styles.note}>
-        <h2>{ANALYTICS_NOTE.title}</h2>
-        {ANALYTICS_NOTE.paragraphs.map((text) => (
-          <p key={text}>{text}</p>
-        ))}
-      </section>
+      <CreditsContent />
     </main>
   );
 }

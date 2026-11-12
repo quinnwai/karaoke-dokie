@@ -109,17 +109,21 @@ test('4. in mini, the Era tab shows only the era panel and the tabs; Era is the 
   await page.screenshot({ path: path.join(SCREENS, 'setlist-04-mini-era.png') });
 });
 
-test('5. deselecting every era by hand leaves Era on with an empty list, the prompt and the reset button', async ({ page }) => {
+test('5. unpicking the last era by hand turns Era off: every song is back, no prompt, nothing pressed, no turn-off button (R23, which replaces round 5\'s empty list)', async ({ page }) => {
   await open(page);
-  // Era starts off with no picks. The first tap turns it on with just that era; tapping it again leaves nothing picked.
+  // Era starts off with no picks. The first tap turns it on with just that era; tapping it again leaves nothing picked, which is Era off.
   await eraButton(page, 's90').click();
   expect((await tuner(page)).eras).toEqual(['s90']);
-  expect(await rows(page).count()).toBeGreaterThan(0);
+  await expect(rows(page)).toHaveCount(4);
   await eraButton(page, 's90').click();
-  await expect(page.locator('#empty')).toHaveText('Pick an era to see songs.');
-  expect(await rows(page).count()).toBe(0);
-  await expect(resetButton(page, 'era')).toBeVisible();
-  expect((await tuner(page)).off).not.toContain('era');
+  await expect(rows(page)).toHaveCount(25);
+  await expect.poll(async () => (await titles(page)).slice(0, 10)).toEqual(DEFAULT_RANKING);
+  await expect(page.locator('#empty')).toHaveCount(0);
+  const t = await tuner(page);
+  expect(t.eras).toEqual([]);
+  expect(t.off).toContain('era');
+  await expect(page.locator('#era-panel')).toHaveAttribute('data-off', 'true');
+  await expect(resetButton(page, 'era')).toBeHidden();
   for (const era of ['pre', 's70', 's80', 's90', 's00', 's10', 's20']) await expect(eraButton(page, era)).toHaveAttribute('aria-pressed', 'false');
 });
 
@@ -500,8 +504,8 @@ test('the sheet does not cover the last row: scrolled to the end, it and the end
     // The scroller ends where the sheet starts.
     const scroller = (await page.locator('#list-scroll').boundingBox())!;
     expect(Math.round(scroller.y + scroller.height)).toBeLessThanOrEqual(Math.round(sheetTop));
-    // The last row and the credits link, at the very end, are above the handle's touch area (it reaches 11 px above the sheet) and receive their own taps.
-    for (const target of [rows(page).last().locator('button').first(), page.getByRole('link', { name: 'Sources and credits' })]) {
+    // The last row, at the very end (the credits link is in the TV's chin now, R28), is above the handle's touch area (it reaches 11 px above the sheet) and receives its own taps.
+    for (const target of [rows(page).last().locator('button').first()]) {
       const b = (await target.boundingBox())!;
       expect(b.y + b.height, `${mode}: bottom of the last thing in the list`).toBeLessThanOrEqual(sheetTop - 11 + 1);
       const c = await centre(target);
@@ -932,7 +936,7 @@ const headerBox = (page: Page) =>
     return {
       bar: box(bar),
       range: box(bar.querySelector('[role="group"]')),
-      redo: box(bar.querySelector('button[aria-label="Redo the singing test"]')),
+      redo: box(bar.querySelector('button[aria-label="Redo the range test"]')),
       sign: signStyle.display === 'none' || signStyle.visibility === 'hidden' ? null : box(sign),
       signSize: Number.parseFloat(signStyle.fontSize),
       spotify: box(bar.querySelector('button[aria-label="Connect to Spotify"], button[aria-label="Spotify account"]')),
@@ -977,16 +981,17 @@ test('the Spotify logo is at the far right of the row, and the カラオケ sign
 });
 
 test('when the row is too tight, the sign gives way first: it shrinks to keep 8 px clear of redo and the logo, goes when even 13 px does not fit, and nothing else shrinks', async ({ page }) => {
-  // The longest range, C#2 to G#5, on a 360 px phone: the sign at the row's middle has no room even at 13 px, so it is hidden.
-  await page.setViewportSize({ width: 360, height: 740 });
+  // The longest range, C#2 to G#5, in a 330 px window (R14's round redo gave a 360 px phone the room back): the sign at the row's
+  // middle has no room even at 13 px, so it is hidden.
+  await page.setViewportSize({ width: 330, height: 740 });
   await open(page, { range: { low: 37, high: 80 } });
   await expect.poll(async () => (await headerBox(page)).sign).toBeNull();
   const tight = await headerBox(page);
   expect(tight.bar!.h).toBe(28);
   expect(tight.range!.r).toBeLessThanOrEqual(tight.redo!.x);
   expect(tight.redo!.r).toBeLessThanOrEqual(tight.spotify!.x);
-  // A little more room (390 px): the sign is back, smaller than 16 px, clear of both by 8 px.
-  await page.setViewportSize({ width: 390, height: 740 });
+  // A little more room (350 px): the sign is back, smaller than 16 px, clear of both by 8 px.
+  await page.setViewportSize({ width: 350, height: 740 });
   await expect.poll(async () => (await headerBox(page)).sign !== null).toBe(true);
   const snug = await headerBox(page);
   expect(snug.signSize).toBeLessThan(16);
@@ -1011,7 +1016,7 @@ test('the range notes and redo look as they did and are 44 px tall to tap', asyn
   const targets = [
     page.getByRole('button', { name: 'Redo your low note, A2' }),
     page.getByRole('button', { name: 'Redo your high note, C5' }),
-    page.getByRole('button', { name: 'Redo the singing test' }),
+    page.getByRole('button', { name: 'Redo the range test' }),
   ];
   for (const target of targets) {
     const b = (await target.boundingBox())!;
@@ -1104,7 +1109,7 @@ test('23b. the #1 spot has no mark of its own any more (R12): when the ranking c
   expect(await rows(page).first().getAttribute('data-rank')).toBe('1');
 });
 
-test('24. the Era header counts the songs that fit: "OFF · all eras" with Era off, and the total, with a thousands comma, with it on', async ({ page }) => {
+test('24. the song count is the screen header\'s, not the Era panel\'s (R19): the panel says "OFF · all eras" with Era off and just "ERA" with it on, and the header counts the total, with a thousands comma', async ({ page }) => {
   // 1,200 more songs in the 90s, so the total (1,204 with the four mock ones) is far past the 200 the screen asks for.
   const extra: MockSong[] = Array.from({ length: 1200 }, (_, i) => ({
     title: `Extra song ${i}`,
@@ -1116,23 +1121,27 @@ test('24. the Era header counts the songs that fit: "OFF · all eras" with Era o
     tempo: (i * 29) % 101,
   }));
   await open(page, { extra });
-  await expect(page.locator('#era-label')).toContainText('· OFF · all eras');
+  const count = page.locator('[data-song-count]');
+  await expect(page.locator('#era-label')).toHaveText('ERA · OFF · all eras');
+  await expect(count).toHaveText('1,225 songs'); // Era off: every song that fits, the 25 mock songs and the 1,200
   await eraButton(page, 's90').click();
-  await expect(page.locator('#era-label')).toContainText('· 1,204 songs');
-  // The list holds what was asked for, a page of 200; the header is the total, not the page.
+  await expect(count).toHaveText('1,204 songs');
+  await expect(page.locator('#era-label')).toHaveText('ERA');
+  // The list holds what was asked for, a page of 200; the count is the total, not the page.
   await expect.poll(() => rows(page).count()).toBeLessThanOrEqual(200);
   expect(await rows(page).count()).toBeLessThan(1204);
   await resetButton(page, 'era').click();
-  await expect(page.locator('#era-label')).toContainText('· OFF · all eras');
-  await expect(page.locator('#era-label')).not.toContainText('songs');
+  await expect(page.locator('#era-label')).toHaveText('ERA · OFF · all eras');
+  await expect(count).toHaveText('1,225 songs');
+  await expect(page.locator('#era-panel')).not.toContainText('songs');
 });
 
-test('24b. one song says "1 song"', async ({ page }) => {
+test('24b. one song says "1 song", in the header', async ({ page }) => {
   // For a range from 61 up only one 2020s song fits: good 4 u.
   await open(page, { range: { low: 61, high: 72 } });
   await eraButton(page, 's20').click();
-  await expect(page.locator('#era-label')).toContainText('· 1 song');
-  await expect(page.locator('#era-label')).not.toContainText('songs');
+  await expect(page.locator('[data-song-count]')).toHaveText('1 song');
+  await expect(page.locator('#era-label')).toHaveText('ERA');
   await expect(rows(page)).toHaveCount(1);
 });
 
@@ -1185,30 +1194,40 @@ test('26. the notes and bolts light by the thresholds: at History 65 five notes,
   expect(await state('[data-strip][data-gear="popularity"] [data-bolt]')).toEqual({ drawn: 7, lit: 6 });
 });
 
-test('27. the Era tab\'s jukebox: Era off is an unlit body with both lights dark; one era lights the left; two or more light both; none picked is dark again', async ({ page }) => {
+test('27. the Era tab\'s jukebox (R24): Era off is an unlit body with all three buttons grey; the picked eras light the left, middle and right buttons, the \'90s in the middle; the last era unpicked is Era off again', async ({ page }) => {
   await open(page, { mini: true });
   const body = tabArt(page, 'era').locator('[data-jukebox="body"]');
   const light = (i: number) => tabArt(page, 'era').locator(`[data-jukebox="button"][data-i="${i}"]`);
-  const DARK = rgb('#3A2A33');
-  // Every gear reset (the real defaults: Era off): the body is unlit, both buttons dark.
+  const lights = async () => [await css(light(0), 'fill'), await css(light(1), 'fill'), await css(light(2), 'fill')];
+  // Every gear reset (the real defaults: Era off): the body is unlit and all three buttons are the same grey, none pink.
   expect(await css(body, 'stroke')).toBe(UNLIT);
-  expect([await css(light(0), 'fill'), await css(light(1), 'fill')]).toEqual([DARK, DARK]);
-  // One era: the body is pink, the left button amber.
+  expect(await lights()).toEqual([UNLIT, UNLIT, UNLIT]);
+  // One era: the body is pink. The '80s is before the '90s, so the left button is lit, amber.
   await tab(page, 'era').click();
   await eraButton(page, 's80').click();
   expect(await css(body, 'stroke')).toBe(PINK);
-  expect([await css(light(0), 'fill'), await css(light(1), 'fill')]).toEqual([AMBER, DARK]);
-  // Two: both amber.
+  expect(await lights()).toEqual([AMBER, UNLIT, UNLIT]);
+  // Two, both the '90s or earlier: left and middle.
   await eraButton(page, 's90').click();
-  expect([await css(light(0), 'fill'), await css(light(1), 'fill')]).toEqual([AMBER, AMBER]);
-  // Era on with none picked: pink body, both dark.
+  expect(await lights()).toEqual([AMBER, AMBER, UNLIT]);
+  // Three: all three.
+  await eraButton(page, 's10').click();
+  expect(await lights()).toEqual([AMBER, AMBER, AMBER]);
+  // Back down: the '80s and the '10s, one before and one after the '90s, light left and right; the '10s alone lights the right one.
+  await eraButton(page, 's90').click();
+  expect(await lights()).toEqual([AMBER, UNLIT, AMBER]);
   await eraButton(page, 's80').click();
+  expect(await lights()).toEqual([UNLIT, UNLIT, AMBER]);
+  // The last one unpicked is Era off (R23): the body goes unlit and all three buttons are grey, not pink.
+  await eraButton(page, 's10').click();
+  expect(await css(body, 'stroke')).toBe(UNLIT);
+  expect(await lights()).toEqual([UNLIT, UNLIT, UNLIT]);
+  // Picked again and turned off with the turn-off button: the same.
   await eraButton(page, 's90').click();
-  expect(await css(body, 'stroke')).toBe(PINK);
-  expect([await css(light(0), 'fill'), await css(light(1), 'fill')]).toEqual([DARK, DARK]);
-  // Reset: back to unlit.
+  expect(await lights()).toEqual([UNLIT, AMBER, UNLIT]);
   await resetButton(page, 'era').click();
   expect(await css(body, 'stroke')).toBe(UNLIT);
+  expect(await lights()).toEqual([UNLIT, UNLIT, UNLIT]);
 });
 
 test.describe('motion', () => {
@@ -1364,7 +1383,7 @@ test('the era labels fit their buttons without wrapping on every phone from 360 
   expect(sizes.at(-1)).toBe(10.5);
 });
 
-test('the slot stands where the rank number was: first in the row, 44 px, 10 px before the text; on a touch screen it holds the ▶ glyph, with no ring, and the number is not drawn', async ({ page }) => {
+test('the slot stands where the rank number was: first in the row, 44 px, 10 px before the text; on a touch screen it holds the ▶ in its circle, and the number is not drawn', async ({ page }) => {
   await open(page);
   // This context is a touch phone, which cannot hover: R3 puts the ▶ in the number's place there (tests/e2e/setlist-rows.spec.ts
   // has the pointer side, where the number shows and hovering the row swaps it for the ▶).
@@ -1382,9 +1401,10 @@ test('the slot stands where the rank number was: first in the row, 44 px, 10 px 
   // The number is in the slot for a pointer device (and for data-rank's sake) but is not drawn here: what is read has no digit first.
   expect(m.digits).toBe(false);
   expect(await rows(page).first().locator('[data-rank-number]').textContent()).toBe('1');
-  // The ▶ is the glyph alone, in --pink-text (a song with no Deezer id has QWW-48's button, disabled): no ring, no circle drawn.
+  // The ▶ is in --pink-text with its thin circle round it (R17 replaced R3's "no ring or circle"; a song with no Deezer id has QWW-48's
+  // button, disabled, and the circle is faded with the glyph). tests/e2e/setlist-rows.spec.ts and setlist-play.spec.ts read the circle in each state.
   expect(await css(rows(page).first().locator('[data-play-slot] button'), 'color')).toBe(rgb('#FF6FB1'));
-  expect(await rows(page).first().locator('[data-play-slot] circle:visible').count()).toBe(0);
+  expect(await rows(page).first().locator('[data-play-slot] circle:visible').count()).toBeGreaterThan(0);
 });
 
 test('the badge is the song\'s own label, pink for all three, and a Maybe song has none', async ({ page }) => {
@@ -1433,8 +1453,8 @@ test('the unreachable hint is the same: Spotify could not be reached, so listeni
 
 test('the other states of the list speak in 6A\'s quiet voice: 15/500 in --text-3', async ({ page }) => {
   await open(page);
-  await eraButton(page, 's80').click();
-  await eraButton(page, 's80').click(); // Era on, nothing picked
+  // Era on with nothing picked: unpicking the last era turns Era off now (R23), so the test hook sets it, as an old state would.
+  await page.evaluate(() => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ off: ['history', 'tempo'], eras: [] }));
   const empty = page.locator('#empty');
   await expect(empty).toHaveText('Pick an era to see songs.');
   const style = await empty.evaluate((el) => {

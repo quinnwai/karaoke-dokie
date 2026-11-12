@@ -15,12 +15,12 @@ export interface GearMeta {
 }
 
 // Round 6A (§5) shortened History's label on the strip to "HISTORY"; Quinn-Wai's review (QWW-57, R6, 11 Nov) put "LISTENING
-// HISTORY" back on the strip. Its tab is still "History", and its reset button says "listening history" to a screen reader.
+// HISTORY" back on the strip. Its tab is still "History", and its ✕ button says "Turn off listening history" to a screen reader.
 export const GEAR_META: Record<GearId, GearMeta> = {
-  difficulty: { eyebrow: 'DIFFICULTY', tab: 'Difficulty', left: 'Light work', right: 'Locked in', resetLabel: 'Reset difficulty (stop factoring it in)' },
-  history: { eyebrow: 'LISTENING HISTORY', tab: 'History', left: 'Rediscover', right: 'On repeat', resetLabel: 'Reset listening history (stop factoring it in)' },
-  popularity: { eyebrow: 'POPULARITY', tab: 'Popularity', left: 'Deep cuts', right: 'Pop hits', resetLabel: 'Reset popularity (stop factoring it in)' },
-  tempo: { eyebrow: 'TEMPO', tab: 'Tempo', left: 'Slow jams', right: 'Upbeat tracks', resetLabel: 'Reset tempo (stop factoring it in)' },
+  difficulty: { eyebrow: 'DIFFICULTY', tab: 'Difficulty', left: 'Light work', right: 'Locked in', resetLabel: 'Turn off difficulty' },
+  history: { eyebrow: 'LISTENING HISTORY', tab: 'History', left: 'Rediscover', right: 'On repeat', resetLabel: 'Turn off listening history' },
+  popularity: { eyebrow: 'POPULARITY', tab: 'Popularity', left: 'Deep cuts', right: 'Pop hits', resetLabel: 'Turn off popularity' },
+  tempo: { eyebrow: 'TEMPO', tab: 'Tempo', left: 'Slow jams', right: 'Upbeat tracks', resetLabel: 'Turn off tempo' },
 };
 
 /**
@@ -33,11 +33,11 @@ export const SHEET_GEARS: readonly GearId[] = ['difficulty', 'popularity', 'temp
 /** The tabs: the gears in sheet order, then Era. */
 export const SHEET_PARTS: readonly TunerPart[] = [...SHEET_GEARS, 'era'];
 
-// The Era panel's header is "ERA" and then a count (§8, `eraCountText` in eras.ts), which replaces "ERA: PICK ANY".
-export const ERA_META = { eyebrow: 'ERA', tab: 'Era', resetLabel: 'Reset era (stop factoring it in)' } as const;
+// The Era panel's header is "ERA", and "OFF · all eras" while Era is off (§8, `ERA_OFF_NOTE` in eras.ts), which replaces "ERA: PICK ANY".
+export const ERA_META = { eyebrow: 'ERA', tab: 'Era', resetLabel: 'Turn off era' } as const;
 
-/** The reset button's tooltip. */
-export const RESET_TITLE = "Reset: don't factor in";
+/** The ✕ button's tooltip (R21: it turns the gear off, so it is no longer a reset arrow). */
+export const RESET_TITLE = "Turn off: don't factor in";
 
 /** Why History cannot be used, in the place of its track (the gear is off and disabled, spec: logged-out). */
 export const HISTORY_HINT_LOGGED_OUT = 'Connect Spotify to use your listening history';

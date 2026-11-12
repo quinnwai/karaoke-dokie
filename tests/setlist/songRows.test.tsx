@@ -192,6 +192,8 @@ describe('the slot: the rank number and the ▶ (R3)', () => {
     }
   });
 
+  // The stand-in for a screen given no renderPlay is the glyph alone. The circle round the ▶ (R17) is the app's own button's, which always
+  // takes its place (tests/screen/previewPlay.test.tsx and tests/e2e/setlist-play.spec.ts).
   it('draws the placeholder ▶ as the glyph alone: one svg, no ring and no circle in it', () => {
     draw(songs);
     for (const slot of all(SEL.playSlot)) {
@@ -446,7 +448,7 @@ describe('the header', () => {
     expect(within(header).getByRole('group', { name: 'Your range A2 to C5' })).toBeTruthy();
     expect(within(header).getByRole('button', { name: 'Redo your low note, A2' })).toBeTruthy();
     expect(within(header).getByRole('button', { name: 'Redo your high note, C5' })).toBeTruthy();
-    expect(within(header).getByRole('button', { name: 'Redo the singing test' })).toBeTruthy();
+    expect(within(header).getByRole('button', { name: 'Redo the range test' })).toBeTruthy();
     expect(within(header).getByRole('heading', { name: 'Tune your setlist' })).toBeTruthy();
   });
 
@@ -464,7 +466,7 @@ describe('the header', () => {
     // The sign is a direct child of the row (R1: centred on the header's middle), so the child itself is the sign.
     const order = Array.from(bar.children).map((c) => (c.matches('[lang="ja"]') || c.querySelector('[lang="ja"]') ? 'sign' : (c as HTMLElement).getAttribute('aria-label') ?? c.tagName));
     expect(order.at(-1)).toBe('Connect to Spotify');
-    expect(order.indexOf('sign')).toBeGreaterThan(order.indexOf('Redo the singing test'));
+    expect(order.indexOf('sign')).toBeGreaterThan(order.indexOf('Redo the range test'));
     expect(order.indexOf('sign')).toBeLessThan(order.indexOf('Connect to Spotify'));
   });
 });

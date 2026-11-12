@@ -3,13 +3,16 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { Match } from '../../src/lib/contracts';
 import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { eraOf, ERA_LABEL } from '../../src/lib/setlist/eras';
 import { GEAR_META, SHEET_GEARS, SHEET_PARTS } from '../../src/lib/setlist/gears';
 import { modeAfterDrag, neonVars, RACK_FULL, RACK_MINI, sheetLayout } from '../../src/lib/setlist/sheet';
 import { initialTuner, isOn, toRequest, tunerReducer } from '../../src/lib/setlist/tuner';
 import type { TunerAction } from '../../src/lib/setlist/tuner';
-import { GEAR_IDS, TUNER_PARTS, type EraId, type GearId, type TunerState } from '../../src/lib/setlist/types';
+import { ERA_IDS, GEAR_IDS, TUNER_PARTS, type EraId, type GearId, type TunerState } from '../../src/lib/setlist/types';
+import { mockPage } from '../fixtures/setlist';
+import { setlistAnswer } from '../helpers/setlistServer';
 
 const run = (s: TunerState, ...actions: TunerAction[]) => actions.reduce(tunerReducer, s);
 /** The tuner everyone starts from: it takes no sign-in state, the ranking engine decides what counts. */
@@ -142,8 +145,9 @@ describe('reset and the off state (spec §4a)', () => {
     const range = { low: 45, high: 72 };
     expect(start.eras).toEqual([]);
     expect(isOn(start, 'era')).toBe(false); // off: every era counts
-    // Picked, then taken out by hand: Era stays on with nothing picked (the engine answers "no-era-picked").
-    const none = run(start, { type: 'era', era: 's80' }, { type: 'era', era: 's80' });
+    // Era on with nothing picked is only a state set by hand (the test hook, an old state), since unpicking the last era turns Era
+    // off (R23): the engine answers it with "no-era-picked".
+    const none = run(start, { type: 'patch', patch: { off: DEFAULTS.off.filter((part) => part !== 'era') } });
     expect(none.eras).toEqual([]);
     expect(isOn(none, 'era')).toBe(true);
     // Reset puts it off again.
@@ -178,6 +182,41 @@ describe('era buttons (spec §4, test 17)', () => {
   it('a tap on a picked era removes it', () => {
     const s = run(start, { type: 'era', era: 's80' }, { type: 'era', era: 's90' }, { type: 'era', era: 's80' });
     expect(s.eras).toEqual(['s90']);
+  });
+
+  // R23 (QWW-57) replaces round 5's spec §4a, "picked and empty means no songs": unpicking the last era turns Era off.
+  it.each(ERA_IDS)('R23: %s picked and then unpicked is Era off with nothing picked, and Era still the open part', (era) => {
+    const picked = run(start, { type: 'era', era });
+    expect(isOn(picked, 'era')).toBe(true);
+    const s = run(picked, { type: 'era', era });
+    expect(s.eras).toEqual([]);
+    expect(isOn(s, 'era')).toBe(false);
+    expect(s.open).toBe('era');
+    // Nothing else moved: it is first load's state, with Era the open part.
+    expect(s).toEqual({ ...start, open: 'era' });
+  });
+
+  it('R23: only the last pick turns Era off: with two picked, taking one out leaves Era on with the other', () => {
+    const two = run(start, { type: 'era', era: 's80' }, { type: 'era', era: 's90' });
+    const one = run(two, { type: 'era', era: 's80' });
+    expect(one.eras).toEqual(['s90']);
+    expect(isOn(one, 'era')).toBe(true);
+    expect(isOn(run(one, { type: 'era', era: 's90' }), 'era')).toBe(false);
+  });
+
+  it('R23: after that, a tap picks just that era and turns Era on again', () => {
+    const off = run(start, { type: 'era', era: 's80' }, { type: 'era', era: 's80' });
+    const again = run(off, { type: 'era', era: 's00' });
+    expect(again.eras).toEqual(['s00']);
+    expect(isOn(again, 'era')).toBe(true);
+  });
+
+  it('R23: unpicking the one pick Era holds while it is off leaves it off, listed off once', () => {
+    const held: TunerState = { ...start, eras: ['s90'] };
+    const s = run(held, { type: 'era', era: 's90' });
+    expect(s.eras).toEqual([]);
+    expect(isOn(s, 'era')).toBe(false);
+    expect(s.off.filter((part) => part === 'era')).toHaveLength(1);
   });
 });
 
@@ -238,6 +277,61 @@ describe('the request sent to the ranking engine', () => {
     expect(s.eras).toEqual(['s80']);
     expect(s.tempo).toBe(DEFAULTS.tempo);
     expect(range.low).toBe(45);
+  });
+
+  it('R22: while Era is off the request names no era, whatever picks the state still holds, so no era filter applies', () => {
+    const held: TunerState = { ...start, eras: ['s90', 's00', 's10'] };
+    expect(isOn(held, 'era')).toBe(false);
+    expect(toRequest(held, range).eras).toEqual([]);
+    expect(toRequest(held, range).off).toContain('era');
+    expect(toRequest(held, range)).toEqual(toRequest(start, range));
+    // With Era on the picks go as they are.
+    expect(toRequest({ ...held, off: [] }, range).eras).toEqual(['s90', 's00', 's10']);
+  });
+});
+
+// R22 and R23 against the engine: the mocked server of the e2e specs ranks the 25 mock songs the way the real route does.
+describe('Era off and the engine (R22, R23)', () => {
+  const range = { low: 45, high: 72 };
+  // The 25 mock songs and one with no year: Era off lists it, and every era filter leaves it out.
+  const base = mockPage();
+  const first = base.matches[0]!;
+  const undated: Match = { ...first, year: undefined, track: { ...first.track, id: 'cat:no-year-song', title: 'No Year Song' } };
+  const page = { ...base, matches: [...base.matches, undated] };
+  const answer = (s: TunerState) => setlistAnswer(page, toRequest(s, range), false);
+  const ids = (r: ReturnType<typeof answer>) => r.songs.map((song) => song.match.track.id);
+
+  it('R22: with Era off the count is every song that fits and the list holds every one of them, a song with no year too', () => {
+    const everything = answer(start);
+    expect(everything.total).toBe(page.matches.length);
+    expect(everything.total).toBe(26);
+    expect(ids(everything)).toHaveLength(26);
+    expect(ids(everything)).toContain('cat:no-year-song');
+    expect(everything.empty).toBeUndefined();
+    // Era on with all seven eras picked is not that: the song with no year has no era.
+    const allSeven = answer({ ...start, eras: [...ERA_IDS], off: DEFAULTS.off.filter((part) => part !== 'era') });
+    expect(allSeven.total).toBe(25);
+    expect(ids(allSeven)).not.toContain('cat:no-year-song');
+  });
+
+  it('R22: the answer is the same whatever picks the state still holds while Era is off', () => {
+    expect(answer({ ...start, eras: ['s80', 's20'] })).toEqual(answer(start));
+  });
+
+  it('R23: pick one era, then unpick it: Era is off and the list shows every era, as at first load', () => {
+    const picked = run(start, { type: 'era', era: 's80' });
+    expect(answer(picked).total).toBe(4);
+    expect(ids(answer(picked))).not.toContain('cat:no-year-song');
+    const unpicked = run(picked, { type: 'era', era: 's80' });
+    expect(isOn(unpicked, 'era')).toBe(false);
+    expect(answer(unpicked).empty).toBeUndefined();
+    expect(answer(unpicked).total).toBe(26);
+    expect(answer(unpicked)).toEqual(answer(start));
+  });
+
+  it('keeps the engine\'s answer for Era on with nothing picked, for a request that still asks it (the test hook, an old state)', () => {
+    const none = run(start, { type: 'patch', patch: { off: DEFAULTS.off.filter((part) => part !== 'era') } });
+    expect(answer(none)).toMatchObject({ songs: [], total: 0, empty: 'no-era-picked' });
   });
 });
 

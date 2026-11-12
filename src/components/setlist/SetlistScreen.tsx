@@ -12,15 +12,14 @@ import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'rea
 import type { Match, ResultsMode, VocalRange } from '../../lib/contracts';
 import { midiToNoteName } from '../../lib/audio/notes';
 import { useSideways } from '../../lib/client/useSideways';
+import { songCountText } from '../../lib/setlist/eras';
 import { toRows } from '../../lib/setlist/rows';
 import { HISTORY_HINT_LOGGED_OUT, HISTORY_HINT_UNREACHABLE } from '../../lib/setlist/gears';
 import type { TunerAction } from '../../lib/setlist/tuner';
 import type { EmptyReason, GearId, SetlistSong, TunerState } from '../../lib/setlist/types';
-import { BookIcon, SpotifyIcon } from '../Icon';
 import { SpotifyAccount } from '../SpotifyAccount';
-import screen from '../screen.module.css';
 import { Sheet } from './Sheet';
-import { DeezerCredit } from '../PreviewButton';
+import { ConnectButton } from './ConnectButton';
 import { SongRows } from './SongRows';
 import type { FillMemory } from './useFillIn';
 import { useSheetFit } from './useSheetFit';
@@ -158,8 +157,8 @@ export function SetlistScreen(props: SetlistScreenProps) {
               <span className={styles.noteMark}>{high}</span>
             </button>
           </span>
-          <button type="button" className={styles.redo} onClick={props.onRedo} aria-label="Redo the singing test" data-sign-left="">
-            redo
+          <button type="button" className={styles.redo} onClick={props.onRedo} aria-label="Redo the range test" data-sign-left="">
+            <RedoIcon />
           </button>
           {/* The sign is centred on the header's own middle (R1), which is where a sign on a screen reads as centred; it is
               hidden when that would put it within 8 px of redo or the Spotify button (useSignFit). */}
@@ -167,12 +166,7 @@ export function SetlistScreen(props: SetlistScreenProps) {
             カラオケ
           </span>
           {mode === 'catalogue' && !props.libraryUnavailable && (
-            <button type="button" className={`${screen.connect} ${styles.spotify}`} onClick={props.onConnect} aria-label="Connect to Spotify" data-sign-right="">
-              <SpotifyIcon />
-              <span className={screen.connectTip} aria-hidden>
-                Connect to Spotify
-              </span>
-            </button>
+            <ConnectButton onConnect={props.onConnect} />
           )}
           {(mode === 'library' || props.libraryUnavailable) && (
             <span className={styles.spotify} data-sign-right="">
@@ -180,7 +174,16 @@ export function SetlistScreen(props: SetlistScreenProps) {
             </span>
           )}
         </div>
-        <h1 className={styles.title}>Tune your setlist</h1>
+        <div className={styles.titleRow}>
+          <h1 className={styles.title}>Tune your setlist</h1>
+          {/* How many songs fit the range and the picked eras (R19: it was the Era panel's title): under the Spotify button, at the
+              header's right, and it follows every answer of the engine. Nothing is said until the engine has answered once. */}
+          {props.total != null && (
+            <p className={styles.count} data-song-count="">
+              {songCountText(props.total)}
+            </p>
+          )}
+        </div>
       </header>
 
       <div ref={scroller} id="list-scroll" className={listStyles.listScroll}>
@@ -228,34 +231,30 @@ export function SetlistScreen(props: SetlistScreenProps) {
         {mode === 'library' && !waiting && !error && rows.length > 0 && visible.length >= rows.length && nextOffset === null && (
           <p className={listStyles.note}>That’s every song that fits, for now.</p>
         )}
-        {mode === 'catalogue' && !props.libraryUnavailable && rows.length > 0 && (
-          <div className={listStyles.connectNote}>
-            <p>Want personalized recommendations?</p>
-            <button type="button" className={listStyles.connectLink} onClick={props.onConnect}>
-              Connect to Spotify
-            </button>
-            <p>Invited testers only for now.</p>
-          </div>
-        )}
-        {/* Deezer's API terms ask for its logo where its previews are (QWW-48): one quiet line under the list, over the credits link,
-            which tells listeners the rest. Only while a row on screen has a preview to play. */}
-        {props.renderPlay && visible.some((r) => r.match.deezerId !== undefined) && <DeezerCredit className={listStyles.deezer} />}
-        {/* In a new tab, like the Deezer line's link: leaving the page would drop the singer's tuning (QWW-57). */}
-        <a className={listStyles.credits} href="/credits" target="_blank" rel="noopener noreferrer" aria-label="Sources and credits" title="Sources and credits">
-          <BookIcon />
-        </a>
       </div>
 
       <Sheet
         tuner={tuner}
         historyAvailable={historyAvailable}
         historyHint={props.libraryUnavailable ? HISTORY_HINT_UNREACHABLE : HISTORY_HINT_LOGGED_OUT}
-        songCount={props.total ?? null}
         canExpand={canExpand}
         onTuner={props.onTuner}
         onGearDone={props.onGearDone}
       />
     </div>
+  );
+}
+
+/**
+ * The redo arrow (R14): clockwise, the mirror of the arrow the gears' reset buttons used to have, 2 px stroke in the button's colour,
+ * drawn 16 px in a 28 px circle.
+ */
+function RedoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M19.5 12A7.5 7.5 0 1 1 12 4.5" />
+      <path d="M9.5 1.75L12.25 4.5L9.5 7.25" />
+    </svg>
   );
 }
 

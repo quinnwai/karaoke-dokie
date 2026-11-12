@@ -453,7 +453,6 @@ describe('the handle when the sheet cannot expand (QWW-57, decision 1)', () => {
       tuner: tunerOf(),
       historyAvailable: true,
       historyHint: 'Connect Spotify to use your listening history',
-      songCount: null,
       canExpand: false,
       onTuner,
       onGearDone: () => {},
@@ -715,7 +714,7 @@ describe('History', () => {
     expect(label().textContent).toBe('LISTENING HISTORY');
     expect(screen.getByRole('slider', { name: 'LISTENING HISTORY' })).toBe(el(SEL.slider('history')));
     // The reset button keeps its name (it is hidden while History is off, so it is read from its attribute).
-    expect(el(SEL.reset('history')).getAttribute('aria-label')).toBe('Reset listening history (stop factoring it in)');
+    expect(el(SEL.reset('history')).getAttribute('aria-label')).toBe('Turn off listening history');
   });
 
   it('has the OFF tag after its label while it is off but usable (signed in), and no tag once it is on', () => {
@@ -809,11 +808,11 @@ describe('History', () => {
 
 describe('reset buttons', () => {
   const LABEL: Record<(typeof TUNER_PARTS)[number], string> = {
-    difficulty: 'Reset difficulty (stop factoring it in)',
-    history: 'Reset listening history (stop factoring it in)',
-    popularity: 'Reset popularity (stop factoring it in)',
-    tempo: 'Reset tempo (stop factoring it in)',
-    era: 'Reset era (stop factoring it in)',
+    difficulty: 'Turn off difficulty',
+    history: 'Turn off listening history',
+    popularity: 'Turn off popularity',
+    tempo: 'Turn off tempo',
+    era: 'Turn off era',
   };
 
   it.each(TUNER_PARTS)('%s: hidden while it is off, shown while it is on', (gear) => {
@@ -830,7 +829,7 @@ describe('reset buttons', () => {
     const button = el(SEL.reset(gear));
     expect(button.getAttribute('aria-label')).toBe(LABEL[gear]);
     expect(screen.getByRole('button', { name: LABEL[gear] })).toBe(button);
-    expect(button.getAttribute('title')).toBe("Reset: don't factor in");
+    expect(button.getAttribute('title')).toBe("Turn off: don't factor in");
     expect(button.textContent).toBe('');
     expect(el('svg', button).getAttribute('aria-hidden')).toBe('true');
   });
@@ -1006,8 +1005,9 @@ describe('the Era panel', () => {
     expect(buttons().every((b) => b.tagName === 'BUTTON')).toBe(true);
   });
 
-  // Round 6A §8: the header is "ERA" and then how many songs fit, or "· OFF · all eras"; it replaces "ERA: PICK ANY".
-  it('is a group named by its header: "ERA" and the count after it', () => {
+  // Round 6A §8: the header is "ERA", and "· OFF · all eras" while Era is off; it replaces "ERA: PICK ANY". The count that came after
+  // "ERA" is the screen header's now (R19).
+  it('is a group named by its header: "ERA", and "ERA · OFF · all eras" while Era is off', () => {
     draw();
     const group = screen.getByRole('group', { name: 'ERA · OFF · all eras' });
     expect(group).toBe(el(SEL.eraPanel));
@@ -1016,31 +1016,23 @@ describe('the Era panel', () => {
     expect(document.getElementById(labelledBy ?? '')?.firstChild?.textContent).toBe('ERA');
   });
 
-  it.each([
-    [1204, 'ERA · 1,204 songs'],
-    [10, 'ERA · 10 songs'],
-    [1, 'ERA · 1 song'],
-    [0, 'ERA · 0 songs'],
-    // Before the engine has answered once there is nothing to count yet.
-    [null, 'ERA'],
-  ] as const)('with Era on and %s songs fitting, the header reads "%s"', (total, header) => {
+  it.each([1204, 10, 1, 0, null])('with Era on the header reads just "ERA", with no count in the panel, whatever the engine counted (%s)', (total) => {
     draw([rankedSong('a')], { ...signedIn({ off: [], eras: ['s90'] }), total });
-    expect(el('#era-label').textContent).toBe(header);
-    expect(screen.getByRole('group', { name: header })).toBe(el(SEL.eraPanel));
-    // The browser tests' hook for the count is the span after "ERA", and there is none while there is nothing to say.
-    const count = el(SEL.eraPanel).querySelector('[data-count]');
-    expect(count?.textContent ?? '').toBe(header.slice('ERA'.length).trim());
-    expect(el(SEL.eraPanel).querySelectorAll('[data-count]')).toHaveLength(total === null ? 0 : 1);
+    expect(el('#era-label').textContent).toBe('ERA');
+    expect(el('#era-label').children).toHaveLength(0);
+    expect(screen.getByRole('group', { name: 'ERA' })).toBe(el(SEL.eraPanel));
+    expect(el(SEL.eraPanel).textContent).not.toContain('song');
   });
 
-  it('with Era off the header says so, whatever the count, and the count is a span of its own for the CSS to set apart', () => {
+  it('with Era off the header says so, in a span of its own for the CSS to set apart, and carries no count either', () => {
     draw([rankedSong('a')], { ...signedIn({ off: ['era'] }), total: 1204 });
     expect(el('#era-label').textContent).toBe('ERA · OFF · all eras');
-    const count = el('#era-label > span');
-    expect(count.textContent).toBe('· OFF · all eras');
-    expect(count.hasAttribute('data-count')).toBe(true);
+    const note = el('#era-label > span');
+    expect(note.textContent).toBe('· OFF · all eras');
+    expect(note.hasAttribute('data-off-note')).toBe(true);
     // It is part of the group's name, so a screen reader says what Era is doing.
-    expect(count.hasAttribute('aria-hidden')).toBe(false);
+    expect(note.hasAttribute('aria-hidden')).toBe(false);
+    expect(el(SEL.eraPanel).textContent).not.toContain('song');
   });
 
   it('hands its stylesheet the pink, for its header (§8); its border is the rail\'s grey in every state, so it gets no colour for one (R5)', () => {
@@ -1078,10 +1070,37 @@ describe('the Era panel', () => {
     expect(hidden(SEL.reset('era'))).toBe(false);
   });
 
-  it('Era on with nothing picked is not Era off: nothing pressed or parked, and the reset stays', () => {
+  it('Era on with nothing picked, a state only the test hook or an old state reaches (R23), is not Era off: nothing pressed or parked, and the reset stays', () => {
     draw([], signedIn({ off: [], eras: [] }));
     expect(pressed()).toEqual([]);
     expect(parked()).toEqual([]);
+    expect(el(SEL.eraPanel).hasAttribute('data-off')).toBe(false);
+    expect(hidden(SEL.reset('era'))).toBe(false);
+  });
+
+  it('R23: tapping the one picked era turns Era off, so the panel is the Era-off one: nothing pressed or outlined, "OFF · all eras", no ✕', () => {
+    const onTuner = vi.fn<(action: TunerAction) => void>();
+    render(<Tuned initial={tunerOf({ off: [], eras: ['s80'] })} onTuner={onTuner} />);
+    const lights = () => all(`${SEL.tab('era')} [data-jukebox="button"]`).map((button) => button.getAttribute('fill'));
+    expect(pressed()).toEqual(['s80']);
+    expect(hidden(SEL.reset('era'))).toBe(false);
+    expect(lights()).toEqual(['#FFC24A', '#34313D', '#34313D']); // the '80s is before the '90s: the left button, lit amber
+    fireEvent.click(el(SEL.era('s80')));
+    expect(calls(onTuner)).toEqual([{ type: 'era', era: 's80' }]);
+    expect(pressed()).toEqual([]);
+    expect(parked()).toEqual([]);
+    expect(el(SEL.eraPanel).hasAttribute('data-off')).toBe(true);
+    expect(el('#era-label').textContent).toBe('ERA · OFF · all eras');
+    expect(hidden(SEL.reset('era'))).toBe(true);
+    // The Era tab goes unlit with it, and the jukebox's three buttons (R24) are the unlit grey.
+    expect(el(SEL.tab('era')).hasAttribute('data-off')).toBe(true);
+    expect(lights()).toEqual(['#34313D', '#34313D', '#34313D']);
+  });
+
+  it('R23: with two eras picked, tapping one leaves Era on with the other', () => {
+    render(<Tuned initial={tunerOf({ off: [], eras: ['s80', 's90'] })} />);
+    fireEvent.click(el(SEL.era('s80')));
+    expect(pressed()).toEqual(['s90']);
     expect(el(SEL.eraPanel).hasAttribute('data-off')).toBe(false);
     expect(hidden(SEL.reset('era'))).toBe(false);
   });
@@ -1308,7 +1327,8 @@ describe('when the engine sent no songs', () => {
   const notes = () => [PICK, NONE_IN_ERA, NONE_CATALOGUE, NONE_LIBRARY].filter((text) => screen.queryByText(text) !== null);
 
   it.each(['catalogue', 'library'] as const)('asks for an era when the engine says none is picked, in %s mode', (mode) => {
-    // Era on with nothing picked: the tuner and the engine agree, and the engine's word is what the screen reads.
+    // Era on with nothing picked, which only the test hook or an old state reaches now (R23: unpicking the last era turns Era off): the
+    // tuner and the engine agree, and the engine's word is what the screen reads.
     draw([], { mode, empty: 'no-era-picked', tuner: tunerOf({ off: [], eras: [] }) });
     const empty = el(SEL.empty);
     expect(empty.textContent).toBe(PICK);

@@ -45,12 +45,14 @@
 }
 
 /* The slot (R3): a 44 px target at the start of the row, beside the row's own button, never inside it. It holds the row's
-   rank number and its ▶ in the same place, one at a time, and draws no ring or circle in any state, only the glyph. QWW-48's
-   play button is styled with the app's colours (--ink, --faint, --pink); the slot hands it the tuner's, so its glyph is
-   --pink-text and it glows like the badge while it plays. */
+   rank number and its ▶ in the same place, one at a time, and wherever the ▶ shows a thin circle surrounds it (R17: always on a
+   touch screen, and with the ▶ on hover or focus on a pointer device); while it plays the ⏸ sits in a ring that fills over the
+   preview. QWW-48's play button is styled with the app's colours (--ink, --faint, --pink); the slot hands it the tuner's, so
+   its glyph and its ring's fill are --pink-text, its circle is the badge's pink line a little dimmer (so the fill reads over it),
+   and it glows like the badge while it plays. */
 .playSlot {
   --ink: var(--sl-pink-text);
-  --faint: var(--sl-pink-line);
+  --faint: rgba(240, 80, 154, 0.55);
   --pink: var(--sl-pink-text);
   --pink-glow: rgba(240, 80, 154, 0.35);
   flex-shrink: 0;
@@ -78,9 +80,9 @@
 }
 
 /* The ▶ is whatever button the slot holds: the placeholder's, or QWW-48's, which brings its own sizes and a margin-left of
-   -4px, so the slot sets them again. The radius is not a circle: it shapes only the keyboard focus outline, which is drawn
-   inside the 44 px so the list's scroller does not cut it off at the row's edge. Nothing else here has a border or a
-   background (R3: no ring in any state). */
+   -4px, so the slot sets them again. The button is round, so the keyboard focus outline, which is drawn inside the 44 px so the
+   list's scroller does not cut it off at the row's edge, goes round the circle QWW-48's button draws (its first svg: a track
+   circle and the fill that runs over it, R17) and not round a square. The button itself has no border or background. */
 .playSlot button {
   position: relative;
   width: 44px;
@@ -90,7 +92,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 10px;
+  border-radius: 50%;
   background: none;
   color: var(--sl-pink-text);
   cursor: pointer;
@@ -100,24 +102,19 @@
   outline-offset: -2px;
 }
 
-/* Not playable (the placeholder until QWW-48 is wired in, and later a song with no preview): the glyph in a faded pink. */
+/* Not playable (the placeholder until QWW-48 is wired in, and later a song with no preview): the circle and the glyph both in a
+   faded pink (the whole button is faded, R17). */
 .playSlot button:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-/* QWW-48's button is a ring (its first svg: two circles) round a glyph (its second). There is no ring in the slot, so it goes
-   and QWW-48 needs no change when it is wired in. */
-.playSlot [data-preview] > svg:first-child {
-  display: none;
 }
 
 .playSlot [data-preview='playing'] {
   filter: drop-shadow(0 0 5px rgba(240, 80, 154, 0.55));
 }
 
-/* A pointer device: the number shows at rest and the ▶ does not (its glyph is hidden, not the button, so the button keeps its
-   44 px target and its place in the Tab order). Hovering the row, or keyboard focus on the ▶, swaps them. Hover is only
+/* A pointer device: the number shows at rest and the ▶ does not (its circle and glyph are hidden, not the button, so the button keeps
+   its 44 px target and its place in the Tab order). Hovering the row, or keyboard focus on the ▶, swaps them. Hover is only
    ever for pointer devices, so nothing sticks after a tap on a phone. */
 @media (hover: hover) {
   .rankNumber {
@@ -139,28 +136,14 @@
   }
 }
 
-/* A preview that is loading, playing or paused (QWW-48 marks its button with data-preview) keeps its glyph in the number's place
-   without hover, on any device, so the row that is sounding shows. */
+/* A preview that is loading, playing or paused (QWW-48 marks its button with data-preview) keeps its circle and glyph in the number's
+   place without hover, on any device, so the row that is sounding shows. */
 .playSlot:has([data-preview='loading'], [data-preview='playing'], [data-preview='paused']) .rankNumber {
   display: none;
 }
 
 .playSlot:has([data-preview='loading'], [data-preview='playing'], [data-preview='paused']) button svg {
   visibility: visible;
-}
-
-/* Deezer's credit (QWW-48): the line under the list, over the credits link, in the tuner's quiet text colour. The element is also
-   given the app's .deezerCredit, which sets a negative margin for the earlier screens and the app's own colours, so this names the
-   element too, to be the more specific. */
-p.deezer {
-  width: auto;
-  max-width: none;
-  margin: 0;
-  padding: 10px 0 0;
-  font-size: 12px;
-  line-height: 16px;
-  color: var(--sl-text-3);
-  --ink: var(--sl-text-2);
 }
 
 .rowOpen {
@@ -193,6 +176,8 @@ p.deezer {
   position: relative;
   display: block;
   min-width: 0;
+  /* The copies drawn over the title (R12's white fill, R16's pink sweep) are layered among themselves, inside the box. */
+  isolation: isolate;
 }
 
 .rowTitle,
@@ -276,6 +261,41 @@ p.deezer {
   }
 }
 
+/* The playing row's title (R16): while a preview plays, a pink copy of the title is revealed over it, left to right, as far as the
+   preview has played: the neon sweep of 6A's lyric wipe (--sl-pink-text with its glow) over the preview's length. SongRow puts that
+   share, 0 to 1, in --preview-progress on the row (usePreviewProgress, once a frame); this only draws it, so the sweep follows the
+   sound and holds where a paused preview stopped. The copy is the ::before of the title's box (the R12 fill is its ::after), made
+   from data-fill-text, so the title is still on the page once. It exists only on the row the player is on (the slot's condition above):
+   when the preview ends or another row plays that row is not it any more, the copy is gone, and the sweep starts over. It is not a
+   transition or an animation, so a re-rank that moves the row's node cannot restart it. With reduced motion there is no sweep: the
+   title is pink, whole, while its row sounds (6A's own rule for its wipe). */
+.row:has([data-preview='loading'], [data-preview='playing'], [data-preview='paused']) .rowTitleBox[data-fill-text]::before {
+  content: attr(data-fill-text);
+  content: attr(data-fill-text) / '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  max-width: 100%;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--sl-pink-text);
+  text-shadow: 0 0 8px rgba(255, 79, 160, 0.7);
+  clip-path: inset(0 calc((1 - var(--preview-progress, 0)) * 100%) 0 0);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row:has([data-preview='loading'], [data-preview='playing'], [data-preview='paused']) .rowTitleBox[data-fill-text]::before {
+    clip-path: none;
+  }
+}
+
 /* The difficulty badge: the song's own label, in one pink neon style for all three. */
 .badge {
   flex-shrink: 0;
@@ -320,48 +340,4 @@ p.deezer {
   font-weight: 500;
   color: var(--sl-text-2);
   cursor: pointer;
-}
-
-.connectNote {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 14px 0 0;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--sl-text-3);
-}
-
-.connectNote p {
-  margin: 0;
-}
-
-.connectLink {
-  border: 0;
-  background: none;
-  padding: 8px;
-  font: inherit;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--sl-pink-text);
-  text-decoration: underline;
-  text-underline-offset: 4px;
-  cursor: pointer;
-}
-
-/* The book icon's link (QWW-57): a 44 px square at the list's right end, with the icon flush right and 6 px under what comes before
-   it, where it always was. It used to be a band as wide as the list, so a tap anywhere along it opened the credits. The square starts
-   where the old 6 px of padding did and reaches 20 px under the icon, into the spacer under the list; the margin takes those 20 px back,
-   so the list ends where it did. The square still stops above the handle's touch area, and nothing else is under it. */
-.credits {
-  display: flex;
-  justify-content: flex-end;
-  align-items: flex-start;
-  width: 44px;
-  height: 44px;
-  margin: 0 0 -20px auto;
-  padding: 6px 0 0;
-  color: var(--sl-text-3);
-  opacity: 0.6;
 }

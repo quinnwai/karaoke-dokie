@@ -211,7 +211,7 @@ describe('the sign in the header', () => {
 
   it('marks the neighbours it keeps clear of: redo on the left, the Spotify button on the right', () => {
     draw();
-    expect(el('[data-sign-left]').getAttribute('aria-label')).toBe('Redo the singing test');
+    expect(el('[data-sign-left]').getAttribute('aria-label')).toBe('Redo the range test');
     expect(el('[data-sign-right]').getAttribute('aria-label')).toBe('Connect to Spotify');
   });
 

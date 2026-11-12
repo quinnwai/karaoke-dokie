@@ -16,15 +16,14 @@ const ask = (): MediaQueryList | null => (typeof window !== 'undefined' && typeo
 /** True while the message is up. False where there is nobody to ask: the server, and a test with no media queries. */
 export const isSideways = (): boolean => ask()?.matches ?? false;
 
+// Module-level, so React keeps one subscription for the life of the component instead of a new one on every render.
+function subscribe(onChange: () => void): () => void {
+  const query = ask();
+  query?.addEventListener('change', onChange);
+  return () => query?.removeEventListener('change', onChange);
+}
+
 /** `isSideways`, kept up to date: the component draws again when the phone is turned. */
 export function useSideways(): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      const query = ask();
-      query?.addEventListener('change', onChange);
-      return () => query?.removeEventListener('change', onChange);
-    },
-    isSideways,
-    () => false,
-  );
+  return useSyncExternalStore(subscribe, isSideways, () => false);
 }

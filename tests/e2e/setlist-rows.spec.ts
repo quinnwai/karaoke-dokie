@@ -1,8 +1,9 @@
 // Review items R3, R12 and R13 of QWW-57 (Quinn-Wai's review of the 6A preview, 11 Nov), the song list's rows, one check each as
 // the ticket asks:
 //   R3   the rank number is back in the row's slot; hovering the row, or focusing its ▶ with the keyboard, swaps it for the ▶
-//        glyph alone (no ring or circle in any state); a ▶ that cannot play is the faded pink; a loading, playing or paused
-//        preview keeps its glyph without hover; on a touch screen, which cannot hover, the ▶ stands in the number's place
+//        (R17 put the thin circle round it again, wherever the ▶ shows: tests/e2e/setlist-play.spec.ts has the circle and the ring in
+//        full, here it is read as part of each state); a ▶ that cannot play is the faded pink, circle and glyph; a loading, playing or
+//        paused preview keeps its ▶ without hover; on a touch screen, which cannot hover, the ▶ stands in the number's place
 //        (the last describes below run it again with QWW-48's real button: a song with a Deezer preview, and one without)
 //   R12  each title fills in once, left to right, when its row scrolls into view, and ends in its normal white; not again on
 //        scrolling back or on a re-rank; with reduced motion the titles simply show; each title's text is in the page once
@@ -11,7 +12,7 @@
 // The tuner is reached the way tests/e2e/setlist.spec.ts reaches it (tests/helpers/tunerE2e.ts). The slot holds QWW-48's real play
 // button (src/components/PreviewButton.tsx, from #28); the fixture songs have no Deezer id, so it is the disabled one. Where a test
 // needs a button in a state the real player reaches only with audio (loading, playing, paused), or one that can play, it mounts a
-// button of the same shape by hand (mountPreview). tests/e2e/preview.spec.ts has the real player, with audio, in these rows.
+// copy of the real button (mountPreview) and sets its state. tests/e2e/preview.spec.ts has the real player, with audio, in these rows.
 //
 // "Hover" is for pointer devices only (@media (hover: hover)): the pointer describes below turn touch off, and the rest of the file
 // is the touch phone every tuner spec starts from.
@@ -20,7 +21,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { launchWithMic, writeTone } from './fakeMic';
-import { centre, css, DEFAULT_RANKING, eraButton, mockApi, open, openButton, pressKey, resetButton, rgb, rows, TEXT_3, titles, tuner } from '../helpers/tunerE2e';
+import { centre, css, DEFAULT_RANKING, eraButton, mockApi, open, openButton, pressKey, resetButton, rgb, rows, TEXT_3, titles } from '../helpers/tunerE2e';
 import type { MockSong } from '../fixtures/setlist';
 
 const SCREENS = path.resolve('test-results/screens');
@@ -42,6 +43,8 @@ const numberOf = (row: Locator) => row.locator('[data-rank-number]');
 const glyphOf = (row: Locator) => row.locator('[data-play-slot] button svg').last();
 /** The ▶ that is live: the last button in the slot (a hand-mounted one comes after the real button it hides). */
 const playOf = (row: Locator) => row.locator('[data-play-slot] button').last();
+/** The live ▶'s ring: its first svg (a track circle, and the fill that runs over it), before the glyph. */
+const ringOf = (row: Locator) => playOf(row).locator('svg').first();
 /** The title's box, which carries the fill (data-fill-text, data-filled). */
 const boxOf = (row: Locator) => row.locator('[data-fill-text]');
 const titleOf = (row: Locator) => row.locator('[data-row-title]');
@@ -53,51 +56,51 @@ const away = (page: Page) => page.mouse.move(2, 400); // off every row (and off 
 type Preview = 'idle' | 'loading' | 'playing' | 'paused' | 'unavailable';
 
 /**
- * Puts into a row's slot a button of the shape QWW-48's play button has (src/components/PreviewButton.tsx): `data-preview`, a ring of
- * two circles as its first svg, then the glyph (a pause while it sounds), in a state the real player reaches only with audio. The
- * real button it replaces is put away.
+ * Puts into a row's slot a copy of QWW-48's play button (src/components/PreviewButton.tsx, the real one the row holds: its classes, its ring
+ * of two circles as the first svg, then the glyph) in a state the real player reaches only with audio, or one that can play. The real
+ * button it copies is put away. The copy is of the real markup, so the slot's CSS draws it as it draws the real one (a glyph that is a
+ * pause while it sounds is the one thing it does not follow: it keeps the ▶).
  */
 async function mountPreview(row: Locator, state: Preview = 'idle') {
   await row.evaluate((li, st) => {
     const slot = li.querySelector('[data-play-slot]')!;
+    const real = slot.querySelector('button')!;
+    const button = real.cloneNode(true) as HTMLButtonElement;
     for (const old of slot.querySelectorAll('button')) {
       old.hidden = true;
       old.style.display = 'none';
     }
-    const button = document.createElement('button');
-    button.type = 'button';
+    button.hidden = false;
+    button.style.display = '';
     button.disabled = st === 'unavailable';
     button.setAttribute('data-preview', st);
     button.setAttribute('aria-label', st === 'unavailable' ? 'No preview' : `Play ${li.querySelector('[data-row-title]')?.textContent ?? ''}`);
-    const sounding = st === 'loading' || st === 'playing';
-    const glyph = sounding ? '<path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"></path>' : '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"></path>';
-    button.innerHTML =
-      '<svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle cx="18" cy="18" r="16.5" fill="none" stroke="currentColor"></circle><circle cx="18" cy="18" r="16.5" fill="none" stroke="currentColor"></circle></svg>' +
-      `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">${glyph}</svg>`;
+    if (st === 'unavailable') button.title = 'No preview';
+    else button.removeAttribute('title');
     slot.appendChild(button);
   }, state);
 }
 
 /**
- * What in a row's slot draws a ring: a visible circle or ellipse, or a visible border, shadow, background or outline on any of its
- * elements. Empty when there is none. (A glow on the playing glyph is a `filter`, which is not any of these.)
+ * The circles a row's slot draws (R17), each as how strongly it is drawn (its own opacity times every ancestor's, so a faded button
+ * fades them): the track circle, and the fill that runs over it once a preview loads, plays or is paused (it is there at opacity 0 before).
+ * Empty when none is drawn, as at rest on a pointer device, where the number shows instead.
  */
-function ringsIn(row: Locator): Promise<string[]> {
+function circlesIn(row: Locator): Promise<number[]> {
   return slotOf(row).evaluate((slot) => {
-    const found: string[] = [];
-    for (const n of [slot, ...Array.from(slot.querySelectorAll('*'))]) {
-      const s = getComputedStyle(n);
-      const box = n.getBoundingClientRect();
-      if (box.width === 0 || box.height === 0 || s.visibility === 'hidden' || s.display === 'none') continue;
-      const tag = n.tagName.toLowerCase();
-      if (tag === 'circle' || tag === 'ellipse') found.push(tag);
-      if (['top', 'right', 'bottom', 'left'].some((side) => s.getPropertyValue(`border-${side}-style`) !== 'none' && Number.parseFloat(s.getPropertyValue(`border-${side}-width`)) > 0)) found.push(`${tag} border`);
-      if (s.boxShadow !== 'none') found.push(`${tag} box-shadow`);
-      if (s.outlineStyle !== 'none' && Number.parseFloat(s.outlineWidth) > 0) found.push(`${tag} outline`);
-      if (s.backgroundImage !== 'none') found.push(`${tag} background-image`);
-      if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent') found.push(`${tag} background`);
+    const drawn: number[] = [];
+    for (const c of Array.from(slot.querySelectorAll('circle'))) {
+      const box = c.getBoundingClientRect();
+      let opacity = 1;
+      let hidden = false;
+      for (let n: Element | null = c; n && n !== slot.parentElement; n = n.parentElement) {
+        const s = getComputedStyle(n);
+        if (s.visibility === 'hidden' || s.display === 'none') hidden = true;
+        opacity *= Number(s.opacity);
+      }
+      if (!hidden && box.width > 0 && box.height > 0 && opacity > 0) drawn.push(Math.round(opacity * 100) / 100);
     }
-    return found;
+    return drawn;
   });
 }
 
@@ -191,27 +194,27 @@ test.describe('R3, with a pointer', () => {
     expect(await measure()).toEqual(rest);
   });
 
-  test('R3. the slot draws no ring or circle in any state: at rest, hovered, or with a button of QWW-48\'s shape in it', async ({ page }) => {
+  test('R3, R17. the slot draws the thin circle where the ▶ shows and nowhere else: none at rest (the number shows), the circle with the ▶ on hover, faded with a ▶ that cannot play', async ({ page }) => {
     await open(page);
-    // A song with no Deezer id has QWW-48's real button, disabled. It draws a ring (two circles in its first svg), which the slot
-    // does not draw, so the glyph is the only thing on screen.
+    // A song with no Deezer id has QWW-48's real button, disabled. It draws a ring (two circles in its first svg) with its glyph: at rest
+    // on a pointer device neither is drawn, and hovered both are, faded with the button.
     const noPreview = rows(page).nth(0);
-    expect(await ringsIn(noPreview)).toEqual([]);
+    await away(page);
+    expect(await circlesIn(noPreview)).toEqual([]);
     await noPreview.hover();
     await expect(glyphOf(noPreview)).toBeVisible();
-    expect(await ringsIn(noPreview)).toEqual([]);
-    expect(await css(slotOf(noPreview).locator('[data-preview] > svg').first(), 'display')).toBe('none');
-    expect(await slotOf(noPreview).locator('circle:visible, ellipse:visible').count()).toBe(0);
-    expect(await slotOf(noPreview).locator('svg:visible').count()).toBe(1);
+    await expect(ringOf(noPreview)).toBeVisible();
+    expect(await circlesIn(noPreview)).toEqual([0.4]); // the track circle, faded; the fill has nothing to show until a preview loads
+    expect(await slotOf(noPreview).locator('svg:visible').count()).toBe(2); // the ring and the glyph
 
     const mounted = rows(page).nth(2);
     await mountPreview(mounted, 'idle');
-    await expect(slotOf(mounted).locator('[data-preview] > svg').first()).toBeHidden(); // QWW-48's ring: hidden, so QWW-48 needs no change
-    expect(await css(slotOf(mounted).locator('[data-preview] > svg').first(), 'display')).toBe('none');
-    expect(await ringsIn(mounted)).toEqual([]);
+    await expect(ringOf(mounted)).toBeHidden(); // at rest the ring goes with the glyph
+    expect(await circlesIn(mounted)).toEqual([]);
     await mounted.hover();
     await expect(glyphOf(mounted)).toBeVisible();
-    expect(await ringsIn(mounted)).toEqual([]);
+    await expect(ringOf(mounted)).toBeVisible();
+    expect(await circlesIn(mounted)).toEqual([1]); // one that can play: the circle in full
     // Its glyph is the pink one and its button keeps the 44 px target, flush with the slot.
     expect(await css(playOf(mounted), 'color')).toBe(PINK_TEXT);
     const slot = (await slotOf(mounted).boundingBox())!;
@@ -232,20 +235,21 @@ test.describe('R3, with a pointer', () => {
       await away(page);
       await expect(numberOf(row)).toBeHidden();
       await expect(glyphOf(row)).toBeVisible();
-      // QWW-48's progress ring (its first svg, two circles) is not drawn: no circle in any state.
-      await expect(slotOf(row).locator('[data-preview] > svg').first()).toBeHidden();
-      expect(await ringsIn(row)).toEqual([]);
-      // The others still show their numbers, and the playing glyph glows (a drop-shadow on the glyph, not a ring).
+      // QWW-48's ring (its first svg: the track circle, and the fill that runs over it) is drawn with the glyph (R17), in full.
+      await expect(ringOf(row)).toBeVisible();
+      expect(await circlesIn(row)).toEqual([1, 1]);
+      // The others still show their numbers, and the playing button glows (a drop-shadow, which is not a ring of its own).
       await expect(numberOf(rows(page).first())).toBeVisible();
       if (state === 'playing') expect(await css(playOf(row), 'filter')).toContain('drop-shadow');
-      // And it goes back to the number when it stops.
+      // And it goes back to the number when it stops, and the circle with it.
       await playOf(row).evaluate((b) => b.setAttribute('data-preview', 'idle'));
       await expect(numberOf(row)).toBeVisible();
       await expect(glyphOf(row)).toBeHidden();
+      expect(await circlesIn(row)).toEqual([]);
     });
   }
 
-  test('R3. Tab to the ▶ shows it in the number\'s place, with a square outline and no circle, and Tab on to the row hides it again', async ({ page }) => {
+  test('R3, R17. Tab to the ▶ shows it in the number\'s place with its circle, and a round outline round it, and Tab on to the row hides them again', async ({ page }) => {
     await open(page);
     const row = rows(page).nth(1);
     await mountPreview(row, 'idle'); // a song with no preview has a disabled button, which is not in the Tab order: a button that can play is
@@ -254,16 +258,17 @@ test.describe('R3, with a pointer', () => {
     await expect(playOf(row)).toBeFocused();
     await expect(numberOf(row)).toBeHidden();
     await expect(glyphOf(row)).toBeVisible();
-    // The focus outline is a rounded square drawn inside the 44 px (a circle on this box would have a 22 px radius), so it is
-    // not the ring R3 took away, and the list's scroller does not cut it off at the row's edge.
-    expect(Number.parseFloat(await css(playOf(row), 'border-top-left-radius'))).toBeLessThan(22);
+    expect(await circlesIn(row)).toEqual([1]);
+    // The focus outline is round, as the button is, round the circle (a square box has a radius of 10 px, a circle on this one 22 px or 50%); it is
+    // drawn inside the 44 px, so the list's scroller does not cut it off at the row's edge.
+    expect(await css(playOf(row), 'border-top-left-radius')).toBe('50%');
     expect(await css(playOf(row), 'outline-style')).toBe('solid');
     expect(await css(playOf(row), 'outline-offset')).toBe('-2px');
-    expect((await ringsIn(row)).filter((found) => !found.endsWith('outline'))).toEqual([]);
     await page.keyboard.press('Tab');
     await expect(openButton(row)).toBeFocused();
     await expect(numberOf(row)).toBeVisible();
     await expect(glyphOf(row)).toBeHidden();
+    expect(await circlesIn(row)).toEqual([]);
   });
 
   test('R3. a ▶ that cannot play is the faded pink, disabled, with the same swap on hover; one that can play is not faded', async ({ page }) => {
@@ -311,7 +316,7 @@ test.describe('R3, with a pointer', () => {
 });
 
 test.describe('R3, on a touch screen', () => {
-  test('R3. there is no hover, so the ▶ glyph stands in the number\'s place without it, faded while it cannot play, and the number is not drawn', async ({ page }) => {
+  test('R3, R17. there is no hover, so the ▶ stands in the number\'s place without it, in its circle, both faded while it cannot play, and the number is not drawn', async ({ page }) => {
     await open(page);
     expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
     expect(await page.evaluate(() => matchMedia('(hover: hover)').matches)).toBe(false);
@@ -322,20 +327,20 @@ test.describe('R3, on a touch screen', () => {
       await expect(playOf(row)).toBeDisabled();
       expect(Number(await css(playOf(row), 'opacity'))).toBeCloseTo(0.4, 1);
       expect(await css(playOf(row), 'color')).toBe(PINK_TEXT);
-      expect(await ringsIn(row)).toEqual([]);
+      expect(await circlesIn(row)).toEqual([0.4]);
     }
     // The number is still in the row, for data-rank's sake and a pointer device.
     expect(await page.locator('[data-rank-number]').first().textContent()).toBe('1');
   });
 
-  test('R3. a ▶ that can play shows in the full pink without hover, draws no ring, and a tap on it opens nothing and leaves nothing stuck', async ({ page }) => {
+  test('R3, R17. a ▶ that can play shows in the full pink without hover, in its circle, and a tap on it opens nothing and leaves nothing stuck', async ({ page }) => {
     await open(page);
     const row = rows(page).nth(1);
     await mountPreview(row, 'idle');
     await expect(glyphOf(row)).toBeVisible();
     await expect(numberOf(row)).toBeHidden();
-    await expect(slotOf(row).locator('[data-preview] > svg').first()).toBeHidden(); // QWW-48's ring
-    expect(await ringsIn(row)).toEqual([]);
+    await expect(ringOf(row)).toBeVisible(); // QWW-48's ring
+    expect(await circlesIn(row)).toEqual([1]);
     expect(await css(playOf(row), 'opacity')).toBe('1');
     await playOf(row).tap();
     await expectNoSongPage(page);
@@ -545,7 +550,7 @@ test.describe('R12, with motion allowed', () => {
     for (const [id, n] of before) expect(after.get(id), `after the era change: ${id}`).toBe(n);
   });
 
-  test('R12. a list that empties and fills again (an era picked, untapped and picked again) does not play any fill again: a visit lasts until the range changes', async ({ page }) => {
+  test('R12. a list that empties and fills again (an era picked, the picks emptied and an era picked again) does not play any fill again: a visit lasts until the range changes', async ({ page }) => {
     await watchFills(page);
     await open(page);
     await expect.poll(async () => (await fills(page)).length).toBeGreaterThanOrEqual(2);
@@ -557,8 +562,9 @@ test.describe('R12, with motion allowed', () => {
     const before = [...(await fillCounts(page)).entries()].sort();
     expect(before.length).toBeGreaterThanOrEqual(4);
 
-    // Untapped, Era is on with nothing picked, so the list is empty and the rows go. Picked again, they come back.
-    await eraButton(page, 's80').click();
+    // Era on with nothing picked leaves the list empty and the rows go. Unpicking the last era turns Era off now (R23), so the test hook
+    // empties the picks. Picked again, the rows come back.
+    await page.evaluate(() => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState({ eras: [] }));
     await expect(rows(page)).toHaveCount(0);
     await eraButton(page, 's80').click();
     await expect(rows(page)).toHaveCount(4);
@@ -778,7 +784,7 @@ const glyphPath = (row: Locator) => glyphOf(row).locator('path').getAttribute('d
 test.describe('R3 with the real play button, with a pointer', () => {
   test.use({ viewport: { width: 1280, height: 800 }, ...POINTER });
 
-  test('R3. a song with a preview shows its number at rest and the bare ▶ in the full --pink-text on hover; one without shows the ▶ faded and disabled; no ring either way', async ({ page }) => {
+  test('R3, R17. a song with a preview shows its number at rest and the ▶ in its circle, in the full --pink-text, on hover; one without shows the ▶ and its circle faded and disabled', async ({ page }) => {
     await open(page, { extra: WITH_AND_WITHOUT });
     const can = byTitle(page, 'Can Play');
     const none = byTitle(page, 'No Preview');
@@ -792,7 +798,9 @@ test.describe('R3 with the real play button, with a pointer', () => {
     await expect(playOf(none)).toBeDisabled();
     await expect(playOf(none)).toHaveAttribute('data-preview', 'unavailable');
 
-    // Hovered, the playable one swaps its number for the ▶ glyph, in the full pink.
+    for (const row of [can, none]) expect(await circlesIn(row)).toEqual([]);
+
+    // Hovered, the playable one swaps its number for the ▶ in its circle, in the full pink.
     await can.hover();
     await expect(numberOf(can)).toBeHidden();
     await expect(glyphOf(can)).toBeVisible();
@@ -800,21 +808,23 @@ test.describe('R3 with the real play button, with a pointer', () => {
     expect(await css(playOf(can), 'color')).toBe(PINK_TEXT);
     expect(await css(can.locator('[data-play-slot] path'), 'fill')).toBe(PINK_TEXT);
     expect(await css(playOf(can), 'opacity')).toBe('1');
-    // The one without a preview swaps the same way, in today's faded pink, and stays disabled.
+    expect(await circlesIn(can)).toEqual([1]);
+    // The one without a preview swaps the same way, in today's faded pink, circle and glyph, and stays disabled.
     await none.hover();
     await expect(numberOf(none)).toBeHidden();
     await expect(glyphOf(none)).toBeVisible();
     expect(Number(await css(playOf(none), 'opacity'))).toBeCloseTo(0.4, 1);
     expect(await css(playOf(none), 'color')).toBe(PINK_TEXT);
     await expect(playOf(none)).toBeDisabled();
+    expect(await circlesIn(none)).toEqual([0.4]);
+    expect(await circlesIn(can), 'the hovered row only: the other one has its number again').toEqual([]);
 
-    // No ring or circle, hovered or not: the button draws one (its first svg), and the slot does not.
-    for (const row of [can, none]) {
-      expect(await css(slotOf(row).locator('[data-preview] > svg').first(), 'display')).toBe('none');
-      expect(await ringsIn(row)).toEqual([]);
-    }
+    // Away, the numbers are back and no circle is drawn.
     await away(page);
-    for (const row of [can, none]) expect(await ringsIn(row)).toEqual([]);
+    for (const row of [can, none]) {
+      await expect(numberOf(row)).toBeVisible();
+      expect(await circlesIn(row)).toEqual([]);
+    }
   });
 
   test('R3. tapping the ▶ plays it: pause stands in the number\'s place while it loads and while it plays, with the pointer away; the song page does not open; the other row keeps its number', async ({ page }) => {
@@ -831,15 +841,16 @@ test.describe('R3 with the real play button, with a pointer', () => {
     await expect(numberOf(can)).toBeHidden();
     await expect(glyphOf(can)).toBeVisible();
     expect(await glyphPath(can)).toBe(PAUSE_PATH);
-    expect(await ringsIn(can)).toEqual([]);
-    // Playing: still pause, in the full pink, with no ring, and the row that cannot play still shows its number.
+    expect(await circlesIn(can)).toEqual([1, 1]); // in its ring: the track circle and the fill that runs over it (tests/e2e/setlist-play.spec.ts has it fill)
+    // Playing: still pause, in the full pink and in its ring, and the row that cannot play still shows its number.
     await expect(playOf(can)).toHaveAttribute('data-preview', 'playing');
     await expect(glyphOf(can)).toBeVisible();
     expect(await glyphPath(can)).toBe(PAUSE_PATH);
     expect(await css(playOf(can), 'color')).toBe(PINK_TEXT);
-    expect(await ringsIn(can)).toEqual([]);
+    expect(await circlesIn(can)).toEqual([1, 1]);
     await expect(numberOf(none)).toBeVisible();
     await expect(glyphOf(none)).toBeHidden();
+    expect(await circlesIn(none)).toEqual([]);
 
     // A tap pauses it: the ▶ glyph stays where the number was, so the row that sounds still shows.
     await playOf(can).click();
@@ -855,7 +866,7 @@ test.describe('R3 with the real play button, with a pointer', () => {
   });
 });
 
-test('R3. on a phone the ▶ always shows: the full pink when it can play, faded and disabled when it cannot; a tap plays it and shows pause; no ring; the song page does not open', async ({ page }) => {
+test('R3, R17. on a phone the ▶ always shows, in its circle: the full pink when it can play, faded and disabled when it cannot; a tap plays it and shows pause in its ring; the song page does not open', async ({ page }) => {
   await open(page, { extra: WITH_AND_WITHOUT });
   expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
   const can = byTitle(page, 'Can Play');
@@ -864,8 +875,9 @@ test('R3. on a phone the ▶ always shows: the full pink when it can play, faded
     await expect(numberOf(row)).toBeHidden();
     await expect(glyphOf(row)).toBeVisible();
     expect(await css(playOf(row), 'color')).toBe(PINK_TEXT);
-    expect(await ringsIn(row)).toEqual([]);
   }
+  expect(await circlesIn(can)).toEqual([1]);
+  expect(await circlesIn(none)).toEqual([0.4]);
   expect(await css(playOf(can), 'opacity')).toBe('1');
   await expect(playOf(can)).toBeEnabled();
   expect(Number(await css(playOf(none), 'opacity'))).toBeCloseTo(0.4, 1);
@@ -879,7 +891,7 @@ test('R3. on a phone the ▶ always shows: the full pink when it can play, faded
   await expect(playOf(can)).toHaveAttribute('data-preview', 'playing');
   expect(await glyphPath(can)).toBe(PAUSE_PATH);
   expect(await css(playOf(can), 'color')).toBe(PINK_TEXT);
-  expect(await ringsIn(can)).toEqual([]);
+  expect(await circlesIn(can)).toEqual([1, 1]);
   // A tap on the one that cannot play opens nothing either.
   const at = await centre(slotOf(none));
   await page.touchscreen.tap(at.x, at.y);
@@ -887,7 +899,8 @@ test('R3. on a phone the ▶ always shows: the full pink when it can play, faded
 });
 
 // ============================================================================================================
-// The second adversarial review of PR #38 (QWW-57): a screen reader reads each row's reason line, and the credits open in a new tab
+// The second adversarial review of PR #38 (QWW-57): a screen reader reads each row's reason line (the credits links that were tested here
+// are tests/e2e/credits.spec.ts now: R28 moved them into the TV)
 // ============================================================================================================
 
 test('a row button is described by its own reason line, also when the track ids have spaces, as catalogue ids do', async ({ page }) => {
@@ -906,29 +919,5 @@ test('a row button is described by its own reason line, also when the track ids 
     expect(why.length).toBeGreaterThan(0);
     // The browser's own accessible description: what a screen reader reads after the row's name.
     await expect(openButton(row)).toHaveAccessibleDescription(why);
-  }
-});
-
-test('the Deezer line and the book icon open /credits in a new tab, and the tuner is as it was', async ({ page, context }) => {
-  await open(page, { extra: WITH_AND_WITHOUT });
-  const before = await tuner(page);
-  const deezer = page.getByRole('link', { name: /^Previews from Deezer/ });
-  const book = page.getByRole('link', { name: 'Sources and credits', exact: true });
-  for (const [what, link] of [['the Deezer line', deezer], ['the book icon', book]] as const) {
-    await link.scrollIntoViewIfNeeded();
-    await expect(link, what).toHaveAttribute('href', '/credits');
-    await expect(link, what).toHaveAttribute('target', '_blank');
-    await expect(link, what).toHaveAttribute('rel', 'noopener noreferrer');
-    const opened = context.waitForEvent('page');
-    await link.tap();
-    const tab = await opened;
-    await tab.waitForLoadState();
-    expect(new URL(tab.url()).pathname, what).toBe('/credits');
-    await expect(tab.getByRole('heading', { name: 'Sources and credits' })).toBeVisible();
-    await tab.close();
-    // This tab never moved: the tuner, and its list, are as they were.
-    expect(new URL(page.url()).pathname, what).toBe('/');
-    expect(await tuner(page), what).toEqual(before);
-    await expect(rows(page).first()).toBeVisible();
   }
 });

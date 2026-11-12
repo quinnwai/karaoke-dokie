@@ -1,12 +1,11 @@
-import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react';
+import { createContext, useContext, useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 import { createPreviewPlayer, type PreviewPlayer, type PreviewSnapshot, type PreviewStatus } from '../lib/client/preview';
-import { DeezerIcon } from './Icon';
 import styles from './screen.module.css';
 
 // The ▶ in a song row (QWW-48): it plays the song's 30 s Deezer preview without leaving the list. Self-contained, so
 // any row can mount it with the song's track id and Deezer id; every button on the page shares one player
-// (lib/client/preview.ts). There is no visible player: the playing button shows ⏸ and a thin ring that fills as the
-// preview plays.
+// (lib/client/preview.ts). There is no visible player: the button is a thin circle round the ▶ (R17), and the playing button shows
+// ⏸ and a ring that fills as the preview plays. The song page mounts the same button, larger (R27).
 
 /** Who hears when a preview starts playing: the event log's row_play (QWW-51). The screen sets it while it is on the page. */
 let rowPlayListener: ((trackId: string, position: number | undefined) => void) | null = null;
@@ -56,6 +55,62 @@ export function usePreview(id: string, deezerId: number | undefined, position?: 
   };
 }
 
+/**
+ * Follows row `id`'s preview on `player` and tells `draw` how far it has come, 0 to 1: 0 while the player is not on this row (it
+ * never was, ended, failed, or another row plays), the place it holds while loading or paused, and a frame at a time while it
+ * plays. Returns what ends it. This is the one place that decides when a progress is drawn, for the ring in the ▶ (R17) and for a
+ * row's title sweep (R16). `draw` writes a style, never React state, so a tick redraws nothing else.
+ */
+function followPreview(player: PreviewPlayer, id: string, draw: (progress: number) => void): () => void {
+  let status: PreviewStatus | undefined;
+  let frame: number | undefined;
+  const stop = () => {
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    frame = undefined;
+  };
+  const sync = () => {
+    const s = player.snapshot();
+    const now: PreviewStatus = s.key === id ? s.status : 'idle';
+    if (now === status) return; // another row's change, or none of this row's
+    status = now;
+    stop();
+    draw(now === 'idle' ? 0 : player.progress());
+    if (now !== 'playing' || typeof requestAnimationFrame === 'undefined') return;
+    frame = requestAnimationFrame(function tick() {
+      draw(player.progress());
+      frame = requestAnimationFrame(tick);
+    });
+  };
+  sync();
+  const off = player.subscribe(sync);
+  return () => {
+    off();
+    stop();
+  };
+}
+
+/** The custom property a row's title sweep reads (rows.module.css): how much of the preview has played, 0 to 1. */
+const PROGRESS_VAR = '--preview-progress';
+
+/**
+ * Puts row `id`'s preview progress in `--preview-progress` on `target`, for CSS to draw (R16: the row's title sweeps in pink as its
+ * preview plays): the share played while it plays, and where it stopped while it is paused. The property is removed when the player
+ * is not on this row, so it resets when the preview ends or another row plays. It is a style on one element, once a frame, not React
+ * state, so the list is not redrawn by it.
+ */
+export function usePreviewProgress(id: string, target: RefObject<HTMLElement | null>): void {
+  const player = useContext(PreviewPlayerContext);
+  useEffect(() => {
+    const el = target.current;
+    if (!el) return;
+    const off = followPreview(player, id, (p) => (p > 0 ? el.style.setProperty(PROGRESS_VAR, String(p)) : el.style.removeProperty(PROGRESS_VAR)));
+    return () => {
+      off();
+      el.style.removeProperty(PROGRESS_VAR);
+    };
+  }, [player, id, target]);
+}
+
 /** The ring's radius and length, in the 36-unit box it is drawn in. */
 const RING_R = 16.5;
 const RING = 2 * Math.PI * RING_R;
@@ -69,39 +124,38 @@ interface PreviewButtonProps {
   artist: string;
   /** The row's 1-based place in the list on screen, for the event log's row_play (QWW-51). */
   position?: number;
+  /**
+   * The song page's ▶ (R27): about 64 px, with its words ("Play 30 s", "Pause", "No preview") under the circle. They are the button's
+   * name too, so what is seen is what is read; the song is the page's heading above it.
+   */
+  large?: boolean;
   className?: string;
 }
 
-export function PreviewButton({ id, deezerId, title, artist, position, className }: PreviewButtonProps) {
+export function PreviewButton({ id, deezerId, title, artist, position, large, className }: PreviewButtonProps) {
   const { state, toggle, player } = usePreview(id, deezerId, position);
   const ring = useRef<SVGCircleElement>(null);
 
-  // The ring follows the preview a frame at a time while it plays, and stays where it stopped when paused.
+  // The ring follows the preview a frame at a time while it plays, stays where it stopped when paused, and is empty otherwise.
   useEffect(() => {
     const el = ring.current;
     if (!el) return;
-    const draw = () => {
-      el.style.strokeDashoffset = String(RING * (1 - (state === 'idle' || state === 'unavailable' ? 0 : player.progress())));
-    };
-    draw();
-    if (state !== 'playing' || typeof requestAnimationFrame === 'undefined') return;
-    let frame = requestAnimationFrame(function tick() {
-      draw();
-      frame = requestAnimationFrame(tick);
+    return followPreview(player, id, (p) => {
+      el.style.strokeDashoffset = String(RING * (1 - p));
     });
-    return () => cancelAnimationFrame(frame);
-  }, [state, player]);
+  }, [player, id]);
 
   const song = `${title} by ${artist}`;
   const sounding = state === 'loading' || state === 'playing';
-  const label = state === 'unavailable' ? `No preview of ${song}` : sounding ? `Pause ${song}` : `Play ${song}`;
+  const words = state === 'unavailable' ? 'No preview' : sounding ? 'Pause' : 'Play 30 s';
+  const label = large ? words : state === 'unavailable' ? `No preview of ${song}` : sounding ? `Pause ${song}` : `Play ${song}`;
   return (
     <button
       type="button"
-      className={className ? `${styles.preview} ${className}` : styles.preview}
+      className={[styles.preview, large && styles.previewLarge, className].filter(Boolean).join(' ')}
       data-preview={state}
       aria-label={label}
-      title={state === 'unavailable' ? 'No preview' : undefined}
+      title={state === 'unavailable' && !large ? 'No preview' : undefined}
       disabled={state === 'unavailable'}
       onClick={(e) => {
         // Never the row's own tap as well: the row opens the song page.
@@ -116,26 +170,7 @@ export function PreviewButton({ id, deezerId, title, artist, position, className
       <svg className={styles.previewIcon} viewBox="0 0 24 24" width="18" height="18" aria-hidden focusable="false">
         {sounding ? <path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor" /> : <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />}
       </svg>
+      {large && <span className={styles.previewWords}>{words}</span>}
     </button>
-  );
-}
-
-/**
- * Deezer's API terms ask every app that uses it to show Deezer's logo where it can be seen, and to tell listeners the
- * previews are for private use. One quiet line over the list says where they come from and links to the credits
- * page, which says the rest. The page opens in a new tab: the tuner holds the singer's range and settings, which leaving
- * would cost them (QWW-57).
- */
-export function DeezerCredit({ className }: { className?: string }) {
-  return (
-    <p className={className ? `${styles.deezerCredit} ${className}` : styles.deezerCredit}>
-      <a href="/credits" target="_blank" rel="noopener noreferrer" aria-label="Previews from Deezer, for private listening. Sources and credits">
-        Previews from
-        <span className={styles.deezerMark}>
-          <DeezerIcon />
-          Deezer
-        </span>
-      </a>
-    </p>
   );
 }

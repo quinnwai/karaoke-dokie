@@ -484,15 +484,21 @@ export function GearArt({ gear, variant, value, off, className }: GearArtProps) 
 // Era
 
 interface EraTabArtProps {
-  /** The picked eras: how many are picked decides which jukebox lights are on. */
+  /** The picked eras: which they are decides which jukebox buttons are lit (jukeboxLit). */
   eras: readonly EraId[];
   off: boolean;
   className?: string;
 }
 
-/** The Era tab's art: a jukebox (§9) with a light for the first era picked and one for the second, pink while Era is on. */
+/**
+ * The jukebox's three buttons, left to right: before the '90s, the '90s, after them (QWW-57, R24). The reference draws two, at x
+ * 10.5 and 17.5; the three here are 6 apart and centred on the body, so the outer ones reach the window's edges (6.2 and 21.8).
+ */
+const JUKEBOX_BUTTON_X = ['8', '14', '20'] as const;
+
+/** The Era tab's art: a jukebox (§9) with three buttons, lit amber by the picked eras; the body is pink while Era is on, and all of it unlit while it is off. */
 export function EraTabArt({ eras, off, className }: EraTabArtProps) {
-  const jukebox = jukeboxArt(eras.length, off);
+  const jukebox = jukeboxArt(eras, off);
   return (
     <svg
       {...TAB}
@@ -506,8 +512,9 @@ export function EraTabArt({ eras, off, className }: EraTabArtProps) {
       <path data-jukebox="body" d="M3 21 V10.8 A11 8.3 0 0 1 25 10.8 V21 Z" />
       <path d="M6.2 14.6 V10.8 A7.8 5.75 0 0 1 21.8 10.8 V14.6 Z" strokeWidth="1.1" />
       <path d="M10.1 7 V14.6 M14 5.1 V14.6 M17.9 7 V14.6" strokeWidth="0.8" />
-      <circle data-jukebox="button" data-i="0" cx="10.5" cy="17.8" r="1.7" stroke="none" fill={jukebox.lights[0]} />
-      <circle data-jukebox="button" data-i="1" cx="17.5" cy="17.8" r="1.7" stroke="none" fill={jukebox.lights[1]} />
+      {JUKEBOX_BUTTON_X.map((cx, i) => (
+        <circle key={cx} data-jukebox="button" data-i={i} cx={cx} cy="17.8" r="1.7" stroke="none" fill={jukebox.lights[i]} />
+      ))}
     </svg>
   );
 }

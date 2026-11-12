@@ -255,7 +255,10 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await shot(page, '07-catalogue-results');
 
   // ---- Connect Spotify (mocked redirect back to /?signedIn=1): the range carries over ----
-  await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
+  // The first tap on a phone shows the button's tooltip (R30); the second connects.
+  const connect = page.getByRole('button', { name: 'Connect to Spotify' });
+  await connect.click();
+  await connect.click();
   await expect(page.locator('#slider-history')).toBeEnabled();
   expect(api.savedRanges).toEqual([{ low: 45, high: 72, source: 'test' }]);
   expect(api.recommendationCalls.at(-1)).toBe('library ?all=1');
@@ -299,7 +302,8 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await page.mouse.move(1, 1);
   await expect.poll(() => legend.evaluate((e) => getComputedStyle(e.parentElement!).opacity)).toBe('0');
   const before = await page.getByRole('button', { name: 'It went well' }).boundingBox();
-  await bar.hover();
+  // A phone has no hover (R20): a tap on the chart opens its legend. The note names need no tap (R25); setlist-song.spec.ts has both, and the pointer's hover.
+  await bar.tap();
   await expect.poll(() => legend.evaluate((e) => getComputedStyle(e.parentElement!).opacity)).toBe('1');
   await expect(page.getByText('your range')).toBeVisible();
   expect(await page.getByRole('button', { name: 'It went well' }).boundingBox()).toEqual(before);
@@ -307,6 +311,10 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
 
   await page.getByRole('button', { name: 'It went well' }).click();
   await expect(page.getByText('Thanks! That helps.')).toBeVisible();
+  // It stays (R26): the picked thumb is selected, and neither can be tapped again.
+  await expect(page.getByRole('button', { name: 'It went well' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'It went well' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: "It didn't go well" })).toBeDisabled();
   await expect.poll(() => api.feedback).toEqual([{ trackId: 't2', thumbs: 'up', difficulty: 'hard', octave: 'down', view: DEFAULT_VIEW }]);
   await shot(page, '11-feedback-thanks');
 
@@ -325,7 +333,7 @@ test('returning user goes straight to results, and redo restarts the test', asyn
   await page.waitForTimeout(1000);
   await shot(page, '12-returning-user');
 
-  await page.getByRole('button', { name: 'Redo the singing test' }).click();
+  await page.getByRole('button', { name: 'Redo the range test' }).click();
   await expect(page.getByText('Find a quiet spot')).toBeVisible();
   // The microphone was let go at the results, so the test starts again at the mic step.
   await expect(page.getByRole('button', { name: 'Turn on microphone', exact: true })).toBeVisible({ timeout: 5000 });

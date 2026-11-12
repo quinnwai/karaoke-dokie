@@ -42,7 +42,7 @@ describe('the Setlist screen and the singer’s range', () => {
     const onRedo = vi.fn();
     const onRedoEnd = vi.fn();
     render(<SetlistScreen {...setlistProps(r(45, 72), [], { onRedo, onRedoEnd })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Redo the singing test' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Redo the range test' }));
     expect(onRedo).toHaveBeenCalledTimes(1);
     expect(onRedoEnd).not.toHaveBeenCalled();
   });

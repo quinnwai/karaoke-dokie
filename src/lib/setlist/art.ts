@@ -2,6 +2,8 @@
 // metronome swings, which jukebox lights are on. Pure, so each rule from the spec has a test. The SVG itself is
 // src/components/setlist/GearArt.tsx; it only applies what these return.
 
+import { ERA_IDS, type EraId } from './types';
+
 /**
  * The neon palette (Round 6A §3.1). The names are the design's tokens; the screen's CSS carries the same values as
  * custom properties, and the art draws with these because an SVG attribute cannot read a CSS variable that a test can see.
@@ -144,23 +146,55 @@ export function metronome(tempo: number, off = false): Metronome {
   };
 }
 
-/** A jukebox light that is not lit (Round 6A §9): a dark rose, not the grey of an unlit body. */
-export const LIGHT_OFF = '#3A2A33';
+/** Which of the jukebox's three buttons are lit: left, middle, right (QWW-57, R24). */
+export type JukeboxLit = readonly [left: boolean, middle: boolean, right: boolean];
+
+/** How far an era is from the '90s, the jukebox's middle button: negative before them, 0 for the '90s, positive after them. */
+const fromThe90s = (era: EraId): number => ERA_IDS.indexOf(era) - ERA_IDS.indexOf('s90');
+
+/**
+ * The buttons the picked eras light (QWW-57, R24). Left is before the '90s (Pre-'70s, '70s, '80s), middle is the '90s, right is
+ * after them ('00s, '10s, '20s). As many buttons are lit as eras are picked, up to three:
+ *
+ *   picks                           lit
+ *   none                            none (and Era off lights none, whatever is picked: see `jukeboxArt`)
+ *   one                             its side's: the '90s middle, before them left, after them right
+ *   two, one before and one after   left and right
+ *   two, both the '90s or earlier   left and middle
+ *   two, both the '90s or later     middle and right
+ *   three or more                   all three
+ *
+ * The three two-pick rows cover all 21 pairs of eras. Two picks on the same side (the '70s and the '80s) are "both the '90s or
+ * earlier", so they light that side and the middle.
+ */
+export function jukeboxLit(eras: readonly EraId[]): JukeboxLit {
+  const picked = ERA_IDS.filter((era) => eras.includes(era)).map(fromThe90s);
+  const before = picked.filter((d) => d < 0).length;
+  const after = picked.filter((d) => d > 0).length;
+  if (picked.length === 0) return [false, false, false];
+  if (picked.length === 1) return [before === 1, before + after === 0, after === 1];
+  if (picked.length === 2) return before === 1 && after === 1 ? [true, false, true] : after === 0 ? [true, true, false] : [false, true, true];
+  return [true, true, true];
+}
 
 export interface JukeboxArt {
   /** The body, the window and the bars: pink while Era is on, UNLIT while it is off. */
   body: string;
-  /** The two lights under the window, left then right. */
-  lights: readonly [string, string];
+  /**
+   * The three buttons under the window, left to right: amber where lit, the unlit grey otherwise. All three are the unlit grey while
+   * Era is off. (6A drew an unlit button in a dark rose, #3A2A33, which read as pink on a phone: R24, "grey, not pink".)
+   */
+  lights: readonly [string, string, string];
 }
 
 /**
- * The Era tab's jukebox (Round 6A §9). `picked` is how many eras are picked. With Era on, the left light is amber for one
- * era or more and the right one for two or more; with Era off both are dark, whatever is parked.
+ * The Era tab's jukebox (Round 6A §9, QWW-57 R24). The buttons are the picked eras' (`jukeboxLit`); with Era off all three are
+ * the unlit grey, whatever picks are parked.
  */
-export function jukeboxArt(picked: number, off: boolean): JukeboxArt {
-  const light = (needs: number) => (!off && picked >= needs ? AMBER : LIGHT_OFF);
-  return { body: tube(PINK, off), lights: [light(1), light(2)] };
+export function jukeboxArt(eras: readonly EraId[], off: boolean): JukeboxArt {
+  const [left, middle, right] = jukeboxLit(eras);
+  const light = (lit: boolean) => tube(AMBER, off || !lit);
+  return { body: tube(PINK, off), lights: [light(left), light(middle), light(right)] };
 }
 
 /** How long the strip art's turn-on flicker takes, ms: the 0.7 s of `neonFlicker`. */

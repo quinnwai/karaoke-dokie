@@ -322,7 +322,7 @@ describe('"Back to songs" on the mic and note steps of a redo (3)', () => {
     const tuned = tuning();
     expect(api.allRecommendations).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Redo the singing test' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Redo the range test' }));
     await screen.findByRole('button', { name: 'Turn on microphone' });
     fireEvent.click(back());
     await screen.findByText('Plastic Love');
@@ -363,7 +363,7 @@ describe('a double tap lands once (a): taps on the range notes, redo and "Back t
   clock();
   const engine = (): SetlistEngine => ({ rank: async () => inOrder(allMatches()) });
   const redoLow = () => fireEvent.click(screen.getByRole('button', { name: /^Redo your low note/ }));
-  const redoAll = () => fireEvent.click(screen.getByRole('button', { name: 'Redo the singing test' }));
+  const redoAll = () => fireEvent.click(screen.getByRole('button', { name: 'Redo the range test' }));
   const micStep = () => screen.queryByRole('button', { name: 'Turn on microphone' });
   /** The same gaps a finger leaves between two taps: close to none, a quick double tap, and just inside the moment. */
   const GAPS = [60, 250, TAP_GUARD_MS - 10];
@@ -634,7 +634,7 @@ describe('closing a song page puts the focus back on the row that opened it (c)'
     // Away to a redo and back: the focus is not put on the row again by an old memory of it.
     (document.activeElement as HTMLElement).blur();
     tick(TAP_GUARD_MS); // redo is not one a double tap's second tap may reach
-    fireEvent.click(screen.getByRole('button', { name: 'Redo the singing test' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Redo the range test' }));
     await screen.findByRole('button', { name: /Find a quiet spot/ });
     fireEvent.click(await screen.findByRole('button', { name: 'Turn on microphone' }));
     await screen.findByRole('button', { name: /lowest note/ });

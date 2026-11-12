@@ -169,7 +169,7 @@ test.describe('3. "Back to songs" on the mic and note steps of a redo', () => {
     await open(page);
     await tune(page);
     const before = await snapshot(page);
-    await page.getByRole('button', { name: 'Redo the singing test' }).tap();
+    await page.getByRole('button', { name: 'Redo the range test' }).tap();
     await expect(page.getByRole('button', { name: 'Turn on microphone' })).toBeVisible({ timeout: 10_000 });
     await backToSongs(page).tap();
     await expect(rows(page).first()).toBeVisible();
@@ -331,7 +331,7 @@ test.describe('a. a double tap lands once', () => {
       expect(await snapshot(page), 'the list was not emptied and fetched again').toEqual(before);
 
       await pastTheGuard(page);
-      await page.getByRole('button', { name: 'Redo the singing test' }).tap(); // after the moment it is a choice
+      await page.getByRole('button', { name: 'Redo the range test' }).tap(); // after the moment it is a choice
       await expect(page.getByRole('button', { name: /Find a quiet spot/ })).toBeVisible();
     });
   }

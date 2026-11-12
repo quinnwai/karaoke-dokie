@@ -1,8 +1,8 @@
-// The Era panel's header (src/lib/setlist/eras.ts, Round 6A §8, QWW-57): "ERA · 1,204 songs". N is `SetlistResponse.total`,
-// every song that fits the range and the picked eras, not just the loaded page.
+// The era text (src/lib/setlist/eras.ts, Round 6A §8, QWW-57): `songCountText`, which the screen header's count uses (R19: the
+// song count left the Era panel's title), and the note the Era panel's header carries while Era is off.
 
 import { describe, expect, it } from 'vitest';
-import { eraCountText, songCountText } from '../../src/lib/setlist/eras';
+import { ERA_OFF_NOTE, songCountText } from '../../src/lib/setlist/eras';
 
 describe('songCountText', () => {
   it.each<[number, string]>([
@@ -20,24 +20,9 @@ describe('songCountText', () => {
   });
 });
 
-describe('eraCountText', () => {
-  it('counts the songs that fit while Era is on: a middle dot, then the count', () => {
-    expect(eraCountText(1204, false)).toBe('· 1,204 songs');
-    expect(eraCountText(10, false)).toBe('· 10 songs');
-  });
-
-  it('says "1 song" for one, and "0 songs" when nothing fits', () => {
-    expect(eraCountText(1, false)).toBe('· 1 song');
-    expect(eraCountText(0, false)).toBe('· 0 songs');
-  });
-
-  it('says "OFF · all eras" while Era is off, whatever the count', () => {
-    expect(eraCountText(1204, true)).toBe('· OFF · all eras');
-    expect(eraCountText(null, true)).toBe('· OFF · all eras');
-    expect(eraCountText(0, true)).toBe('· OFF · all eras');
-  });
-
-  it('says nothing before the engine has answered once', () => {
-    expect(eraCountText(null, false)).toBe('');
+describe('ERA_OFF_NOTE', () => {
+  it('says "OFF · all eras" after a middle dot, and has no count in it (R19)', () => {
+    expect(ERA_OFF_NOTE).toBe('· OFF · all eras');
+    expect(ERA_OFF_NOTE).not.toMatch(/\d|song/);
   });
 });

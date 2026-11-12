@@ -26,7 +26,10 @@ export type TunerAction =
   | { type: 'touch'; gear: GearId }
   /** Reset: back to the default value, and off. Era goes back to the default picks. */
   | { type: 'reset'; gear: TunerPart }
-  /** An Era button: toggle that era. If Era was off, the toggle applies to the default picks and Era turns on. */
+  /**
+   * An Era button: toggle that era. If Era was off, the toggle applies to the default picks and Era turns on. Unpicking the last
+   * era turns Era off (QWW-57, R23, which replaces round 5's spec §4a: "picked and empty means no songs"): every era counts.
+   */
   | { type: 'era'; era: EraId }
   /** A tab (mini sheet): show that part. */
   | { type: 'open'; gear: TunerPart }
@@ -51,7 +54,7 @@ export function tunerReducer(s: TunerState, a: TunerAction): TunerState {
       return { ...s, [a.gear]: DEFAULTS[a.gear], off: withOff(s, a.gear), open: a.gear };
     case 'era': {
       const eras = s.eras.includes(a.era) ? s.eras.filter((e) => e !== a.era) : [...s.eras, a.era];
-      return { ...s, eras, off: withoutOff(s, 'era'), open: 'era' };
+      return { ...s, eras, off: eras.length === 0 ? withOff(s, 'era') : withoutOff(s, 'era'), open: 'era' };
     }
     case 'open':
       return { ...s, open: a.gear };
@@ -64,13 +67,14 @@ export function tunerReducer(s: TunerState, a: TunerAction): TunerState {
 
 /**
  * What the tuner sends to the ranking engine: the state as it is, and the range. The engine decides what counts (History
- * only counts once the singer's library was read) and says so in its answer.
+ * only counts once the singer's library was read) and says so in its answer. While Era is off no era filter applies (QWW-57,
+ * R22), so the request names no era, whatever picks the state still holds.
  */
 export function toRequest(s: TunerState, range: { low: Midi; high: Midi }): SetlistRequest {
   return {
     range: { low: range.low, high: range.high },
     gears: { difficulty: s.difficulty, history: s.history, popularity: s.popularity, tempo: s.tempo },
     off: [...s.off],
-    eras: [...s.eras],
+    eras: isOn(s, 'era') ? [...s.eras] : [],
   };
 }

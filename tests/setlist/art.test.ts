@@ -1,4 +1,4 @@
-// The art rules from Round 6A §6 (gear art), §7 (the off state) and §9 (the Era tab's jukebox), with the numbers the spec
+// The art rules from Round 6A §6 (gear art), §7 (the off state) and §9 (the Era tab's jukebox, QWW-57 R24), with the numbers the spec
 // gives. The numbers the reference's own view model draws are checked, tempo by tempo and value by value, in gearArt.test.tsx.
 
 import { describe, expect, it } from 'vitest';
@@ -10,7 +10,6 @@ import {
   FLICKER_MS,
   HARD,
   ITEM_COUNT,
-  LIGHT_OFF,
   MID,
   NOTE_PINK,
   PINK,
@@ -24,6 +23,7 @@ import {
   itemArt,
   itemLit,
   jukeboxArt,
+  jukeboxLit,
   laneArt,
   laneColor,
   metronome,
@@ -33,6 +33,7 @@ import {
   tabGlow,
   tube,
 } from '../../src/lib/setlist/art';
+import { ERA_IDS, type EraId } from '../../src/lib/setlist/types';
 
 describe('the palette (Round 6A §3.1)', () => {
   it('has the neon tokens', () => {
@@ -47,7 +48,6 @@ describe('the palette (Round 6A §3.1)', () => {
     });
     // Difficulty's middle tier is the same amber as Popularity's bolts.
     expect(MID).toBe(AMBER);
-    expect(LIGHT_OFF).toBe('#3A2A33');
   });
 
   it('lights each part in its colour: Difficulty by its tier, History cyan, Popularity amber, Tempo violet, Era pink (§3.1)', () => {
@@ -230,22 +230,96 @@ describe('metronome (Round 6A §6, Round 5 test 12)', () => {
   });
 });
 
-describe('the Era tab jukebox (Round 6A §9, test 27)', () => {
-  // [picked eras, Era off] -> body, left light, right light
-  const CASES: Array<{ picked: number; off: boolean; body: string; lights: [string, string] }> = [
-    { picked: 0, off: false, body: '#FF4FA0', lights: ['#3A2A33', '#3A2A33'] },
-    { picked: 1, off: false, body: '#FF4FA0', lights: ['#FFC24A', '#3A2A33'] },
-    { picked: 2, off: false, body: '#FF4FA0', lights: ['#FFC24A', '#FFC24A'] },
-    { picked: 3, off: false, body: '#FF4FA0', lights: ['#FFC24A', '#FFC24A'] },
-    { picked: 7, off: false, body: '#FF4FA0', lights: ['#FFC24A', '#FFC24A'] },
-    // Era off: the body is unlit and both lights are dark, whatever picks are parked.
-    { picked: 0, off: true, body: '#34313D', lights: ['#3A2A33', '#3A2A33'] },
-    { picked: 1, off: true, body: '#34313D', lights: ['#3A2A33', '#3A2A33'] },
-    { picked: 3, off: true, body: '#34313D', lights: ['#3A2A33', '#3A2A33'] },
+describe('the Era tab jukebox (Round 6A §9, test 27; QWW-57, R24)', () => {
+  // The table of R24. Left is before the '90s (Pre-'70s, '70s, '80s), middle is the '90s, right is after them ('00s, '10s, '20s).
+  type Button = 'left' | 'middle' | 'right';
+  /** The buttons a row of the table says are lit, as [left, middle, right]. */
+  const lit = (...buttons: Button[]): [boolean, boolean, boolean] => [buttons.includes('left'), buttons.includes('middle'), buttons.includes('right')];
+  /** Every set of eras that can be picked: the 128 subsets of the seven. */
+  const subsets = ERA_IDS.reduce<EraId[][]>((all, era) => [...all, ...all.map((set) => [...set, era])], [[]]);
+
+  it('lights none when none is picked', () => {
+    expect(jukeboxLit([])).toEqual(lit());
+  });
+
+  it.each<[EraId, Button]>([
+    ['pre', 'left'],
+    ['s70', 'left'],
+    ['s80', 'left'],
+    ['s90', 'middle'],
+    ['s00', 'right'],
+    ['s10', 'right'],
+    ['s20', 'right'],
+  ])('lights one button for one pick: %s lights %s', (era, button) => {
+    expect(jukeboxLit([era])).toEqual(lit(button));
+  });
+
+  // The three two-pick rows, for all 21 pairs written out: one before and one after the '90s (9 pairs) is left and right, both the
+  // '90s or earlier (6) is left and middle, both the '90s or later (6) is middle and right.
+  const PAIRS: Array<[EraId, EraId, Button[]]> = [
+    ['pre', 's70', ['left', 'middle']],
+    ['pre', 's80', ['left', 'middle']],
+    ['pre', 's90', ['left', 'middle']],
+    ['s70', 's80', ['left', 'middle']],
+    ['s70', 's90', ['left', 'middle']],
+    ['s80', 's90', ['left', 'middle']],
+    ['pre', 's00', ['left', 'right']],
+    ['pre', 's10', ['left', 'right']],
+    ['pre', 's20', ['left', 'right']],
+    ['s70', 's00', ['left', 'right']],
+    ['s70', 's10', ['left', 'right']],
+    ['s70', 's20', ['left', 'right']],
+    ['s80', 's00', ['left', 'right']],
+    ['s80', 's10', ['left', 'right']],
+    ['s80', 's20', ['left', 'right']],
+    ['s90', 's00', ['middle', 'right']],
+    ['s90', 's10', ['middle', 'right']],
+    ['s90', 's20', ['middle', 'right']],
+    ['s00', 's10', ['middle', 'right']],
+    ['s00', 's20', ['middle', 'right']],
+    ['s10', 's20', ['middle', 'right']],
   ];
 
-  it.each(CASES)('$picked picked, Era off: $off -> body $body, lights $lights', ({ picked, off, body, lights }) => {
-    expect(jukeboxArt(picked, off)).toEqual({ body, lights });
+  it('has a row for each of the 21 pairs of eras, and no other', () => {
+    const every = ERA_IDS.flatMap((a, i) => ERA_IDS.slice(i + 1).map((b) => `${a}+${b}`));
+    expect(every).toHaveLength(21);
+    expect(PAIRS.map(([a, b]) => `${a}+${b}`).sort()).toEqual(every.sort());
+  });
+
+  it.each(PAIRS)('lights two buttons for two picks: %s and %s light %j, whichever is picked first', (a, b, buttons) => {
+    expect(jukeboxLit([a, b])).toEqual(lit(...buttons));
+    expect(jukeboxLit([b, a])).toEqual(lit(...buttons));
+  });
+
+  it('lights all three for three or more picks, whichever they are: all 99 sets of three to seven eras', () => {
+    const many = subsets.filter((set) => set.length >= 3);
+    expect(many).toHaveLength(99);
+    for (const eras of many) expect(jukeboxLit(eras), eras.join()).toEqual(lit('left', 'middle', 'right'));
+  });
+
+  it('lights as many buttons as eras are picked, up to three, and does not mind the order they were picked in', () => {
+    for (const eras of subsets) {
+      expect(jukeboxLit(eras).filter(Boolean), eras.join()).toHaveLength(Math.min(eras.length, 3));
+      expect(jukeboxLit([...eras].reverse()), eras.join()).toEqual(jukeboxLit(eras));
+    }
+  });
+
+  it('draws a lit button amber and an unlit one in the unlit grey, on a pink body, while Era is on', () => {
+    expect(jukeboxArt(['s90'], false)).toEqual({ body: PINK, lights: [UNLIT, AMBER, UNLIT] });
+    expect(jukeboxArt(['s80', 's00'], false)).toEqual({ body: PINK, lights: [AMBER, UNLIT, AMBER] });
+    expect(jukeboxArt(['s70', 's80'], false)).toEqual({ body: PINK, lights: [AMBER, AMBER, UNLIT] });
+    expect(jukeboxArt(['s00', 's20'], false)).toEqual({ body: PINK, lights: [UNLIT, AMBER, AMBER] });
+    expect(jukeboxArt([...ERA_IDS], false)).toEqual({ body: PINK, lights: [AMBER, AMBER, AMBER] });
+    // Era on with nothing picked, which the engine still answers ("no-era-picked"), though unpicking cannot get there (R23): nothing lit.
+    expect(jukeboxArt([], false)).toEqual({ body: PINK, lights: [UNLIT, UNLIT, UNLIT] });
+  });
+
+  it('is the unlit grey all over while Era is off, whatever picks are parked: all three buttons grey, none pink or amber, and not 6A\'s dark rose', () => {
+    for (const eras of subsets) {
+      const art = jukeboxArt(eras, true);
+      expect(art, eras.join()).toEqual({ body: UNLIT, lights: [UNLIT, UNLIT, UNLIT] });
+      expect(art.lights, eras.join()).not.toContain('#3A2A33');
+    }
   });
 });
 

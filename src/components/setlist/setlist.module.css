@@ -117,18 +117,20 @@
   transition: color 120ms ease, border-color 120ms ease;
 }
 
-/* Redo re-sings both ends. 28 px tall to look at, 44 px to tap (8 px more above and below). */
+/* Redo re-sings both ends (QWW-57, R14): a round icon button, a 28 px circle with the redo arrow in it and no text, 44 px to tap (the
+   ::after reaches 9 px past the padding box, which is 1 px inside the border: 44 px square). */
 .redo {
   position: relative;
   flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 28px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0;
   border: 1px solid #3a3742;
-  border-radius: 8px;
+  border-radius: 50%;
   background: transparent;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 400;
   color: var(--sl-text-2);
   cursor: pointer;
   transition: color 120ms ease, border-color 120ms ease;
@@ -137,7 +139,7 @@
 .redo::after {
   content: '';
   position: absolute;
-  inset: -8px -2px;
+  inset: -9px;
 }
 
 /* R9 (QWW-57): hover and keyboard focus turn the range notes (text and dotted underline) and redo (text and border) pink. Hover only
@@ -208,6 +210,26 @@
   flex-shrink: 0;
   display: flex;
   margin-left: auto;
+}
+
+/* The title and, at the right, under the Spotify button, the count of songs that fit (R19). The count keeps its width and the title
+   gives way (it is cut with an ellipsis) where the two do not fit. */
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.count {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--sl-text-3);
+  white-space: nowrap;
 }
 
 .title {

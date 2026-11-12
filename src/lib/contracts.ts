@@ -236,7 +236,10 @@ export type GearValues = Record<GearId, number>;
 export interface SetlistState {
   gears: GearValues;
   off: TunerPart[];
-  /** The picked eras. Used only while 'era' is not in `off`; picked and empty then means no songs (spec §4a). */
+  /**
+   * The picked eras. Used only while 'era' is not in `off`; picked and empty then means no songs (spec §4a). The tuner never sends that
+   * state since QWW-57's R23 (unpicking the last era turns Era off), and while Era is off it sends `[]` with 'era' in `off` (R22).
+   */
   eras: EraId[];
 }
 

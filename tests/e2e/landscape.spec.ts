@@ -204,7 +204,7 @@ test('a tap on what is under it does nothing: the tap lands on the message, and 
   await open(page);
   await page.setViewportSize(LANDSCAPE);
   await expect(notice(page)).toBeVisible();
-  const redo = (await page.getByRole('button', { name: 'Redo the singing test' }).boundingBox())!;
+  const redo = (await page.getByRole('button', { name: 'Redo the range test' }).boundingBox())!;
   expect(redo.y + redo.height, 'redo is on the screen, so the tap below is a real one').toBeLessThan(LANDSCAPE.height);
   // Who gets each click: the message, or something under it.
   await page.evaluate(() => {
@@ -449,7 +449,7 @@ for (const step of ['the title', 'the tuner'] as const) {
     await reach(page, step);
     const upright = await controls(page);
     // Upright the step has things to press (so an empty answer below says something), and the message is not in the tree.
-    expect(upright, `${step} upright`).toContain(step === 'the title' ? 'button: Start' : 'button: Redo the singing test');
+    expect(upright, `${step} upright`).toContain(step === 'the title' ? 'button: Start' : 'button: Redo the range test');
     expect(await axTree(page), 'upright: no message').not.toContainEqual({ role: 'dialog', name: WORDS });
 
     await turnSideways(page);
