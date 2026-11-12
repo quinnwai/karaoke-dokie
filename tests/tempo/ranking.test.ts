@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { Match, SetlistInput, VocalRange } from '../../src/lib/contracts';
 import { DEFAULT_VIEW, orderMatches } from '../../src/lib/songs/browse';
 import { rankSetlist, type SetlistCandidate } from '../../src/lib/songs/setlist';
-import { effectiveTempo, type Feel } from '../../src/lib/tempo/feel';
+import { effectiveTempo, isWeakLabelSource, type Feel } from '../../src/lib/tempo/feel';
 import { rng } from '../helpers/sliderFixtures';
 
 const user: VocalRange = { low: 40, high: 76, source: 'test' };
@@ -155,5 +155,53 @@ describe('Tempo gear: a slow label wins over a double-time reading', () => {
     // and none is among the first 30% of "Upbeat tracks"
     const front = new Set(list.songs.slice(0, Math.ceil(list.songs.length * 0.3)).map((s) => s.match.track.id));
     expect(slow.filter((key) => front.has(key))).toEqual([]);
+  });
+});
+
+// ---------- QWW-54 follow-up: clear labels first ----------
+// The judge agreed with 95% of the slow labels the strict first pass made and 79% (58% where two runs of three agreed) of the band-edge
+// audit's. Labels from the plain-definition passes keep their band but rank behind the strict ones at either end of the gear.
+
+describe('Tempo gear: strict labels rank ahead of plain-definition ones', () => {
+  const STRICT = 'claude-opus-5-5/feel-v1';
+  const PLAIN = 'claude-opus-5-5/feel-plain-v1';
+  const AUDIT = 'claude-opus-5-5/feel-edge-recheck-v1';
+  /** name, Deezer's bpm, label, where the label came from. */
+  const POOL: [string, number, Feel, string][] = [
+    ['strict slow 85', 85, 'slow', STRICT],
+    ['strict slow 70', 70, 'slow', STRICT],
+    ['audit slow 50', 50, 'slow', AUDIT], // the lowest tempo of the slow songs
+    ['second-look slow 55', 55, 'slow', PLAIN],
+    ['mid 100', 100, 'mid', STRICT],
+    ['mid 110', 110, 'mid', STRICT],
+    ['strict upbeat 150', 150, 'upbeat', STRICT],
+    ['strict upbeat 170', 170, 'upbeat', STRICT],
+    ['audit upbeat 190', 190, 'upbeat', AUDIT], // the highest tempo of the upbeat songs
+    ['second-look upbeat 130', 130, 'upbeat', PLAIN],
+  ];
+  const at = (tempo: 0 | 100): string[] => {
+    const candidates: SetlistCandidate[] = POOL.map(([name, bpm, feel, source], i) => ({
+      match: {
+        track: { id: name, title: name, artist: 'A', artistId: 'a', spotifyUrl: '', playRank: i },
+        range: { low: 50, high: 62, tessitura: 56, source: 'note-file', confidence: 'high', fastLyrics: false },
+        difficulty: 'easy',
+        octave: 'none',
+        tempo: effectiveTempo({ record: { deezerBpm: bpm }, feel, weak: isWeakLabelSource(source) })!.tempo,
+      } as Match,
+    }));
+    const input: SetlistInput = { range: { low: 41, high: 72 }, gears: { difficulty: 50, history: 50, popularity: 50, tempo }, off: ['difficulty', 'history', 'popularity', 'era'], eras: [], loggedIn: false };
+    return rankSetlist(candidates, input).songs.map((s) => s.match.track.id);
+  };
+
+  it('puts the strict slow songs first at the slow end, then the audit\'s and the second look\'s, then the mid ones', () => {
+    // Taken by tempo alone the audit's 50 and the second look's 55 would come first.
+    expect(at(0).slice(0, 4)).toEqual(['strict slow 70', 'strict slow 85', 'audit slow 50', 'second-look slow 55']);
+    expect(at(0).slice(4, 6)).toEqual(['mid 100', 'mid 110']);
+  });
+
+  it('puts the strict upbeat songs first at the upbeat end, then the second look\'s and the audit\'s, then the mid ones', () => {
+    // Taken by tempo alone the audit's 190 would come first.
+    expect(at(100).slice(0, 4)).toEqual(['strict upbeat 170', 'strict upbeat 150', 'audit upbeat 190', 'second-look upbeat 130']);
+    expect(at(100).slice(4, 6)).toEqual(['mid 110', 'mid 100']);
   });
 });

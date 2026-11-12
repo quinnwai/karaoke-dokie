@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { effectiveTempo, feelOfTempo, FEEL_BANDS, FEEL_REST, FEELS, isFeel, type Feel } from '../../src/lib/tempo/feel';
+import { effectiveTempo, feelOfTempo, FEEL_BANDS, FEEL_REST, FEELS, isFeel, isWeakLabelSource, type Feel } from '../../src/lib/tempo/feel';
 import { tempoOf } from '../../src/lib/tempo/tempo';
 
 // The checked tempos are data that changes (data/tempo-gold.json), so these tests use their own.
@@ -209,6 +209,58 @@ describe('effectiveTempo with a label', () => {
 
   it('keeps every slow song below every mid song below every upbeat song', () => {
     const all = FEELS.flatMap((feel) => [40, 62, 85, 100, 118, 140, 171, 190].map((bpm) => ({ feel, t: effectiveTempo({ record: { deezerBpm: bpm }, feel })!.tempo })));
+    for (const a of all) for (const b of all) if (FEELS.indexOf(a.feel) < FEELS.indexOf(b.feel)) expect(a.t).toBeLessThan(b.t);
+  });
+});
+
+describe('weak labels: the second look and the band-edge audit rank behind the strict first pass', () => {
+  const weak = (feel: Feel, bpm: number) => effectiveTempo({ record: { deezerBpm: bpm }, feel, weak: true })!;
+  const clear = (feel: Feel, bpm: number) => effectiveTempo({ record: { deezerBpm: bpm }, feel })!;
+
+  it('knows the plain-definition passes by their source, and nothing else', () => {
+    expect(isWeakLabelSource('claude-opus-5-5/feel-plain-v1')).toBe(true);
+    expect(isWeakLabelSource('claude-opus-5-5/feel-edge-recheck-v1')).toBe(true);
+    // the strict first pass, the strict recheck (which only makes mids), a person's fix, anything unnamed
+    for (const source of ['claude-opus-5-5/feel-v1', 'claude-opus-5-5/feel-recheck-v1', 'manual/hand-fix-qww-54b', 'test/v1', '', undefined]) {
+      expect(isWeakLabelSource(source), String(source)).toBe(false);
+    }
+  });
+
+  it('puts a weak slow song in the strip at the top of the slow band, behind a clear one, in the order of its own tempo', () => {
+    for (const bpm of [45, 50, 70, 85]) expect(weak('slow', bpm).tempo).toBeGreaterThanOrEqual(89.5);
+    for (const bpm of [45, 50, 70, 85]) expect(weak('slow', bpm).tempo).toBeLessThanOrEqual(89.9);
+    for (const bpm of [45, 70, 85]) expect(clear('slow', 85).tempo).toBeLessThan(weak('slow', bpm).tempo); // a clear 85 is still ahead of the weak 45
+    expect(weak('slow', 50).tempo).toBeLessThan(weak('slow', 70).tempo);
+    expect(weak('slow', 70).tempo).toBeLessThan(weak('slow', 85).tempo);
+    expect(weak('slow', 70)).toMatchObject({ weak: true, source: 'deezer' });
+    expect(clear('slow', 70)).not.toHaveProperty('weak');
+  });
+
+  it('puts a weak upbeat song in the strip at the bottom of the upbeat band, behind a clear one, in the order of its own tempo', () => {
+    for (const bpm of [130, 150, 180]) {
+      expect(weak('upbeat', bpm).tempo).toBeGreaterThanOrEqual(125);
+      expect(weak('upbeat', bpm).tempo).toBeLessThanOrEqual(125.4);
+      expect(clear('upbeat', 150).tempo).toBeGreaterThan(weak('upbeat', bpm).tempo);
+    }
+    expect(weak('upbeat', 130).tempo).toBeLessThan(weak('upbeat', 170).tempo);
+  });
+
+  it('still halves or doubles the reading first, and says so', () => {
+    // 148 on a slow label: halved to 74 (so it sits at 74/90 of the band), and then it goes to the strip because the label is weak
+    expect(weak('slow', 148)).toMatchObject({ adjusted: 'halved', weak: true });
+    expect(weak('slow', 148).tempo).toBeCloseTo(89.5 + 0.4 * ((74 - 40) / 50), 6);
+    expect(weak('upbeat', 70)).toMatchObject({ adjusted: 'doubled', weak: true });
+  });
+
+  it('leaves a mid label, a song with no label and a labelled song with no reading as they are', () => {
+    expect(weak('mid', 100)).toEqual(clear('mid', 100));
+    expect(effectiveTempo({ record: { deezerBpm: 100 }, weak: true })).toEqual(effectiveTempo({ record: { deezerBpm: 100 } }));
+    expect(effectiveTempo({ feel: 'slow', weak: true })).toEqual({ tempo: FEEL_REST.slow, source: 'feel' });
+    expect(effectiveTempo({ feel: 'upbeat', weak: true })).toEqual({ tempo: FEEL_REST.upbeat, source: 'feel' });
+  });
+
+  it('never leaves the label\'s band, so a weak slow song is still below every mid song and a weak upbeat song above', () => {
+    const all = FEELS.flatMap((feel) => [40, 62, 85, 100, 118, 140, 171, 190].flatMap((bpm) => [true, false].map((w) => ({ feel, t: weak(feel, bpm).tempo * Number(w) + clear(feel, bpm).tempo * Number(!w) }))));
     for (const a of all) for (const b of all) if (FEELS.indexOf(a.feel) < FEELS.indexOf(b.feel)) expect(a.t).toBeLessThan(b.t);
   });
 });

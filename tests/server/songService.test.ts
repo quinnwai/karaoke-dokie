@@ -420,6 +420,22 @@ describe('song service whole list (all)', () => {
     });
   });
 
+  describe('weak feel labels (QWW-54)', () => {
+    it('puts a label from a plain-definition pass in the strip at the inner edge of its band, behind the strict one, on the whole list', async () => {
+      const store = createMemoryStore();
+      await store.putSongTempo([{ key: key(2), deezerBpm: 160 }, { key: key(4), deezerBpm: 50 }]);
+      await store.putSongFeel([
+        { key: key(2), feel: 'slow', source: 'claude-opus-5-5/feel-v1' },
+        { key: key(4), feel: 'slow', source: 'claude-opus-5-5/feel-plain-v1' },
+      ]);
+      const svc = createSongService(store, fakeDeps({ resolveSongRange: everyone(range(56, 64)) }).deps);
+      const all = await svc.recommend([track(2), track(4)], user, 0, 0, { all: true });
+      const tempoOf = (n: number) => all.matches.find((m) => m.track.id === track(n).id)!.tempo;
+      expect(tempoOf(2)).toBe(80); // 160 halved
+      expect(tempoOf(4)).toBeCloseTo(89.5 + 0.4 * ((50 - 40) / 50), 6); // read at 50, but the label is weak: behind the 80
+    });
+  });
+
   describe('karaoke popularity (QWW-6)', () => {
     const popular = (n: number, extra: { karaokeViews?: number; chartRank?: number; chartYear?: number }) => ({ key: key(n), source: 'test', ...extra });
 

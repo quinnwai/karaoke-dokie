@@ -13,6 +13,10 @@
 // not trusted at either end: it is squeezed into the mid band, in the order it had, so only labelled songs reach the two
 // ends of the gear (a published tempo counts as one more reading, not as a label). A real sample says why: of 297 songs labelled slow that Deezer
 // has a bpm for, 59% were read at 125 bpm or more, which the measured rule alone puts at the upbeat end.
+//
+// Not every label vouches for its end equally. An independent judge agreed with 95% of the slow labels the strict first
+// pass made, but with only 79% of those the band-edge audit made (58% where just two of its three runs agreed), so a
+// label from a plain-definition pass ranks behind the clear ones in its band (isWeakLabelSource).
 
 import { reviewedBpm } from './reviewed';
 import { combineTempo, TEMPO_MAX, TEMPO_MIN, type SongTempoRecord, type TempoSource } from './tempo';
@@ -30,6 +34,17 @@ export interface SongFeelRecord {
   /** ISO time the label was stored. */
   labeledAt?: string;
 }
+
+/**
+ * Whether a label came from a plain-definition pass, which vouches for its end less than the strict first pass or a person's fix.
+ * Measured on 12 Nov 2026 over every song that fits a test range, against an independent judge (OpenAI gpt-6-luna, three runs,
+ * the majority): it agreed with 95% of the slow and 98% of the upbeat labels from the strict first pass (`…/feel-v1`), 83% and
+ * 90% of the second look's (`…/feel-plain-v1`), 79% and 89% of the audit's where all three of its runs agreed
+ * (`…/feel-edge-recheck-v1`) and 58% and 61% where two of three did. Other sources (a hand fix, `manual/…`, or a future pass)
+ * are not weak until they are named here.
+ */
+const WEAK_LABEL_SOURCE = /\/feel-(plain|edge-recheck)-/;
+export const isWeakLabelSource = (source: string | undefined): boolean => source !== undefined && WEAK_LABEL_SOURCE.test(source);
 
 /**
  * Where each feel sits on the Tempo gear, in bpm; the low end is in the band and the high end is not. The bands
@@ -81,6 +96,8 @@ export interface EffectiveTempo {
    * (with no label) squeezed into the mid band. Unset when the measured value is used as it is.
    */
   adjusted?: 'halved' | 'doubled' | 'clamped' | 'compressed';
+  /** True when the label is a weak one (isWeakLabelSource) and the song was put behind the clear ones in its band. */
+  weak?: true;
 }
 
 /** One measured or checked tempo of a song, as written by its source, and which source. */
@@ -134,11 +151,15 @@ export function fitReading(readings: Reading[], feel: Feel): { value: number; oc
  *   octave moved (HALVE_COST, DOUBLE_COST), the cheapest wins, an earlier reading and fewer octaves win a tie (that
  *   is fitReading), and a value still outside the band goes into a thin strip just inside its nearest edge. With no
  *   reading the song sits at FEEL_REST.
+ * - A weak label (`weak`, from isWeakLabelSource) at either end: the same band, but the song goes into the strip at the band's
+ *   inner edge, in the order of its tempo, so it ranks behind every song with a clear label (a mid label has no end to be behind).
  */
 export function effectiveTempo(input: {
   key?: string;
   record?: Pick<SongTempoRecord, 'deezerBpm' | 'trackerBpm' | 'ultrastarBpm'>;
   feel?: Feel;
+  /** The label is a weak one (isWeakLabelSource of the label's source). */
+  weak?: boolean;
 }): EffectiveTempo | null {
   const { key, record, feel } = input;
   const reviewed = key === undefined ? undefined : reviewedBpm(key);
@@ -165,5 +186,11 @@ export function effectiveTempo(input: {
   const tempo = best.value < band.min ? band.min + t * STRIP : best.value >= band.max ? band.max - EDGE + t * STRIP : best.value;
   const clamped = best.value < band.min || best.value >= band.max;
   const adjusted = clamped ? 'clamped' : best.octaves < 0 ? 'halved' : best.octaves > 0 ? 'doubled' : undefined;
+  if (input.weak && feel !== 'mid') {
+    // Behind the clear labels: the inner edge of the band, the strip next to the middle, in the order the song had.
+    const place = Math.min(1, Math.max(0, (tempo - band.min) / (band.max - band.min)));
+    const inner = feel === 'slow' ? band.max - EDGE + STRIP * place : band.min + STRIP * place;
+    return { tempo: inner, source: best.source, ...(adjusted ? { adjusted } : {}), weak: true };
+  }
   return { tempo, source: best.source, ...(adjusted ? { adjusted } : {}) };
 }
