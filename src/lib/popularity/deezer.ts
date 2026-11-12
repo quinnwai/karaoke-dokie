@@ -7,15 +7,24 @@
 //
 // The search is plain text ("artist title"): the quoted form artist:"..." track:"..." returned
 // nothing when tried in November 2026. A result counts only when its artist and title match the
-// song's key; among the results that match (the original, remasters, live takes), the best rank.
+// song's key (matchesKey), a bracketed part of its title read as the title too: Deezer's "Good
+// Riddance (Time of Your Life)" is our "Time Of Your Life". Among the results that match, the
+// original studio recording wins (QWW-59, pickDeezerHit): a live take, a remix, a sped-up edit, a
+// cover, a commentary track or a language version is never taken unless our title names that kind
+// of recording, and a re-recording ("(2023 Version)", "(Taylor's Version)") only when the artist
+// has no original among the results. The artist's own credit comes before a longer name that
+// contains it, so a tribute act's plain title never beats the artist's re-recording.
 
 import { hasLittleSinging, songKey } from '../songs/resolve';
+import { classifyTag } from '../songs/title';
 
 /** One Deezer search result, the fields we read. */
 export interface DeezerTrack {
   id: number;
   title: string;
   title_short?: string;
+  /** The part of `title` Deezer counts as the version, e.g. "(2023 Version)" or "(Live Aid)"; unset or empty when none. */
+  title_version?: string;
   rank: number;
   artist: { name: string };
 }
@@ -52,38 +61,192 @@ export function deezerQuery(artist: string, title: string): string {
 }
 
 /**
- * A key part with punctuation dropped and "&" read as "and": "paint it, black" is "paint it black",
- * "kc & the sunshine band" is "kc and the sunshine band".
+ * A key part with punctuation dropped and "&" or "+" read as "and": "paint it, black" is "paint it black",
+ * "kc & the sunshine band" is "kc and the sunshine band", "shut up + dance" is "shut up and dance". An apostrophe
+ * joins the word up, so "fool's garden" is Deezer's "fools garden".
  */
 const loose = (part: string) =>
-  part.replace(/&/g, ' and ').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  part
+    .replace(/['’‘`´]/g, '')
+    .replace(/[&+]/g, ' and ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-/** True when one artist name is the other with words added ("ms lauryn hill", "lauryn hill"). */
-function sameArtist(a: string, b: string): boolean {
-  if (a === b) return true;
+/** Words in an artist name that make it someone else's recording: "OneRepublic Tribute Band", "Karaoke Hits of ...". */
+const COVER_ARTIST = /\b(?:tribute|karaoke|covers?|made famous|in the style of|originally|as performed)\b/;
+/** Words before a name that still credit the same singer: "Ms. Lauryn Hill", "The Notorious B.I.G.". */
+const SAME_BEFORE = /^(?:(?:ms|mr|mrs|miss|dr|sir|dame|the) )*$/;
+/** Words after a name that credit others alongside the same singer: "Bob Marley & The Wailers", "Lady Gaga & Bradley Cooper". */
+const SAME_AFTER = /^$|^(?:and|with|x|vs|feat|featuring|ft) /;
+
+/**
+ * 'exact' when the artist names credit the same singer: the same name, or one with a title before it or co-credits after
+ * it ("ms lauryn hill", "bob marley and the wailers"). 'contained' when one is the other with other words added ("elvis",
+ * "elvis presley"; also a "We Love Taylor Swift" act, which is why it comes second). null otherwise, and null when the
+ * words added make it a cover act ("taylor swift tribute").
+ */
+function artistMatch(a: string, b: string): 'exact' | 'contained' | null {
+  if (a === b) return 'exact';
   const [short, long] = a.length < b.length ? [a, b] : [b, a];
-  return short.length >= 3 && ` ${long} `.includes(` ${short} `);
+  const padded = ` ${long} `;
+  const at = padded.indexOf(` ${short} `);
+  if (short.length < 3 || at < 0) return null;
+  const before = padded.slice(1, at + 1);
+  const after = padded.slice(at + short.length + 2);
+  if (COVER_ARTIST.test(`${before}${after}`)) return null;
+  return SAME_BEFORE.test(before) && SAME_AFTER.test(after) ? 'exact' : 'contained';
+}
+
+// ---------- which recording a title names (QWW-59) ----------
+
+/**
+ * A recording that is not the song's original studio one. `version` is another recording of it by the artist: a
+ * re-recording ("(2023 Version)", "(Taylor's Version)"), another take ("(Acoustic)", "(Piano Version)"), or a version
+ * part Deezer splits off the title that no rule here names. `other-song` is what songs/title.ts keeps as a song of its
+ * own: a language version ("(Spanish Version)") or a part. The others are never the original.
+ */
+export type Recording = 'live' | 'remix' | 'sped-up' | 'cover' | 'not-a-song' | 'other-song' | 'version';
+/** Kinds a match is never taken as, unless our own title names the same kind. A `version` is only a fallback. */
+const NEVER: ReadonlySet<Recording> = new Set(['live', 'remix', 'sped-up', 'cover', 'not-a-song', 'other-song']);
+
+const SPED_UP = /\b(?:sped|speed)[ -]?up\b|\bslowed\b|\bnightcore\b|\breverb\b/;
+const COVER = /\bcover(?:ed)?\b|\boriginally\b|\bmade famous\b|\bin the style of\b|\btribute\b|\bas performed\b/;
+const NOT_A_SONG = /\bcommentary\b|\binterview\b|\bvoice memo\b|\brehearsal\b|\bspeech\b|\bdialogue\b|\btake \d+\b|\balternate take\b|\bouttake\b/;
+/** A remix wherever the word sits: "(From "Frozen"/Dave Audé Club Remix)" names the film first. */
+const REMIXED = /\bre-?mix(?:ed)?\b|\brmx\b|\bbootleg\b|\bmash-?up\b/;
+/** Another take by the artist: "(2017 Acoustic)", "(Piano Version)", "(Symphonic Version)", "(Demo)". */
+const OTHER_TAKE = /\b(?:acoustic|piano|orchestral|symphonic|a ?cappella|stripped|demo|re-?record(?:ed|ing)?)\b/;
+/** Words that only say how the original recording was released: "(Single Version)", "(Radio Edit)", "(Original Mix)". */
+const RELEASE_WORDS = new Set(
+  'single album radio original main lp ep 7 12 inch mono stereo explicit clean edited edit uncensored censored uncut extended short long full deluxe bonus track us uk digital official audio video film movie soundtrack ost mix mixed version ver the a'.split(
+    ' ',
+  ),
+);
+
+/** The tags of a title: what is in each pair of brackets, and what follows a dash ("Song - Remastered 2011"). */
+function tagsOf(title: string): string[] {
+  const tags = [...title.matchAll(/\(([^)]*)\)|\[([^\]]*)\]/g)].map((m) => m[1] ?? m[2] ?? '');
+  const dash = title.match(/\s+-\s(.*)$/);
+  if (dash) tags.push(dash[1]!);
+  return tags.filter((t) => t.trim());
+}
+
+/**
+ * The kind of recording one tag names, or null when it names the original: a release tag ("(Radio Edit)",
+ * "(Remastered 2011)", "(Deluxe Edition)", "(From "Frozen")", "(feat. X)") or a real subtitle ("(Time of Your Life)").
+ * The tag grammar is QWW-49's (songs/title.ts classifyTag, what the song list strips); here a release tag stays the
+ * original only when every word of it is a release word, so "(Single Version)" is the original and "(2023 Version)" is
+ * not. `from`: whose title the tag is in. In a Deezer title, "live" anywhere is a live take ("(Live Aid)"); in our own,
+ * only where the list strips it, since "(Live It Up)" can be a subtitle. Deezer's own version part (title_version) is
+ * a version even when no rule names it.
+ */
+function recordingOf(tag: string, from: 'ours' | 'deezer' | 'deezer-version' = 'ours'): Recording | null {
+  const t = tag.normalize('NFKC').toLowerCase().replace(/[’‘`´]/g, "'");
+  if (SPED_UP.test(t)) return 'sped-up';
+  if (COVER.test(t)) return 'cover';
+  if (NOT_A_SONG.test(t)) return 'not-a-song';
+  if (REMIXED.test(t)) return 'remix';
+  const kind = classifyTag(tag)?.kind;
+  if (kind === 'live' || ((kind !== undefined || from !== 'ours') && /\blive\b/.test(t))) return 'live';
+  if (OTHER_TAKE.test(t)) return 'version';
+  if (kind === undefined) {
+    // Not a tag the list strips. With a version word it is one title.ts keeps on purpose, a language version or a part.
+    if (/\b(?:version|ver|edit|mix)\b/.test(t)) return 'other-song';
+    return from === 'deezer-version' ? 'version' : null;
+  }
+  if (kind === 'remix') return 'remix';
+  if (kind === 'duet') return 'version';
+  if (kind === 'edition' && /\bedition$/.test(t)) return null; // "(Deluxe Edition)", "(20th Anniversary Edition)"
+  if (kind === 'version' || kind === 'edition' || kind === 'edit') {
+    if (/remaster/.test(t)) return null;
+    const words = t.split(/[^\p{L}\p{N}']+/u).filter(Boolean);
+    // A year says which mix ("1985 Single Mix"), but which recording when it names a version ("2023 Version").
+    if (words.every((w) => RELEASE_WORDS.has(w) || (kind === 'edit' && /^(?:19|20)\d{2}$/.test(w)))) return null;
+    return kind === 'edit' ? 'remix' : 'version';
+  }
+  return null; // remaster, feat, context, tv, video: the original recording, released another way
+}
+
+/** The kinds of recording a title names, from its tags. */
+export function recordingsOf(title: string): Set<Recording> {
+  return new Set(tagsOf(title).flatMap((tag) => recordingOf(tag) ?? []));
+}
+
+/** The kinds of recording a Deezer track is. Its version part (title_version) is read as a version whatever it says. */
+function trackRecordings(track: Pick<DeezerTrack, 'title' | 'title_short' | 'title_version'>): Set<Recording> {
+  const version = track.title_version?.trim() ? track.title_version : '';
+  const title = version ? (track.title_short ?? track.title.replace(version, '')) : track.title;
+  // A version part with no brackets ("Live") is one tag.
+  const versionTags = version ? (tagsOf(version).length ? tagsOf(version) : [version]) : [];
+  return new Set([
+    ...tagsOf(title).flatMap((tag) => recordingOf(tag, 'deezer') ?? []),
+    ...versionTags.flatMap((tag) => recordingOf(tag, 'deezer-version') ?? []),
+  ]);
+}
+
+/**
+ * The title and each plain bracketed part of it (a subtitle, not a version tag) as a title of its own. That is the
+ * title with its bracketed part swapped, since a key drops what is in brackets: "Good Riddance (Time of Your Life)"
+ * also reads as "Time of Your Life".
+ */
+function titleReadings(title: string): string[] {
+  const parts = [...title.matchAll(/\(([^)]*)\)|\[([^\]]*)\]/g)].map((m) => m[1] ?? m[2] ?? '');
+  return [title, ...parts.filter((p) => p.trim() && classifyTag(p) === null && recordingOf(p, 'deezer') === null)];
+}
+
+/** How the track's artist matches the key's, or null when the track is not the song with key `key`. */
+function keyMatch(key: string, track: Pick<DeezerTrack, 'title' | 'title_short' | 'artist'>): 'exact' | 'contained' | null {
+  if (hasLittleSinging(track.title)) return null; // karaoke and instrumental versions share the title
+  const [artist = '', title = ''] = key.split('|').map(loose);
+  const [dArtist = ''] = songKey(track.artist.name, '').split('|').map(loose);
+  const how = artistMatch(artist, dArtist);
+  if (!how) return null;
+  // A medley title counts by its first song: "Hard to Say I'm Sorry / Get Away".
+  const titles = [track.title, track.title_short ?? ''].flatMap(titleReadings).flatMap((t) => [t, t.split(' / ')[0]!]);
+  return titles.some((t) => loose(songKey('', t).split('|')[1] ?? '') === title) ? how : null;
 }
 
 /** True when a Deezer track is the song with key `key`. */
 export function matchesKey(key: string, track: Pick<DeezerTrack, 'title' | 'title_short' | 'artist'>): boolean {
-  if (hasLittleSinging(track.title)) return false; // karaoke and instrumental versions share the title
-  const [artist = '', title = ''] = key.split('|').map(loose);
-  const [dArtist = ''] = songKey(track.artist.name, '').split('|').map(loose);
-  if (!sameArtist(artist, dArtist)) return false;
-  // A medley title counts by its first song: "Hard to Say I'm Sorry / Get Away".
-  const titles = [track.title, track.title_short ?? ''].flatMap((t) => [t, t.split(' / ')[0]!]);
-  return titles.some((t) => loose(songKey('', t).split('|')[1] ?? '') === title);
+  return keyMatch(key, track) !== null;
 }
 
-/** The best-ranked result that matches `key`, or null when none does. */
-export function pickDeezerHit(key: string, results: DeezerTrack[]): DeezerHit | null {
-  let best: DeezerTrack | undefined;
+/** True when `a` sorts before `b`: the first place they differ decides, lower first. */
+const sortsBefore = (a: number[], b: number[]) => {
+  const i = a.findIndex((v, k) => v !== b[k]);
+  return i >= 0 && a[i]! < b[i]!;
+};
+
+/**
+ * The result that is the song's original studio recording, or null when none will do. `title` is our own title for the
+ * song (not just its key): a version it names ("Song (Live at Donington)", "Song (Taylor's Version)") is not passed
+ * over. Among the results that match `key`:
+ *   - a live take, a remix, a sped-up edit, a cover, a commentary track or a language version is passed over, unless
+ *     our title names that kind;
+ *   - first, the artist's own credit (the same name, or with a title or co-credits: artistMatch 'exact') beats a
+ *     longer name that contains it, so a "We Love Taylor Swift" act's plain title never beats Taylor Swift's track;
+ *   - then the original (no tag, or only release tags like "(Remastered 2011)", "(Radio Edit)" or "(From "Frozen")"),
+ *     even for a title that names a version: the list shows the song, its rank is the song's popularity, and the
+ *     original is what people know. Then a version our title names, then, only when there is nothing better, a
+ *     re-recording or another version Deezer names ("(2023 Version)", "(Taylor's Version)": Deezer's search has no
+ *     "Shake It Off" but Taylor's Version);
+ *   - then the best rank.
+ */
+export function pickDeezerHit(key: string, results: DeezerTrack[], title = ''): DeezerHit | null {
+  const named = recordingsOf(title);
+  let best: { track: DeezerTrack; order: number[] } | undefined;
   for (const t of results) {
-    if (typeof t.rank !== 'number' || !matchesKey(key, t)) continue;
-    if (!best || t.rank > best.rank) best = t;
+    const how = typeof t.rank === 'number' ? keyMatch(key, t) : null;
+    if (!how) continue;
+    const kinds = [...trackRecordings(t)];
+    if (kinds.some((k) => NEVER.has(k) && !named.has(k))) continue;
+    const tier = kinds.length === 0 ? 0 : kinds.every((k) => named.has(k)) ? 1 : 2;
+    const order = [how === 'exact' ? 0 : 1, tier, -t.rank];
+    if (!best || sortsBefore(order, best.order)) best = { track: t, order };
   }
-  return best ? { rank: best.rank, deezerId: best.id, artist: best.artist.name, title: best.title } : null;
+  const hit = best?.track;
+  return hit ? { rank: hit.rank, deezerId: hit.id, artist: hit.artist.name, title: hit.title } : null;
 }
 
 export class DeezerError extends Error {}

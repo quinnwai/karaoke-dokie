@@ -259,6 +259,30 @@ a floor at the lower quartile of its tier's charting songs. USDB stars are not u
 song has 5. `npm run popularity:calibrate [-- --dry-run]` reads the numbers from `DATABASE_URL` and
 writes `src/lib/songs/popularityScale.ts`.
 
+**Language weight (QWW-59).** USDB is a German fan site, so a German, Polish or French party song can rank high on
+its USDB views when nothing else knows it. When no signed-in library is read (`POST /api/setlist` signed out or with
+the library unavailable, and always on `/api/catalogue/recommendations`), a song whose only popularity signal is its
+USDB views (`usdbOnlyPopularity`: no KaraFun views, Year-End entry or Deezer rank) has its score multiplied by its
+language's weight in `LANGUAGE_POPULARITY_WEIGHTS` (`src/lib/songs/score.ts`), keyed by USDB's `#LANGUAGE` exactly
+(German, Polish and French at 0.5; "German, English" is not "German"). Its Popularity place, tie-break, score and
+"Crowd favourite" reason all use the weighted score. The catalogue keeps each song's language and that flag
+(`catalogueMatches` `signals`), so the per-range lists stay shared and the weight is applied while ranking
+(`rankPrepared`'s `languageWeights`, which a future language preference can pass). Signed-in lists are not weighted,
+and a library song never is.
+
+**Deezer match (QWW-37, QWW-59).** `npm run popularity:deezer` searches Deezer for "artist title" and keeps one track
+per song (`song_deezer`): its rank is a popularity signal and its id is the row's ▶. A result is the song when its
+artist and title match the song key (`matchesKey`, `src/lib/popularity/deezer.ts`); a plain bracketed part of the
+title counts as the title too ("Good Riddance (Time of Your Life)" is "Time Of Your Life"), and a tribute or karaoke act
+whose name contains the artist's is not the artist. Among those, `pickDeezerHit` takes the original studio recording:
+a live take, remix, sped-up edit, cover, commentary track or language version is never taken unless our title names
+that kind; the artist's own credit (the same name, or with a title or co-credits) comes before a longer name that
+contains it; then the original before a re-recording ("(2023 Version)", "(Taylor's Version)") or a version Deezer names
+but no rule does, which is taken only when the artist has no original among the results; then the best rank. Deezer's search does
+not return every original (it has no 2013 "Counting Stars", only the 2023 re-recording and a live take), so a hand fix
+in `song_deezer` stays right only while `--recheck-before` leaves it alone: it rechecks misses and hits ranked under
+50,000, and `--refresh` rechecks everything.
+
 ## Song tempo
 
 The Tempo slider (QWW-40) sorts by beats per minute, 70 to 180, placed by rank like popularity. No
