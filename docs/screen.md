@@ -5,7 +5,7 @@ screen, with instructions sung in like karaoke lyrics. One accent color: hot pin
 
 The TV is phone-shaped on every screen and every step (Round 6A §3.3, QWW-57, review item R2): 390 px wide and
 min(844 px, the window less 32 px) tall, centred, with the bezel padding 9 9 0, bezel radius 30, screen radius 22 and a
-34 px chin with the LED. On a phone (up to 430 px wide) it is the whole screen instead: page padding 14 10 12 (or the
+34 px chin (the Sources and credits link at its left, the LED at its right: R28). On a phone (up to 430 px wide) it is the whole screen instead: page padding 14 10 12 (or the
 safe-area insets, if larger), no height cap. Text that scales with the window width (`--vw`) stops growing at a phone's
 width, so a wide window shows the phone's type, not a bigger one. There is no wider TV and no column inside one. A phone on
 its side is wider than 430 px and would get a 328 px TV with no room for songs, so on a touch screen in landscape under 500 px
@@ -14,8 +14,8 @@ phone upright" covers every step (`RotateNotice`, drawn by `Tv`). It is only dra
 finds the screen, the tuner and a running mic step as they were. While it is up the TV is `inert` (`Tv`; `useSideways` in
 `src/lib/client/useSideways.ts` asks the same query from script): Tab, Enter and the arrow keys reach nothing under it, the covered
 buttons are not in the accessibility tree, focus is on the message, and it goes back to the control that had it when the phone is
-turned upright. The page is not measured while it is up, and the tuner's first sizing (a short phone opens the sheet in mini) waits,
-so a page opened on its side opens expanded when turned upright at 390x844. A tablet (taller than 500 px) and a desktop never see it.
+turned upright. The page is still laid out under it, but nothing is sized from that: the tuner's first sizing (a short phone opens the sheet in
+mini) waits, and goes by a measure taken when the phone is turned upright, so a page opened on its side opens expanded at 390x844. A tablet (taller than 500 px) and a desktop never see it.
 Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape layout is a follow-up.
 
 ## Flow
@@ -104,19 +104,26 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
    (QWW-47, `src/lib/songs/setlist.ts`) ranks, and `createNetworkEngine` asks it with the request (`limit` 200, the most one
    request may ask for; the screen shows 40 at a time). A slider drag asks once the thumb has rested 120 ms, and a request
    a newer one replaced is aborted. The list keeps the last answer until its own arrives. `libraryUnavailable` comes in the answer.
-   - **The header**: a 28 px row with the singer's range (each note re-sings that end), **redo** (re-sings both), the
-     カラオケ sign and the Spotify logo at the far right. The sign is centred on the row's own middle (R1: the row's
-     centre, to a pixel, not the room between redo and the logo). It shrinks from 16 px down to 13 px to keep 8 px clear of
-     redo and the logo, and is hidden, not moved, only when 13 px does not fit (`signSize` in `fit.ts` is the first guess,
-     and `useSignFit` checks the laid-out sign and steps down 0.2 px until the gap holds, so a browser whose text is not
-     exactly proportional to its size still keeps it; the longest range on a 360 px phone). The notes
-     and redo are 44 px tall to tap, and turn pink on hover and on keyboard focus (R9). The heading is below the row.
+   - **The header**: a 28 px row with the singer's range (each note re-sings that end), **redo** (re-sings both: a round icon
+     button, a 28 px circle with the redo arrow in it and no text, named "Redo the range test", R14), the カラオケ sign and the
+     Spotify logo at the far right, with the count of songs that fit under it ("1,136 songs", R19). The sign is centred on the
+     row's own middle (R1: the row's centre, to a pixel, not the room between redo and the logo; no optical nudge, R15). It shrinks
+     from 16 px down to 13 px to keep 8 px clear of redo and the logo, and is hidden, not moved, only when 13 px does not fit
+     (`signSize` in `fit.ts` is the first guess, and `useSignFit` checks the laid-out sign and steps down 0.2 px until the gap
+     holds, so a browser whose text is not exactly proportional to its size still keeps it; the longest range, C#2 to G#5, in a
+     window under about 345 px: the round redo gave back the room the word "redo" took, so a 360 px phone has the sign at full
+     size). The notes are 44 px tall to tap and redo's 44 px target reaches 9 px past its circle; both turn pink on hover (where
+     there is one) and on keyboard focus (R9). On a touch screen the Spotify logo's tooltip, which says what the logo is, comes with
+     a tap (`ConnectButton`, R30): the first tap shows it and connects to nothing, a second connects, and a tap anywhere else or
+     Escape hides it; a click that is not a finger (Enter, Space, a screen reader's activate) connects at once, and a mouse keeps
+     hover and one click. The "Want personalized recommendations?" note that ended the list is gone (R18). The heading is below the row.
    - **The list**: a row (66 px) is the slot (44 px) with the rank number, the title over "Artist · Era" (`’90s`) over a
      **reason line**, and a **difficulty badge**. The slot holds the rank number and the ▶ on top of each other (R3): on a
-     pointer device the number shows and a hover on the row, or keyboard focus on the ▶, swaps it for the ▶ (the glyph
-     alone, no ring or circle); on a touch screen, which cannot hover, the ▶ stands in the number's place and the number
-     is not drawn. A ▶ that cannot play (the song has no preview) is faded and disabled; a preview that is loading, playing or
-     paused shows its ⏸ or ▶ with no hover. The number is hidden from a screen reader (the list is an `<ol>`) and the rank is also in
+     pointer device the number shows and a hover on the row, or keyboard focus on the ▶, swaps it for the ▶ in its thin circle
+     (R17); on a touch screen, which cannot hover, the ▶ in its circle stands in the number's place and the number is not
+     drawn. A ▶ that cannot play (the song has no preview) is faded and disabled, circle and glyph; a preview that is loading,
+     playing or paused shows its ⏸ or ▶ in the circle with no hover, and the circle's ring fills over the preview's 30 s. The row
+     that sounds has its title fill in pink as well, from the left, over the length of the preview (R16). The number is hidden from a screen reader (the list is an `<ol>`) and the rank is also in
      `data-rank`. The row's button is described by its reason line (`aria-describedby`), by an id made from the row's place, not
      its track id: a catalogue id has spaces ("cat:michael jackson|beat it"), which split the list of ids. The reason line is
      `whyOf` in `src/lib/setlist/rows.ts`: the first two of "In your sweet spot" (Difficulty on, the song's place within 15
@@ -129,24 +136,32 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      singer's range changes (redo) or the page is reloaded: a row that scrolls out and back, is re-ranked, leaves when an era
      is untapped and comes back, or comes back after a song page and Back, does not replay it (R12; `KaraokeApp` keeps the
      memory, `useFillMemory`; with reduced motion there is no fill). The ▶ is QWW-48's
-     play button (Play from the list, below), and a line under the list, over the credits link, shows Deezer's logo while a song on
-     screen has a preview. Rows are in rank order in the DOM, and slide to their new place when
+     play button (Play from the list, below); Deezer's credit is in Sources and credits (R29), not under the list. Rows are in rank order in the DOM, and slide to their new place when
      the order changes (`flip.ts`; reduced motion turns it off). Tapping a row opens the song page; the ▶ does not.
      40 songs show at first, then "Load more". Songs with no year are in the list while Era is off and out of it
-     while Era is on. When there are no songs the engine says why (`empty`): "Pick an era to see songs." (Era on,
-     nothing picked), or a line saying none of the picked eras fit the range.
+     while Era is on. When there are no songs the engine says why (`empty`): a line saying none of the picked eras fit the range, or that
+     nothing fits it. The tuner is never on with nothing picked (R23, below), so "Pick an era to see songs." (the engine's
+     `no-era-picked`) is reached only by a state set by hand (the test hook).
    - **The sheet**: four gears (Difficulty, Popularity, Tempo, Listening history: the one that has to be unlocked is last,
      in the strips and in the tabs, R11; `SHEET_GEARS` in `gears.ts`) and a multi-select Era. The History strip reads
      "LISTENING HISTORY" (its tab says "History") and sets its type by the strip's width so it is never cut off (R6). Every
      strip and the Era panel have a grey border (`--sl-rail`) in every state; only the selected mini tab has a gear-coloured
      border and glow, and on a pointer device an idle tab shows its border when hovered and an unpicked era button a pink
-     one, with no glow (R5, R10). The top of the sheet has no pink (R8). **Reset** on
+     one, with no glow (R5, R10). The top of the sheet has no pink (R8). **Reset** (a ✕ named "Turn off <gear>", R21) on
      a gear puts it back to its default (`src/lib/setlist/defaults.ts`, the one place) and turns it **off**: it
      counts for nothing, its art goes dark (unlit neon tubes; no dimming), and touching it again turns it on from the
      default, with a short neon flicker (0.7 s; it also plays on the page's first load, and nowhere else: showing a strip
      again, as a mini tab switch, expanding the sheet or Back from a song page does, plays nothing). The History notes, the Popularity bolts and the tabs' rays that the value has not
-     reached are drawn unlit rather than hidden, and light as it reaches them (R7). Era off means every era. The Era panel's header counts the songs that fit
-     (`SetlistResponse.total`, every song that fits the range and the picked eras, not the loaded page): "ERA · 1,204 songs".
+     reached are drawn unlit rather than hidden, and light as it reaches them (R7). Era off means every era (R22): the request carries no era filter, so the count and the list are those of a
+     request that never mentions eras. Unpicking the last picked era turns Era off (R23; this replaces round 5's "on with
+     nothing picked shows an empty list"). The Era panel's header says "ERA", and "· OFF · all eras" while Era is off. The count of songs
+     that fit (`SetlistResponse.total`, every song that fits the range and the picked eras, not the loaded page) is the screen
+     header's, at the top right under the Spotify button ("1,136 songs"), and follows every change of a gear or an era (R19).
+     The Era tab's icon is a jukebox with three buttons, left, middle and right, lit by the picked eras with the '90s in
+     the middle (R24; `jukeboxLit` in `src/lib/setlist/art.ts`): one era lights its side's button; two lights left and right
+     when one is before the '90s and one after, left and middle when both are the '90s or earlier, middle and right when both
+     are the '90s or later; three or more light all three. The lit buttons are amber and the unlit ones, and all three while Era is off, are the
+     unlit grey.
      **Defaults** (QWW-47's decision): Popularity 100 and Difficulty 0 on; History 100, Tempo 50 and Era off, and Era
      has no default picks (the first tap on an era picks just that era). Signed out, History is also disabled and says
      "Connect Spotify to use your listening history" (or the unreachable line, when the engine says the library could
@@ -194,15 +209,24 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
    The list is then a catalogue list (History disabled, no connect prompts) for a singer who stays
    signed in, with the green logo, Log out and one quiet line above the list: "Couldn’t reach Spotify, showing
    popular songs." The next range save or redo asks the server again.
-8. **Song detail**: range bar (song in neon pink over the user's range, note names at the
-   ends; a song sung an octave away is drawn as sung, with the recording as a dashed outline;
+8. **Song detail**: the title, artist and year, then the Deezer ▶ (R27: a 64 px round button with the preview's ring, "Play 30 s"
+   under it and "Pause" while it sounds, or a faded disabled ▶ saying "No preview" when the song has none; it is the list's own
+   one-at-a-time player, so a preview playing in the list stops when this page opens, and this one stops when the page closes),
+   then "Find on Spotify" for a catalogue song, an outlined secondary button (a library song has Spotify's own player lower
+   down instead), then the range bar (song in neon pink over the user's range; a song sung an octave away is drawn as sung, with
+   the recording as a dashed outline;
    faint bars above it show where the song's singing time sits across your range, `Match.shape`,
    so an Easy song that spans most of your range reads as Easy: one bar for each twelfth of your range
    that has singing in it, none for a twelfth without, and each cut to the song's pink stretch so none
    sticks out of it (the shape only counts notes inside the song's range, `shapeOf` in `score.ts`;
-   `rangeBar` in `display.ts` does the cutting)), difficulty (or a quiet "Maybe"), "Fast lyrics", an "i" button explaining where the
-   data came from (for Maybe songs, also that the range is an estimate), Spotify's own player
-   (see below), and "How'd it go?" thumbs that POST `/api/feedback`.
+   `rangeBar` in `display.ts` does the cutting)). The four end names, the song's two in pink and the singer's two in grey, are
+   always drawn (R25); a song bar narrower than 14% of the chart (`NAMES_APART` in `display.ts`) puts its low name left of its end and its
+   high name right of it, so the two never touch. A tap on the chart shows or hides its legend (song range, your range, as
+   recorded), where a mouse hovers. Then difficulty (or a quiet "Maybe"), "Fast lyrics", Spotify's own player
+   (see below), and "How'd it go?" thumbs that POST `/api/feedback` (R26): after a tap "Thanks! That helps." takes the question's
+   place and stays, the picked thumb is filled and pressed (`aria-pressed`) and both are disabled, and the pick is kept per song on
+   the device (`localStorage` `kd.feedback:<trackId>`, `loadFeedback` and `saveFeedback` in `storage.ts`), so a later visit
+   shows it again.
 9. **Returning user** with a saved range lands on results; "redo" restarts the test. Someone
    without Spotify whose range is kept on the device lands on catalogue results. Half a test left behind by a redo that was
    abandoned (a reload in the middle of one note) is dropped then, from the flow and from the device: the singer is where the redo
@@ -223,11 +247,13 @@ button and must stay on screen (spike QWW-44).
 - **iOS.** The tap handler sets the element's address to `/api/preview/<deezerId>` and calls `play()` in the same
   tick; iOS plays audio only when it starts inside the tap. That route redirects to Deezer's preview link (see
   backend.md), which expires after 15 minutes, so links are never stored.
-- **What it shows.** ▶ until tapped; then ⏸. Tapped again it pauses; a pause by the phone (a call, the lock screen,
-  headphones) shows the same, and a resume from there shows ⏸ again. At the end it goes back to ▶. The button is 44 px
-  square. The button itself draws a thin pink ring that fills as the preview plays and marks the playing row's title in
-  pink, as Spotify marks the track it is on; in the tuner neither is shown (QWW-57: R3 has no ring or circle in any state,
-  R12 has every title end white), so the row that sounds is the one with ⏸ in its slot.
+- **What it shows.** A thin pink circle round the ▶ (R17; in the tuner it shows wherever the ▶ does, below); then ⏸ in a ring
+  that fills over the preview's 30 s as it plays (`followPreview`, one driver for the ring and the title's sweep). Tapped again it pauses and the
+  ring stays where it stopped; a pause by the phone (a call, the lock screen, headphones) shows the same, and a resume from there
+  shows ⏸ again. At the end it goes back to ▶ and an empty ring. The button is 44 px square. In the tuner the row that sounds also has its
+  title fill in pink from the left over the length of the preview (R16: `--preview-progress`, written on the row once a frame, drawn as a
+  clipped copy of the title; a pause holds it, and it resets when the preview ends, stops or another row plays; with reduced motion the
+  title is solid pink while the row sounds, with no sweep).
 - **When there is nothing to play.** A song with no Deezer match (`Match.deezerId` unset) gets a disabled button. A
   preview that fails to load before making a sound goes back to ▶ at once, and the player asks the route why: only a
   404 (Deezer has no preview) disables the button for the rest of the visit. Any other failure (Deezer slow or down,
@@ -236,22 +262,31 @@ button and must stay on screen (spike QWW-44).
 - **The row.** The play button (in the slot) and the song button sit side by side, never one inside the other: the play
   button never opens the song page, and the rest of the row still does. Opening the song page (or a filter taking the song off
   the list) stops the preview.
-- **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly, so a line under the list reads
-  "Previews from [logo] Deezer" whenever a song on it has a preview. It links to the credits page (in a new tab, as the book
-  icon's link is, so reading it does not cost the singer their range and tuning; its "‹ Back" closes that tab when it is a tab
-  of its own, which shows the tuned tab again, and goes back otherwise, `CreditsBack`; the book icon's link is a 44 px square at the
-  list's right end, not a band as wide as the list), which says the
-  previews stream from Deezer for private, non-commercial listening and that no audio is kept, as the terms ask
-  listeners to be told.
+- **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly and to tell listeners the previews are for
+  private use. Sources and credits (below) carries both: its Deezer entry has the logo beside the name and says the previews stream
+  from Deezer for private, non-commercial listening and that no audio is kept (R29; the line that was over the list is gone).
 - **Event log (QWW-51).** When a preview a tap started makes its first sound, the player tells `KaraokeApp`
   (`listenForRowPlay` in `PreviewButton.tsx`), which records `row_play` with the row's place in the list and a
   catalogue song's key (`rowPlayEvent` in `funnel.ts`; a library song carries only its place). A pause, a resume, a
   resume from a fresh link and a preview that never sounds record nothing.
 - **In the tuner (QWW-46, QWW-57).** `PreviewButton` takes the row's track id (`id`), the song's `deezerId`, title and
-  artist, and its `position` (the row's 1-based place on screen, which `row_play` carries); `DeezerCredit` is the logo line.
+  artist, and its `position` (the row's 1-based place on screen, which `row_play` carries).
   `KaraokeApp` hands the screen a `renderPlay(match, position)` that mounts the button in each row's slot (a test can pass its own), and the slot's CSS (`rows.module.css`) restyles it: the
-  44 px target, the glyph alone, the swap with the rank number, the faded disabled look. Without a `renderPlay` the
-  screen shows an inert, disabled ▶ and no Deezer line.
+  44 px target, the circle, the swap with the rank number, the faded disabled look. Without a `renderPlay` the
+  screen shows an inert, disabled ▶. The song page mounts the same button with `large` (R27).
+
+## Sources and credits (QWW-57, R28, R29)
+
+A book icon in the chin's bottom left (a button named "Sources and credits", `aria-haspopup="dialog"`) opens the credits inside the TV's
+screen, over whatever step is showing, on the same page: no new tab, and the address does not change (`Tv`, `CreditsPanel`). The panel has
+its heading and a ✕ ("Close sources and credits") at its top and scrolls inside; it closes with the ✕ or Escape. It is drawn over the
+step, never in place of it, so the step keeps its state, its scroll and a running microphone. While it is up everything else in the TV
+is `inert` (as under the landscape message), the focus is in the panel (`role="dialog"`, `aria-modal`), and on close it goes back to the
+link. For 400 ms after it closes the step stays inert too (`CREDITS_GUARD_MS`, the same number as `TAP_GUARD_MS`): the ✕ is over the
+tuner's top right corner, where the Spotify button is, so a double tap on it would otherwise connect Spotify. Opening the panel is not a
+history entry, so the browser's Back is the browser's own: from the list it leaves the page; over a song page or a redo it closes that and
+leaves the panel up. `CreditsContent` draws the list and the note for the panel and for the `/credits` page both. Its Deezer entry has
+Deezer's logo beside the name (R29). The playing row's own "Preview by Deezer" mark waits on Quinn-Wai and is not built.
 
 ## Spotify player
 
@@ -268,9 +303,8 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 - **Size**: 152px tall, Spotify's compact size for one song. Spotify wants at least 280px of width.
   A 360px phone leaves the screen 264px, so the player reaches 12px into the screen's padding
   (288px); a page narrower than 352px gets less than 280px.
-- **Fit**: the player is about 110px taller than the old button. A one-line title still fits a
-  664px-high phone without scrolling; a three-line title or the open info tooltip makes the screen
-  scroll (the tooltip already did on short phones). The screen is one scroller shared with the song
+- **Fit**: the player is about 110px taller than the old button, and the page's own ▶ and its words (R27) take about 112px more, so with
+  the player the song page scrolls on a 664px-high phone (the ▶ and "Find on Spotify" are above the fold at 390x664, as R27 asks). The screen is one scroller shared with the song
   list, so the song page resets it to the top when it opens.
 - **Playing**: all of it is Spotify's own controls. Seen in Chrome 156 with no Spotify sign-in: a
   "Preview" badge, playback in the page, and after about 30 seconds a "Listen to the full track and
@@ -322,7 +356,8 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/components/RoundButton.tsx` | The round pink-ringed button, shared by the record button (`HoldStep.tsx`, a dot in it) and "Turn on microphone" (`MicStep.tsx`, a microphone in it), so the two keep one look. |
 | `src/components/MicStep.tsx` | The mic step's screens. |
 | `src/components/SpotifyPlayer.tsx` | Spotify's player iframe, or the plain "Open in Spotify" link when there is no track to embed. |
-| `src/components/PreviewButton.tsx`, `src/lib/client/preview.ts` | The play button in each row, its hook and the one shared `<audio>` they drive (QWW-48); the Deezer logo line. |
+| `src/components/PreviewButton.tsx`, `src/lib/client/preview.ts` | The play button in each row and, larger, on the song page (R27), its hooks (`usePreview`, `usePreviewProgress` for the title's sweep) and the one shared `<audio>` they drive (QWW-48). |
+| `src/components/CreditsPanel.tsx`, `CreditsContent.tsx`, `src/components/setlist/ConnectButton.tsx` | Sources and credits inside the TV (opened from the chin link in `Tv`; `CreditsContent` is shared with `/credits`), and the header's Spotify button with its tap-for-tooltip on touch (R30). |
 | `src/components/screen.module.css`, `app/globals.css` | Styles; `prefers-reduced-motion` stops all animation. |
 
 ## Tests
@@ -346,6 +381,7 @@ Chrome and the in-app browsers: granted, refused (and closed without an answer),
 browser's question left unanswered (and the reload after 12 s), a microphone taken away mid-note (our screen again
 though the browser says yes), a quick tap on the record button, and the sizes. What a real iPhone and Android phone do
 with those screens is checked by hand.
+Quinn-Wai's second review of #38 on an iPhone (R14 to R30) has a Playwright check per item: `setlist-header.spec.ts` (R14, R15, R18, R19, R21, R30), `setlist-era.spec.ts` (R22 to R24, with a screenshot of each two-pick row and of Era off), `setlist-play.spec.ts` (R16, R17, R27), `setlist-song.spec.ts` (R25, R26), `credits.spec.ts` (R28, R29) and `touch-no-hover.spec.ts` (R20: no rule that applies on a touch screen shows or hides anything on `:hover`).
 Named screenshots land in `test-results/screens/`. The specs never load Spotify's player from
 Spotify: the screen spec answers `https://open.spotify.com/embed/**` with a stand-in page, and the
 full-stack spec (offline mock, search links only) shows the plain link.
