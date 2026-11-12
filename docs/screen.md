@@ -136,7 +136,7 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      singer's range changes (redo) or the page is reloaded: a row that scrolls out and back, is re-ranked, leaves when an era
      is untapped and comes back, or comes back after a song page and Back, does not replay it (R12; `KaraokeApp` keeps the
      memory, `useFillMemory`; with reduced motion there is no fill). The ▶ is QWW-48's
-     play button (Play from the list, below); Deezer's credit is in Sources and credits (R29), not under the list. Rows are in rank order in the DOM, and slide to their new place when
+     play button (Play from the list, below), and a line under the list shows Deezer's logo while a song on screen has a preview (it stays where it is: R29). Rows are in rank order in the DOM, and slide to their new place when
      the order changes (`flip.ts`; reduced motion turns it off). Tapping a row opens the song page; the ▶ does not.
      40 songs show at first, then "Load more". Songs with no year are in the list while Era is off and out of it
      while Era is on. When there are no songs the engine says why (`empty`): a line saying none of the picked eras fit the range, or that
@@ -162,10 +162,15 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      when one is before the '90s and one after, left and middle when both are the '90s or earlier, middle and right when both
      are the '90s or later; three or more light all three. The lit buttons are amber and the unlit ones, and all three while Era is off, are the
      unlit grey.
-     **Defaults** (QWW-47's decision): Popularity 100 and Difficulty 0 on; History 100, Tempo 50 and Era off, and Era
-     has no default picks (the first tap on an era picks just that era). Signed out, History is also disabled and says
+     **Defaults** (QWW-47's decision): Popularity 100 and Difficulty 0 on; Tempo 50 and Era off, and Era
+     has no default picks (the first tap on an era picks just that era). History is 100 and depends on who is singing (R31:
+     "that's the purpose of logging in"): signed in it starts **on**, at "On repeat", so the singer's own top and liked songs come
+     first (`initialTuner({ signedIn })` in `tuner.ts`, `defaultOff` in `setlistConfig.ts`, set when the app boots and finds a session, so
+     the first list request already says so); signed out it starts off, and is also disabled and says
      "Connect Spotify to use your listening history" (or the unreachable line, when the engine says the library could
-     not be read), drawn as an off gear in place of its end labels, 11 px and shown whole (two lines, three in a narrow strip); signed in, it can be switched on. **Expanded** shows
+     not be read), drawn as an off gear in place of its end labels, 11 px and shown whole (two lines, three in a narrow strip). Its ✕ is "Turn off", as
+     every gear's is (R21): back at 100 and off, and a touch turns it on again from there. A singer who logs out, or whose library cannot be read, keeps the
+     History the tuner holds, and the sheet and the engine count it as off. **Expanded** shows
      every gear (rack 416 px); **mini** shows one gear and a tab bar (164 px). The grab handle switches by tap, Enter or
      Space, or by a vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live.
      **Which mode it opens in** (`src/lib/setlist/fit.ts`, measured in `useSheetFit`): mini when the expanded sheet
@@ -262,20 +267,24 @@ button and must stay on screen (spike QWW-44).
 - **The row.** The play button (in the slot) and the song button sit side by side, never one inside the other: the play
   button never opens the song page, and the rest of the row still does. Opening the song page (or a filter taking the song off
   the list) stops the preview.
-- **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly and to tell listeners the previews are for
-  private use. Sources and credits (below) carries both: its Deezer entry has the logo beside the name and says the previews stream
-  from Deezer for private, non-commercial listening and that no audio is kept (R29; the line that was over the list is gone).
+- **Deezer.** Deezer's API terms ask every app that uses it to show its logo clearly, so a line under the list reads
+  "Previews from [logo] Deezer" whenever a song on it has a preview. It stays where it is (QWW-57, R29: it was to move into Sources
+  and credits, and then Quinn-Wai said to keep it), and no playing row carries a Deezer mark. It links to the credits page in a new tab,
+  so reading it does not cost the singer their range and tuning (its "‹ Back" closes that tab when it is a tab of its own, which shows
+  the tuned tab again, and goes back otherwise, `CreditsBack`), which says the previews stream from Deezer for private, non-commercial
+  listening and that no audio is kept, as the terms ask listeners to be told. Sources and credits inside the TV (below) lists Deezer in
+  words too, with the same text and no logo.
 - **Event log (QWW-51).** When a preview a tap started makes its first sound, the player tells `KaraokeApp`
   (`listenForRowPlay` in `PreviewButton.tsx`), which records `row_play` with the row's place in the list and a
   catalogue song's key (`rowPlayEvent` in `funnel.ts`; a library song carries only its place). A pause, a resume, a
   resume from a fresh link and a preview that never sounds record nothing.
 - **In the tuner (QWW-46, QWW-57).** `PreviewButton` takes the row's track id (`id`), the song's `deezerId`, title and
-  artist, and its `position` (the row's 1-based place on screen, which `row_play` carries).
+  artist, and its `position` (the row's 1-based place on screen, which `row_play` carries); `DeezerCredit` is the logo line.
   `KaraokeApp` hands the screen a `renderPlay(match, position)` that mounts the button in each row's slot (a test can pass its own), and the slot's CSS (`rows.module.css`) restyles it: the
   44 px target, the circle, the swap with the rank number, the faded disabled look. Without a `renderPlay` the
-  screen shows an inert, disabled ▶. The song page mounts the same button with `large` (R27).
+  screen shows an inert, disabled ▶ and no Deezer line. The song page mounts the same button with `large` (R27).
 
-## Sources and credits (QWW-57, R28, R29)
+## Sources and credits (QWW-57, R28)
 
 A book icon in the chin's bottom left (a button named "Sources and credits", `aria-haspopup="dialog"`) opens the credits inside the TV's
 screen, over whatever step is showing, on the same page: no new tab, and the address does not change (`Tv`, `CreditsPanel`). The panel has
@@ -285,8 +294,8 @@ is `inert` (as under the landscape message), the focus is in the panel (`role="d
 link. For 400 ms after it closes the step stays inert too (`CREDITS_GUARD_MS`, the same number as `TAP_GUARD_MS`): the ✕ is over the
 tuner's top right corner, where the Spotify button is, so a double tap on it would otherwise connect Spotify. Opening the panel is not a
 history entry, so the browser's Back is the browser's own: from the list it leaves the page; over a song page or a redo it closes that and
-leaves the panel up. `CreditsContent` draws the list and the note for the panel and for the `/credits` page both. Its Deezer entry has
-Deezer's logo beside the name (R29). The playing row's own "Preview by Deezer" mark waits on Quinn-Wai and is not built.
+leaves the panel up. `CreditsContent` draws the list and the note for the panel and for the `/credits` page both. Its Deezer entry names
+Deezer in words, as before; the logo stays in the line under the list (R29), and no playing row has a Deezer mark.
 
 ## Spotify player
 
@@ -356,7 +365,7 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/components/RoundButton.tsx` | The round pink-ringed button, shared by the record button (`HoldStep.tsx`, a dot in it) and "Turn on microphone" (`MicStep.tsx`, a microphone in it), so the two keep one look. |
 | `src/components/MicStep.tsx` | The mic step's screens. |
 | `src/components/SpotifyPlayer.tsx` | Spotify's player iframe, or the plain "Open in Spotify" link when there is no track to embed. |
-| `src/components/PreviewButton.tsx`, `src/lib/client/preview.ts` | The play button in each row and, larger, on the song page (R27), its hooks (`usePreview`, `usePreviewProgress` for the title's sweep) and the one shared `<audio>` they drive (QWW-48). |
+| `src/components/PreviewButton.tsx`, `src/lib/client/preview.ts` | The play button in each row and, larger, on the song page (R27), its hooks (`usePreview`, `usePreviewProgress` for the title's sweep) and the one shared `<audio>` they drive (QWW-48); the Deezer logo line. |
 | `src/components/CreditsPanel.tsx`, `CreditsContent.tsx`, `src/components/setlist/ConnectButton.tsx` | Sources and credits inside the TV (opened from the chin link in `Tv`; `CreditsContent` is shared with `/credits`), and the header's Spotify button with its tap-for-tooltip on touch (R30). |
 | `src/components/screen.module.css`, `app/globals.css` | Styles; `prefers-reduced-motion` stops all animation. |
 
@@ -381,7 +390,7 @@ Chrome and the in-app browsers: granted, refused (and closed without an answer),
 browser's question left unanswered (and the reload after 12 s), a microphone taken away mid-note (our screen again
 though the browser says yes), a quick tap on the record button, and the sizes. What a real iPhone and Android phone do
 with those screens is checked by hand.
-Quinn-Wai's second review of #38 on an iPhone (R14 to R30) has a Playwright check per item: `setlist-header.spec.ts` (R14, R15, R18, R19, R21, R30), `setlist-era.spec.ts` (R22 to R24, with a screenshot of each two-pick row and of Era off), `setlist-play.spec.ts` (R16, R17, R27), `setlist-song.spec.ts` (R25, R26), `credits.spec.ts` (R28, R29) and `touch-no-hover.spec.ts` (R20: no rule that applies on a touch screen shows or hides anything on `:hover`).
+Quinn-Wai's second review of #38 on an iPhone (R14 to R30) has a Playwright check per item: `setlist-header.spec.ts` (R14, R15, R18, R19, R21, R30), `setlist-era.spec.ts` (R22 to R24, with a screenshot of each two-pick row and of Era off), `setlist-history-default.spec.ts` (R31), `setlist-play.spec.ts` (R16, R17, R27), `setlist-song.spec.ts` (R25, R26), `credits.spec.ts` (R28, and Deezer's line staying: R29) and `touch-no-hover.spec.ts` (R20: no rule that applies on a touch screen shows or hides anything on `:hover`).
 Named screenshots land in `test-results/screens/`. The specs never load Spotify's player from
 Spotify: the screen spec answers `https://open.spotify.com/embed/**` with a stand-in page, and the
 full-stack spec (offline mock, search links only) shows the plain link.
