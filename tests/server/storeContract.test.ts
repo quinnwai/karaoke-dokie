@@ -606,6 +606,35 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
     expect(back.get('artist 4|song 4')!.feel).toBe('mid');
   });
 
+  it('keeps one Deezer genre row per song, misses included, the last write winning (QWW-61)', async () => {
+    const s = make();
+    const at = '2026-11-12T00:00:00.000Z';
+    await s.putSongGenre([
+      { key: 'wet leg|chaise longue', genres: 'Alternative, Rock', albumId: 211_438_712, source: 'deezer-album', checkedAt: at },
+      { key: 'gone|track', source: 'deezer-album', checkedAt: at }, // a miss: Deezer no longer has the track
+      { key: 'no|genre', albumId: 5, source: 'deezer-album', checkedAt: at }, // a miss: the album lists no genre
+    ]);
+    // a recheck replaces the whole row
+    await s.putSongGenre([{ key: 'no|genre', genres: 'Pop', albumId: 6, source: 'deezer-album', checkedAt: '2026-12-01T00:00:00.000Z' }]);
+    // one key twice in one write: the last entry is the one kept
+    await s.putSongGenre([
+      { key: 'dup|song', genres: 'Rock', albumId: 7, source: 'first', checkedAt: at },
+      { key: 'dup|song', genres: 'Jazz', albumId: 8, source: 'second', checkedAt: at },
+    ]);
+    const read = await s.getSongGenres(['wet leg|chaise longue', 'gone|track', 'no|genre', 'dup|song', 'unknown|song']);
+    expect([...read.keys()].sort()).toEqual(['dup|song', 'gone|track', 'no|genre', 'wet leg|chaise longue']);
+    expect(read.get('wet leg|chaise longue')).toStrictEqual({ key: 'wet leg|chaise longue', genres: 'Alternative, Rock', albumId: 211_438_712, source: 'deezer-album', checkedAt: at });
+    expect(read.get('gone|track')).toStrictEqual({ key: 'gone|track', source: 'deezer-album', checkedAt: at });
+    expect(read.get('no|genre')).toStrictEqual({ key: 'no|genre', genres: 'Pop', albumId: 6, source: 'deezer-album', checkedAt: '2026-12-01T00:00:00.000Z' });
+    expect(read.get('dup|song')).toStrictEqual({ key: 'dup|song', genres: 'Jazz', albumId: 8, source: 'second', checkedAt: at });
+    expect(await s.listSongGenres()).toEqual(read);
+    expect(await s.getSongGenres([])).toEqual(new Map());
+    // more keys than one query carries
+    const many = Array.from({ length: 2_500 }, (_, i) => ({ key: `artist ${i}|song ${i}`, genres: 'Pop', albumId: i, source: 'deezer-album', checkedAt: at }));
+    await s.putSongGenre(many);
+    expect((await s.getSongGenres(many.map((m) => m.key))).size).toBe(2_500);
+  });
+
   it('keeps one Spotify block for the whole app: a later time wins and an earlier one never shortens it (QWW-55)', async () => {
     const s = make();
     expect(await s.getSpotifyBlock()).toBeNull();
@@ -695,7 +724,7 @@ describe('schema and store selection', () => {
     const q = pgMemQuery();
     await migrate(q);
     expect(schemaStatements().length).toBeGreaterThanOrEqual(5);
-    for (const t of ['users', 'vocal_ranges', 'song_ranges', 'source_log', 'feedback', 'song_popularity', 'spotify_block']) {
+    for (const t of ['users', 'vocal_ranges', 'song_ranges', 'source_log', 'feedback', 'song_popularity', 'spotify_block', 'song_genre']) {
       await expect(q(`SELECT * FROM ${t}`)).resolves.toEqual([]);
     }
   });

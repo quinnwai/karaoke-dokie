@@ -1,19 +1,18 @@
 // Release eval (QWW-52): the pass/fail checks for the QWW-42 success criteria 1 to 4, 6 and 9, on nine
-// fixed test ranges. Everything here is pure: it takes the ranked matches and the facts the script
-// looked up (Billboard, Deezer, the tempo judge's labels) and returns structured results. It asserts
-// on ranked ids and labels only, never on model prose. scripts/eval-release.ts does the reading.
+// fixed test ranges. Everything here is pure: it takes the tuner's prepared songs and the facts the
+// script looked up (Billboard, Deezer, the tempo judge's labels) and returns structured results. It
+// asserts on ranked ids and labels only, never on model prose. scripts/eval-release.ts does the reading.
 //
-// How the list is cut for each check lives in VIEWS, the one place that knows the results view's
-// shape. When the tuner changes it (QWW-46: multi-select era, gears; QWW-47: the ranking), update
-// VIEWS and the checks keep working. Criterion 9 (QWW-58) does not read VIEWS: "default gears" and "sung
-// as written first" belong to the Setlist tuner, so it reads the tuner's own list (tunerDefaultList, the
-// engine in songs/setlist.ts). Criteria 1 to 4 and 6 still grade the old results view.
+// How the list is cut for each check lives in VIEWS, the one place that knows the tuner's state. The
+// lists come from the tuner's engine (QWW-47, POST /api/setlist: songs/setlist.ts rankPrepared), so the
+// checks grade the lists a logged-out tester sees. Criteria 1, 4, 6 and 9 read the list as the tuner
+// opens (VIEWS.default, which is tunerDefaultList); criterion 2 reads each era with Tempo alone.
 
-import type { Decade, Match, ResultsView, VocalRange } from '../contracts';
-import { DECADES, DEFAULT_VIEW, viewMatches } from '../songs/browse';
-import { songKey } from '../songs/resolve';
+import type { EraId, GearId, Match, SetlistState, TunerPart, VocalRange } from '../contracts';
+import { ERA_IDS, GEAR_IDS } from '../contracts';
 import { rankPrepared, type PreparedSetlist } from '../songs/setlist';
-import { DEFAULTS, DEFAULT_OFF } from '../songs/setlistConfig';
+import { DEFAULT_OFF, DEFAULTS, ERA_LABEL } from '../songs/setlistConfig';
+import { songKey } from '../songs/resolve';
 import { leadArtist } from '../popularity/import';
 
 // ---------- the test ranges ----------
@@ -43,43 +42,53 @@ export const TEST_RANGES: TestRange[] = [
   { id: 'beginner', label: 'Narrow beginner (G3-A4)', range: { low: 55, high: 69, source: 'test' } },
 ];
 
-// ---------- the views each check reads (update with QWW-46 / QWW-47) ----------
+// ---------- the views each check reads: the tuner's state, ranked by its engine ----------
 
-export type Era = Decade;
+export type Era = EraId;
 export type TempoEnd = 'slow' | 'upbeat';
 /** The gears a logged-out singer has, at either end. History needs a login, so it is left out. */
 export const GEARS = ['difficulty', 'popularity', 'tempo'] as const;
 export type Gear = (typeof GEARS)[number];
-export const ERAS: Era[] = DECADES.map((d) => d.id);
+export const ERAS: Era[] = ERA_IDS;
+/** An era as the tuner labels it, or "any era" with Era off. */
+export const eraName = (era: Era | null) => (era ? ERA_LABEL[era] : 'any era');
 
-const view = (patch: Partial<ResultsView>): ResultsView => ({ ...DEFAULT_VIEW, ...patch });
+const { eras: _eras, ...firstGears } = DEFAULTS;
+/** The tuner as the sheet loads (setlistConfig.ts): Popularity and Difficulty on, the rest reset, Era off. */
+const FIRST: SetlistState = { gears: firstGears, off: [...DEFAULT_OFF], eras: [] };
+/** Every part reset: the base the tempo ends switch Tempo alone on from. */
+const NOTHING_ON: SetlistState = { gears: firstGears, off: [...GEAR_IDS, 'era'], eras: [] };
+
+/** `base` with `gear` switched on at `at`, and only `era` picked (null: Era stays off). */
+function tuned(base: SetlistState, era: Era | null, gear: GearId, at: number): SetlistState {
+  const off: TunerPart[] = base.off.filter((p) => p !== gear && (era === null || p !== 'era'));
+  return { gears: { ...base.gears, [gear]: at }, off, eras: era ? [era] : [] };
+}
+
+const ranked = (p: PreparedSetlist, s: SetlistState): Match[] => rankPrepared(p, { ...s, loggedIn: false }).songs.map((x) => x.match);
 
 export const VIEWS = {
   /** What a logged-out singer sees first. */
-  default: (ms: Match[], r: VocalRange) => viewMatches(ms, view({}), r, 'catalogue'),
+  default: (p: PreparedSetlist) => ranked(p, FIRST),
   /** Difficulty all the way to Locked in. */
-  maxDifficulty: (ms: Match[], r: VocalRange) => viewMatches(ms, view({ difficulty: 1 }), r, 'catalogue'),
-  /** One era picked (null: none picked) and the tempo gear at one end. */
-  eraTempo: (ms: Match[], r: VocalRange, era: Era | null, end: TempoEnd) =>
-    viewMatches(ms, view({ decade: era, tempo: end === 'slow' ? 0 : 1 }), r, 'catalogue'),
-  /** One era (or none) and one gear at one end. */
-  eraGear: (ms: Match[], r: VocalRange, era: Era | null, gear: Gear, at: 0 | 1) =>
-    viewMatches(ms, view({ decade: era, [gear]: at }), r, 'catalogue'),
+  maxDifficulty: (p: PreparedSetlist) => ranked(p, tuned(FIRST, null, 'difficulty', 100)),
+  /**
+   * Tempo alone at one end, in one era (null: Era off): "with Tempo at the slow end, the 20 slowest by effective
+   * tempo" (QWW-54). Popularity and Difficulty are reset so they cannot pull mid songs in.
+   */
+  eraTempo: (p: PreparedSetlist, era: Era | null, end: TempoEnd) => ranked(p, tuned(NOTHING_ON, era, 'tempo', end === 'slow' ? 0 : 100)),
+  /** One era (or none) and one gear at one end, the rest as the sheet loads. */
+  eraGear: (p: PreparedSetlist, era: Era | null, gear: Gear, at: 0 | 100) => ranked(p, tuned(FIRST, era, gear, at)),
 };
 
 /**
  * What the Setlist tuner lists for a logged-out singer who has not touched it (QWW-58): the engine
  * (songs/setlist.ts) with the defaults (songs/setlistConfig.ts), as POST /api/setlist answers it. `prepared` is
- * the range's songs with their places on the gears (prepareCatalogue in server/catalogue.ts).
+ * the range's songs with their places on the gears (prepareCatalogue in server/catalogue.ts). It is
+ * VIEWS.default, so criteria 1, 4, 6 and 9 all grade this one list.
  */
 export function tunerDefaultList(prepared: PreparedSetlist): Match[] {
-  const state = {
-    gears: { difficulty: DEFAULTS.difficulty, history: DEFAULTS.history, popularity: DEFAULTS.popularity, tempo: DEFAULTS.tempo },
-    off: [...DEFAULT_OFF],
-    eras: [...DEFAULTS.eras],
-    loggedIn: false,
-  };
-  return rankPrepared(prepared, state).songs.map((s) => s.match);
+  return VIEWS.default(prepared);
 }
 
 // ---------- facts the script looks up ----------
@@ -97,11 +106,16 @@ export const DEEZER_HIGH_RANK = 600_000;
 const key = (m: Match) => m.track.id.replace(/^cat:/, '');
 const brief = (m: Match) => ({ id: m.track.id, artist: m.track.artist, title: m.track.title, year: m.year });
 
+/** Curly apostrophes as straight ones: "Livin’ la vida loca" and "Livin' La Vida Loca" are one song. */
+const straight = (s: string) => s.replace(/[‘’]/g, "'");
+/** songKey with apostrophes folded; the Billboard list writes them straight. */
+const foldedKey = (artist: string, title: string) => songKey(straight(artist), straight(title));
+
 // ---------- 1. recognisable ----------
 
 export function isRecognisable(m: Match, billboard: Set<string>, facts: SongFacts | undefined): 'billboard' | 'deezer' | null {
   const { artist, title } = m.track;
-  if (billboard.has(songKey(artist, title)) || billboard.has(songKey(leadArtist(artist), title))) return 'billboard';
+  if (billboard.has(foldedKey(artist, title)) || billboard.has(foldedKey(leadArtist(artist), title))) return 'billboard';
   if ((facts?.deezerRank ?? 0) >= DEEZER_HIGH_RANK) return 'deezer';
   return null;
 }
@@ -125,7 +139,7 @@ export function isVersionTitle(title: string): boolean {
 }
 
 /** The same song twice: same lead artist and the same title once version tags are gone. */
-export const sameSongKey = (m: Match) => songKey(leadArtist(m.track.artist), m.track.title);
+export const sameSongKey = (m: Match) => foldedKey(leadArtist(m.track.artist), m.track.title);
 
 // ---------- 2. tempo judge ----------
 
@@ -170,6 +184,38 @@ export function judgePrompt(songs: JudgeSong[]): string {
   return songs.map((s) => `${s.id}. ${s.artist} - ${s.title}${s.year ? ` (${s.year})` : ''}`).join('\n');
 }
 
+/**
+ * `items` in a fixed pseudo-random order, one order per seed (mulberry32). The tempo lists are sorted by stored
+ * tempo, so sending their songs in list order would tell the judge which ones we think are slow. Each run gets
+ * its own seed, so no order is shared by the runs that vote.
+ */
+export function shuffled<T>(items: T[], seed: number): T[] {
+  let a = seed >>> 0;
+  const rand = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [copy[i], copy[j]] = [copy[j]!, copy[i]!];
+  }
+  return copy;
+}
+
+/** Songs per judge request. */
+export const JUDGE_BATCH = 40;
+
+/** What judge run `run` (0, 1, 2) sends: every song once, in the run's own shuffled order, JUDGE_BATCH a request. */
+export function judgeBatches<T>(songs: T[], run: number): T[][] {
+  const order = shuffled(songs, run + 1);
+  const out: T[][] = [];
+  for (let i = 0; i < order.length; i += JUDGE_BATCH) out.push(order.slice(i, i + JUDGE_BATCH));
+  return out;
+}
+
 /** The labels in one reply, by id; ids the reply skipped or mangled are left out (they count as unknown). */
 export function parseJudgeReply(text: string): Map<number, JudgeLabel> {
   const out = new Map<number, JudgeLabel>();
@@ -184,13 +230,22 @@ export function parseJudgeReply(text: string): Map<number, JudgeLabel> {
   return out;
 }
 
-/**
- * Whether a song fits its end of the tempo gear, over every judge run: it fits only when every run
- * gave the end's label. A song the runs disagree on is flaky and counts as a miss.
- */
-export function fitsEnd(labels: JudgeLabel[], end: TempoEnd): { fits: boolean; flaky: boolean } {
-  const flaky = new Set(labels).size > 1;
-  return { fits: labels.length > 0 && labels.every((l) => l === end), flaky };
+// The grading Quinn-Wai set for criterion 2 (QWW-42, 11 Nov 14:45 UTC): every era is graded at both ends,
+// whatever the size of its pool; a song counts when at least 2 of 3 judge runs give the end's label; an end
+// passes when at least 18 of its top 20 count.
+
+/** The judge runs each song gets. */
+export const JUDGE_RUNS = 3;
+/** The runs that must give the end's label for a song to count. */
+export const JUDGE_AGREE = 2;
+/** The songs graded at each end. */
+export const END_TOP = 20;
+/** The songs of the top END_TOP that must count for the end to pass. */
+export const END_PASS = 18;
+
+/** Whether a song counts at its end of the tempo gear: at least JUDGE_AGREE of the runs gave the end's label. */
+export function fitsEnd(labels: JudgeLabel[], end: TempoEnd): boolean {
+  return labels.filter((l) => l === end).length >= JUDGE_AGREE;
 }
 
 // ---------- the checks ----------
@@ -208,12 +263,12 @@ export interface Check {
 
 export interface RangeInput {
   test: TestRange;
-  /** The catalogue's ranked matches for the range, as the API sends them (all=1). */
-  matches: Match[];
+  /** The catalogue's songs that fit the range, with their places on every gear, as POST /api/setlist ranks them. */
+  prepared: PreparedSetlist;
 }
 
 export function checkRecognisable(t: RangeInput, billboard: Set<string>, facts: Map<string, SongFacts>): Check {
-  const top = VIEWS.default(t.matches, t.test.range).slice(0, 20);
+  const top = VIEWS.default(t.prepared).slice(0, 20);
   const misses = top.filter((m) => !isRecognisable(m, billboard, facts.get(m.track.id)));
   const hits = top.length - misses.length;
   return {
@@ -227,15 +282,15 @@ export function checkRecognisable(t: RangeInput, billboard: Set<string>, facts: 
 }
 
 export function checkNeverEmpty(t: RangeInput): Check {
-  const { matches, test } = t;
+  const { prepared, test } = t;
   const notes: string[] = [];
-  const hardest = VIEWS.maxDifficulty(matches, test.range).length;
+  const hardest = VIEWS.maxDifficulty(prepared).length;
   if (hardest < 10) notes.push(`max difficulty: ${hardest} songs`);
   for (const era of [null, ...ERAS]) {
     for (const gear of GEARS) {
-      for (const at of [0, 1] as const) {
-        const n = VIEWS.eraGear(matches, test.range, era, gear, at).length;
-        if (n === 0) notes.push(`${era ?? 'no era'} + ${gear} at ${at}: 0 songs`);
+      for (const at of [0, 100] as const) {
+        const n = VIEWS.eraGear(prepared, era, gear, at).length;
+        if (n === 0) notes.push(`${eraName(era)} + ${gear} at ${at}: 0 songs`);
       }
     }
   }
@@ -250,7 +305,7 @@ export function checkNeverEmpty(t: RangeInput): Check {
 }
 
 export function checkTitles(t: RangeInput): Check {
-  const top = VIEWS.default(t.matches, t.test.range).slice(0, 50);
+  const top = VIEWS.default(t.prepared).slice(0, 50);
   const versions = top.filter((m) => isVersionTitle(m.track.title));
   const seen = new Map<string, Match>();
   const dupes: string[] = [];
@@ -271,7 +326,7 @@ export function checkTitles(t: RangeInput): Check {
 }
 
 export function checkPlay(t: RangeInput, facts: Map<string, SongFacts>): Check {
-  const top = VIEWS.default(t.matches, t.test.range).slice(0, 20);
+  const top = VIEWS.default(t.prepared).slice(0, 20);
   const missing = top.filter((m) => facts.get(m.track.id)?.playable !== true);
   const errors = missing.filter((m) => facts.get(m.track.id)?.playable === 'error').length;
   const ok = top.length - missing.length;
@@ -314,11 +369,12 @@ export interface TempoList {
   songs: Match[];
 }
 
+/** Both ends of every era, and of Era off, for one range. No era is left out, however few songs it has. */
 export function tempoLists(t: RangeInput): TempoList[] {
   const out: TempoList[] = [];
   for (const era of [null, ...ERAS]) {
     for (const end of ['slow', 'upbeat'] as const) {
-      out.push({ range: t.test.id, era, end, songs: VIEWS.eraTempo(t.matches, t.test.range, era, end).slice(0, 20) });
+      out.push({ range: t.test.id, era, end, songs: VIEWS.eraTempo(t.prepared, era, end).slice(0, END_TOP) });
     }
   }
   return out;
@@ -326,25 +382,26 @@ export function tempoLists(t: RangeInput): TempoList[] {
 
 export interface TempoResult {
   list: TempoList;
-  top10: number;
-  top20: number;
-  flaky: number;
+  /** The songs of the top END_TOP that count (fitsEnd). */
+  counted: number;
+  /** The ones that do not, as "Artist - Title (the runs' labels)". */
+  missed: string[];
   pass: boolean;
 }
 
 /**
- * 10/10 of the top 10 and 18/20 of the top 20 fit. A list shorter than 20 is held to the same share:
- * all of its first ten, and all but one in ten of the rest (the details name short lists). An empty list fails.
+ * An end passes when at least END_PASS of its top END_TOP count. There is no minimum pool size: a thin era is
+ * graded like the rest, so one whose list is short, or filled out with songs of the wrong feel, fails.
  */
 export function judgeList(list: TempoList, labels: Map<string, JudgeLabel[]>): TempoResult {
-  const fits = list.songs.map((m) => fitsEnd(labels.get(key(m)) ?? [], list.end));
-  const n10 = Math.min(10, fits.length);
-  const n20 = fits.length;
-  const top10 = fits.slice(0, 10).filter((f) => f.fits).length;
-  const top20 = fits.filter((f) => f.fits).length;
-  const flaky = fits.filter((f) => f.flaky).length;
-  // An empty list fails here too, not only under criterion 3.
-  return { list, top10, top20, flaky, pass: n20 > 0 && top10 === n10 && top20 >= Math.ceil(n20 * 0.9) };
+  const missed: string[] = [];
+  let counted = 0;
+  for (const m of list.songs.slice(0, END_TOP)) {
+    const ls = labels.get(key(m)) ?? [];
+    if (fitsEnd(ls, list.end)) counted++;
+    else missed.push(`${m.track.artist} - ${m.track.title} (${ls.join(', ') || 'no labels'})`);
+  }
+  return { list, counted, missed, pass: counted >= END_PASS };
 }
 
 export function checkTempo(range: string, results: TempoResult[]): Check {
@@ -357,7 +414,9 @@ export function checkTempo(range: string, results: TempoResult[]): Check {
     value: `${mine.length - failed.length}/${mine.length} era-ends`,
     want: 'all',
     notes: failed.map(
-      (r) => `${r.list.era ?? 'any era'} ${r.list.end}${r.list.songs.length < 20 ? ` (only ${r.list.songs.length} songs)` : ''}: top 10 ${r.top10}/${Math.min(10, r.list.songs.length)}, top 20 ${r.top20}/${r.list.songs.length}${r.flaky ? `, ${r.flaky} flaky` : ''}`,
+      (r) =>
+        `${eraName(r.list.era)} ${r.list.end}: ${r.counted}/${END_TOP} count${r.list.songs.length < END_TOP ? ` (only ${r.list.songs.length} songs in the pool)` : ''}` +
+        (r.missed.length ? `. Not counted: ${r.missed.join('; ')}` : ''),
     ),
   };
 }
@@ -373,36 +432,50 @@ export function judgeSongs(lists: TempoList[]): { key: string; song: Omit<JudgeS
 
 const CRITERIA: Record<Check['criterion'], string> = {
   1: '1. Recognisable (top 20)',
-  2: '2. Tempo ends per era (LLM judge x3)',
+  2: '2. Tempo ends, every era (judge: 2 of 3 runs)',
   3: '3. Never empty',
   4: '4. Titles (top 50)',
   6: '6. Play (top 20 with a Deezer preview)',
   9: '9. Sung as written (top 20)',
 };
 
+/** The lists Quinn-Wai checks by ear, criterion 2's sampled human check: the ’90s for F2 to C5, as QWW-54 proposed. */
+export const HAND_CHECK: { range: string; era: Era } = { range: 'low-male', era: 's90' };
+
+export interface HandCheck {
+  range: string;
+  era: Era;
+  ends: {
+    end: TempoEnd;
+    songs: { artist: string; title: string; year?: number; bpm?: number; labels: JudgeLabel[]; counts: boolean }[];
+  }[];
+}
+
+/** Both ends of the HAND_CHECK era, as graded: each song with the judge's labels and whether it counts. */
+export function handCheck(lists: TempoList[], labels: Map<string, JudgeLabel[]>): HandCheck {
+  const ends = (['slow', 'upbeat'] as const).map((end) => {
+    const list = lists.find((l) => l.range === HAND_CHECK.range && l.era === HAND_CHECK.era && l.end === end);
+    const songs = (list?.songs ?? []).map((m) => {
+      const ls = labels.get(key(m)) ?? [];
+      return { artist: m.track.artist, title: m.track.title, year: m.year, bpm: m.tempo, labels: ls, counts: fitsEnd(ls, end) };
+    });
+    return { end, songs };
+  });
+  return { ...HAND_CHECK, ends };
+}
+
 export interface Report {
   title: string;
   checks: Check[];
   top10: { range: TestRange; songs: ReturnType<typeof brief>[] }[];
-  tempoSample: { artist: string; title: string; year?: number; bpm?: number; era: string; end: TempoEnd; labels: JudgeLabel[] }[];
+  /** Null when the judge did not run. */
+  handCheck: HandCheck | null;
   /** Notes about the run (which database, model, what was skipped). */
   meta: string[];
 }
 
 export function topTen(t: RangeInput) {
-  return VIEWS.default(t.matches, t.test.range).slice(0, 10).map(brief);
-}
-
-/** A fixed pseudo-random sample, so two runs on the same data pick the same songs for the human check. */
-export function sample<T>(items: T[], n: number, seed = 52): T[] {
-  let s = seed;
-  const rand = () => ((s = (s * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [copy[i], copy[j]] = [copy[j]!, copy[i]!];
-  }
-  return copy.slice(0, n);
+  return VIEWS.default(t.prepared).slice(0, 10).map(brief);
 }
 
 /**
@@ -429,7 +502,7 @@ export function toMarkdown(r: Report): string {
     `|---|${ranges.map(() => '---').join('|')}|`,
     ...crits.map((c) => `| ${CRITERIA[c]} | ${ranges.map((id) => cell(r.checks.find((x) => x.criterion === c && x.range === id))).join(' | ')} |`),
     '',
-    'Targets: 1 at least 15/20; 2 every era and end at 10/10 of the top 10 and 18/20 of the top 20; 3 max difficulty at least 10 and no empty era + gear combination; 4 zero version titles and duplicates; 6 at least 90%; 9 at least 15 of the top 20 sung as written (the tuner\'s list, logged out, default gears).',
+    `Targets: 1 at least 15/20; 2 every era (and Era off), at both ends, has at least ${END_PASS} of its top ${END_TOP} counting, a song counting when at least ${JUDGE_AGREE} of ${JUDGE_RUNS} judge runs give the end's label; 3 max difficulty at least 10 and no empty era + gear combination; 4 zero version titles and duplicates; 6 at least 90%; 9 at least 15 of the top 20 sung as written (the tuner's list, logged out, default gears).`,
   ];
   const failed = r.checks.filter((c) => !c.pass && c.notes.length);
   if (failed.length) {
@@ -445,9 +518,18 @@ export function toMarkdown(r: Report): string {
   for (const t of r.top10) {
     lines.push(`**${t.range.label}**`, '', ...t.songs.map((s, i) => `${i + 1}. ${s.artist} - ${s.title}${s.year ? ` (${s.year})` : ''}`), '');
   }
-  if (r.tempoSample.length) {
-    lines.push('### Tempo: 20 songs for a human check', '', '| Song | Year | Era list | End | Stored bpm | Judge (3 runs) |', '|---|---|---|---|---|---|');
-    for (const s of r.tempoSample) lines.push(`| ${s.artist} - ${s.title} | ${s.year ?? ''} | ${s.era} | ${s.end} | ${s.bpm ?? ''} | ${s.labels.join(', ')} |`);
+  if (r.handCheck) {
+    const h = r.handCheck;
+    const label = TEST_RANGES.find((t) => t.id === h.range)?.label ?? h.range;
+    lines.push(`### Tempo hand check: ${label}, ${eraName(h.era)}`, '');
+    for (const { end, songs } of h.ends) {
+      lines.push(`**${end === 'slow' ? 'Slow' : 'Upbeat'} end, top ${songs.length}: ${songs.filter((s) => s.counts).length} count**`, '');
+      lines.push(`| # | Song | Year | Effective bpm | Judge (${JUDGE_RUNS} runs) | Counts |`, '|---|---|---|---|---|---|');
+      songs.forEach((s, i) =>
+        lines.push(`| ${i + 1} | ${s.artist} - ${s.title} | ${s.year ?? ''} | ${s.bpm === undefined ? '' : Math.round(s.bpm)} | ${s.labels.join(', ')} | ${s.counts ? 'yes' : '**no**'} |`),
+      );
+      lines.push('');
+    }
   }
   return lines.join('\n') + '\n';
 }

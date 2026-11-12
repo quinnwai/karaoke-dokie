@@ -169,4 +169,14 @@ CREATE TABLE IF NOT EXISTS song_canonical (
   source_artist TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS song_canonical_canonical ON song_canonical (canonical_key);
+-- Deezer's genres per song (QWW-61), written by npm run genres:deezer: the genres of the album of the song's Deezer track
+-- (song_deezer.deezer_id), joined by ", ". A null genres is a miss (the track or album is gone, or the album lists no
+-- genre), kept so a rerun skips it for a while. The genre shown is USDB's when the song has one (src/lib/genres/genres.ts).
+CREATE TABLE IF NOT EXISTS song_genre (
+  song_key TEXT PRIMARY KEY,
+  genres TEXT,
+  album_id BIGINT,
+  source TEXT NOT NULL,
+  checked_at TEXT NOT NULL
+);
 `;

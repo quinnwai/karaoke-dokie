@@ -5,16 +5,20 @@
 // does the rest, and a run that has nothing left to do writes nothing.
 //
 // Usage: npm run tempo:feel [-- --file data/tempo-feel.json] [--apply] [--production --confirm-database <name>]
-//                          [--unlabeled out.json [--top 3000 | --served] [--feel mid]]
+//                          [--backup song_feel_bak_<name>] [--unlabeled out.json [--top 3000 | --served] [--feel mid]]
 //   --apply            write the rows. Only to karaoke_pr4_preview, unless --production is given together with
 //                      --confirm-database <the database's own name> (neondb); it refuses either flag alone.
+//   --backup TABLE     copy song_feel into TABLE (song_feel_bak_ and a name) before anything is written, so the old labels
+//                      can be put back. Alone it only makes the copy and stops; with --apply it goes on to write. It never
+//                      overwrites a table that exists, and it is a write, so it takes the same --production flags as --apply.
 //   --unlabeled FILE   write the catalogue songs that have no label (in the file or in song_feel) to FILE, as
 //                      [{ id: songKey, artist, title, year }], for the labellers: the first --top of the catalogue in its
 //                      order (most popular first), or with --served every song a logged-out singer is shown in any of the
 //                      release harness' five test ranges or in F2 to C5 and E2 to E5 (the best 1,000 of each), which are the
 //                      only songs that can reach the top 20 at an end of the Tempo gear there. With --feel mid (or slow, upbeat)
 //                      it lists the songs that already carry that label instead, for a second look.
-// Needs DATABASE_URL. Reads with SELECT only; --apply creates song_feel if missing and writes its rows, nothing else.
+// Needs DATABASE_URL. Reads with SELECT only; --apply creates song_feel if missing and writes its rows, and --backup creates
+// its backup table, nothing else.
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
@@ -22,7 +26,7 @@ import type { VocalRange } from '../src/lib/contracts';
 import { catalogueTracks, loadCatalogue, recommendCatalogue } from '../src/lib/server/catalogue';
 import { neonQuery } from '../src/lib/server/getStore';
 import { createPostgresStore, schemaStatements } from '../src/lib/server/postgresStore';
-import { isMissingTable } from '../src/lib/server/songFeel';
+import { backupSongFeel, backupTableRefusal, isMissingTable } from '../src/lib/server/songFeel';
 import type { SongFeelRecord } from '../src/lib/server/store';
 import { productionSongDeps } from '../src/lib/server/wiring';
 import { isFeel } from '../src/lib/tempo/feel';
@@ -39,6 +43,7 @@ async function main() {
     options: {
       file: { type: 'string', default: 'data/tempo-feel.json' },
       apply: { type: 'boolean' },
+      backup: { type: 'string' },
       production: { type: 'boolean' },
       'confirm-database': { type: 'string' },
       unlabeled: { type: 'string' },
@@ -52,13 +57,29 @@ async function main() {
   if (!Number.isInteger(top) || top < 1) throw new Error('--top must be a whole number, 1 or more');
   if (values.feel !== undefined && !isFeel(values.feel)) throw new Error('--feel must be slow, mid or upbeat');
   if ((values.feel !== undefined || values.served) && !values.unlabeled) throw new Error('--feel and --served go with --unlabeled <file>');
+  if (values.backup !== undefined) {
+    const bad = backupTableRefusal(values.backup);
+    if (bad) throw new Error(bad);
+  }
   const url = process.env.DATABASE_URL?.trim();
   if (!url) throw new Error('Set DATABASE_URL');
   const query = neonQuery(url);
   const db = String((await query('SELECT current_database() AS db'))[0]?.db);
-  console.log(`Database: ${db}${values.apply ? ' (writing song_feel)' : ' (dry run: nothing is written)'}`);
-  const refusal = values.apply ? writeRefusal(db, { production: values.production, confirmDatabase: values['confirm-database'] }) : null;
+  const writes = Boolean(values.apply || values.backup);
+  console.log(`Database: ${db}${values.apply ? ' (writing song_feel)' : values.backup ? ` (backing up song_feel to ${values.backup}; nothing else is written)` : ' (dry run: nothing is written)'}`);
+  const refusal = writes ? writeRefusal(db, { production: values.production, confirmDatabase: values['confirm-database'] }) : null;
   if (refusal) throw new Error(refusal);
+  if (values.backup) {
+    const b = await backupSongFeel(query, values.backup);
+    console.log(
+      b.status === 'nothing-to-back-up'
+        ? 'song_feel does not exist here yet: nothing to back up.'
+        : b.status === 'kept'
+          ? `Backup ${values.backup} already exists (${b.rows} rows): kept as it is, not overwritten.`
+          : `Backed up song_feel to ${values.backup}: ${b.rows} rows.`,
+    );
+    if (!values.apply) return;
+  }
 
   const store = createPostgresStore(query, { autoMigrate: false }); // a dry run must not create anything
   // --apply creates only the table it writes (its statement in db/schema.sql); the rest of the app's migration is not this step's.
@@ -115,7 +136,7 @@ async function main() {
   }
 
   if (!values.apply) {
-    console.log(`\nDry run: nothing written. Add --apply to write ${toWrite.length} rows${db === SCRATCH_DB ? '' : ` (to ${db}, with --production --confirm-database ${db})`}.`);
+    console.log(`\nDry run: nothing written. Add --apply to write ${toWrite.length} rows${db === SCRATCH_DB ? '' : ` (to ${db}, with --production --confirm-database ${db}; copy song_feel first with --backup song_feel_bak_<name>)`}.`);
     return;
   }
   for (let i = 0; i < toWrite.length; i += WRITE_BATCH) {
