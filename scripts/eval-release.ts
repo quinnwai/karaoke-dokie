@@ -54,9 +54,10 @@ import {
 } from '../src/lib/eval/release';
 import { isProvider, PROVIDER_NAMES, PROVIDERS } from '../src/lib/moods/providers';
 import { billboardCharts } from '../src/lib/popularity/import';
-import { catalogueTracks, loadCatalogue, prepareCatalogue } from '../src/lib/server/catalogue';
+import { catalogueTracks, loadCatalogue, prepareCatalogue, type CatalogueTrack } from '../src/lib/server/catalogue';
 import { neonQuery } from '../src/lib/server/getStore';
 import { createPostgresStore, type QueryFn } from '../src/lib/server/postgresStore';
+import type { Store } from '../src/lib/server/store';
 import { productionSongDeps } from '../src/lib/server/wiring';
 
 const PARALLEL = 4;
@@ -135,6 +136,25 @@ export function loadHarnessCatalogue(store: Parameters<typeof loadCatalogue>[0])
   return loadCatalogue(store, undefined, { canonical: true });
 }
 
+/**
+ * What main() grades: the folded catalogue (loadHarnessCatalogue), and each test range's songs as POST /api/setlist
+ * ranks them for a logged-out singer (the range filter, then every song's place on every gear). Stops when the clean
+ * titles cannot be read, so no criterion grades the titles as stored.
+ */
+export async function harnessInputs(store: Store): Promise<{ tracks: CatalogueTrack[]; inputs: RangeInput[] }> {
+  const entries = await loadHarnessCatalogue(store);
+  // The app retries a failed read of the clean titles within a minute; a graded run must not use the stored ones.
+  if (entries.degraded) throw new Error('Could not read song_canonical (the warning above says why), so the titles would be as stored, not as the app shows them.');
+  const tracks = catalogueTracks(entries);
+  const deps = productionSongDeps(store, false);
+  return { tracks, inputs: TEST_RANGES.map((test) => ({ test, prepared: prepareCatalogue(tracks, test.range, deps).prepared })) };
+}
+
+/** The checks that need no outside service, on every range: 1 recognisable, 3 never empty, 4 titles, 9 sung as written. */
+export function offlineChecks(inputs: RangeInput[], billboard: Set<string>, facts: Map<string, SongFacts>): Check[] {
+  return inputs.flatMap((t) => [checkRecognisable(t, billboard, facts), checkNeverEmpty(t), checkTitles(t), checkSungAsWritten(t.test, tunerDefaultList(t.prepared))]);
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -150,19 +170,12 @@ async function main() {
   const query = selectOnly(neonQuery(databaseUrl(db)));
   const store = createPostgresStore(query, { autoMigrate: false });
 
-  const [entries, deezer, billboardCsv] = await Promise.all([
-    loadHarnessCatalogue(store),
+  const [{ tracks, inputs }, deezer, billboardCsv] = await Promise.all([
+    harnessInputs(store),
     store.listSongDeezer(),
     readFile(new URL('../data/billboard-year-end.csv', import.meta.url), 'utf8'),
   ]);
-  // The app retries a failed read of the clean titles within a minute; a graded run must not use the stored ones.
-  if (entries.degraded) throw new Error('Could not read song_canonical (the warning above says why), so the titles would be as stored, not as the app shows them.');
   const billboard = new Set(billboardCharts(billboardCsv).keys());
-  const tracks = catalogueTracks(entries);
-  const deps = productionSongDeps(store, false);
-
-  // The songs POST /api/setlist ranks for a logged-out singer: the range filter, then every song's place on every gear.
-  const inputs: RangeInput[] = TEST_RANGES.map((test) => ({ test, prepared: prepareCatalogue(tracks, test.range, deps).prepared }));
 
   const facts = new Map<string, SongFacts>();
   const fact = (id: string) => facts.get(id) ?? (facts.set(id, {}), facts.get(id)!);
@@ -172,14 +185,11 @@ async function main() {
   }
 
   const meta = [
-    `Database: ${db} (${entries.length} catalogue songs, one row per song with its clean title, as the app serves it), code: this checkout, logged out.`,
+    `Database: ${db} (${tracks.length} catalogue songs, one row per song with its clean title, as the app serves it), code: this checkout, logged out.`,
     'Lists: the tuner engine (POST /api/setlist). Criteria 1, 4, 6 and 9 read the list as the tuner opens (Popularity and Difficulty on); criterion 2 reads each era with Tempo alone at each end.',
     'Ranges: ' + TEST_RANGES.map((t) => t.label).join('; ') + '.',
   ];
-  const checks: Check[] = [];
-  for (const t of inputs) {
-    checks.push(checkRecognisable(t, billboard, facts), checkNeverEmpty(t), checkTitles(t), checkSungAsWritten(t.test, tunerDefaultList(t.prepared)));
-  }
+  const checks: Check[] = offlineChecks(inputs, billboard, facts);
 
   // 6. Play: ask Deezer about every top-20 song once.
   if (!values['skip-play']) {

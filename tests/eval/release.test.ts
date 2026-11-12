@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ERA_IDS, type EraId, type Match, type SongRange } from '../../src/lib/contracts';
 import {
   checkNeverEmpty,
@@ -30,12 +30,11 @@ import {
   verdict,
   VIEWS,
 } from '../../src/lib/eval/release';
-import { loadHarnessCatalogue, selectOnly } from '../../scripts/eval-release';
-import { catalogueTracks, loadCatalogue, prepareCatalogue } from '../../src/lib/server/catalogue';
+import { harnessInputs, loadHarnessCatalogue, offlineChecks, selectOnly } from '../../scripts/eval-release';
+import { loadCatalogue } from '../../src/lib/server/catalogue';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
 import { setlistFor } from '../../src/lib/server/setlistService';
 import type { SongCanonical } from '../../src/lib/server/store';
-import { productionSongDeps } from '../../src/lib/server/wiring';
 import { prepareSetlist } from '../../src/lib/songs/setlist';
 import { DEFAULT_OFF, DEFAULTS } from '../../src/lib/songs/setlistConfig';
 import { songKey } from '../../src/lib/songs/resolve';
@@ -208,10 +207,14 @@ describe('the catalogue the harness grades (QWW-49)', () => {
     await store.putSongTempo(rows.map((r, i) => ({ key: r.key, deezerBpm: [68, 70, 100, 150][i]! })));
     await store.putSongFeel(rows.map((r, i) => ({ key: r.key, feel: (['slow', 'slow', 'mid', 'upbeat'] as const)[i]!, source: 'test' })));
 
-    // As main() builds them: the folded catalogue, then each of the nine ranges' songs as the tuner's engine holds them.
-    const tracks = catalogueTracks(await loadHarnessCatalogue(store));
-    const deps = productionSongDeps(store, false);
-    const lists = TEST_RANGES.flatMap((test) => tempoLists({ test, prepared: prepareCatalogue(tracks, test.range, deps).prepared }));
+    // What main() grades: the folded catalogue, then each of the nine ranges' songs as the tuner's engine holds them.
+    const { tracks, inputs } = await harnessInputs(store);
+    expect(tracks).toHaveLength(3);
+    expect(inputs.map((t) => t.test.id)).toEqual(TEST_RANGES.map((t) => t.id));
+    expect(TEST_RANGES).toHaveLength(9);
+    const offline = offlineChecks(inputs, new Set(), new Map());
+    for (const t of TEST_RANGES) expect(offline.filter((c) => c.range === t.id).map((c) => c.criterion)).toEqual([1, 3, 4, 9]);
+    const lists = inputs.flatMap(tempoLists);
     expect(new Set(lists.map((l) => l.range))).toEqual(new Set(TEST_RANGES.map((t) => t.id)));
     for (const l of lists) for (const m of l.songs) expect(m.track.title).not.toMatch(/I Don't Wanna|Album Version/);
     const shown = (end: 'slow' | 'upbeat') => lists.find((l) => l.range === 'low-male' && l.era === null && l.end === end)!.songs.map((m) => `${m.track.artist} - ${m.track.title}`);
@@ -224,6 +227,19 @@ describe('the catalogue the harness grades (QWW-49)', () => {
     const lowMale = checkTempo('low-male', lists.map((l) => judgeList(l, labels)));
     // Three songs is a thin pool: graded, and short of 18.
     expect(lowMale.notes).toContain("any era slow: 1/20 count (only 3 songs in the pool). Not counted: 10cc - Dreadlock Holiday (mid, upbeat, upbeat); Toto - Africa (mid, upbeat, upbeat)");
+  });
+
+  it('stops the run when the clean titles cannot be read, rather than grade the titles as stored', async () => {
+    const store = createMemoryStore();
+    const row = stored('Toto', 'Africa');
+    await store.putSongRange(row.key, { range: row.range, log: row.log });
+    const broken = { ...store, getSongCanonical: async (): Promise<Map<string, SongCanonical>> => Promise.reject(new Error('song_canonical is unreadable')) };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(harnessInputs(broken)).rejects.toThrow(/Could not read song_canonical/);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -454,11 +470,12 @@ describe('report', () => {
   });
 
   it("lists the ’90s slow and upbeat top 20 for F2 to C5, as graded, for Quinn-Wai's hand check", () => {
-    const songs = list(300);
-    const lowMale = TEST_RANGES.find((t) => t.id === HAND_CHECK.range)!;
-    const lists = TEST_RANGES.flatMap((t) => tempoLists(input(songs, t)));
-    const h = handCheck(lists, votes(songs, ['slow', 'mid', 'slow']));
-    expect(lowMale.range).toMatchObject({ low: 41, high: 72 }); // F2 to C5, one of the nine ranges
+    // Each range gets songs of its own, so the hand check can only show low male's.
+    const pool = (t: TestRange) => Array.from({ length: 300 }, (_, i) => song(i, { title: `${t.id} ${i}` }));
+    const lists = TEST_RANGES.flatMap((t) => tempoLists(input(pool(t), t)));
+    const h = handCheck(lists, votes(TEST_RANGES.flatMap(pool), ['slow', 'mid', 'slow']));
+    expect(TEST_RANGES.find((t) => t.id === HAND_CHECK.range)!.range).toMatchObject({ low: 41, high: 72 }); // F2 to C5, one of the nine
+    expect(h.ends.every((e) => e.songs.every((s) => s.title.startsWith('low-male ')))).toBe(true);
     expect(h).toMatchObject({ range: 'low-male', era: 's90' });
     expect(h.ends.map((e) => [e.end, e.songs.length])).toEqual([
       ['slow', 20],
