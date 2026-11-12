@@ -1,4 +1,5 @@
 import type { Mood, PostHogSettings } from '../contracts';
+import { POSTHOG_PROXY_PATH } from '../postHogProxy';
 import { parseShippedMoods } from './moods';
 import { pickStoreKind } from './getStore';
 import type { SpotifyConfig } from './spotify';
@@ -69,13 +70,42 @@ export function pickSongsOn(env: Record<string, string | undefined>): boolean {
  * PostHog as the event log's second sink (QWW-51): NEXT_PUBLIC_POSTHOG_KEY (the project token) and
  * NEXT_PUBLIC_POSTHOG_HOST (the region's ingest address, e.g. https://us.i.posthog.com). Either missing or malformed
  * means null, and the app records to our own log alone. The key must be a project token ("phc_..."): a personal API
- * key ("phx_...") is a secret and is never passed to a browser. The host must be https; a path is kept, for a reverse
- * proxy (https://example.com/ingest), and a query or fragment is dropped. Like pickSongsOn it is read
- * per request by app/page.tsx and handed to the screen, so a build does not have to be redone to change it.
+ * key ("phx_...") is a secret and is never passed to a browser. The host must be https (or http on this machine, a
+ * stand-in for PostHog in e2e); only its origin counts, so a path, query or fragment is dropped.
+ *
+ * The browser never calls that host (QWW-63): blockers refuse *.posthog.com, so the screen sends to our own path
+ * (POSTHOG_PROXY_PATH) and app/roadie forwards it to the host (postHogUpstream). Like pickSongsOn both are read
+ * per request, so a build does not have to be redone to change them.
  * The environment (VERCEL_ENV: production, preview, else local) tags every event: previews and production share one
  * PostHog project, and the release funnel must leave out preview and local traffic.
  */
 export function postHogSettings(env: Record<string, string | undefined>): PostHogSettings | null {
+  const posthog = readPostHog(env);
+  if (!posthog) return null;
+  const environment = env.VERCEL_ENV === 'production' || env.VERCEL_ENV === 'preview' ? env.VERCEL_ENV : 'local';
+  return { key: posthog.key, host: POSTHOG_PROXY_PATH, uiHost: posthog.origin.replace('.i.posthog.com', '.posthog.com'), environment };
+}
+
+/** The two PostHog origins our proxy forwards to (QWW-63): PostHog serves its scripts and config from a separate asset host. */
+export interface PostHogUpstream {
+  api: string;
+  assets: string;
+}
+
+/**
+ * Where the proxy under app/roadie forwards to, from the same two variables as postHogSettings; null while PostHog is
+ * off there (no key, or no usable host), and the proxy answers 404 so it is not a relay for anything else.
+ */
+export function postHogUpstream(env: Record<string, string | undefined>): PostHogUpstream | null {
+  const posthog = readPostHog(env);
+  if (!posthog) return null;
+  // PostHog's cloud has an asset host per region (us-assets.i.posthog.com); any other host serves both itself.
+  return { api: posthog.origin, assets: posthog.origin.replace(/^https:\/\/(us|eu)\.i\.posthog\.com$/, 'https://$1-assets.i.posthog.com') };
+}
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+function readPostHog(env: Record<string, string | undefined>): { key: string; origin: string } | null {
   const key = env.NEXT_PUBLIC_POSTHOG_KEY?.trim() ?? '';
   if (!/^phc_[A-Za-z0-9_-]+$/.test(key)) return null;
   let host: URL;
@@ -84,9 +114,8 @@ export function postHogSettings(env: Record<string, string | undefined>): PostHo
   } catch {
     return null;
   }
-  if (host.protocol !== 'https:') return null;
-  const environment = env.VERCEL_ENV === 'production' || env.VERCEL_ENV === 'preview' ? env.VERCEL_ENV : 'local';
-  return { key, host: host.origin + host.pathname.replace(/\/+$/, ''), environment };
+  if (host.protocol !== 'https:' && !(host.protocol === 'http:' && LOOPBACK.has(host.hostname))) return null;
+  return { key, origin: host.origin };
 }
 
 /**

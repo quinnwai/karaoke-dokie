@@ -8,6 +8,7 @@ import { KaraokeApp } from '../../src/components/KaraokeApp';
 import type { Api } from '../../src/lib/client/api';
 import type { Mic } from '../../src/lib/client/mic';
 import type { EventsRequest, MeResponse, PostHogSettings, VocalRange } from '../../src/lib/contracts';
+import { POSTHOG_PROXY_PATH } from '../../src/lib/postHogProxy';
 import { allMatches, knownSongs, me, recommendationsPage } from '../fixtures/screen';
 
 const posthog = vi.hoisted(() => ({
@@ -18,7 +19,7 @@ const posthog = vi.hoisted(() => ({
 }));
 vi.mock('posthog-js', () => ({ default: posthog }));
 
-const SETTINGS: PostHogSettings = { key: 'phc_testtoken', host: 'https://us.i.posthog.com', environment: 'production' };
+const SETTINGS: PostHogSettings = { key: 'phc_testtoken', host: POSTHOG_PROXY_PATH, uiHost: 'https://us.posthog.com', environment: 'production' };
 
 function fakeApi(user: MeResponse | null) {
   let current = user;
@@ -67,7 +68,9 @@ describe('KaraokeApp with PostHog', () => {
     expect(posthog.init).toHaveBeenCalledTimes(1);
     const [token, config] = posthog.init.mock.calls[0]!;
     expect(token).toBe('phc_testtoken');
-    expect(config.api_host).toBe('https://us.i.posthog.com');
+    // Our own origin, not PostHog's: a blocker that refuses *.posthog.com cannot hide it (QWW-63).
+    expect(config.api_host).toBe(POSTHOG_PROXY_PATH);
+    expect(config.ui_host).toBe('https://us.posthog.com');
     // The device's own random id, the one the event log keeps, is the distinct id.
     const deviceId = localStorage.getItem('kd.anonId')!;
     expect(deviceId).toMatch(/^[A-Za-z0-9-]{8,64}$/);

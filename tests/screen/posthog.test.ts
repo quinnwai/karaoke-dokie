@@ -9,9 +9,10 @@ import { createTracker } from '../../src/lib/client/events';
 import { beforeSend, createPostHogSink, postHogConfig, type PostHogClient } from '../../src/lib/client/posthog';
 import { EVENT_NAME, isForbiddenProp, PROP_KEY } from '../../src/lib/eventRules';
 import { EVENT, POSTHOG_PROPS } from '../../src/lib/eventNames';
+import { POSTHOG_PROXY_PATH } from '../../src/lib/postHogProxy';
 
 const ANON = '0f8fad5b-d9cb-469f-a165-70867728950e';
-const SETTINGS: PostHogSettings = { key: 'phc_testtoken', host: 'https://us.i.posthog.com', environment: 'preview' };
+const SETTINGS: PostHogSettings = { key: 'phc_testtoken', host: POSTHOG_PROXY_PATH, uiHost: 'https://us.posthog.com', environment: 'preview' };
 const T0 = Date.parse('2026-11-10T12:00:00.000Z');
 
 /** A posthog-js that records what it is asked, and answers like the real one where the sink looks. */
@@ -46,8 +47,11 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 describe('postHogConfig: the privacy-relevant choices', () => {
   const config = postHogConfig(SETTINGS, ANON);
 
-  it('sends to the configured host with the device id as the distinct id, and keeps nothing on the device', () => {
-    expect(config.api_host).toBe('https://us.i.posthog.com');
+  it('sends to our own origin, not to PostHog (QWW-63), with the device id as the distinct id, and keeps nothing on the device', () => {
+    // A path on this origin: ad and privacy blockers refuse *.posthog.com, and nothing here may name another host.
+    expect(config.api_host).toBe(POSTHOG_PROXY_PATH);
+    expect(config.api_host).toMatch(/^\/[^/]/);
+    expect(config.ui_host).toBe('https://us.posthog.com');
     expect(config.bootstrap).toEqual({ distinctID: ANON });
     expect(config.persistence).toBe('memory');
     expect(config.person_profiles).toBe('identified_only');
@@ -67,6 +71,16 @@ describe('postHogConfig: the privacy-relevant choices', () => {
       disable_conversations: true,
       disable_web_experiments: true,
     });
+  });
+
+  it('renames the recorder\'s file on our origin, the one name the block lists match under any path, and nothing else', () => {
+    const rewrite = (path: string) => config.rewriteRequestPath!(new URL(`https://app.test${path}?v=1.447.7`));
+    expect(rewrite(`${POSTHOG_PROXY_PATH}/static/1.447.7/posthog-recorder.js`).pathname).toBe(`${POSTHOG_PROXY_PATH}/static/1.447.7/reel.js`);
+    expect(rewrite(`${POSTHOG_PROXY_PATH}/static/posthog-recorder.js`).pathname).toBe(`${POSTHOG_PROXY_PATH}/static/reel.js`);
+    expect(rewrite(`${POSTHOG_PROXY_PATH}/static/posthog-recorder.js`).search).toBe('?v=1.447.7');
+    for (const path of ['/e/', '/s/', '/flags/', '/array/phc_x/config.js', '/static/1.447.7/lazy-recorder.js', '/static/1.447.7/web-vitals-with-attribution.js']) {
+      expect(rewrite(`${POSTHOG_PROXY_PATH}${path}`).pathname, path).toBe(`${POSTHOG_PROXY_PATH}${path}`);
+    }
   });
 
   it('masks inputs in the replay, and starts it off', () => {

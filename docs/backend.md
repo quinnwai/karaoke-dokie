@@ -55,7 +55,7 @@ ran out of budget (a first visit to a very large library), `all=1` returns `comp
 | `EVENTS` | `on` or `off`: whether `POST /api/events` stores beta events. Unset or blank, it is on only when `NODE_ENV=production`, `SPOTIFY_MOCK` is not `1` and the store is Postgres, so tests, e2e and local dev collect nothing. Any other value counts as off |
 | `DUETS_AND_MOODS` | `on` shows duets and moods on screen; unset, blank or any other value (`1`, `true`, a typo) hides them (QWW-43). Off, the four recommendation responses (`/api/recommendations` and `/api/catalogue/recommendations`, paged or `all=1`) carry no `moods` and no duet markers (`range.duet`, `range.parts`, `part`, `partSinger`), so the Duets and mood chips, the "Duet: take ..." lines and the song-page mood pills never appear. It is applied after ranking (`src/lib/server/features.ts`), so the songs and their order are the same either way; a duet is still scored on the part that fits the singer |
 | `MOODS_SHIPPED` | Comma-separated moods (`upbeat`, `heartfelt`) allowed on screen as chips, while `DUETS_AND_MOODS=on`. Set a mood here only after it passes the QWW-11 precision gate (`npm run moods:report`). Unset = no mood chips |
-| `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | PostHog as the event log's second sink (QWW-51). The key is the project token (`phc_...`, public by design; a personal API key is refused), the host the region's ingest address (`https://us.i.posthog.com` or `https://eu.i.posthog.com`; https only, and a reverse proxy's path is kept). Either missing or malformed and the app records to our own log alone. Read per request by `app/page.tsx` (`postHogSettings` in `src/lib/server/config.ts`) and handed to the screen. `VERCEL_ENV` (set by Vercel) tags every event `production`, `preview` or, anywhere else, `local` |
+| `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | PostHog as the event log's second sink (QWW-51). The key is the project token (`phc_...`, public by design; a personal API key is refused), the host PostHog's own ingest address (`https://us.i.posthog.com` or `https://eu.i.posthog.com`; https only, and only its origin counts). The browser never calls that host: the screen sends to our own `/roadie` and the route under `app/roadie` forwards it there (QWW-63), so the host says where that route forwards to, and its region picks the asset host too. Either missing or malformed and the app records to our own log alone, and `/roadie` answers 404. Read per request by `app/page.tsx` and `app/roadie` (`postHogSettings` and `postHogUpstream` in `src/lib/server/config.ts`). `VERCEL_ENV` (set by Vercel) tags every event `production`, `preview` or, anywhere else, `local` |
 | `PICK_SONGS` | `on` shows "or pick songs you sing well" on the title screen and "or use songs from your Spotify" under the range; unset, blank or any other value hides both (QWW-55: one onboarding flow for the first release; the Spotify logo on the list is then the one way to sign in). Read per request by `app/page.tsx` (`pickSongsOn` in `src/lib/server/config.ts`), not baked in at build time, so one build can serve it on or off; no API response changes |
 
 ## Store
@@ -454,6 +454,33 @@ be switched off (no key) and nothing else changes. What the sink keeps to:
   `setReplay`) or at the first event, whichever is first, so the title screen never waits for it.
   Events that arrive while it loads wait (at most 100) and keep the time they happened; a page that
   closes before it is ready loses them from PostHog, not from our log.
+- **Reaching PostHog (QWW-63)**: the browser talks to our own origin only. Ad and privacy blockers
+  refuse `*.posthog.com` (AdGuard's tracking list blocks the whole `i.posthog.com` host; EasyPrivacy
+  blocks its retries, its replay data and `posthog-recorder.js`), and a tester with one sent nothing
+  from production. So `api_host` is `POSTHOG_PROXY_PATH` (`/roadie`, in `src/lib/postHogProxy.ts`),
+  `ui_host` is PostHog's own app, and `app/roadie/[...path]/route.ts` forwards to PostHog
+  (`src/lib/server/postHogProxy.ts`): events, replay and flags to its ingest host, `/static/` and
+  `/array/` (the recorder, the project's config) to its asset host (`us-assets.i.posthog.com`). Both
+  hosts come from `NEXT_PUBLIC_POSTHOG_HOST`, never from the request.
+  - **The path's name.** PostHog's suggested `/ingest` is on the lists (uBlock's privacy list and
+    AdGuard match `/ingest/...ip=`). `/roadie` matched none of EasyList, EasyPrivacy, uBlock filters and
+    privacy, AdGuard base and tracking or Peter Lowe's, for every URL posthog-js asks for under it
+    (checked 12 Nov 2026 by loading the lists into `@ghostery/adblocker`). Repeat that before renaming it,
+    and rename the folder under `app/` with it (a test keeps the two together).
+  - **The recorder's file name.** EasyPrivacy and AdGuard match `/posthog-recorder.js` under any path,
+    so posthog-js's `rewriteRequestPath` asks for `reel.js` and the route puts the real name back. A
+    file name that gets listed later is one more pair in `postHogProxy.ts`.
+  - **No cookies, either way.** It is a route and not a Next.js rewrite (PostHog's documented setup)
+    because a rewrite passes the browser's headers on whole, and `kd_session` holds the Spotify id of
+    someone signed in: with a plain rewrite the e2e stand-in received it with every event, and PostHog's
+    `Set-Cookie` landed on our origin. The route forwards `content-type`, `accept`, `user-agent` and
+    `x-forwarded-for` (the visitor's address, which PostHog saw before as well) and returns `content-type`
+    and `cache-control`; nothing else, in either direction.
+  - **When it fails.** PostHog down or slower than 8 s: 502, and the library's own retries and our log
+    carry on. PostHog off here: 404, so the route is no relay for anything else. Anything but GET and
+    POST: 405. `next.config.ts` sets `skipTrailingSlashRedirect` because PostHog's paths end in a slash
+    (`/e/`, `/s/`); the site's own pages then serve `/credits/` as they serve `/credits`, with no redirect.
+    Vercel caps a function's request body at 4.5 MB, which a compressed replay chunk stays well under.
 
 The `/credits` page tells testers this in plain words (`ANALYTICS_NOTE` in `src/lib/credits.ts`); change both together.
 
