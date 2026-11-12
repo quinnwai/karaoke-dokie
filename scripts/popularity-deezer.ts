@@ -49,7 +49,8 @@ async function main() {
        range_json::json ->> 'source' AS source
      FROM song_ranges WHERE skipped = false`,
   );
-  const checked = values.refresh ? new Map<string, SongDeezerRecord>() : await store.listSongDeezer();
+  const stored = await store.listSongDeezer();
+  const checked = values.refresh ? new Map<string, SongDeezerRecord>() : stored;
   const recheckBefore = values['recheck-before'] ? Date.parse(values['recheck-before']) : undefined;
   if (Number.isNaN(recheckBefore)) throw new Error('--recheck-before takes an ISO time');
   const fresh = (d: SongDeezerRecord | undefined) =>
@@ -98,7 +99,7 @@ async function main() {
             hits++;
           } else misses++;
           if (values['dry-run'] && hits + misses <= 40) console.log(`${hit ? hit.rank : 'miss'}\t${song.artist} - ${song.title}${hit ? `\t(${hit.artist} - ${hit.title})` : ''}`);
-          const was = checked.get(song.key);
+          const was = stored.get(song.key);
           const change = !was ? 'unchecked' : was.rank === undefined ? (hit ? 'found' : 'same') : !hit ? 'lost' : was.deezerId === hit.deezerId ? 'same' : 'switched';
           changes[change]++;
           if (values['dry-run'] && (change === 'found' || change === 'lost' || change === 'switched') && shown++ < 80) {
@@ -122,11 +123,9 @@ async function main() {
   console.log(
     `Done: ${hits} hits, ${misses} misses, ${errors} errors${inARow >= STOP_AFTER_ERRORS ? `; stopped after ${inARow} failures in a row` : ''}${left > 0 ? `; ${left} left, run again to carry on` : ''}${values['dry-run'] ? ' (dry run, nothing saved)' : ''}`,
   );
-  if (!values.refresh) {
-    console.log(
-      `Against the stored rows: ${changes.found} misses now matched, ${changes.lost} matches now misses, ${changes.switched} matched to another track, ${changes.same} unchanged, ${changes.unchecked} never looked up before`,
-    );
-  }
+  console.log(
+    `Against the stored rows: ${changes.found} misses now matched, ${changes.lost} matches now misses, ${changes.switched} matched to another track, ${changes.same} unchanged, ${changes.unchecked} never looked up before`,
+  );
 }
 
 main().catch((err) => {

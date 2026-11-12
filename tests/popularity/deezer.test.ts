@@ -197,7 +197,8 @@ describe('recordingsOf', () => {
     ['Counting Stars (2023 Version)', ['version']],
     ['Love Story (Taylor’s Version)', ['version']],
     ['(Everything I Do) I Do It For You (Classic Version)', ['version']],
-    ['Let It Go (German Version)', ['version']],
+    ['Let It Go (German Version)', ['other-song']],
+    ['Nothing Else Matters (Jungle Cruise Version Part 2)', ['other-song']],
     ['Take On Me (2017 Acoustic)', ['version']],
     ['Africa (Live)', ['live']],
     ['Take On Me (MTV Unplugged)', ['live']],
@@ -223,10 +224,38 @@ describe('recordingsOf', () => {
     'Hey Jude (Single Version)',
     'I Will Always Love You (Film Version)',
     'Let It Go (From "Frozen"/Soundtrack Version)',
+    'Thriller (25th Anniversary Edition)',
+    'Rumours (Deluxe Edition)',
     'Shallow (feat. Bradley Cooper)',
     'Good Riddance (Time of Your Life)',
     "(I Can't Get No) Satisfaction",
   ])('%s is the original', (title) => {
     expect([...recordingsOf(title)]).toEqual([]);
+  });
+});
+
+describe('pickDeezerHit, after the review of QWW-59', () => {
+  it('reads a live take as live wherever Deezer writes it: "(Live Aid)" in the title, or a version part with no brackets', () => {
+    const results = [dz(1, 900_000, 'Queen', 'Bohemian Rhapsody (Live Aid)'), dz(2, 850_000, 'Queen', 'Bohemian Rhapsody', 'Live'), dz(3, 800_000, 'Queen', 'Bohemian Rhapsody')];
+    expect(pick('Queen', 'Bohemian Rhapsody', results)).toBe(3);
+  });
+
+  it('never takes a language version for a plain title, even with nothing else to take', () => {
+    expect(pick('ABBA', 'Chiquitita', [dz(1, 500_000, 'ABBA', 'Chiquitita (Spanish Version)')])).toBeNull();
+    expect(pick('ABBA', 'Chiquitita', [dz(1, 500_000, 'ABBA', 'Chiquitita (Spanish Version)')], 'Chiquitita (Spanish Version)')).toBe(1);
+  });
+
+  it('counts a title or a co-credit as the artist\'s own credit, so the original beats the artist\'s re-recording', () => {
+    const lauryn = [dz(1, 100_000, 'Lauryn Hill', 'Doo Wop (That Thing) (2018 Version)'), dz(2, 500_000, 'Ms. Lauryn Hill', 'Doo Wop (That Thing)')];
+    expect(pick('Lauryn Hill', 'Doo Wop (That Thing)', lauryn)).toBe(2);
+    const wailers = [dz(1, 100_000, 'Bob Marley', 'Three Little Birds (Acoustic)'), dz(2, 600_000, 'Bob Marley & The Wailers', 'Three Little Birds')];
+    expect(pick('Bob Marley', 'Three Little Birds', wailers)).toBe(2);
+    // Other words before the name are not a credit: a tribute act's plain title stays behind the artist's re-recording.
+    const tribute = [dz(1, 696_539, 'Taylor Swift', "Shake It Off (Taylor's Version)"), dz(2, 900_000, 'We Love Taylor Swift', 'Shake It Off')];
+    expect(pick('Taylor Swift', 'Shake It Off', tribute)).toBe(1);
+  });
+
+  it('counts "(Deluxe Edition)" as the original release', () => {
+    expect(pick('Fleetwood Mac', 'Dreams', [dz(1, 900_000, 'Fleetwood Mac', 'Dreams', '(Deluxe Edition)'), dz(2, 300_000, 'Fleetwood Mac', 'Dreams (Live)')])).toBe(1);
   });
 });

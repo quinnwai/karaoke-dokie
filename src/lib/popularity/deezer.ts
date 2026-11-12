@@ -10,8 +10,10 @@
 // song's key (matchesKey), a bracketed part of its title read as the title too: Deezer's "Good
 // Riddance (Time of Your Life)" is our "Time Of Your Life". Among the results that match, the
 // original studio recording wins (QWW-59, pickDeezerHit): a live take, a remix, a sped-up edit, a
-// cover or a commentary track is never taken unless our title names that kind of recording, and a
-// re-recording ("(2023 Version)", "(Taylor's Version)") only when there is no original to take.
+// cover, a commentary track or a language version is never taken unless our title names that kind
+// of recording, and a re-recording ("(2023 Version)", "(Taylor's Version)") only when the artist
+// has no original among the results. The artist's own credit comes before a longer name that
+// contains it, so a tribute act's plain title never beats the artist's re-recording.
 
 import { hasLittleSinging, songKey } from '../songs/resolve';
 import { classifyTag } from '../songs/title';
@@ -73,28 +75,40 @@ const loose = (part: string) =>
 
 /** Words in an artist name that make it someone else's recording: "OneRepublic Tribute Band", "Karaoke Hits of ...". */
 const COVER_ARTIST = /\b(?:tribute|karaoke|covers?|made famous|in the style of|originally|as performed)\b/;
+/** Words before a name that still credit the same singer: "Ms. Lauryn Hill", "The Notorious B.I.G.". */
+const SAME_BEFORE = /^(?:(?:ms|mr|mrs|miss|dr|sir|dame|the) )*$/;
+/** Words after a name that credit others alongside the same singer: "Bob Marley & The Wailers", "Lady Gaga & Bradley Cooper". */
+const SAME_AFTER = /^$|^(?:and|with|x|vs|feat|featuring|ft) /;
 
 /**
- * 'exact' when the artist names are the same, 'contained' when one is the other with words added ("ms lauryn hill",
- * "lauryn hill"), null otherwise, and null too when the words added make it a cover act ("taylor swift tribute").
+ * 'exact' when the artist names credit the same singer: the same name, or one with a title before it or co-credits after
+ * it ("ms lauryn hill", "bob marley and the wailers"). 'contained' when one is the other with other words added ("elvis",
+ * "elvis presley"; also a "We Love Taylor Swift" act, which is why it comes second). null otherwise, and null when the
+ * words added make it a cover act ("taylor swift tribute").
  */
 function artistMatch(a: string, b: string): 'exact' | 'contained' | null {
   if (a === b) return 'exact';
   const [short, long] = a.length < b.length ? [a, b] : [b, a];
-  if (short.length < 3 || !` ${long} `.includes(` ${short} `)) return null;
-  return COVER_ARTIST.test(` ${long} `.replace(` ${short} `, ' ')) ? null : 'contained';
+  const padded = ` ${long} `;
+  const at = padded.indexOf(` ${short} `);
+  if (short.length < 3 || at < 0) return null;
+  const before = padded.slice(1, at + 1);
+  const after = padded.slice(at + short.length + 2);
+  if (COVER_ARTIST.test(`${before}${after}`)) return null;
+  return SAME_BEFORE.test(before) && SAME_AFTER.test(after) ? 'exact' : 'contained';
 }
 
 // ---------- which recording a title names (QWW-59) ----------
 
 /**
- * A recording that is not the song's original studio one. `version` is another recording or release of it: a
- * re-recording ("(2023 Version)", "(Taylor's Version)", "(Acoustic)"), a language version, or a version part Deezer
- * splits off the title that no rule here names. The others are never the original.
+ * A recording that is not the song's original studio one. `version` is another recording of it by the artist: a
+ * re-recording ("(2023 Version)", "(Taylor's Version)"), another take ("(Acoustic)", "(Piano Version)"), or a version
+ * part Deezer splits off the title that no rule here names. `other-song` is what songs/title.ts keeps as a song of its
+ * own: a language version ("(Spanish Version)") or a part. The others are never the original.
  */
-export type Recording = 'live' | 'remix' | 'sped-up' | 'cover' | 'not-a-song' | 'version';
+export type Recording = 'live' | 'remix' | 'sped-up' | 'cover' | 'not-a-song' | 'other-song' | 'version';
 /** Kinds a match is never taken as, unless our own title names the same kind. A `version` is only a fallback. */
-const NEVER: ReadonlySet<Recording> = new Set(['live', 'remix', 'sped-up', 'cover', 'not-a-song']);
+const NEVER: ReadonlySet<Recording> = new Set(['live', 'remix', 'sped-up', 'cover', 'not-a-song', 'other-song']);
 
 const SPED_UP = /\b(?:sped|speed)[ -]?up\b|\bslowed\b|\bnightcore\b|\breverb\b/;
 const COVER = /\bcover(?:ed)?\b|\boriginally\b|\bmade famous\b|\bin the style of\b|\btribute\b|\bas performed\b/;
@@ -120,26 +134,30 @@ function tagsOf(title: string): string[] {
 
 /**
  * The kind of recording one tag names, or null when it names the original: a release tag ("(Radio Edit)",
- * "(Remastered 2011)", "(From "Frozen")", "(feat. X)") or a real subtitle ("(Time of Your Life)"). The tag grammar is
- * QWW-49's (songs/title.ts classifyTag, what the song list strips); here a release tag stays the original only when
- * every word of it is a release word, so "(Single Version)" is the original and "(2023 Version)" is not.
- * `deezerVersion`: the tag is Deezer's own version part (title_version), so it is a version even when no rule names
- * it, and "live" anywhere in it is a live take ("(Live Aid)").
+ * "(Remastered 2011)", "(Deluxe Edition)", "(From "Frozen")", "(feat. X)") or a real subtitle ("(Time of Your Life)").
+ * The tag grammar is QWW-49's (songs/title.ts classifyTag, what the song list strips); here a release tag stays the
+ * original only when every word of it is a release word, so "(Single Version)" is the original and "(2023 Version)" is
+ * not. `from`: whose title the tag is in. In a Deezer title, "live" anywhere is a live take ("(Live Aid)"); in our own,
+ * only where the list strips it, since "(Live It Up)" can be a subtitle. Deezer's own version part (title_version) is
+ * a version even when no rule names it.
  */
-function recordingOf(tag: string, deezerVersion = false): Recording | null {
+function recordingOf(tag: string, from: 'ours' | 'deezer' | 'deezer-version' = 'ours'): Recording | null {
   const t = tag.normalize('NFKC').toLowerCase().replace(/[’‘`´]/g, "'");
   if (SPED_UP.test(t)) return 'sped-up';
   if (COVER.test(t)) return 'cover';
   if (NOT_A_SONG.test(t)) return 'not-a-song';
   if (REMIXED.test(t)) return 'remix';
   const kind = classifyTag(tag)?.kind;
-  // "Live" in a tag the list strips ("(Live Version)") or in Deezer's version part ("(Live Aid)"), not in a subtitle ("(Live It Up)").
-  if (kind === 'live' || ((kind !== undefined || deezerVersion) && /\blive\b/.test(t))) return 'live';
+  if (kind === 'live' || ((kind !== undefined || from !== 'ours') && /\blive\b/.test(t))) return 'live';
   if (OTHER_TAKE.test(t)) return 'version';
-  // Not a tag the list strips: a subtitle, or a version title.ts keeps on purpose (a language version, a part).
-  if (kind === undefined) return deezerVersion || /\b(?:version|ver|edit|mix)\b/.test(t) ? 'version' : null;
+  if (kind === undefined) {
+    // Not a tag the list strips. With a version word it is one title.ts keeps on purpose, a language version or a part.
+    if (/\b(?:version|ver|edit|mix)\b/.test(t)) return 'other-song';
+    return from === 'deezer-version' ? 'version' : null;
+  }
   if (kind === 'remix') return 'remix';
   if (kind === 'duet') return 'version';
+  if (kind === 'edition' && /\bedition$/.test(t)) return null; // "(Deluxe Edition)", "(20th Anniversary Edition)"
   if (kind === 'version' || kind === 'edition' || kind === 'edit') {
     if (/remaster/.test(t)) return null;
     const words = t.split(/[^\p{L}\p{N}']+/u).filter(Boolean);
@@ -159,16 +177,22 @@ export function recordingsOf(title: string): Set<Recording> {
 function trackRecordings(track: Pick<DeezerTrack, 'title' | 'title_short' | 'title_version'>): Set<Recording> {
   const version = track.title_version?.trim() ? track.title_version : '';
   const title = version ? (track.title_short ?? track.title.replace(version, '')) : track.title;
-  return new Set([...tagsOf(title).flatMap((tag) => recordingOf(tag) ?? []), ...tagsOf(version).flatMap((tag) => recordingOf(tag, true) ?? [])]);
+  // A version part with no brackets ("Live") is one tag.
+  const versionTags = version ? (tagsOf(version).length ? tagsOf(version) : [version]) : [];
+  return new Set([
+    ...tagsOf(title).flatMap((tag) => recordingOf(tag, 'deezer') ?? []),
+    ...versionTags.flatMap((tag) => recordingOf(tag, 'deezer-version') ?? []),
+  ]);
 }
 
 /**
- * The title and, for each plain bracketed part of it (a subtitle, not a version tag), that part as the title: the title
- * and its bracketed part swapped, so "Good Riddance (Time of Your Life)" also reads "Time of Your Life (Good Riddance)".
+ * The title and each plain bracketed part of it (a subtitle, not a version tag) as a title of its own. That is the
+ * title with its bracketed part swapped, since a key drops what is in brackets: "Good Riddance (Time of Your Life)"
+ * also reads as "Time of Your Life".
  */
 function titleReadings(title: string): string[] {
   const parts = [...title.matchAll(/\(([^)]*)\)|\[([^\]]*)\]/g)].map((m) => m[1] ?? m[2] ?? '');
-  return [title, ...parts.filter((p) => p.trim() && classifyTag(p) === null && recordingOf(p) === null)];
+  return [title, ...parts.filter((p) => p.trim() && classifyTag(p) === null && recordingOf(p, 'deezer') === null)];
 }
 
 /** How the track's artist matches the key's, or null when the track is not the song with key `key`. */
@@ -198,15 +222,15 @@ const sortsBefore = (a: number[], b: number[]) => {
  * The result that is the song's original studio recording, or null when none will do. `title` is our own title for the
  * song (not just its key): a version it names ("Song (Live at Donington)", "Song (Taylor's Version)") is not passed
  * over. Among the results that match `key`:
- *   - a live take, a remix, a sped-up edit, a cover or a commentary track is passed over, unless our title names
- *     that kind;
- *   - the original comes first (no tag, or only release tags like "(Remastered 2011)", "(Radio Edit)" or
- *     "(From "Frozen")"), even for a title that names a version: the list shows the song, its rank is the song's
- *     popularity, and the original is what people know. Then a version our title names, then, only when there is
- *     nothing better, a re-recording or another version Deezer names ("(2023 Version)", "(Taylor's Version)": Deezer's
- *     search has no "Shake It Off" but Taylor's Version);
- *   - before all that, an artist named exactly beats one named with words added, so a "We Love Taylor Swift" act's
- *     plain title never beats Taylor Swift's own track;
+ *   - a live take, a remix, a sped-up edit, a cover, a commentary track or a language version is passed over, unless
+ *     our title names that kind;
+ *   - first, the artist's own credit (the same name, or with a title or co-credits: artistMatch 'exact') beats a
+ *     longer name that contains it, so a "We Love Taylor Swift" act's plain title never beats Taylor Swift's track;
+ *   - then the original (no tag, or only release tags like "(Remastered 2011)", "(Radio Edit)" or "(From "Frozen")"),
+ *     even for a title that names a version: the list shows the song, its rank is the song's popularity, and the
+ *     original is what people know. Then a version our title names, then, only when there is nothing better, a
+ *     re-recording or another version Deezer names ("(2023 Version)", "(Taylor's Version)": Deezer's search has no
+ *     "Shake It Off" but Taylor's Version);
  *   - then the best rank.
  */
 export function pickDeezerHit(key: string, results: DeezerTrack[], title = ''): DeezerHit | null {

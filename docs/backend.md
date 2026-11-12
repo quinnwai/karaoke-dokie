@@ -275,9 +275,10 @@ per song (`song_deezer`): its rank is a popularity signal and its id is the row'
 artist and title match the song key (`matchesKey`, `src/lib/popularity/deezer.ts`); a plain bracketed part of the
 title counts as the title too ("Good Riddance (Time of Your Life)" is "Time Of Your Life"), and a tribute or karaoke act
 whose name contains the artist's is not the artist. Among those, `pickDeezerHit` takes the original studio recording:
-a live take, remix, sped-up edit, cover or commentary track is never taken unless our title names that kind; a
-re-recording ("(2023 Version)", "(Taylor's Version)") or a version Deezer names but no rule does is taken only when
-there is no original; the artist named exactly comes before a longer name; then the best rank. Deezer's search does
+a live take, remix, sped-up edit, cover, commentary track or language version is never taken unless our title names
+that kind; the artist's own credit (the same name, or with a title or co-credits) comes before a longer name that
+contains it; then the original before a re-recording ("(2023 Version)", "(Taylor's Version)") or a version Deezer names
+but no rule does, which is taken only when the artist has no original among the results; then the best rank. Deezer's search does
 not return every original (it has no 2013 "Counting Stars", only the 2023 re-recording and a live take), so a hand fix
 in `song_deezer` stays right only while `--recheck-before` leaves it alone: it rechecks misses and hits ranked under
 50,000, and `--refresh` rechecks everything.
