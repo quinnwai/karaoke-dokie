@@ -1,15 +1,16 @@
 // Release eval harness (QWW-52): a pass/fail table for the QWW-42 success criteria 1 to 4, 6 and 9, on
 // nine fixed test ranges, one per voice type (src/lib/eval/release.ts). Reads the catalogue straight from
-// Postgres with SELECT only, ranks it with this checkout's code, and checks what a logged-out singer would see.
+// Postgres with SELECT only, folded to one row per song with its clean title as the app serves it, ranks it
+// with this checkout's tuner engine (POST /api/setlist), and checks what a logged-out singer would see.
 //
 //   1  recognisable: the bundled Billboard Year-End list (data/billboard-year-end.csv) or a high Deezer rank
 //   2  tempo: an LLM judges every song in each era's slow and upbeat top 20, 3 runs in parallel, seeing
-//      only artist, title and year; a song fits only when all 3 runs agree
+//      only artist, title and year; a song counts when 2 of the 3 runs give the end's label, and an end
+//      passes with 18 of its top 20 counting
 //   3  never empty, 4  titles, 6  play: Deezer is asked whether each top-20 song has a 30 s preview
-//   9  sung as written (QWW-58): at least 15 of the Setlist tuner's top 20 have no octave shift. This one reads
-//      the tuner's list (the engine, the defaults); 1 to 4 and 6 still read the old results view.
+//   9  sung as written (QWW-58): at least 15 of the tuner's top 20 have no octave shift
 //
-// Usage: npm run eval:release -- [--db production|preview] [--runs 3] [--provider anthropic|openai|gemini]
+// Usage: npm run eval:release -- [--db production|preview] [--provider anthropic|openai|gemini]
 //                                [--model <id>] [--skip-judge] [--skip-play] [--out eval-out]
 // Needs DATABASE_URL_UNPOOLED or DATABASE_URL (production's; --db preview reads karaoke_pr4_preview on
 // the same host) and, for the judge, the first of ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY
@@ -29,13 +30,15 @@ import {
   checkSungAsWritten,
   checkTempo,
   checkTitles,
+  handCheck,
+  judgeBatches,
   judgeList,
+  JUDGE_RUNS,
   JUDGE_SCHEMA,
   JUDGE_SYSTEM,
   judgePrompt,
   judgeSongs,
   parseJudgeReply,
-  sample,
   TEST_RANGES,
   tempoLists,
   toMarkdown,
@@ -45,18 +48,18 @@ import {
   type Check,
   type JudgeLabel,
   type RangeInput,
+  type Report,
   type SongFacts,
   VIEWS,
 } from '../src/lib/eval/release';
 import { isProvider, PROVIDER_NAMES, PROVIDERS } from '../src/lib/moods/providers';
 import { billboardCharts } from '../src/lib/popularity/import';
-import { catalogueTracks, loadCatalogue, prepareCatalogue, recommendCatalogue } from '../src/lib/server/catalogue';
-import { withoutDuetsAndMoods } from '../src/lib/server/features';
+import { catalogueTracks, loadCatalogue, prepareCatalogue, type CatalogueTrack } from '../src/lib/server/catalogue';
 import { neonQuery } from '../src/lib/server/getStore';
 import { createPostgresStore, type QueryFn } from '../src/lib/server/postgresStore';
+import type { Store } from '../src/lib/server/store';
 import { productionSongDeps } from '../src/lib/server/wiring';
 
-const JUDGE_BATCH = 40;
 const PARALLEL = 4;
 
 /**
@@ -126,17 +129,36 @@ async function deezerPlayable(id: number): Promise<boolean | 'error'> {
 /**
  * The catalogue as the app serves it (wiring.ts): one row per song with its clean title (QWW-49, `canonical`), so the harness
  * grades the list a logged-out singer sees and not the rows as stored. Titles and the tags on them (criterion 4) and the songs
- * in a top 20 (criteria 6 and 9) would differ otherwise. A mapping that cannot be read gives the titles as stored, and `degraded`.
+ * in every list (criteria 1, 2, 6 and 9) would differ otherwise. A mapping that cannot be read gives the titles as stored, and
+ * `degraded`: harnessInputs stops the run then, rather than grade them.
  */
 export function loadHarnessCatalogue(store: Parameters<typeof loadCatalogue>[0]) {
   return loadCatalogue(store, undefined, { canonical: true });
+}
+
+/**
+ * What main() grades: the folded catalogue (loadHarnessCatalogue), and each test range's songs as POST /api/setlist
+ * ranks them for a logged-out singer (the range filter, then every song's place on every gear). Stops when the clean
+ * titles cannot be read, so no criterion grades the titles as stored.
+ */
+export async function harnessInputs(store: Store): Promise<{ tracks: CatalogueTrack[]; inputs: RangeInput[] }> {
+  const entries = await loadHarnessCatalogue(store);
+  // The app retries a failed read of the clean titles within a minute; a graded run must not use the stored ones.
+  if (entries.degraded) throw new Error('Could not read song_canonical (the warning above says why), so the titles would be as stored, not as the app shows them.');
+  const tracks = catalogueTracks(entries);
+  const deps = productionSongDeps(store, false);
+  return { tracks, inputs: TEST_RANGES.map((test) => ({ test, prepared: prepareCatalogue(tracks, test.range, deps).prepared })) };
+}
+
+/** The checks that need no outside service, on every range: 1 recognisable, 3 never empty, 4 titles, 9 sung as written. */
+export function offlineChecks(inputs: RangeInput[], billboard: Set<string>, facts: Map<string, SongFacts>): Check[] {
+  return inputs.flatMap((t) => [checkRecognisable(t, billboard, facts), checkNeverEmpty(t), checkTitles(t), checkSungAsWritten(t.test, tunerDefaultList(t.prepared))]);
 }
 
 async function main() {
   const { values } = parseArgs({
     options: {
       db: { type: 'string', default: 'production' },
-      runs: { type: 'string', default: '3' },
       provider: { type: 'string' },
       model: { type: 'string' },
       'skip-judge': { type: 'boolean' },
@@ -145,30 +167,15 @@ async function main() {
     },
   });
   const db = values.db!;
-  const runs = Number(values.runs);
-  // Fewer than 3 runs could not show a flaky label (QWW-52 asks for 3, and flaky counts as a miss).
-  if (!Number.isInteger(runs) || runs < 3) throw new Error(`--runs must be a whole number, 3 or more (got ${values.runs})`);
   const query = selectOnly(neonQuery(databaseUrl(db)));
   const store = createPostgresStore(query, { autoMigrate: false });
 
-  const [entries, deezer, billboardCsv] = await Promise.all([
-    loadHarnessCatalogue(store),
+  const [{ tracks, inputs }, deezer, billboardCsv] = await Promise.all([
+    harnessInputs(store),
     store.listSongDeezer(),
     readFile(new URL('../data/billboard-year-end.csv', import.meta.url), 'utf8'),
   ]);
   const billboard = new Set(billboardCharts(billboardCsv).keys());
-  const tracks = catalogueTracks(entries);
-  const deps = productionSongDeps(store, false);
-  const bpm = new Map(entries.map((e) => [`cat:${e.key}`, e.tempo]));
-
-  // What the API sends a logged-out singer: every match ranked, duet and mood markers off (QWW-43).
-  const inputs: RangeInput[] = TEST_RANGES.map((test) => ({
-    test,
-    matches: recommendCatalogue(tracks, test.range, deps, { all: true }).matches.map(withoutDuetsAndMoods),
-  }));
-
-  // What the Setlist tuner lists for the same singer (QWW-58): the engine with the defaults, as POST /api/setlist answers it.
-  const tuner = new Map(TEST_RANGES.map((test) => [test.id, tunerDefaultList(prepareCatalogue(tracks, test.range, deps).prepared)]));
 
   const facts = new Map<string, SongFacts>();
   const fact = (id: string) => facts.get(id) ?? (facts.set(id, {}), facts.get(id)!);
@@ -178,16 +185,16 @@ async function main() {
   }
 
   const meta = [
-    `Database: ${db} (${entries.length} catalogue songs, ${entries.degraded ? 'titles as stored: the canonical mapping could not be read' : 'one row per song with its clean title, as the app serves it'}), code: this checkout, logged out, duets and moods off.`,
+    `Database: ${db} (${tracks.length} catalogue songs, one row per song with its clean title, as the app serves it), code: this checkout, logged out.`,
+    'Lists: the tuner engine (POST /api/setlist). Criteria 1, 4, 6 and 9 read the list as the tuner opens (Popularity and Difficulty on); criterion 2 reads each era with Tempo alone at each end.',
     'Ranges: ' + TEST_RANGES.map((t) => t.label).join('; ') + '.',
   ];
-  const checks: Check[] = [];
-  for (const t of inputs) checks.push(checkRecognisable(t, billboard, facts), checkNeverEmpty(t), checkTitles(t), checkSungAsWritten(t.test, tuner.get(t.test.id)!));
+  const checks: Check[] = offlineChecks(inputs, billboard, facts);
 
   // 6. Play: ask Deezer about every top-20 song once.
   if (!values['skip-play']) {
     const top = new Map<string, Match>();
-    for (const t of inputs) for (const m of VIEWS.default(t.matches, t.test.range).slice(0, 20)) top.set(m.track.id, m);
+    for (const t of inputs) for (const m of VIEWS.default(t.prepared).slice(0, 20)) top.set(m.track.id, m);
     const ids = [...top.keys()];
     const playable = await pool(ids, 5, async (id): Promise<boolean | 'error'> => {
       const d = deezer.get(id.replace(/^cat:/, ''));
@@ -199,7 +206,7 @@ async function main() {
   } else meta.push('Play: skipped (--skip-play).');
 
   // 2. Tempo: judge each song once per run, the runs in parallel.
-  let tempoSample: Parameters<typeof toMarkdown>[0]['tempoSample'] = [];
+  let hand: Report['handCheck'] = null;
   if (!values['skip-judge']) {
     // The first provider with a key, unless --provider names one.
     const keyOf = (p: keyof typeof PROVIDERS) => process.env[PROVIDERS[p].keyEnv]?.trim();
@@ -211,10 +218,11 @@ async function main() {
     const ask = PROVIDERS[provider].create({ apiKey: keyOf(provider)! });
     const lists = inputs.flatMap(tempoLists);
     const songs = judgeSongs(lists);
-    const batches: { key: string; song: { artist: string; title: string; year?: number } }[][] = [];
-    for (let i = 0; i < songs.length; i += JUDGE_BATCH) batches.push(songs.slice(i, i + JUDGE_BATCH));
-    const oneRun = () =>
-      pool(batches, PARALLEL, async (batch) => {
+    // Ids the replies left out or mangled: they count as unknown, so this says how much the judge failed to answer.
+    let missing = 0;
+    // Each run sees the songs in its own shuffled order, never the lists' order (sorted by stored tempo).
+    const oneRun = (run: number) =>
+      pool(judgeBatches(songs, run), PARALLEL, async (batch) => {
         const res = await ask({
           model,
           system: JUDGE_SYSTEM,
@@ -223,36 +231,28 @@ async function main() {
           schema: JUDGE_SCHEMA,
         });
         const got = parseJudgeReply(res.text);
+        missing += batch.filter((_, id) => !got.has(id)).length;
         return batch.map((b, id): [string, JudgeLabel] => [b.key, got.get(id) ?? 'unknown']);
       }).then((parts) => new Map(parts.flat()));
-    const runMaps = await Promise.all(Array.from({ length: runs }, oneRun));
+    const runMaps = await Promise.all(Array.from({ length: JUDGE_RUNS }, (_, run) => oneRun(run)));
     const labels = new Map(songs.map((s) => [s.key, runMaps.map((r) => r.get(s.key) ?? 'unknown')]));
     const results = lists.map((l) => judgeList(l, labels));
     for (const t of TEST_RANGES) checks.push(checkTempo(t.id, results));
-    const flaky = [...labels.values()].filter((l) => new Set(l).size > 1).length;
-    meta.push(`Tempo judge: ${provider} ${model}, ${runs} runs in parallel over ${songs.length} songs; ${flaky} songs got different labels across runs (counted as misses).`);
-    tempoSample = sample(
-      lists.flatMap((l) => l.songs.map((m) => ({ m, l }))),
-      20,
-    ).map(({ m, l }) => ({
-      artist: m.track.artist,
-      title: m.track.title,
-      year: m.year,
-      bpm: bpm.get(m.track.id),
-      era: l.era ?? 'any',
-      end: l.end,
-      labels: labels.get(m.track.id.replace(/^cat:/, '')) ?? [],
-    }));
+    const split = [...labels.values()].filter((l) => new Set(l).size > 1).length;
+    meta.push(
+      `Tempo judge: ${provider} ${model}, ${JUDGE_RUNS} runs in parallel over ${songs.length} songs, each run in its own shuffled order; the runs split on ${split} songs, and ${missing} of ${JUDGE_RUNS * songs.length} answers were missing from the replies (counted as unknown).`,
+    );
+    hand = handCheck(lists, labels);
   } else meta.push('Tempo: skipped (--skip-judge).');
 
-  const report = {
+  const report: Report = {
     title: `Release eval, ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
     checks,
     top10: inputs.map((t) => ({ range: t.test, songs: topTen(t) })),
-    tempoSample,
+    handCheck: hand,
     meta,
   };
-  report.meta.push('Not checked by the harness: 1b (Quinn-Wai recognises 8 of the top 10, list below), 5 (octave), 7 (design), 8 (funnel). Criterion 4 flags every variant, including one that is the more popular version. Criteria 1 to 4 and 6 grade the old results view; criterion 9 grades the tuner\'s list.');
+  report.meta.push('Not checked by the harness: 1b (Quinn-Wai recognises 8 of the top 10, list below), 2b (Quinn-Wai hand-checks the tempo lists below), 5 (octave), 7 (design), 8 (funnel). Criterion 4 flags every variant, including one that is the more popular version.');
   const md = toMarkdown(report);
   await mkdir(values.out!, { recursive: true });
   const stem = join(values.out!, `release-${db}-${new Date().toISOString().replace(/[:.]/g, '-')}`);

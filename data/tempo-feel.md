@@ -12,9 +12,10 @@ a measurement: no audio, no measured tempo and no lyrics went in. They were made
 songs, each batch a separate fresh run that saw only its own songs and the instructions below; a song the model did not know
 got no label, and a song that two batches labelled differently became "mid". The second look and the recheck are described
 further down. The file holds 6,196 labels, which cover 6,202 of the catalogue's 7,638 songs (81%) and 97 to 98% of the 300, 1,000, 2,000 and
-3,000 most popular: **685 slow, 3,737 mid and 1,780 upbeat songs**. Of the mids, 691 are songs a later pass
-took away a slow or upbeat label from (method `claude-opus-5-5/feel-recheck-v1`). One label was set by hand after review
-(method `manual/hand-fix-qww-54`): a-ha, Take On Me, from mid to upbeat.
+3,000 most popular: **686 slow, 3,736 mid and 1,780 upbeat songs**. Of the mids, 691 are songs a later pass
+took away a slow or upbeat label from (method `claude-opus-5-5/feel-recheck-v1`). Two labels were set by hand after review:
+a-ha, Take On Me, from mid to upbeat (method `manual/hand-fix-qww-54`), and Ed Sheeran, I See Fire, from mid to slow
+(method `manual/hand-fix-qww-54b`).
 
 The labels are tuned for precision at the two ends: the instructions say to answer slow or upbeat only when it is
 unmistakable, and mid otherwise. So a song missing from an end is expected, and a song at an end has been vouched for.
@@ -36,6 +37,15 @@ into 70 to 180) puts them like this, by label:
 
 So most slow songs are read at double time or more, and no rule on the numbers alone can tell them from a fast song. With
 the label, 228 of the 297 slow songs are halved into the slow band, 53 go to its top edge and 16 were already in it.
+
+## A mid label can hide a slow song
+
+Mid is not neutral for a song read at double time. A label only moves a reading by whole octaves when that is cheaper than
+leaving it, so a slow ballad whose reading sits near the mid band stays there and is pinned just inside the top edge of the
+mid band (about 125 bpm), right under every upbeat song. That is what happened to Ed Sheeran's "I See Fire", labelled mid: 124.8
+bpm and 72 of 100 on the Tempo gear, near the top at "Upbeat tracks". With the slow label the same reading is halved into the
+slow band. So a wrong mid on a slow or upbeat song shows as a song pinned within a bpm or two of an edge of its band (90 or
+125) while its reading says otherwise; that is where to look for wrong labels.
 
 ## The instructions (feel-v1)
 
@@ -94,6 +104,25 @@ motivated looking (they showed which labels were weak) but no label was changed 
 All three passes are one model answering the same question in different words, so they share blind spots; the hand check of one
 era's lists by Quinn-Wai (QWW-54 "Done when") is the independent test. The one error known so far, Take On Me (published at
 170 bpm, marked "Fast"), was labelled mid by the model and has been set to upbeat by hand.
+
+## The band-edge audit (QWW-54 follow-up, 12 Nov)
+
+A label that disagrees with the measured tempo leaves the song pinned just inside the edge of its band. A wrong mid on a slow
+ballad sits at about 125, right under the upbeat songs: that was Ed Sheeran's "I See Fire". So every labelled song in the best
+1,000 of each release harness range (bass to soprano, low male and beginner) and of F2 to D4, from the tuner's default list and
+from the old whole list, whose effective tempo was within 2 bpm of a band edge (40, 90, 125 or 215), was rechecked: 1,820 songs.
+Three independent runs of `claude-opus-5-5` per song, each given only the artist, title and year and the plain definitions in
+the release harness' judge prompt, never the tempo or the label. A label changed when at least two runs agreed on the same
+different label; a change from one end to the other without all three runs behind it went to mid.
+
+1,388 labels were confirmed, 430 changed and one song had no majority. The 430 are 197 mid to slow, 231 mid to upbeat and 2
+slow to mid; 359 have all three runs behind them. Each is marked `claude-opus-5-5/feel-edge-recheck-v1` in `song_feel.source`.
+All 676 upbeat labels at 125 were confirmed. "I See Fire" was also one of the 1,820 (all three runs said slow); it was set by
+hand in the same week (`manual/hand-fix-qww-54b`) and is left out of these 430. The counts in the first paragraph of this file
+are from before the audit. The audit looked only at songs at an edge of their band, not at every label.
+
+The recheck is the same kind of model as the first pass and as the harness' judge, so it is not independent of either; the hand
+check of one era is still the test.
 
 ## Where the songs came from
 
