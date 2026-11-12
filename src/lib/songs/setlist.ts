@@ -9,10 +9,10 @@
 //      A language weight (QWW-59, rankPrepared) lays the Popularity places out again per request, from a copy.
 //   3. Era filter, then the songs are sorted. The first thing that counts is how a song is sung (QWW-58,
 //      Quinn-Wai's decision A, 11 Nov): every song that fits as written comes before any song that needs an
-//      octave jump, whatever the gears say. The jump songs still follow, so a singer whose popular songs all
-//      need a jump still gets a full list. The Maybe songs (estimated ranges) come after all the others, as
-//      everywhere else, and are sorted that way inside too. Inside each of those groups the songs are sorted
-//      by distance to the gear values (rankPrepared):
+//      octave jump, whatever the gears say, except with Tempo at an end of its track (below). The jump songs
+//      still follow, so a singer whose popular songs all need a jump still gets a full list. The Maybe songs
+//      (estimated ranges) come after all the others, as everywhere else, and are sorted that way inside too.
+//      Inside each of those groups the songs are sorted by distance to the gear values (rankPrepared):
 //        distance = sum over the active gears of weight × |song's place − gear value|
 //      An active gear is one that is not in `off` (and History only when the singer's library was read).
 //      Off gears add nothing. A song we do not know on an active gear (no tempo, an implausible range, not in
@@ -31,6 +31,12 @@
 // sung as written; and the biggest hits (mostly tenor and female pop) win in whichever octave fits them, which
 // put octave jumps at the top of a bass's list. The places do not change: a jump song keeps the Difficulty and
 // Popularity place it is shown at, it just comes after the songs sung as written.
+//
+// Tempo at an end is the one exception (QWW-54, 12 Nov). With Tempo on and within TEMPO_END_REACH places of 0 or 100,
+// the singer asked for "Slow jams" or "Upbeat tracks", and a slow or fast song that needs a jump answers that as well as
+// one sung as written. So there are no octave groups then: the distance decides, and only the Maybe songs still come
+// last. Kept as a group, the songs sung as written filled a narrow range's top 20 with mid-tempo songs ahead of the
+// first slow song that needed a jump. The default list, and every list with Tempo off or in the middle, are unchanged.
 //
 // The default state (setlistConfig.ts) is Popularity on at 100, Difficulty on at 0, the rest off. With
 // Popularity counting double, that is a blend that leans on popularity: of two songs sung the same way, the one
@@ -57,6 +63,12 @@ import { eraOf } from './setlistConfig';
  * on popularity: a ten place gap in popularity needs a twenty place easier song to make up for it.
  */
 export const GEAR_WEIGHTS: Readonly<Record<GearId, number>> = Object.freeze({ difficulty: 1, history: 1, popularity: 2, tempo: 1 });
+
+/**
+ * How far in from an end of the Tempo track still counts as the end (QWW-54): Tempo is on and at most this many places
+ * from 0 or 100. There the octave is not a group of its own (rankPrepared). 10 and 90 are at the end; 11 and 89 are not.
+ */
+export const TEMPO_END_REACH = 10;
 
 /**
  * A song range narrower than this many semitones is not a melody. The 5th to 95th percentile of what is sung
@@ -163,7 +175,8 @@ export interface RankedSetlist {
  * Which missing gear counts most when songs miss different ones, as bits of a sum: a song missing History sorts after
  * every song that has it, then one missing Tempo after every song that has it, then Popularity, then Difficulty.
  * All of it inside a group: songs sung as written come before songs that need an octave jump (QWW-58), so a song that
- * misses a gear still comes before a jump song that has it.
+ * misses a gear still comes before a jump song that has it. With Tempo at an end (TEMPO_END_REACH) there are no such
+ * groups (QWW-54), so a song that misses a gear comes after every song that has it, whichever way each is sung.
  * The gears the singer chose to switch on (History, Tempo) outrank the ones that are on from the start.
  */
 const MISSING_RANK: Readonly<Record<GearId, number>> = Object.freeze({ difficulty: 1, popularity: 2, tempo: 4, history: 8 });
@@ -319,6 +332,10 @@ export function rankPrepared(
   const applied: TunerPart[] = eraOn ? [...active, 'era'] : active;
   const picked = new Set<EraId>(state.eras);
 
+  // Tempo at an end of its track: the songs are not grouped by how they are sung, and a slow (or fast) song that needs an
+  // octave jump can come before one sung as written (QWW-54).
+  const tempoAtEnd = active.includes('tempo') && (state.gears.tempo <= TEMPO_END_REACH || state.gears.tempo >= 100 - TEMPO_END_REACH);
+
   const passing = list.songs.filter((s) => !eraOn || (s.era !== null && picked.has(s.era)));
   const scored = passing.map((s) => {
     let distance = 0;
@@ -329,8 +346,8 @@ export function rankPrepared(
       else distance += GEAR_WEIGHTS[g] * Math.abs(place - state.gears[g]);
     }
     const m = s.candidate.match;
-    // 0 for a song sung as written, 1 for one that needs an octave jump, up or down (QWW-58).
-    const jump = octaveSemitones(m) === 0 ? 0 : 1;
+    // 0 for a song sung as written, 1 for one that needs an octave jump, up or down (QWW-58); 0 for every song with Tempo at an end.
+    const jump = !tempoAtEnd && octaveSemitones(m) !== 0 ? 1 : 0;
     return { s, jump, missing, distance: quantize(distance), who: `${m.track.artist}\u0000${m.track.title}`.toLowerCase() };
   });
   scored.sort(
