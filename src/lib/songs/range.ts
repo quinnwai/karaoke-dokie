@@ -52,6 +52,12 @@ export const OUTLIER_SHARE = 0.05;
 export const NARROW_SPAN = 5;
 /** The trim a note file's narrow range is measured again with, instead of OUTLIER_SHARE. */
 export const NARROW_OUTLIER_SHARE = 0.01;
+/**
+ * A step of this many semitones or more between neighbouring pitches that are sung, inside the narrow range's 1% trim, means a note
+ * far from the rest: usually a typo in the note file, often an exact octave copy. Of the 654 note files that production's 1% trim
+ * would widen (12 Nov), 7 step out by 8 to 16 semitones, each a single stray note, and the other 647 by 7 or less.
+ */
+export const STRAY_GAP = 8;
 /** How far (semitones) a histogram's weighted mean may sit from the stored typical note, at the nearest whole octave, and still describe that song. */
 const HISTOGRAM_MEAN_TOLERANCE = 1;
 /** Note files outside these bounds are badly transcribed (or mash-ups), so the bulk import drops them and the narrow-range rule does not widen to them. */
@@ -97,9 +103,10 @@ export function trimmedRange(notes: { midi: number; length: number }[], share = 
  * stored range; null when there is no histogram, or it does not describe the song (its mean is not the typical note
  * at any whole octave). The octave fix moves a histogram along with the range (shiftRange), so the whole-octave gap
  * between the histogram's mean and the typical note, `octaves`, is 0 for every stored range; it is applied all the
- * same, so a histogram left in the file's octave lands the range in the stored one and not an octave away.
+ * same, so a histogram left in the file's octave lands the range in the stored one and not an octave away. `gap` is the
+ * widest step between neighbouring pitches that are sung (a share above 0) inside that range.
  */
-export function gentleRange(range: SongRange): { low: number; high: number; octaves: number } | null {
+export function gentleRange(range: SongRange): { low: number; high: number; octaves: number; gap: number } | null {
   const shares = range.pitchShare;
   if (!shares?.length) return null;
   const total = shares.reduce((sum, [, share]) => sum + share, 0);
@@ -108,7 +115,10 @@ export function gentleRange(range: SongRange): { low: number; high: number; octa
   const octaves = Math.round((range.tessitura - mean) / 12);
   if (Math.abs(range.tessitura - mean - 12 * octaves) > HISTOGRAM_MEAN_TOLERANCE) return null;
   const { low, high } = trimmedRange(shares.map(([midi, length]) => ({ midi, length })), NARROW_OUTLIER_SHARE);
-  return { low: low + 12 * octaves, high: high + 12 * octaves, octaves };
+  const sung = shares.filter(([midi, share]) => share > 0 && midi >= low && midi <= high).map(([midi]) => midi).sort((a, b) => a - b);
+  let gap = 0;
+  for (let i = 1; i < sung.length; i++) gap = Math.max(gap, sung[i]! - sung[i - 1]!);
+  return { low: low + 12 * octaves, high: high + 12 * octaves, octaves, gap };
 }
 
 /** Whether the narrow-range rule applies to `range`: a note file or a recording of NARROW_SPAN semitones or fewer, and not a duet with parts. */
@@ -121,8 +131,10 @@ export function isNarrow(range: SongRange): boolean {
 /**
  * The narrow-range rule (QWW-60), for a range the usual 5% trim has just measured or that is stored.
  *   1. A note file whose range is NARROW_SPAN semitones or fewer is measured again with a 1% trim from its pitch
- *      histogram (never narrower than it was). A 1% trim that reaches pitches no song has (isPlausible: a note file
- *      with junk notes in it, one reaching G17) is not used: the range stays as it was.
+ *      histogram (never narrower than it was). That trim is not used, and the range stays as it was, when it reaches
+ *      pitches no song has (isPlausible: a note file with junk notes in it, one reaching G17) or a note STRAY_GAP
+ *      semitones or more from its nearest sung neighbour (a typo in the file, often an octave copy: Pretty Maids All
+ *      in a Row has 2.1% of its time on a note 16 semitones below the rest, which would make it a Hard song).
  *   2. A range that is still NARROW_SPAN semitones or fewer is marked `confidence: 'low'`: match.ts puts it in the
  *      Maybe group, with no difficulty label, and score.ts takes the low-confidence penalty off its score.
  *   3. A recording (`audio-full`) of NARROW_SPAN semitones or fewer is only marked: its extremes come from a pitch
@@ -135,7 +147,7 @@ export function isNarrow(range: SongRange): boolean {
 export function applyNarrowRule(range: SongRange): SongRange {
   if (!isNarrow(range)) return range;
   const finer = range.source === 'note-file' ? gentleRange(range) : null;
-  const gentle = finer && isPlausible(finer) ? finer : null;
+  const gentle = finer && isPlausible(finer) && finer.gap < STRAY_GAP ? finer : null;
   const low = gentle ? Math.min(range.low, gentle.low) : range.low;
   const high = gentle ? Math.max(range.high, gentle.high) : range.high;
   // A range the 1% trim widened keeps the confidence it had; one still this narrow is marked.

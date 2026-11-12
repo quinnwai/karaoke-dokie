@@ -51,18 +51,21 @@ const rangeOf = async (store: Store, key: string) => (await store.getSongRange(k
 const snapshot = async (store: Store) => JSON.stringify(await Promise.all([...keysOf, 'z|skipped'].map((k) => store.getSongRange(k))));
 
 describe.each(STORES)('fixNarrowRanges (%s store)', (_name, make) => {
-  const counts = { checked: 9, narrow: 6, widened: 2, stillNarrow: 2, recordings: 2, noHistogram: 0, implausible: 0, histogramOffOctave: 0, changed: 5, skippedChanged: 0 };
+  const counts = { checked: 9, narrow: 6, widened: 2, stillNarrow: 2, recordings: 2, noHistogram: 0, implausible: 0, stray: 0, histogramOffOctave: 0, changed: 5, skippedChanged: 0 };
 
   it('counts what it would change on a dry run, and writes nothing', async () => {
     const store = make();
     await fill(store);
     const before = await snapshot(store);
     const changes: string[] = [];
-    expect(await fixNarrowRanges(readOnlyStore(store), { dryRun: true, onChange: (key) => changes.push(key) })).toEqual(counts);
+    const noWrite = () => {
+      throw new Error('wrote on a dry run');
+    };
+    expect(await fixNarrowRanges(readOnlyStore(store), { dryRun: true, onChange: (key) => changes.push(key), onWrite: noWrite })).toEqual(counts);
     expect(changes).toEqual(['a|widens', 'b|moved and widens', 'c|still narrow', 'f|recording', 'wallows|are you bored yet?']);
     expect(await snapshot(store)).toBe(before);
     // Dry run is also respected by a store that would write.
-    await fixNarrowRanges(store, { dryRun: true });
+    await fixNarrowRanges(store, { dryRun: true, onWrite: noWrite });
     expect(await snapshot(store)).toBe(before);
   });
 
@@ -107,8 +110,8 @@ describe.each(STORES)('fixNarrowRanges (%s store)', (_name, make) => {
   it('leaves the typical note alone, so the octave fix finds the same moves after it as before', async () => {
     const store = make();
     await fill(store);
-    // The octave fix reads only the typical note, so it cannot see the range: it says the same before and after. A song that
-    // still has a move to make (here a note file the evidence puts an octave lower) makes the count above 0 in both.
+    // The octave fix reads the typical note, so apart from the bounds check (the next test) it cannot see the range: it says the
+    // same before and after. A song that still has a move to make (here a note file the evidence puts an octave lower) makes the count above 0 in both.
     const evidence: OctaveEvidence = {
       songs: { 'b|moved and widens': STORED['b|moved and widens']!.tessitura, 'wallows|are you bored yet?': WALLOWS.tessitura, 'a|widens': STORED['a|widens']!.tessitura - 12 },
       artists: {},
@@ -160,7 +163,10 @@ describe.each(STORES)('fixNarrowRanges (%s store)', (_name, make) => {
         return page;
       },
     };
-    expect(await fixNarrowRanges(racing)).toMatchObject({ changed: 5, skippedChanged: 1 });
+    const wrote: string[] = [];
+    expect(await fixNarrowRanges(racing, { onWrite: (key) => wrote.push(key) })).toMatchObject({ changed: 5, skippedChanged: 1 });
+    // The key list for a rollback is the rows written, not the rows that changed: the skipped one is not in it.
+    expect([...wrote].sort()).toEqual(['b|moved and widens', 'c|still narrow', 'f|recording', 'wallows|are you bored yet?']);
     expect(await rangeOf(store, 'a|widens')).toEqual(concurrent);
     expect(await fixNarrowRanges(store)).toMatchObject({ changed: 1, skippedChanged: 0 });
     expect(await rangeOf(store, 'a|widens')).toEqual({ ...concurrent, low: 52, high: 61 });
@@ -171,9 +177,37 @@ describe.each(STORES)('fixNarrowRanges (%s store)', (_name, make) => {
     // 1.5% of the time on a pitch no song has (production has one that reaches G17): the 1% trim would stretch it to 44 semitones.
     const junk = noteFile([[56, 0.5], [57, 0.485], [100, 0.015]]);
     await store.putSongRange('a|junk notes', { range: junk, log });
-    expect(await fixNarrowRanges(store)).toMatchObject({ narrow: 1, stillNarrow: 1, widened: 0, noHistogram: 0, implausible: 1, changed: 1 });
+    expect(await fixNarrowRanges(store)).toMatchObject({ narrow: 1, stillNarrow: 1, widened: 0, noHistogram: 0, implausible: 1, stray: 0, changed: 1 });
     expect(await rangeOf(store, 'a|junk notes')).toEqual({ ...junk, confidence: 'low' });
     expect(await fixNarrowRanges(store)).toMatchObject({ implausible: 1, changed: 0 });
+  });
+
+  it('keeps the range of a note file with a stray note in it, and only marks it (Pretty Maids All in a Row)', async () => {
+    const store = make();
+    // 2.1% of the time on D#2, 16 semitones below every other note: the 1% trim would make a Hard song of it, from what is probably a typo.
+    const eagles = noteFile([[39, 0.021], [55, 0.766], [56, 0.115], [58, 0.098]]);
+    expect(eagles).toMatchObject({ low: 55, high: 58 });
+    await store.putSongRange('eagles|pretty maids all in a row', { range: eagles, log });
+    // The junk-note guard looks first, so a range that fails both is counted once, as implausible.
+    const junk = noteFile([[56, 0.5], [57, 0.485], [100, 0.015]]);
+    await store.putSongRange('a|junk notes', { range: junk, log });
+    expect(await fixNarrowRanges(store)).toMatchObject({ narrow: 2, stillNarrow: 2, widened: 0, noHistogram: 0, implausible: 1, stray: 1, changed: 2 });
+    expect(await rangeOf(store, 'eagles|pretty maids all in a row')).toEqual({ ...eagles, confidence: 'low' });
+    expect(await fixNarrowRanges(store)).toMatchObject({ implausible: 1, stray: 1, changed: 0 });
+  });
+
+  it('can block a pending octave move at the bounds of a plausible song, and never adds one', async () => {
+    const store = make();
+    // A high note file that the evidence puts an octave up: written 78 to 79 (+12 is 90 to 91, inside the bounds), it is widened to
+    // 78 to 80, whose +12 is past the top bound, so octaveMove (which refuses a move out of bounds) now declines it.
+    const high = noteFile([[78, 0.5], [79, 0.485], [80, 0.015]]);
+    await store.putSongRange('a|high', { range: high, log });
+    const evidence: OctaveEvidence = { songs: { 'a|high': high.tessitura + 12 }, artists: {} };
+    const moves = async () => (await fixStoredOctaves(readOnlyStore(store), evidence, { dryRun: true })).moved;
+    expect(await moves()).toBe(1);
+    await fixNarrowRanges(store);
+    expect(await rangeOf(store, 'a|high')).toMatchObject({ low: 78, high: 80, confidence: 'low' });
+    expect(await moves()).toBe(0);
   });
 
   it('counts a narrow note file with no usable histogram, and can only mark it', async () => {

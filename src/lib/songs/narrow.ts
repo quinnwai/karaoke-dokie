@@ -1,8 +1,9 @@
 // Redoes the stored ranges the narrow-range rule changes (range.ts applyNarrowRule, QWW-60): a note file
 // of 5 semitones or fewer is measured again with a 1% trim from its pitch histogram, what is still that narrow
 // is marked low confidence, and so is a recording of 5 semitones or fewer. Duets with parts, artist estimates
-// and every range wider than 5 semitones are left alone, and so is the range of a note file whose 1% trim would
-// reach pitches no song has (junk notes in the file, one reaching G17): it is only marked low confidence.
+// and every range wider than 5 semitones are left alone. So is the range of a note file whose 1% trim would reach
+// pitches no song has (junk notes in the file, one reaching G17) or a note 8 or more semitones from the nearest
+// pitch that is sung (a typo in the file, often an octave copy): that one is only marked low confidence.
 //
 // Safe to run again, and to stop and run again: a widened range is wider than 5 semitones and a marked one
 // comes out the same from the same histogram, so a second run changes nothing. A row is read again just
@@ -12,12 +13,13 @@
 // Octave: the stored histogram is in the octave of the stored range (the octave fix moves it along, see
 // shiftRange in octave.ts), and applyNarrowRule keeps the new low and high in that octave, so a range the
 // octave fix has moved does not move back. `histogramOffOctave` counts the rows where that was not so (0 on
-// production). The octave fix reads only a song's typical note, which this never writes, so a run of
-// `scripts/octave-fix.ts --dry-run` after this one finds the same moves as before it, no more.
+// production). A later `scripts/octave-fix.ts --dry-run` finds no move that this run added, since it reads a song's
+// typical note, which this never writes. It can find fewer: octaveMove also refuses a move that would take the
+// range past PLAUSIBLE_SONG, which a widened range can now reach. Compare the moves before and after, not a count of 0.
 
 import type { SongRange } from '../contracts';
 import type { SongRangeRecord, Store } from '../server/store';
-import { applyNarrowRule, gentleRange, isNarrow, isPlausible, NARROW_SPAN } from './range';
+import { applyNarrowRule, gentleRange, isNarrow, isPlausible, NARROW_SPAN, STRAY_GAP } from './range';
 
 export interface NarrowFixSummary {
   /** Stored ranges read. */
@@ -34,6 +36,8 @@ export interface NarrowFixSummary {
   noHistogram: number;
   /** Of the note files in `narrow`, those whose 1% trim reaches pitches no song has (junk notes in the file): kept at their range and marked, never widened. */
   implausible: number;
+  /** Of the other note files in `narrow`, those whose 1% trim has a note 8 or more semitones from the nearest pitch that is sung (a typo, often an octave copy): kept at their range and marked, never widened. */
+  stray: number;
   /** Of the note files in `narrow`, those whose histogram sat in another octave than the stored range, so the new range was moved to the stored octave. 0 when the octave fix moved the histogram along, as it does. */
   histogramOffOctave: number;
   /** Rows the rule changes (on a dry run, would change): `narrow` less the rows that are already as the rule leaves them. */
@@ -51,6 +55,8 @@ export interface NarrowFixOptions {
   pageSize?: number;
   /** Called for every song that changes (on a dry run, would change), with its range before and after. */
   onChange?: (key: string, before: SongRange, after: SongRange) => void;
+  /** Called for every song actually written, after the check that its row did not change since it was read; never on a dry run. The exact key list for a rollback. */
+  onWrite?: (key: string) => void;
   /** Called after every page with its last song key, to resume from, and the counts so far. */
   onPage?: (lastKey: string, summary: NarrowFixSummary) => void;
 }
@@ -64,7 +70,7 @@ const WRITE_BATCH = 10;
  */
 export async function fixNarrowRanges(store: Store, opts: NarrowFixOptions = {}): Promise<NarrowFixSummary> {
   const pageSize = opts.pageSize ?? 1000;
-  const summary: NarrowFixSummary = { checked: 0, narrow: 0, widened: 0, stillNarrow: 0, recordings: 0, noHistogram: 0, implausible: 0, histogramOffOctave: 0, changed: 0, skippedChanged: 0 };
+  const summary: NarrowFixSummary = { checked: 0, narrow: 0, widened: 0, stillNarrow: 0, recordings: 0, noHistogram: 0, implausible: 0, stray: 0, histogramOffOctave: 0, changed: 0, skippedChanged: 0 };
   const same = (a: SongRangeRecord, b: SongRangeRecord | undefined) => b !== undefined && JSON.stringify(a) === JSON.stringify(b);
   let after = opts.after ?? '';
   for (;;) {
@@ -85,6 +91,7 @@ export async function fixNarrowRanges(store: Store, opts: NarrowFixOptions = {})
         if (!finer) summary.noHistogram++;
         else {
           if (!isPlausible(finer)) summary.implausible++;
+          else if (finer.gap >= STRAY_GAP) summary.stray++;
           if (finer.octaves !== 0) summary.histogramOffOctave++;
         }
         if (range.high - range.low > NARROW_SPAN) summary.widened++;
@@ -101,7 +108,7 @@ export async function fixNarrowRanges(store: Store, opts: NarrowFixOptions = {})
       const fresh = await store.getSongRanges(batch.map((w) => w.key));
       await Promise.all(
         batch.map(({ key, read, next }) => {
-          if (same(read, fresh.get(key))) return store.putSongRange(key, next);
+          if (same(read, fresh.get(key))) return store.putSongRange(key, next).then(() => opts.onWrite?.(key));
           summary.skippedChanged++;
           return undefined;
         }),

@@ -8,11 +8,13 @@
 // `--after <that key>` skips what a stopped run had done. It runs no schema migration, so a dry run reads and nothing else.
 // --show prints the change of a song that has one, --sample the first n changes. Back up song_ranges first (copy it to a
 // song_ranges_bak_<ticket> table and check the row counts match): a row's old range is not kept anywhere else. A restore
-// of the whole table also undoes any write made after the backup (the octave fix, the USDB sync), so keep the --sample
-// output of the write run and restore only the keys it lists.
+// of the whole table also undoes any write made after the backup (the octave fix, the USDB sync), so keep the output of
+// the write run: its `wrote <key>` lines are exactly the keys it wrote (a row that changed after it was read is skipped
+// and not listed), and a rollback restores only those.
 // The new low and high stay in the stored octave (`histogramOffOctave` counts the rows where that took a shift: 0 on
-// production). The octave fix reads only a song's typical note, which this never writes, so `scripts/octave-fix.ts --dry-run`
-// afterwards finds the same moves as before this run, no more.
+// production). A later `scripts/octave-fix.ts --dry-run` finds no move this run added, since it reads only a song's typical
+// note, which this never writes. It can find fewer: it also refuses a move that would take a range past PLAUSIBLE_SONG,
+// which a widened range can reach. Compare its moves before and after this run; do not expect a count of 0.
 
 import { parseArgs } from 'node:util';
 import { midiToNoteName } from '../src/lib/audio/notes';
@@ -52,6 +54,7 @@ async function main() {
       const name = (r: { low: number; high: number }) => `${midiToNoteName(r.low)}-${midiToNoteName(r.high)} (${r.high - r.low} semitones)`;
       console.log(`change ${key}: ${before.source} ${name(before)}, ${before.confidence} -> ${name(after)}, ${after.confidence}`);
     },
+    onWrite: (key) => console.log(`wrote ${key}`),
     onPage: (lastKey, s) => console.log(`page done, last key ${JSON.stringify(lastKey)}: checked ${s.checked}, narrow ${s.narrow}, ${dryRun ? 'would change' : 'changed'} ${s.changed}`),
   });
   const spans = [...widenedSpans].sort((a, b) => a[0] - b[0]).map(([span, n]) => `${span}: ${n}`).join(', ');
