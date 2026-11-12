@@ -197,22 +197,35 @@ as written.
 **Tempo at an end (QWW-54).** With Tempo on and within 10 places of either end of its track (0 to 10 or 90 to 100,
 `TEMPO_END_REACH`), the songs in that end's band come first: under 90 on the one tempo at the slow end, 125 and over at the
 upbeat end (`feelOfTempo`). The band follows the feel labels: a song labelled slow or upbeat is in its band, a weak label too,
-and a song with no label is squeezed into the mid band (90 to 124.5), so with no labels both bands are empty and the rule does
-nothing. The band songs come ahead of how a song is sung and ahead of every other gear. Inside the band, and inside the rest,
-the order is the usual one: sung as written first, then the jumps (QWW-58), each by the closest sum. There the thumb counts as
-the end itself: Tempo's distance is to 0 or 100, so a thumb anywhere from 0 to 10 (90 to 100) gives the same list and the
-slowest (fastest) songs come first. Measured to the thumb, a thumb at 8 or 10 reached first the weak labels, which rest at the
-top of the slow band (at Tempo 10, 71% of the slow end's top 20 were weak labels; with the end as the target, 9.5%). The Maybe
-songs still come last, and a song with no tempo comes after every song that has one in its group. With Tempo off, or on and 11
-to 89, nothing changes: the default list, criterion 9 and the Hard songs above are as they were. Why: asked for "Slow jams",
-the songs sung as written came first and, in a narrow range, filled the top 20 with mid-tempo songs before the first slow song
-that needed a jump. In the release eval (criterion 2, Tempo alone) the soprano's 2020s slow list showed 6 slow songs and then
-14 mid or unlabelled ones, while 40 slow-labelled songs fit the range. Dropping the octave groups at the ends, so that the sum
-decides, was tried first and not kept: on the tuner's default gears (Popularity and Difficulty stay on when Tempo moves) it put
-the biggest hits back at the top in whichever octave fits them, 47% of the top 20 of the eval's 144 lists octave jumps (a
-bass's 97%), where there had been none. With the band first 3% of those slots are jump songs (96 of 2,880). On one set of the
-judge's answers, 128 of the 144 lists of criterion 2 reach 18 of 20 with this rule against 120 without it, and 115 against 27
-on the default gears. It changes Quinn-Wai's QWW-58 decision A for these two ends only.
+and a song with no label is squeezed into the mid band (90 to 124.5), so with no labels both bands are empty and this part does
+nothing. The band songs come ahead of how a song is sung, ahead of the singer's own songs (History, R31) and ahead of every
+other gear. Signed in with History on, the order at an end is: the singer's own songs in the band, other songs in the band, the
+singer's own songs outside it, the rest. Inside the band, and inside the rest, the order is the usual one: sung as written
+first, then the jumps (QWW-58), each by the closest sum. The Maybe songs still come last, and a song with no tempo comes after
+every song that has one in its group.
+
+The first and last tenth of the track are one stop each. Within 10 of an end Tempo's distance is to the end itself (0 or 100),
+so every thumb from 0 to 10 (or 90 to 100) gives the same list, with labels or without (#38's metronome art keeps moving across
+a stop while the list stays the same). Between the stops the distance is to a target that runs from 0 at the thumb's 10 to
+100 at its 90, so it does not jump when the thumb leaves a stop. Measured to the thumb instead, a thumb at 8 or 10 reached the
+weak labels first, which rest at the top of the slow band (at Tempo 10, 71% of the slow end's top 20 were weak labels; with the
+end as the target, 9.5%), and a target that went from the end straight to the thumb changed the top 20 completely between 10
+and 11 (68% weak labels at 11). With the running target, thumbs 11 to 15 keep 9 to 16% weak labels and 117 to 124 of the
+144 lists reaching 18 of 20, against 17 to 68% and 63 to 67. The weak labels sit at one place on the track, so they still come
+first where the target lands on them, now at a thumb of about 17 to 20. With Tempo off, the default list, criterion 9 and the
+Hard songs above are as they were.
+
+Why: asked for "Slow jams", the songs sung as written came first and, in a narrow range, filled the top 20 with mid-tempo songs
+before the first slow song that needed a jump. In the release eval (criterion 2, Tempo alone) the soprano's 2020s slow list
+showed 6 slow songs and then 14 mid or unlabelled ones, while 40 slow-labelled songs fit the range. Dropping the octave groups
+at the ends, so that the sum decides, was tried first and not kept: on the tuner's default gears (Popularity and Difficulty stay
+on when Tempo moves) it put the biggest hits back at the top in whichever octave fits them, 47% of the top 20 of the eval's 144
+lists octave jumps (a bass's 97%), where there had been none. With the band first 3% of those slots are jump songs (96 of
+2,880). On one set of the judge's answers, 128 of the 144 lists of criterion 2 reach 18 of 20 with this rule against 120
+without it, and 115 against 27 on the default gears. Signed in with History on (a made-up library of 200 popular songs of the
+range, three seeds, the same 144 lists), the top 20 at an end held 12.4 of the singer's own songs on average before, 8.9 of
+them outside the band, and 4 of the 144 lists reached 18 of 20; with this rule it holds 4.9, all but 0.1 inside the band, and 114
+of the 144 lists reach 18. It changes Quinn-Wai's QWW-58 decision A and R31 for these two ends only.
 
 **The curve (rule 2, easy leans low).** The strain of a song is the sung-time-weighted average of a note's cost, `t` being
 where the note sits in the singer's range (0 lowest, 1 highest, an octave shift applied): `((t - 0.35) / 0.65)²` from the
