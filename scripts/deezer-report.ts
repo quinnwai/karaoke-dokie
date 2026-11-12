@@ -2,8 +2,10 @@
 // For one range (default F#2 to C5, Quinn-Wai's range on 12 Nov), at the Setlist tuner's defaults, for every era and
 // for each era alone, in the whole list and in its top 100. With --overlay, the same lists again with the lookups a
 // `popularity:deezer --dry-run --save <file>` would write in place of the stored ones, so a recheck is judged before it
-// writes. --songs prints named songs (song keys, "artist|title") before and after.
+// writes. --songs prints named songs (song keys, "artist|title") before and after. --keys-out writes every catalogue
+// song's key, in any range, as JSON: the songs a logged-out list can show, for popularity:deezer --keys.
 //   node --import tsx scripts/deezer-report.ts [--low 42] [--high 72] [--overlay <file>] [--songs '<key>;<key>'] [--out <file>]
+//     [--keys-out <file>]
 // Needs DATABASE_URL_UNPOOLED or DATABASE_URL. Reads only (SELECT), like eval:release.
 
 import { realpathSync } from 'node:fs';
@@ -55,9 +57,13 @@ export function withOverlay<S extends Pick<Store, 'getSongPopularity'>>(store: S
   };
 }
 
-/** Every era's list and each era's own, logged out at the tuner's defaults, as POST /api/setlist answers them. */
-async function lists(store: Parameters<typeof loadCatalogue>[0] & Store, low: number, high: number): Promise<Map<EraId | 'all', Row[]>> {
+/**
+ * Every era's list and each era's own, logged out at the tuner's defaults, as POST /api/setlist answers them. `keys` gets
+ * every catalogue song's key when given.
+ */
+async function lists(store: Parameters<typeof loadCatalogue>[0] & Store, low: number, high: number, keys?: string[]): Promise<Map<EraId | 'all', Row[]>> {
   const entries = await loadCatalogue(store, undefined, { canonical: true });
+  keys?.push(...entries.map((e) => e.key));
   const prepared = prepareCatalogue(catalogueTracks(entries), { low, high }, productionSongDeps(store, false)).prepared;
   const gears = { difficulty: DEFAULTS.difficulty, history: DEFAULTS.history, popularity: DEFAULTS.popularity, tempo: DEFAULTS.tempo };
   const out = new Map<EraId | 'all', Row[]>();
@@ -91,6 +97,7 @@ async function main() {
       overlay: { type: 'string' },
       songs: { type: 'string' },
       out: { type: 'string' },
+      'keys-out': { type: 'string' },
     },
   });
   const url = (process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL || '').trim();
@@ -100,8 +107,13 @@ async function main() {
 
   const overlay = new Map<string, SongDeezerRecord>();
   if (values.overlay) for (const r of JSON.parse(await readFile(values.overlay, 'utf8')) as SongDeezerRecord[]) overlay.set(r.key, r);
-  const before = await lists(store, low, high);
+  const catalogue: string[] = [];
+  const before = await lists(store, low, high, catalogue);
   const after = overlay.size ? await lists(withOverlay(store, overlay), low, high) : null;
+  if (values['keys-out']) {
+    await writeFile(values['keys-out'], JSON.stringify(catalogue));
+    console.error(`Wrote ${catalogue.length} catalogue keys to ${values['keys-out']}`);
+  }
 
   console.log(`Range ${low} to ${high} (MIDI), logged out, the tuner's defaults. Dim ▶ = no Deezer track.${overlay.size ? ` After: ${overlay.size} lookups from ${values.overlay}.` : ''}\n`);
   const head = after ? '| Era | Songs | Dim ▶ now | Dim ▶ after | Top 100 now | Top 100 after |' : '| Era | Songs | Dim ▶ | Top 100 |';
