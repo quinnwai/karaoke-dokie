@@ -171,8 +171,8 @@ import. The model is the design's distance ranking (round 5 spec section 5), dec
    of the default list needs to lean harder.
 4. **Order.** The Maybe songs (estimated ranges) come after all the others, as everywhere else. Inside the Maybe songs and
    inside all the others, every song that fits as written comes before any song that needs an octave jump, up or down
-   (QWW-58, Quinn-Wai's decision A, 11 Nov; see below). The jump songs still follow, so a range whose popular songs all
-   need a jump gets a full list, never an empty one. Within each of those groups, a song we do not know on an active gear
+   (QWW-58, Quinn-Wai's decision A, 11 Nov; see below), except with Tempo at an end of its track (QWW-54, see below). The
+   jump songs still follow, so a range whose popular songs all need a jump gets a full list, never an empty one. Within each of those groups, a song we do not know on an active gear
    (no tempo, a one-note range, not in the library) comes after every song we do. When songs miss different gears the more
    specific control wins: History, then Tempo, then Popularity, then Difficulty (so a song with no tempo is after every
    song that has one, whatever else either is missing). Then the closest sum first. Exact ties go to the more popular
@@ -193,6 +193,17 @@ jump keeps its places on the gears, and its difficulty is still measured as sung
 relative to the songs sung as written is new. "As written" is only as reliable as the stored octave (`octave.ts`,
 QWW-31), so some songs that a low voice would have to jump (mostly women's and falsetto songs) can still count as sung
 as written.
+
+**Tempo at an end (QWW-54).** With Tempo on and within 10 places of either end of its track (0 to 10 or 90 to 100,
+`TEMPO_END_REACH`), the songs are not grouped by how they are sung: the closest sum comes first whether a song is sung as
+written or needs a jump, so a slow song that needs a jump can come before a mid-tempo song sung as written. The Maybe songs
+still come last, and a song with no tempo still comes after every song that has one, a jump song included. The other gears
+still count in the sum. With Tempo off, or on and 11 to 89, nothing changes: the default list, criterion 9 and the Hard
+songs above are as they were. Why: asked for "Slow jams", the songs sung as written came first and, in a narrow range,
+filled the top 20 with mid-tempo songs before the first slow song that needed a jump. In the release eval (criterion 2,
+Tempo alone) the soprano's 2020s slow list showed 6 slow songs and then 14 mid or unlabelled ones, while 40 slow-labelled
+songs fit the range. On the 144 lists of criterion 2, on top of the clarity ranking of the feel labels, 4 to 18 more lists
+reach 18 of 20 (three sets of the judge's answers); it changes Quinn-Wai's QWW-58 decision A for these two ends only.
 
 **The curve (rule 2, easy leans low).** The strain of a song is the sung-time-weighted average of a note's cost, `t` being
 where the note sits in the singer's range (0 lowest, 1 highest, an octave shift applied): `((t - 0.35) / 0.65)²` from the
