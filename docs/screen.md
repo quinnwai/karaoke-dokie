@@ -115,7 +115,7 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      size). The notes are 44 px tall to tap and redo's 44 px target reaches 9 px past its circle; both turn pink on hover (where
      there is one) and on keyboard focus (R9). On a touch screen the Spotify logo's tooltip, which says what the logo is, comes with
      a tap (`ConnectButton`, R30): the first tap shows it and connects to nothing, a second connects, and a tap anywhere else or
-     Escape hides it; a click that is not a finger (Enter, Space, a screen reader's activate) connects at once, and a mouse keeps
+     Escape hides it, and a second tap within 400 ms of the first is ignored (it would connect before the tooltip could be read); a click that is not a finger (Enter, Space, a screen reader's activate) connects at once, and a mouse keeps
      hover and one click. The "Want personalized recommendations?" note that ended the list is gone (R18). The heading is below the row.
    - **The list**: a row (66 px) is the slot (44 px) with the rank number, the title over "Artist · Era" (`’90s`) over a
      **reason line**, and a **difficulty badge**. The slot holds the rank number and the ▶ on top of each other (R3): on a
@@ -174,12 +174,15 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      With every gear off (Difficulty, Popularity, Tempo, History, and Era as a filter aside) the list is not left to the ties: the engine ranks it as the
      defaults do for this singer, History first when signed in, then popularity, then the easiest (R36, `defaultRanking` in `src/lib/songs/setlist.ts`); the
      request still has every gear off, the sheet shows them off, and `applied` is empty. Each gear's ✕ is vertically centred on its title (R34); its touch area is
-     44 x 20 and ends where the fader's hit area begins, 1 px below the title row, so none of it is over the fader's (R33).
+     44 x 20 (29 in a mini strip) and ends where the fader's hit area begins, 1 px below the title row, so none of it is over the fader's (R33).
      A gear's fader takes the pointer on a transparent hit area in the track, 44 px tall (8 px above the track and 16 below it) and as wide as the track with 7 px more
-     at each end (`.faderHit`, `src/lib/setlist/fader.ts`; R33): a drag can start anywhere on the fader's row (16 px above the thumb's centre included), a tap on
-     the track jumps the thumb there, and a swipe that is mostly up or down scrolls the sheet and changes nothing (`touch-action: pan-y`; a finger is judged over a
-     stretch, at 16 px when it is clearly sideways and otherwise at 32, so a wobble at the start of a swipe or a dip at the start of a drag does not decide it). The `<input type="range">` under it takes
-     no pointer and stays for the keyboard and screen readers. **Expanded** shows
+     at each end (`.faderHit`; `src/lib/setlist/fader.ts`; R33): a drag can start anywhere on the fader's row (16 px above the thumb's centre
+     included), a tap on the track jumps the thumb there, and a swipe that is mostly up or down scrolls the sheet and changes nothing (`touch-action: pan-y` on the
+     whole strip body). The strip reads the pointer by where the finger is, not by the element the event names, since Chromium hands a touch near the ✕ or the
+     title to them (`rawPress.ts`; the ✕, the era buttons and the sheet's handle count a click only if the press began on them). A finger is judged over a stretch
+     (a tap inside 8 px; a drag from 16 px if it is twice as far sideways as up or down; otherwise judged at 32 px), and a drag that was called is taken back, the
+     gear put back as it was and nothing recorded, if the finger turns up or down before it has gone 40 px sideways. The `<input type="range">` under it takes
+     no pointer and stays for the keyboard and screen readers; a click on the area gives it the focus as a mouse's. **Expanded** shows
      every gear (rack 416 px); **mini** shows one gear and a tab bar (164 px). The grab handle switches by tap, Enter or
      Space, or by a vertical drag (`touch-action: none`, so it never scrolls the page) that resizes the rack live.
      **Which mode it opens in** (`src/lib/setlist/fit.ts`, measured in `useSheetFit`): mini when the expanded sheet
@@ -212,7 +215,7 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      tap after the moment is a choice and works, and the system Back is not a tap and starts no moment. An ignored tap puts the moment off
      again, so a run of quick taps never gets through. The song page holds its ▶, its Spotify link or player and its thumbs for the same
      400 ms from when it is on the screen (`holdMs` in `SongDetail`: `pointer-events: none`), since a double tap on a row puts its second
-     tap there; ‹, the chart, the text and the keyboard are not held. Closing a page puts the list back where the singer had scrolled it
+     tap there, and each press that lands on it during the moment starts it again (a finger that went down in it keeps it up until 400 ms after the lift); ‹, the chart, the text and the keyboard are not held. Starting a redo starts the same guard and the quiet step's button goes through it. "Load more" holds the rows for the moment (a double tap on it opened the song under the finger); a row tapped after ‹ is not held. Closing a page puts the list back where the singer had scrolled it
      (`listTop` in `KaraokeApp`, put back before the focus, which then scrolls only if the row moved).
    - **Tests**: `window.setlist` (`getState`, `setState`, `ranking`, `songs`) exists only in a build made with
      `NEXT_PUBLIC_SETLIST_TEST_HOOK=1`, which is the e2e build (`playwright.config.ts`); production has none.
@@ -403,7 +406,7 @@ Chrome and the in-app browsers: granted, refused (and closed without an answer),
 browser's question left unanswered (and the reload after 12 s), a microphone taken away mid-note (our screen again
 though the browser says yes), a quick tap on the record button, and the sizes. What a real iPhone and Android phone do
 with those screens is checked by hand.
-Quinn-Wai's second review of #38 on an iPhone (R14 to R30) has a Playwright check per item: `setlist-header.spec.ts` (R14, R15, R18, R19, R21, R30), `setlist-era.spec.ts` (R22 to R24, with a screenshot of each two-pick row and of Era off), `setlist-history-default.spec.ts` (R31), and for the review of the whole build `setlist-fader.spec.ts` and `setlist-fader-ends.spec.ts` (R33), `setlist-reset-x.spec.ts` (R34), `setlist-row-tap.spec.ts` (the song page after a row tap), `setlist-reasons.spec.ts` (R35) and `setlist-all-off.spec.ts` (R36), `setlist-play.spec.ts` (R16, R17, R27), `setlist-song.spec.ts` (R25, R26), `credits.spec.ts` (R28, and Deezer's line staying: R29) and `touch-no-hover.spec.ts` (R20: no rule that applies on a touch screen shows or hides anything on `:hover`).
+Quinn-Wai's second review of #38 on an iPhone (R14 to R30) has a Playwright check per item: `setlist-header.spec.ts` (R14, R15, R18, R19, R21, R30), `setlist-era.spec.ts` (R22 to R24, with a screenshot of each two-pick row and of Era off), `setlist-history-default.spec.ts` (R31), and for the review of the whole build `setlist-fader.spec.ts`, `setlist-fader-ends.spec.ts` and `setlist-fader-near.spec.ts` (R33), `setlist-reset-x.spec.ts` (R34), `setlist-row-tap.spec.ts` (the song page after a row tap, "Load more", redo, the Spotify button), `setlist-reasons.spec.ts` (R35) and `setlist-all-off.spec.ts` (R36), `setlist-play.spec.ts` (R16, R17, R27), `setlist-song.spec.ts` (R25, R26), `credits.spec.ts` (R28, and Deezer's line staying: R29) and `touch-no-hover.spec.ts` (R20: no rule that applies on a touch screen shows or hides anything on `:hover`).
 Named screenshots land in `test-results/screens/`. The specs never load Spotify's player from
 Spotify: the screen spec answers `https://open.spotify.com/embed/**` with a stand-in page, and the
 full-stack spec (offline mock, search links only) shows the plain link.
