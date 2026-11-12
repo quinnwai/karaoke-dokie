@@ -97,7 +97,8 @@ describe('the lists are the tuner engine’s (POST /api/setlist)', () => {
   // Labels and ranges vary, so every gear moves the order.
   const songs = list(300).map((m, i): Match => ({ ...m, difficulty: (['easy', 'medium', 'hard'] as const)[i % 3]!, range: { ...m.range, low: 44 + (i % 17), high: 56 + (i % 17) } }));
   const t = input(songs);
-  const base = { matches: songs, logs: new Map(), prepared: t.prepared };
+  // `signals` is the per-song popularity signals that #42 (QWW-59) adds to the catalogue setlist; empty here, so no language weight.
+  const base = { matches: songs, logs: new Map(), signals: new Map(), prepared: t.prepared };
   const route = (req: Omit<Parameters<typeof setlistFor>[2], 'range' | 'limit'>) =>
     setlistFor(base, null, { ...req, range: { low: range.range.low, high: range.range.high }, limit: 200 }).songs.map((s) => s.match.track.id);
   const ids = (ms: Match[]) => ms.slice(0, 200).map((m) => m.track.id);
