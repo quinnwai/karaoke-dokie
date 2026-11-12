@@ -95,6 +95,25 @@ All three passes are one model answering the same question in different words, s
 era's lists by Quinn-Wai (QWW-54 "Done when") is the independent test. The one error known so far, Take On Me (published at
 170 bpm, marked "Fast"), was labelled mid by the model and has been set to upbeat by hand.
 
+## The band-edge audit (QWW-54 follow-up, 12 Nov)
+
+A label that disagrees with the measured tempo leaves the song pinned just inside the edge of its band. A wrong mid on a slow
+ballad sits at about 125, right under the upbeat songs: that was Ed Sheeran's "I See Fire". So every labelled song in the best
+1,000 of each release harness range (bass to soprano, low male and beginner) and of F2 to D4, from the tuner's default list and
+from the old whole list, whose effective tempo was within 2 bpm of a band edge (40, 90, 125 or 215), was rechecked: 1,820 songs.
+Three independent runs of `claude-opus-5-5` per song, each given only the artist, title and year and the plain definitions in
+the release harness' judge prompt, never the tempo or the label. A label changed when at least two runs agreed on the same
+different label; a change from one end to the other without all three runs behind it went to mid.
+
+1,388 labels were confirmed, 430 changed and one song had no majority. The 430 are 197 mid to slow, 231 mid to upbeat and 2
+slow to mid; 359 have all three runs behind them. Each is marked `claude-opus-5-5/feel-edge-recheck-v1` in `song_feel.source`.
+All 676 upbeat labels at 125 were confirmed. "I See Fire" was also one of the 1,820 (all three runs said slow); it was set by
+hand in the same week (`manual/hand-fix-qww-54b`) and is left out of these 430. The counts in the first paragraph of this file
+are from before the audit. The audit looked only at songs at an edge of their band, not at every label.
+
+The recheck is the same kind of model as the first pass and as the harness' judge, so it is not independent of either; the hand
+check of one era is still the test.
+
 ## Where the songs came from
 
 - the Billboard Year-End Hot 100 for 1990 to 2025 (`data/billboard-year-end.csv` in the release harness), 3,268 distinct songs;
