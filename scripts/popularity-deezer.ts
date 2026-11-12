@@ -58,7 +58,9 @@ async function main() {
       save: { type: 'string' },
     },
   });
-  const only = values.keys ? new Set(JSON.parse(await readFile(values.keys, 'utf8')) as string[]) : undefined;
+  const keys: unknown = values.keys ? JSON.parse(await readFile(values.keys, 'utf8')) : undefined;
+  if (keys !== undefined && !(Array.isArray(keys) && keys.every((k) => typeof k === 'string'))) throw new Error('--keys takes a JSON array of song keys');
+  const only = keys === undefined ? undefined : new Set(keys as string[]);
   const url = process.env.DATABASE_URL?.trim();
   if (!url) throw new Error('Set DATABASE_URL');
   const query = neonQuery(url);

@@ -145,6 +145,8 @@ export const ARTIST_ALIASES: ReadonlyMap<string, string> = new Map([
   ['bibi and tina', 'Bibi und Tina'],
 ]);
 
+/** Deezer's name for an act (a credit or one act of it, as a key reads it), or the act itself. */
+const aliasOf = (act: string) => ARTIST_ALIASES.get(loose(act)) ?? act;
 /** A credit as a key reads it, then as `loose` reads that: the form names are compared in. */
 const creditOf = (name: string) => loose(songKey(name, '').split('|')[0] ?? '');
 /** A title as a key reads it: lower case, without tags. Everything after the key's "|", since a title can hold one. */
@@ -171,16 +173,23 @@ const SOUNDTRACK = /\b(?:soundtrack|motion picture|cast recording|original cast|
 /** "Disney’s " before a film's name: the credit names the film, not the singer. */
 const DISNEY = /^(?:walt )?disney['’]s\s+/;
 
+/** What may follow the work's name in its soundtrack's title: nothing, a subtitle, or soundtrack words. */
+const AFTER_WORK = /^$|^\s*[:\-–—]|^\s+(?:the\s+)?(?:movie|film|original|motion picture|soundtrack|ost|musical|score|cast)\b/;
+const apostrophes = (s: string) => s.replace(/[’‘`´]/g, "'");
+
 /**
  * True when `album` is the soundtrack of the film or show a credit names: "Disney’s Aladdin" is "Aladdin (Original Motion
- * Picture Soundtrack)", "Hamilton" is "Hamilton (Original Broadway Cast Recording)". Deezer credits such a song to its
- * singers, so the album is what says it is the one.
+ * Picture Soundtrack)", "Disney’s Camp Rock 2" is "Camp Rock 2: The Final Jam (...)", "Hamilton" is "Hamilton (Original
+ * Broadway Cast Recording)". Deezer credits such a song to its singers, so the album is what says it is the one. The
+ * album's title starts with the work's name and goes on, if at all, with a subtitle or soundtrack words, so "Queen Of The
+ * Damned (Soundtrack)" is not Queen's.
  */
 function soundtrackOf(credit: string, album: string | undefined): boolean {
   if (!album) return false;
-  const work = loose(credit.replace(DISNEY, ''));
-  const a = loose(album.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase());
-  return work.length >= 4 && ` ${a} `.includes(` ${work} `) && SOUNDTRACK.test(a);
+  const work = apostrophes(credit.replace(DISNEY, '')).trim();
+  const base = apostrophes(titlePart(album));
+  const whole = loose(album.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase());
+  return work.length >= 4 && SOUNDTRACK.test(whole) && base.startsWith(work) && AFTER_WORK.test(base.slice(work.length));
 }
 
 // ---------- which recording a title names (QWW-59) ----------
@@ -213,9 +222,13 @@ const SESSION = /\brecorded (?:at|live|in)\b|\b(?:deezer|spotify|bbc|live|peel|t
  */
 const LIVE_ALBUM =
   /\bunplugged\b|\blive (?:at|in|from|on|aus|au|en)\b|(?:^|\s)live!?$|^live\b(?=\s*(?:$|[\d(:[–-]))|\bin concert\b|\b(?:ao|en|dal) vivo\b|\ben direct[eo]?\b/;
-/** An album of remixes, or of karaoke or instrumental tracks, by its title (QWW-67): "The Remixes", "Karaoke Hits". */
+/** An album of remixes by its title (QWW-67): "The Remixes". */
 const REMIX_ALBUM = /\bre-?mix(?:e[sd])?\b|\bmixes\b/;
-const KARAOKE_ALBUM = /\bkaraoke\b|\binstrumentals?\b/;
+/**
+ * An album of someone else's recordings, anywhere in its title, tags included (QWW-67): "Anti-Hero (Karaoke Version)",
+ * "Songs Made Famous By Adele", "Taylor Swift - Piano Covers". Not the bare word "cover": "Cover To Cover" is a best-of.
+ */
+const COVER_ALBUM = /\bkaraoke\b|\binstrumentals?\b|\btribute\b|\bmade famous\b|\bin the style of\b|\bas performed\b|\boriginally performed\b|\bcovers\b/;
 /** Words that only say how the original recording was released: "(Single Version)", "(Radio Edit)", "(Original Mix)". */
 const RELEASE_WORDS = new Set(
   'single album radio original main lp ep 7 12 inch mono stereo explicit clean edited edit uncensored censored uncut extended short long full deluxe bonus track us uk digital official audio video film movie soundtrack ost mix mixed version ver the a'.split(
@@ -279,11 +292,13 @@ export function recordingsOf(title: string): Set<Recording> {
  * Version)", "(Taylor's Version)"), or the title itself ("MTV Unplugged In New York", "Deezer Session", "The Remixes",
  * "Karaoke Hits"). A tag that only says which release it is ("(Deluxe Edition)", "(Original Motion Picture Soundtrack)",
  * "(International Version)") names no kind: an album is reissued far more often than a song is re-recorded. A single or
- * an EP named after the song (`song`, a title as a key reads it) says nothing: it carries several versions, each named in
- * its own title, so "Girl on Fire (Remixes) - EP" and "I Hope You’re Happy Now (Live)" hold the original too.
+ * an EP named after the song (`song`, a title as a key reads it) says nothing more than that it is a karaoke or cover
+ * release: it carries several versions, each named in its own title, so "Girl on Fire (Remixes) - EP" and "I Hope You’re
+ * Happy Now (Live)" hold the original too.
  */
 export function albumRecordings(album: string, song = ''): Set<Recording> {
   const kinds = new Set<Recording>();
+  if (COVER_ALBUM.test(album.normalize('NFKC').toLowerCase())) kinds.add('cover');
   const base = titlePart(album); // lower case, without tags
   if (song && loose(base) === loose(song)) return kinds;
   for (const tag of tagsOf(album)) {
@@ -295,7 +310,6 @@ export function albumRecordings(album: string, song = ''): Set<Recording> {
   if (LIVE_ALBUM.test(base) || SESSION.test(base)) kinds.add('live');
   if (REMIX_ALBUM.test(base)) kinds.add('remix');
   if (SPED_UP.test(base)) kinds.add('sped-up');
-  if (KARAOKE_ALBUM.test(base)) kinds.add('cover');
   return kinds;
 }
 
@@ -341,12 +355,11 @@ function keyMatch(key: string, track: Pick<DeezerTrack, 'title' | 'title_short' 
   const titles = [track.title, track.title_short ?? ''].flatMap(titleReadings).flatMap((t) => [t, t.split(' / ')[0]!]);
   if (!titles.some((t) => loose(songKey('', t).split('|')[1] ?? '') === title)) return null;
   const dArtist = creditOf(track.artist.name);
-  const artist = loose(credit);
-  const alias = ARTIST_ALIASES.get(artist);
-  const how = [artistMatch(artist, dArtist), alias === undefined ? null : artistMatch(creditOf(alias), dArtist)];
-  if (how.includes('exact')) return 0;
-  if (creditedActs(credit).some((act) => artistMatch(loose(act), dArtist) === 'exact')) return 1;
-  if (how.includes('contained')) return 2;
+  // For an act Deezer names another way, only Deezer's name counts: an artist with our spelling is a namesake ("Pink").
+  const how = artistMatch(creditOf(aliasOf(credit)), dArtist);
+  if (how === 'exact') return 0;
+  if (creditedActs(credit).some((act) => artistMatch(creditOf(aliasOf(act)), dArtist) === 'exact')) return 1;
+  if (how === 'contained') return 2;
   return soundtrackOf(credit, track.album?.title) ? 3 : null;
 }
 
@@ -456,6 +469,7 @@ const bare = (q: string) => loose(q.toLowerCase()).replace(JOIN_WORDS, ' ').repl
  * search often finds the original only with them: the plain search has "Break Free" as a live take and an a cappella only.
  */
 export function everyActQuery(artist: string, title: string): string | null {
+  if (!loose(titlePart(title))) return null;
   const featured = [...title.matchAll(/[([](?:feat|ft|featuring|with)\.?\s+([^)\]]+)[)\]]/gi)].map((m) => m[1]!);
   const acts = `${artist} ${featured.join(' ')}`.toLowerCase().replace(/\b(?:feat|ft|featuring)\b\.?/g, ' ');
   const query = `${acts} ${titlePart(title)}`.replace(/\s+/g, ' ').trim();
@@ -500,25 +514,35 @@ export async function findDeezerTrack(
     return b.track.rank >= SETTLED_SHARE * top;
   };
 
-  add(await client.search(deezerQuery(alias ?? artist, title)), 'search');
+  /** The artist's top tracks, when Deezer has an artist with that name; false when it has none. */
+  const artistRoute = async (name: string) => {
+    calls++;
+    const named = namedArtist(await client.artists(name), name);
+    if (named) add(await client.artistTop(named.id), 'artist');
+    return named !== undefined;
+  };
+
+  // Deezer answers an empty query with an error, which the client would retry: a key part can be empty ("(Intro)").
+  const plain = deezerQuery(alias ?? artist, title);
+  if (loose(plain)) add(await client.search(plain), 'search');
   const acts = everyActQuery(alias ?? artist, title);
   if (!settled() && acts !== null) add(await client.search(acts), 'acts');
-  if (!settled()) {
-    for (const name of alias ? [alias] : [credit, ...creditedActs(credit)]) {
-      calls++;
-      const named = namedArtist(await client.artists(name), name);
-      if (named) add(await client.artistTop(named.id), 'artist');
+  // The whole credit's artist first; its acts only when Deezer has no artist by the whole name, so "AC/DC" is never "AC".
+  if (!settled() && loose(credit) && !(await artistRoute(alias ?? credit)) && !alias) {
+    for (const act of creditedActs(credit)) {
       if (settled()) break;
+      await artistRoute(aliasOf(act));
     }
   }
-  if (!settled()) add(await client.search(keyTitle, TITLE_SEARCH_LIMIT), 'title');
+  if (!settled() && loose(keyTitle)) add(await client.search(keyTitle, TITLE_SEARCH_LIMIT), 'title');
 
   const chosen = best();
   if (!chosen) return { hit: null, calls };
   const route = found.get(chosen.track.id)!.route;
   if (!opts.releaseDate) return { hit: toHit(chosen.track), route, calls };
   calls++;
-  const detail = await client.track(chosen.track.id);
+  // The release date is only kept for audits: a failed read keeps the hit without it.
+  const detail = await client.track(chosen.track.id).catch(() => null);
   return { hit: toHit(detail?.release_date ? { ...chosen.track, release_date: detail.release_date } : chosen.track), route, calls };
 }
 

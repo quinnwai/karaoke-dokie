@@ -691,6 +691,20 @@ describe('schema and store selection', () => {
     expect((await s.listFeedback())[1]).not.toHaveProperty('view');
   });
 
+  it('migrate adds the matched-track columns to a song_deezer made before them, and can run again (QWW-67)', async () => {
+    const q = pgMemQuery({ noAstCoverageCheck: true });
+    await q('CREATE TABLE song_deezer (song_key TEXT PRIMARY KEY, rank INTEGER, deezer_id BIGINT, checked_at TEXT NOT NULL)');
+    await q('INSERT INTO song_deezer (song_key, rank, deezer_id, checked_at) VALUES ($1, $2, $3, $4)', ['toto|africa', 964_180, 1_079_668, '2026-11-06T12:00:00.000Z']);
+    await migrate(q);
+    await migrate(q);
+    const s = createPostgresStore(q, { autoMigrate: false });
+    // A lookup stored before the columns existed reads back without them; a new one keeps them.
+    expect((await s.listSongDeezer()).get('toto|africa')).toStrictEqual({ key: 'toto|africa', rank: 964_180, deezerId: 1_079_668, checkedAt: '2026-11-06T12:00:00.000Z' });
+    const hit = { key: 'toto|africa', rank: 964_180, deezerId: 1_079_668, checkedAt: '2026-11-13T00:00:00.000Z', title: 'Africa', album: 'Toto IV', releaseDate: '1982-04-08', duration: 295 };
+    await s.putSongDeezer([hit]);
+    expect((await s.listSongDeezer()).get('toto|africa')).toStrictEqual(hit);
+  });
+
   it('picks memory unless a DATABASE_URL is set and KARAOKE_STORE is not memory', () => {
     expect(pickStoreKind({})).toBe('memory');
     expect(pickStoreKind({ DATABASE_URL: '  ' })).toBe('memory');

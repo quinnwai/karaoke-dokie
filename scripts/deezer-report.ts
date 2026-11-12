@@ -63,7 +63,7 @@ export function withOverlay<S extends Pick<Store, 'getSongPopularity'>>(store: S
  */
 async function lists(store: Parameters<typeof loadCatalogue>[0] & Store, low: number, high: number, keys?: string[]): Promise<Map<EraId | 'all', Row[]>> {
   const entries = await loadCatalogue(store, undefined, { canonical: true });
-  keys?.push(...entries.map((e) => e.key));
+  for (const e of keys ? entries : []) keys!.push(e.key);
   const prepared = prepareCatalogue(catalogueTracks(entries), { low, high }, productionSongDeps(store, false)).prepared;
   const gears = { difficulty: DEFAULTS.difficulty, history: DEFAULTS.history, popularity: DEFAULTS.popularity, tempo: DEFAULTS.tempo };
   const out = new Map<EraId | 'all', Row[]>();

@@ -302,6 +302,11 @@ describe('albumRecordings (QWW-67)', () => {
     ['Sadnecessary (Acoustic Version)', ['version']],
     ["Red (Taylor's Version)", ['version']],
     ['Party Tyme Karaoke - Pop Male Hits 8 (Vocal Versions)', ['cover']],
+    ['Anti-Hero (Karaoke Version)', ['cover']],
+    ['Anti-Hero - Instrumental', ['cover']],
+    ['Songs Made Famous By Adele', ['cover']],
+    ['Taylor Swift - Piano Covers', ['cover', 'version']],
+    ['Taylor Swift Tribute', ['cover']],
     ['Caetano e Bethânia Ao Vivo', ['live']],
     ['The Remixes', ['remix']],
   ])('%s is %j', (album, kinds) => {
@@ -314,6 +319,8 @@ describe('albumRecordings (QWW-67)', () => {
     expect([...albumRecordings('I Hope You’re Happy Now (Live)', 'i hope you’re happy now')]).toEqual([]);
     expect([...albumRecordings('Girl on Fire (Remixes) - EP', 'empire state of mind')]).toEqual(['remix']);
     expect(pick('Alicia Keys', 'Girl On Fire', [dza(61542462, 878_990, 'Alicia Keys', 'Girl on Fire', 'Girl on Fire (Remixes) - EP')])).toBe(61542462);
+    // A karaoke single named after the song is still karaoke.
+    expect([...albumRecordings('Anti-Hero (Karaoke Version)', 'anti-hero')]).toEqual(['cover']);
   });
 
   it.each([
@@ -375,9 +382,11 @@ describe('other names for a credit (QWW-67)', () => {
     expect(matchesKey(songKey('Pink', 'Just Like a Pill'), dz(15597819, 554_354, 'P!nk', 'Just Like a Pill'))).toBe(true);
     expect(matchesKey(songKey('★N Sync', 'Bye Bye Bye'), dz(71183268, 505_100, '*NSYNC', 'Bye Bye Bye'))).toBe(true);
     expect(matchesKey(songKey('Dixie Chicks', 'Landslide'), dz(1, 1, 'The Chicks', 'Landslide'))).toBe(true);
-    // P!nk's track is the artist's own credit, so it beats a longer name that contains "Pink", whatever the rank.
-    const pill = [dz(1, 900_000, 'Pink Floyd', 'Just Like a Pill'), dz(15597819, 554_354, 'P!nk', 'Just Like a Pill')];
-    expect(pickDeezerHit(songKey('Pink', 'Just Like a Pill'), pill)?.deezerId).toBe(15597819);
+    // Only Deezer's name counts for an aliased act: the other artist named "Pink" is a namesake, and so is "Pink Floyd".
+    expect(matchesKey(songKey('Pink', 'Just Like a Pill'), dz(1, 1, 'Pink', 'Just Like a Pill'))).toBe(false);
+    expect(matchesKey(songKey('Pink', 'Just Like a Pill'), dz(1, 1, 'Pink Floyd', 'Just Like a Pill'))).toBe(false);
+    // An act of a shared credit goes by Deezer's name too.
+    expect(matchesKey(songKey('Pink & Nate Ruess', 'Just Give Me A Reason'), dz(60200391, 986_564, 'P!nk', 'Just Give Me a Reason (feat. Nate Ruess)'))).toBe(true);
   });
 
   it.each<[string, string[]]>([
@@ -412,7 +421,11 @@ describe('other names for a credit (QWW-67)', () => {
     expect(matchesKey(aladdin, dza(1, 1, 'Lea Salonga', 'A Whole New World', 'Aladdin'))).toBe(false); // no soundtrack word
     const hamilton = songKey('Hamilton', 'My Shot');
     expect(pickDeezerHit(hamilton, [dza(107832272, 633_897, 'Lin-Manuel Miranda', 'My Shot', 'Hamilton (Original Broadway Cast Recording)')])?.deezerId).toBe(107832272);
-    // The film's name must be whole words of the album's.
+    // The album starts with the work's name and goes on, if at all, with a subtitle or soundtrack words.
+    const campRock = songKey('Disney’s Camp Rock 2', 'Can’t Back Down');
+    expect(matchesKey(campRock, dza(1, 1, 'Demi Lovato', 'Can’t Back Down', 'Camp Rock 2: The Final Jam (Original Motion Picture Soundtrack)'))).toBe(true);
+    expect(matchesKey(songKey('Mamma Mia!', 'Mamma Mia'), dza(1, 1, 'Meryl Streep', 'Mamma Mia', 'Mamma Mia! The Movie Soundtrack'))).toBe(true);
+    expect(matchesKey(songKey('Queen', 'Slept So Long'), dza(1, 1, 'Jonathan Davis', 'Slept So Long', 'Queen Of The Damned (Soundtrack)'))).toBe(false);
     expect(matchesKey(songKey('Up', 'Married Life'), dza(1, 1, 'Michael Giacchino', 'Married Life', 'Upside Down (Original Motion Picture Soundtrack)'))).toBe(false);
   });
 });
@@ -514,7 +527,41 @@ describe('findDeezerTrack (QWW-67)', () => {
     const found = await findDeezerTrack(client, 'U2 and Green Day', 'The Saints Are Coming');
     expect(found.hit?.deezerId).toBe(1574233);
     expect(found.route).toBe('artist');
-    expect(client.calls.slice(0, 4)).toEqual(['search u2 and green day the saints are coming', 'artists u2 and green day', 'artists u2', 'top 432']);
+    // One act's track is not the artist's own credit, so the rest of the ladder still runs; it finds nothing better.
+    expect(client.calls).toEqual([
+      'search u2 and green day the saints are coming',
+      'artists u2 and green day',
+      'artists u2',
+      'top 432',
+      'artists green day',
+      'search the saints are coming (25)',
+    ]);
+  });
+
+  it('AC/DC: tries the acts of a credit only when Deezer has no artist by the whole name', async () => {
+    const client = fakeClient({
+      artists: { 'ac/dc': [{ id: 115, name: 'AC/DC', nb_fan: 9_000_000 }] },
+      top: { 115: [dza(574145, 900_000, 'AC/DC', 'Highway to Hell', 'Highway to Hell')] },
+    });
+    const found = await findDeezerTrack(client, 'AC/DC', 'Highway To Hell');
+    expect(found.hit?.deezerId).toBe(574145);
+    expect(client.calls).toEqual(['search ac/dc highway to hell', 'artists ac/dc', 'top 115']);
+  });
+
+  it('never sends an empty query: a key part can be empty, and Deezer answers that with an error', async () => {
+    const client = fakeClient({});
+    expect(await findDeezerTrack(client, 'Patrick Nuo', '(Intro)')).toEqual({ hit: null, calls: 2 });
+    expect(client.calls).toEqual(['search patrick nuo ', 'artists patrick nuo']);
+    const none = fakeClient({});
+    expect(await findDeezerTrack(none, '(Unknown)', '[Intro]')).toEqual({ hit: null, calls: 0 });
+    expect(none.calls).toEqual([]);
+  });
+
+  it('keeps a hit when its release date cannot be read', async () => {
+    const client = { ...fakeClient(summertime), track: async () => Promise.reject(new Error('Deezer track 16149860 failed (HTTP 503)')) };
+    const found = await findDeezerTrack(client, 'Lana Del Rey', 'Summertime Sadness', { releaseDate: true });
+    expect(found.hit?.deezerId).toBe(16149860);
+    expect(found.hit).not.toHaveProperty('releaseDate');
   });
 
   it('Disney’s Aladdin: no artist has the name, so the title alone finds the soundtrack', async () => {
