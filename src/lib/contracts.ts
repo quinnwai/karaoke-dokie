@@ -9,7 +9,18 @@ export interface VocalRange {
   high: Midi;
   /** How we got it: the hold-to-record test, or songs the user picked. */
   source: 'test' | 'songs';
+  /**
+   * When the singer sang it: milliseconds since 1970, by the clock of the device that measured it. The range sung last
+   * is the one both the device and the account keep (QWW-66). Absent on a range kept before this was recorded.
+   */
+  measuredAt?: number;
 }
+
+/**
+ * What the server takes as a vocal range, in MIDI notes and semitones (`validateVocalRange`): whole notes from `midiMin` to
+ * `midiMax`, spanning `spanMin` to `spanMax`. The screen reads them too, so it never offers the server a range it would refuse.
+ */
+export const RANGE_LIMITS = { midiMin: 28, midiMax: 96, spanMin: 5, spanMax: 48 } as const;
 
 /** Where a song's range numbers came from. 'audio-full': measured from the song's full recording. */
 export type RangeSource = 'note-file' | 'audio-full' | 'artist-typical' | 'artist-external';

@@ -172,7 +172,8 @@ export function KaraokeApp({
       // Always taken, so a pick left over from an earlier visit cannot surface later; only used when picking is on.
       const wantedPick = me ? takeWantsPick() : false;
       const progress = loadProgress();
-      const savedRange = me ? null : loadSavedRange();
+      // Signed in or not (QWW-66): the range sung last wins, so the flow compares the device's with the account's.
+      const savedRange = loadSavedRange();
       // Half a test left over from a redo that was abandoned is dropped when the singer already has a range (the flow goes to the list):
       // it must not come back at the next visit as a first test with no way back (the second review of PR #38).
       if ((me?.range || savedRange) && progress && (progress.low === null || progress.high === null)) clearProgress();
@@ -185,6 +186,9 @@ export function KaraokeApp({
         // ?mini=1 starts the tuner's sheet in mini mode (the reference's way to open its "L2 mini" board).
         mini: url.searchParams.get('mini') === '1',
       });
+      // On the list, no test is in flight. A finished test left in storage that the account's newer range outranked
+      // would otherwise come back as "That's your range" the next time the singer is signed out.
+      if (stateRef.current.step === 'results') clearProgress();
     })();
     return () => {
       cancelled = true;
@@ -195,7 +199,9 @@ export function KaraokeApp({
   useEffect(() => {
     if (state.step === 'boot') return;
     if (state.step === 'low' || state.step === 'high' || state.step === 'signin' || state.step === 'quiet') {
-      saveProgress({ low: state.low, high: state.high });
+      // A finished test carries the time it was sung (QWW-66), so signing in can tell it from the account's range.
+      const sung = state.range && state.range.low === state.low && state.range.high === state.high ? state.range.measuredAt : undefined;
+      saveProgress({ low: state.low, high: state.high, measuredAt: sung });
     }
   }, [state.step, state.low, state.high]);
 
@@ -207,6 +213,13 @@ export function KaraokeApp({
 
   // Save the range, then show results.
   const { step, range, error } = state;
+
+  // The device keeps the range of the list on screen (QWW-66), signed in or not. Signed out, that list is built on the range
+  // kept here, so a range sung or synced while signed in has to be kept here too, or the two lists drift apart again.
+  useEffect(() => {
+    if (step === 'results' && range) saveRangeOnDevice(range);
+  }, [step, range]);
+
   useEffect(() => {
     if (step !== 'saving' || !range || error) return;
     let cancelled = false;
@@ -427,6 +440,8 @@ export function KaraokeApp({
       return;
     }
     const samples = rec.take();
+    // When the note was let go: the time a range made by this test is stamped with (QWW-66).
+    const at = Date.now();
     // Muted, or audio that never started: only exact zeros for long enough, or no sound at all from a recorder that is
     // not running (iOS after a call or the lock screen) or after a hold too long to be a tap. A quiet singer's
     // microphone still wobbles, and a quick tap on a running recorder is just a short hold. "Hold the note a little
@@ -441,7 +456,7 @@ export function KaraokeApp({
     // Let the button repaint before the analysis runs.
     setTimeout(() => {
       const held = detectHeldNote(samples, rec.sampleRate);
-      dispatch({ type: 'holdEnd', midi: held ? held.midi : null });
+      dispatch({ type: 'holdEnd', midi: held ? held.midi : null, at });
     }, 0);
   };
 
@@ -489,7 +504,7 @@ export function KaraokeApp({
   const connectSpotify = () => {
     tracker.track(EVENT.spotifyConnect, { from: state.step, mode: state.mode });
     tracker.flush();
-    if (state.range) saveProgress({ low: state.range.low, high: state.range.high });
+    if (state.range) saveProgress({ low: state.range.low, high: state.range.high, measuredAt: state.range.measuredAt });
     navigate(LOGIN_PATH);
   };
 

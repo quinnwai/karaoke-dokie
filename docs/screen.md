@@ -83,7 +83,7 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
    or below the low one asks to go higher.
 6. **Range + arrow**: "That's your range A2 – C5" and a wordless arrow bouncing bottom-right
    (`aria-label="Continue"`). The arrow goes straight to catalogue results with no sign-in
-   (QWW-2 Track B); the range is kept on the device (`localStorage` `kd.range`). "or use songs from your
+   (QWW-2 Track B); the range is kept on the device (`localStorage` `kd.range`, with the time it was sung, QWW-66). "or use songs from your
    Spotify" under it shows only while `PICK_SONGS=on`, the switch of step 1 (QWW-55); it keeps the range in
    `sessionStorage` (`kd.test`) and goes to `/api/auth/login`. With the switch off, the Spotify logo on the
    results (step 7) is the one way to sign in.
@@ -222,7 +222,8 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
    - **Tests**: `window.setlist` (`getState`, `setState`, `ranking`, `songs`) exists only in a build made with
      `NEXT_PUBLIC_SETLIST_TEST_HOOK=1`, which is the e2e build (`playwright.config.ts`); production has none.
    In catalogue mode "Connect Spotify" saves the range for the sign-in round trip; back from Spotify,
-   it is PUT to `/api/me/range` and library results load. The Spotify logo at the top right shows
+   it is PUT to `/api/me/range` when it was sung after the account's (the range sung last wins, QWW-66; see
+   "The range on the device and on the account" in `backend.md`) and library results load. The Spotify logo at the top right shows
    which mode this is: grey ("Connect to Spotify") without an account, Spotify green when signed in.
    Signed in, pointing at it (or a tap) opens a small box, "Logged in as <display name> · Log out";
    Log out POSTs `/api/auth/logout`, forgets the library and shows catalogue results for the same
@@ -254,6 +255,8 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
    without Spotify whose range is kept on the device lands on catalogue results. Half a test left behind by a redo that was
    abandoned (a reload in the middle of one note) is dropped then, from the flow and from the device: the singer is where the redo
    started. Without a saved range it is a first test and is resumed, as is a finished test waiting at the arrow (the Spotify round trip).
+   A signed-in singer whose device holds a range sung after the account's has it saved first, so the list is built on it (QWW-66; see
+   "The range on the device and on the account" in `backend.md`).
 10. **Pick songs**: a signed-in user picks up to 3 songs from `/api/songs/known`; the lowest
    low and highest high become the range (`source: 'songs'`). Signed-out users sign in first.
 
