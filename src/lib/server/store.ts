@@ -243,7 +243,7 @@ export interface Store {
   listSongCanonical(): Promise<Map<string, SongCanonical>>;
   /**
    * Every measured song (note file or recording; the catalogue's pool, not only the part of it the list
-   * loads) with what the build reads: its display title and artist, popularity rank and range.
+   * loads) with what the build reads: its display title and artist, popularity rank, range and how far the range's octave can be trusted.
    */
   listCanonicalInputs(): Promise<CanonicalInput[]>;
 

@@ -81,7 +81,7 @@ const LIVE: RegExp[] = [
   /\bsessions?$/,
 ];
 const PACKAGING =
-  /^(?:single|album|radio|original|explicit|clean|edited|uncensored|censored|uncut|extended|short|long|full|mono|stereo|acoustic|ac[uú]stico|unplugged|demo|deluxe|bonus(?: track)?|orchestral|restrung|from the vault|stripped|outtake|alternate take|director's cut|official audio|audio|visuali[sz]er|re-?record(?:ed)?(?: \d{4})?|\d{4} re-?record)$|\bedition$|^deluxe\b|\bbonus track$/;
+  /^(?:single|album|radio|original|explicit|clean|edited|uncensored|censored|uncut|extended|short|long|full|mono|stereo|acoustic|ac[uú]stico|unplugged|demo|deluxe|bonus(?: track)?|orchestral|restrung|high notes|low notes|from the vault|stripped|outtake|alternate take|director's cut|official audio|audio|visuali[sz]er|re-?record(?:ed)?(?: \d{4})?|\d{4} re-?record)$|\bedition$|^deluxe\b|\bbonus track$/;
 /**
  * Where the song was used, not another recording of it: "(From "Frozen")", "(Once OST)", "(ESC 2015 Romania)",
  * "(La Casa De Papel Opening)". A bracket of one word before "theme", "intro" and the like ("(Love Theme)",

@@ -124,6 +124,8 @@ describe('cleanTitle: the patterns the list must not show (QWW-49)', () => {
     ['Song (Deluxe Edition)', 'Song', 'edition'],
     ['Song (Stripped)', 'Song', 'edition'],
     ['Faded (Restrung)', 'Faded', 'edition'],
+    ['Bleeding Love [High Notes]', 'Bleeding Love', 'edition'],
+    ['Song (Low Notes)', 'Song', 'edition'],
     ['Song (2008 Re-record)', 'Song', 'edition'],
     ['Let It Go (From "Frozen")', 'Let It Go', 'context'],
     ['Falling Slowly (Once OST)', 'Falling Slowly', 'context'],
@@ -217,7 +219,7 @@ describe('cleanTitle: real titles that are not tags stay as they are', () => {
   it.each([
     'Live It Up', 'Live in Love', 'Live in the Moment', 'Live a Little', 'Live Together', 'Live for Tonight', 'Live On', 'Live Without You', 'Live Is Life', 'Long Live',
     'How Do I Live', 'We Live in a Material World', 'Saturday Night Live', 'Remix Me Baby', 'Concert Hall', 'Unplugged Love', 'Bootleg Blues',
-    'The Theme', 'Love Theme', 'Happy Ending', 'Never Ending', 'Album Intro', 'The Intro', 'Single Ladies', 'Under Cover', 'Cover Me',
+    'The Theme', 'Love Theme', 'Happy Ending', 'Never Ending', 'Album Intro', 'The Intro', 'Single Ladies', 'Under Cover', 'Cover Me', 'High Notes of Love', 'Notes',
   ])('keeps a bracket that only starts or ends like a tag: Song (%s)', (inner) => unchanged(`Song (${inner})`));
 
   it('keeps a bracket that names a part, a reprise or an interlude, even next to a tag word', () => {

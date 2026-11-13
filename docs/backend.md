@@ -427,8 +427,19 @@ language versions ("(German Version)", "(Spanish Radio Edit)": the lyrics differ
   the cleaned titles. A featured artist or a further credit is set aside: "Calvin Harris" and "Calvin Harris & Dua
   Lipa" are one song (the release eval harness counts duplicates by lead artist too); "A" and "B" are not, and
   neither are "A & B" and "B & A";
-- their ranges agree at both ends within 4 semitones (`MAX_RANGE_GAP`). A popular row measured an octave off would
-  otherwise hide the row that fits the singer; those pairs stay two rows and the dry run lists them;
+- their ranges agree at both ends within 4 semitones (`MAX_RANGE_GAP`); rows that agree make a part. Two parts are still
+  one song when their most popular rows are an octave apart (both ends 12 semitones off, give or take 2) and one part is
+  strictly better evidenced: its best row has a higher `trust` (`rangeTrust`: 2 measured from a recording with high
+  confidence; 1 a note file moved to sit with its own recording or by a person, `octaveFrom` `recording` or `hand`; 0
+  anything else, which is a note file as written, one moved on a guess (`artist`, `pitch`) and any low-confidence range,
+  that the matcher shows as a Maybe and so must not hide a row it shows as a fit). That is one melody written in two
+  octaves, the matcher already tries a song an octave up and down, and the row is shown from the better evidenced part.
+  Every row folded in has to sit an octave (give or take 2) from the row shown, not only from the head of its part, and a
+  part folded in takes no other part with it, so a row is never hidden for one two octaves away (the matcher tries one
+  octave each way). A part that takes another never shows a low-confidence row when it has any other: a Maybe must not
+  hide a row the matcher shows as a fit. Any other disagreement (a fifth apart, two octaves, an octave with equal evidence) keeps two rows,
+  because folding would pick one measurement for everyone; the dry run lists them, and lists every octave fold with the
+  evidence behind it;
 - neither is an instrumental, karaoke or dub row.
 
 The row shown is the main version, the one with no tag on its title (the most popular such row), unless an alternate

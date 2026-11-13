@@ -83,6 +83,7 @@ export function summarizePlan(inputs: CanonicalInput[], plan: CanonicalPlan, sam
   }
   const folded = count('folded');
   const alternates = groups.filter((g) => g.alternate);
+  const octaves = groups.filter((g) => g.octave);
   const sizes = new Map<number, number>();
   for (const g of groups) sizes.set(g.members.length, (sizes.get(g.members.length) ?? 0) + 1);
   const row = (m: { key: string; artist: string; title: string; rank: number }, shown: boolean) => `      ${shown ? '=>' : '  '} ${m.artist} - ${m.title}  [${m.key}] (popularity ${m.rank < 0 ? 'unknown' : m.rank.toFixed(2)})`;
@@ -90,6 +91,7 @@ export function summarizePlan(inputs: CanonicalInput[], plan: CanonicalPlan, sam
     `${inputs.length} measured songs -> ${inputs.length - folded} after folding.`,
     `  ${folded} rows folded into another row of the same song, in ${groups.length} groups (sizes: ${[...sizes].sort((a, b) => a[0] - b[0]).map(([n, c]) => `${c} of ${n}`).join(', ') || 'none'}).`,
     `  ${alternates.length} groups show an alternate version because it is clearly more popular than the main one.`,
+    `  ${octaves.length} groups hold rows an octave apart, folded into the better evidenced part (listed in full below).`,
     `  ${count('cleaned')} rows shown with a cleaned title or artist line, ${count('same')} shown as stored, ${folded} folded.`,
     `  Tags removed from titles: ${[...byKind].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ') || 'none'}.`,
     `  To write: ${plan.changed.length} rows (${plan.unchanged} already stored and equal).`,
@@ -108,6 +110,16 @@ export function summarizePlan(inputs: CanonicalInput[], plan: CanonicalPlan, sam
     `Kept as separate rows because their ranges disagree by more than ${MAX_RANGE_GAP} semitones at either end: ${apart.length} songs (${octave} about an octave apart). A singer both fit sees such a song twice; one it fits only one of is not shown the other. The most popular ${Math.min(10, apart.length)}:`,
   );
   for (const g of apart.slice(0, 10)) lines.push(`  ${g.parts.map((m) => `${m.artist} - ${m.title} (${m.low}-${m.high})`).join('  |  ')}  [${note(g.gap)} apart]`);
+  // Every octave group, not a sample: each one hides a row from the singers it fits, so each is read. The evidence is
+  // printed as stored, beside the trust it came to.
+  const evidence = (m: CanonicalInput) =>
+    `${m.source === 'audio-full' ? 'recording' : m.source === 'note-file' ? 'note file' : 'source unknown'}, octaveFrom ${m.octaveFrom ?? 'none'}, confidence ${m.confidence ?? 'unknown'}, trust ${m.trust}`;
+  const octaveByPopularity = [...octaves].sort((a, b) => Math.max(...b.members.map((m) => m.rank)) - Math.max(...a.members.map((m) => m.rank)));
+  lines.push('', `Rows an octave apart folded into the better evidenced part (all ${octaves.length}, most popular first); => marks the row shown:`);
+  for (const g of octaveByPopularity) {
+    for (const m of g.members) lines.push(`      ${m.key === g.canonicalKey ? '=>' : '  '} ${m.artist} - ${m.title} (${m.low}-${m.high}, ${evidence(m)})  [${m.key}]`);
+    lines.push('');
+  }
   const byPopularity = [...groups].sort((a, b) => Math.max(...b.members.map((m) => m.rank)) - Math.max(...a.members.map((m) => m.rank)));
   lines.push('', `Folded songs, most popular first (${Math.min(samples, groups.length)} of ${groups.length}); => marks the row shown:`);
   for (const g of byPopularity.slice(0, samples)) {

@@ -1,4 +1,5 @@
 import type { DataSourceLogEntry, FeedbackEntry, SongRange, Track, VocalRange } from '../contracts';
+import { rangeTrust } from '../songs/canonical';
 import { catalogueRank, pickCatalogue } from '../songs/score';
 import { isMeasured } from '../songs/sourceRank';
 import {
@@ -241,7 +242,8 @@ export function createMemoryStore(): Store {
       for (const [key, { range, log }] of songs) {
         if (!range || !isMeasured(range)) continue;
         const popularity = popularityOf(key);
-        out.push({ key, artist: log.artist, title: log.title, rank: catalogueRank(range, best.get(key), popularity), low: range.low, high: range.high });
+        const evidence = { source: range.source, confidence: range.confidence, octaveFrom: range.octaveFrom };
+        out.push({ key, artist: log.artist, title: log.title, rank: catalogueRank(range, best.get(key), popularity), low: range.low, high: range.high, trust: rangeTrust(evidence), ...evidence });
       }
       return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     },
