@@ -11,7 +11,7 @@ a measurement: no audio, no measured tempo and no lyrics went in. They were made
 `claude-opus-5-5`, in three passes. The first pass (method `claude-opus-5-5/feel-v1`) labelled batches of about 350 to 410
 songs, each batch a separate fresh run that saw only its own songs and the instructions below; a song the model did not know
 got no label, and a song that two batches labelled differently became "mid". The second look and the recheck are described
-further down. The file holds 6,236 labels, which cover 6,242 of the catalogue's 7,638 songs (82%): **894 slow, 4,569 mid and 779
+further down. The file holds 6,236 labels, which cover 6,242 of the catalogue's 7,638 songs (82%): **895 slow, 4,577 mid and 770
 upbeat songs** since the pace relabel of 13 Nov, described below (on 12 Nov, before it, there were 6,202 labelled
 songs, 97 to 98% of the 300, 1,000, 2,000 and 3,000 most popular, and 878 slow, 3,312 mid and 2,012 upbeat). Of the mids, 436 are
 songs the strict recheck took a slow or upbeat label from (method `claude-opus-5-5/feel-recheck-v1`); the band-edge audit below
@@ -202,6 +202,16 @@ still `upbeat`.) The change list, by era and end, with his 25 marked, is on QWW-
    that takes the label of its main row, and all are ballads: November Rain, Don't Let the Sun Go Down on Me (two credits), Say You,
    Say Me, Die with a Smile, Cat's in the Cradle, Don't Let Go, I'm with You, Where'd You Go and Young Forever. (The other copies and the
    new rows went through the recheck like any other label, so a spelling copied as upbeat that the recheck sent to mid is back where it was.)
+4. **One label per song across its spellings** (a follow-up, 13 Nov). After the step 11 songs still had one label under one spelling and
+   another under a twin: the recheck had moved three NSYNC songs under `★n sync` while `nsync` and `*nsync` stayed upbeat, and eight
+   older songs had split on an apostrophe, a hyphen or a credit. Where the recheck judged a spelling its verdict decides (NSYNC's Bye Bye
+   Bye, It's Gonna Be Me and I Want You Back go to mid, Zedd's Clarity, judged fast under "Zedd & Foxes", to upbeat); otherwise the label of
+   the more popular key, taken to be the catalogue's own row, the one the app and the release pools show. James Arthur's Say You Won't Let
+   Go stays slow (the recheck's mid verdict on the slow end is not applied); The Who's Won't Get Fooled Again, KT Tunstall's Black Horse and
+   the Cherry Tree, Ne-Yo's Let Me Love You, Kendrick Lamar's DNA., En Vogue's My Lovin' and Imagine Dragons' It's Time are mid. 12 keys
+   change, each taking its twin's label and method; `tests/tempo/feelFile.test.ts` checks that the 11 songs keep one label. Two pairs stay
+   apart on purpose, Kid Cudi's Day 'n' Nite and Lana Del Rey's Summertime Sadness against their "vs." credits: those are remixes, other
+   recordings.
 
 **How the instructions were chosen.** The first draft, the plain standard with his 25 as examples, kept only 156 of the 1,920 upbeat
 labels as fast, and on the '60s and '90s lists he had called good it moved most of the songs too. The instructions below add what
