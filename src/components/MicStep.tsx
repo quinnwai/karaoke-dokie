@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { chromeIntentUrl, type BrowserInfo, type InApp } from '../lib/client/browser';
 import type { MicGate } from '../lib/client/flow';
 import type { MicProblem } from '../lib/client/mic';
+import { BackToSongs } from './BackToSongs';
 import { Lyric } from './Lyric';
 import { RoundButton } from './RoundButton';
 import styles from './screen.module.css';
@@ -23,6 +24,8 @@ interface MicStepProps {
   onAsk(): void;
   onTryHere(): void;
   onReload(): void;
+  /** Given when the singer already has a range (a redo): "Back to songs" is then on every screen of the step, so none is a dead end. */
+  onBack?(): void;
 }
 
 /** True once `ms` have passed with `active` on, and false again when it goes off. */
@@ -39,7 +42,16 @@ function useAfter(active: boolean, ms: number): boolean {
   return late;
 }
 
-export function MicStep({ gate, onAsk, onTryHere, onReload }: MicStepProps) {
+export function MicStep({ onBack, ...screen }: MicStepProps) {
+  return (
+    <>
+      {onBack && <BackToSongs onBack={onBack} />}
+      <MicScreen {...screen} />
+    </>
+  );
+}
+
+function MicScreen({ gate, onAsk, onTryHere, onReload }: Omit<MicStepProps, 'onBack'>) {
   const { view, env } = gate;
   // Looking at the browser, or opening a microphone that was already allowed: nothing to read yet.
   if (!env || view === 'checking' || view === 'opening') return <BusyScreen view={view} onReload={onReload} />;

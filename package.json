@@ -33,6 +33,7 @@
     "tempo:report": "tsx scripts/tempo-report.ts",
     "titles:build": "tsx scripts/song-titles.ts",
     "tempo:feel": "tsx scripts/tempo-feel.ts",
+    "genres:deezer": "tsx scripts/genres-deezer.ts",
     "smoke:live": "tsx scripts/smoke-live.ts",
     "eval:release": "tsx scripts/eval-release.ts"
   },
@@ -50,6 +51,7 @@
     "vitest": "^3.2.0"
   },
   "dependencies": {
+    "@fontsource/inter": "5.3.0",
     "@neondatabase/serverless": "1.2.0",
     "next": "16.4.1",
     "posthog-js": "1.447.7",

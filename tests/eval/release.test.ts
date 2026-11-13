@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import type { Match, SongRange } from '../../src/lib/contracts';
+import { describe, expect, it, vi } from 'vitest';
+import { ERA_IDS, type EraId, type Match, type SongRange } from '../../src/lib/contracts';
 import {
   checkNeverEmpty,
   checkPlay,
@@ -8,12 +8,16 @@ import {
   checkTempo,
   checkTitles,
   fitsEnd,
+  HAND_CHECK,
+  handCheck,
   isRecognisable,
   isVersionTitle,
+  JUDGE_BATCH,
+  judgeBatches,
   judgeList,
   judgeSongs,
   parseJudgeReply,
-  sample,
+  shuffled,
   tempoLists,
   TEST_RANGES,
   toMarkdown,
@@ -22,14 +26,18 @@ import {
   type JudgeLabel,
   type RangeInput,
   type SongFacts,
+  type TestRange,
   verdict,
+  VIEWS,
 } from '../../src/lib/eval/release';
-import { loadHarnessCatalogue, selectOnly } from '../../scripts/eval-release';
+import { harnessInputs, loadHarnessCatalogue, offlineChecks, selectOnly } from '../../scripts/eval-release';
 import { loadCatalogue } from '../../src/lib/server/catalogue';
 import { createMemoryStore } from '../../src/lib/server/memoryStore';
+import { setlistFor } from '../../src/lib/server/setlistService';
 import type { SongCanonical } from '../../src/lib/server/store';
-import { songKey } from '../../src/lib/songs/resolve';
 import { prepareSetlist } from '../../src/lib/songs/setlist';
+import { DEFAULT_OFF, DEFAULTS } from '../../src/lib/songs/setlistConfig';
+import { songKey } from '../../src/lib/songs/resolve';
 
 const range = TEST_RANGES[0]!;
 
@@ -49,7 +57,11 @@ function song(i: number, over: Partial<{ artist: string; title: string; year: nu
   };
 }
 const list = (n: number) => Array.from({ length: n }, (_, i) => song(i));
-const input = (matches: Match[]): RangeInput => ({ test: range, matches });
+/** The songs as the tuner's engine holds them for one test range (what POST /api/setlist ranks). */
+const input = (matches: Match[], test: TestRange = range): RangeInput => ({ test, prepared: prepareSetlist(matches.map((match) => ({ match })), test.range) });
+/** The judge's labels by song key, the same for every song unless `of` gives a song its own. */
+const votes = (songs: Match[], all: JudgeLabel[], of: (m: Match, i: number) => JudgeLabel[] | undefined = () => undefined) =>
+  new Map<string, JudgeLabel[]>(songs.map((m, i) => [m.track.id.slice(4), of(m, i) ?? all]));
 
 describe('titles (criterion 4)', () => {
   it('flags version tags and square brackets', () => {
@@ -74,6 +86,35 @@ describe('titles (criterion 4)', () => {
   it('passes a clean top 50', () => {
     expect(checkTitles(input(list(60))).pass).toBe(true);
   });
+
+  it('counts a title with a curly apostrophe and one with a straight one as the same song', () => {
+    const ms = [song(0, { artist: 'Ricky Martin', title: 'Livin’ la vida loca' }), song(1, { artist: 'Ricky Martin', title: "Livin' La Vida Loca" })];
+    expect(checkTitles(input(ms)).value).toBe('0 version, 1 duplicate');
+  });
+});
+
+describe('the lists are the tuner engine’s (POST /api/setlist)', () => {
+  // Labels and ranges vary, so every gear moves the order.
+  const songs = list(300).map((m, i): Match => ({ ...m, difficulty: (['easy', 'medium', 'hard'] as const)[i % 3]!, range: { ...m.range, low: 44 + (i % 17), high: 56 + (i % 17) } }));
+  const t = input(songs);
+  // `signals` is the per-song popularity signals that #42 (QWW-59) adds to the catalogue setlist; empty here, so no language weight.
+  const base = { matches: songs, logs: new Map(), signals: new Map(), prepared: t.prepared };
+  const route = (req: Omit<Parameters<typeof setlistFor>[2], 'range' | 'limit'>) =>
+    setlistFor(base, null, { ...req, range: { low: range.range.low, high: range.range.high }, limit: 200 }).songs.map((s) => s.match.track.id);
+  const ids = (ms: Match[]) => ms.slice(0, 200).map((m) => m.track.id);
+  const { eras: _eras, ...gears } = DEFAULTS;
+
+  it('ranks the first list as the route does for the tuner as it opens, for criteria 1, 4, 6 and 9 alike', () => {
+    const opening = route({ gears, off: [...DEFAULT_OFF], eras: [] });
+    expect(ids(VIEWS.default(t.prepared))).toEqual(opening);
+    expect(ids(tunerDefaultList(t.prepared))).toEqual(opening);
+  });
+
+  it('ranks a tempo end as the route does with Tempo alone and one era picked', () => {
+    const off = ['difficulty', 'history', 'popularity'] as const;
+    expect(ids(VIEWS.eraTempo(t.prepared, 's80', 'slow'))).toEqual(route({ gears: { ...gears, tempo: 0 }, off: [...off], eras: ['s80'] }));
+    expect(ids(VIEWS.eraTempo(t.prepared, null, 'upbeat'))).toEqual(route({ gears: { ...gears, tempo: 100 }, off: [...off, 'era'], eras: [] }));
+  });
 });
 
 describe('recognisable (criterion 1)', () => {
@@ -82,6 +123,11 @@ describe('recognisable (criterion 1)', () => {
     expect(isRecognisable(song(0, { artist: 'Wilson Phillips feat. X', title: 'Hold On' }), billboard, undefined)).toBe('billboard');
     expect(isRecognisable(song(1), billboard, { deezerRank: 700_000 })).toBe('deezer');
     expect(isRecognisable(song(2), billboard, { deezerRank: 100_000 })).toBeNull();
+  });
+
+  it('finds a title with a curly apostrophe on the Billboard list, which writes it straight', () => {
+    const hits = new Set([songKey('Aerosmith', "I Don't Want to Miss a Thing")]);
+    expect(isRecognisable(song(0, { artist: 'Aerosmith', title: 'I Don’t Want to Miss a Thing' }), hits, undefined)).toBe('billboard');
   });
 
   it('needs 15 of the top 20', () => {
@@ -144,6 +190,59 @@ describe('the catalogue the harness grades (QWW-49)', () => {
     expect(loaded.map((m) => `${m.artist} - ${m.title}`).sort()).toEqual(['10cc - Dreadlock Holiday', 'Aaliyah - I Don’t Wanna', 'Toto - Africa']);
     // The harness used to read the rows as stored, which is four, with the tag, and a song twice.
     expect(await loadCatalogue(store)).toHaveLength(4);
+  });
+
+  it('is what criterion 2 grades on every range: a song stored twice is judged once, under its clean title', async () => {
+    const store = createMemoryStore();
+    const rows = [stored('Aaliyah', "I Don't Wanna"), stored('Aaliyah', 'I Don’t Wanna'), stored('10cc', 'Dreadlock Holiday (Album Version)'), stored('Toto', 'Africa')];
+    for (const r of rows) await store.putSongRange(r.key, { range: r.range, log: r.log });
+    await store.putSongPopularity([
+      { key: rows[0]!.key, karaokeViews: 1_000, source: 'test' },
+      { key: rows[1]!.key, karaokeViews: 40_000_000, source: 'test' },
+    ]);
+    await store.putSongCanonical([
+      folded(rows[0]!, rows[1]!.key, 'I Don’t Wanna'),
+      folded(rows[1]!, rows[1]!.key, 'I Don’t Wanna'),
+      folded(rows[2]!, rows[2]!.key, 'Dreadlock Holiday'),
+    ]);
+    await store.putSongTempo(rows.map((r, i) => ({ key: r.key, deezerBpm: [68, 70, 100, 150][i]! })));
+    await store.putSongFeel(rows.map((r, i) => ({ key: r.key, feel: (['slow', 'slow', 'mid', 'upbeat'] as const)[i]!, source: 'test' })));
+
+    // What main() grades: the folded catalogue, then each of the nine ranges' songs as the tuner's engine holds them.
+    const { tracks, inputs } = await harnessInputs(store);
+    expect(tracks).toHaveLength(3);
+    expect(inputs.map((t) => t.test.id)).toEqual(TEST_RANGES.map((t) => t.id));
+    // Each range's songs are placed against that range, not the first one's.
+    expect(inputs.map((t) => [t.prepared.range.low, t.prepared.range.high])).toEqual(TEST_RANGES.map((t) => [t.range.low, t.range.high]));
+    expect(TEST_RANGES).toHaveLength(9);
+    const offline = offlineChecks(inputs, new Set(), new Map());
+    for (const t of TEST_RANGES) expect(offline.filter((c) => c.range === t.id).map((c) => c.criterion)).toEqual([1, 3, 4, 9]);
+    const lists = inputs.flatMap(tempoLists);
+    expect(new Set(lists.map((l) => l.range))).toEqual(new Set(TEST_RANGES.map((t) => t.id)));
+    for (const l of lists) for (const m of l.songs) expect(m.track.title).not.toMatch(/I Don't Wanna|Album Version/);
+    const shown = (end: 'slow' | 'upbeat') => lists.find((l) => l.range === 'low-male' && l.era === null && l.end === end)!.songs.map((m) => `${m.track.artist} - ${m.track.title}`);
+    expect(shown('slow')).toEqual(['Aaliyah - I Don’t Wanna', '10cc - Dreadlock Holiday', 'Toto - Africa']);
+    expect(shown('upbeat')).toEqual(['Toto - Africa', '10cc - Dreadlock Holiday', 'Aaliyah - I Don’t Wanna']);
+
+    const judged = judgeSongs(lists);
+    expect(judged.map((s) => `${s.song.artist} - ${s.song.title}`).sort()).toEqual(['10cc - Dreadlock Holiday', 'Aaliyah - I Don’t Wanna', 'Toto - Africa']);
+    const labels = new Map<string, JudgeLabel[]>(judged.map((s) => [s.key, s.song.artist === 'Aaliyah' ? ['slow', 'slow', 'mid'] : ['mid', 'upbeat', 'upbeat']]));
+    const lowMale = checkTempo('low-male', lists.map((l) => judgeList(l, labels)));
+    // Three songs is a thin pool: graded, and short of 18.
+    expect(lowMale.notes).toContain("any era slow: 1/20 count (only 3 songs in the pool). Not counted: 10cc - Dreadlock Holiday (mid, upbeat, upbeat); Toto - Africa (mid, upbeat, upbeat)");
+  });
+
+  it('stops the run when the clean titles cannot be read, rather than grade the titles as stored', async () => {
+    const store = createMemoryStore();
+    const row = stored('Toto', 'Africa');
+    await store.putSongRange(row.key, { range: row.range, log: row.log });
+    const broken = { ...store, getSongCanonical: async (): Promise<Map<string, SongCanonical>> => Promise.reject(new Error('song_canonical is unreadable')) };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(harnessInputs(broken)).rejects.toThrow(/Could not read song_canonical/);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -230,7 +329,7 @@ describe('never empty (criterion 3)', () => {
     const no80s = list(70).filter((m) => m.year! < 1980 || m.year! >= 1990);
     const c = checkNeverEmpty(input(no80s));
     expect(c.pass).toBe(false);
-    expect(c.notes).toContain('80s + tempo at 1: 0 songs');
+    expect(c.notes).toContain('’80s + tempo at 100: 0 songs');
   });
 
   it('fails a range with fewer than 10 songs', () => {
@@ -248,32 +347,108 @@ describe('tempo judge (criterion 2)', () => {
     expect(parseJudgeReply('not json').size).toBe(0);
   });
 
-  it('counts a song only when every run gives the end label; disagreement is flaky and a miss', () => {
-    expect(fitsEnd(['slow', 'slow', 'slow'], 'slow')).toEqual({ fits: true, flaky: false });
-    expect(fitsEnd(['slow', 'mid', 'slow'], 'slow')).toEqual({ fits: false, flaky: true });
-    expect(fitsEnd(['mid', 'mid', 'mid'], 'slow')).toEqual({ fits: false, flaky: false });
-    expect(fitsEnd([], 'upbeat').fits).toBe(false);
+  it('counts a song when 2 of 3 runs give the end label, not when 1 of 3 does', () => {
+    expect(fitsEnd(['slow', 'slow', 'slow'], 'slow')).toBe(true);
+    expect(fitsEnd(['slow', 'mid', 'slow'], 'slow')).toBe(true);
+    expect(fitsEnd(['upbeat', 'upbeat', 'slow'], 'upbeat')).toBe(true);
+    expect(fitsEnd(['mid', 'slow', 'mid'], 'slow')).toBe(false);
+    expect(fitsEnd(['slow', 'unknown', 'upbeat'], 'slow')).toBe(false);
+    expect(fitsEnd(['slow', 'slow', 'mid'], 'upbeat')).toBe(false);
+    expect(fitsEnd([], 'upbeat')).toBe(false);
   });
 
-  it('builds a slow and an upbeat top 20 for no era and each era, slowest songs first at the slow end', () => {
+  it('builds a slow and an upbeat top 20 for Era off and each era, slowest songs first at the slow end', () => {
     const lists = tempoLists(input(list(300)));
-    expect(lists).toHaveLength(16);
+    expect(lists.map((l) => `${l.era ?? 'off'} ${l.end}`)).toEqual([null, ...ERA_IDS].flatMap((e) => [`${e ?? 'off'} slow`, `${e ?? 'off'} upbeat`]));
     const slow = lists.find((l) => l.era === null && l.end === 'slow')!;
     const upbeat = lists.find((l) => l.era === null && l.end === 'upbeat')!;
     expect(slow.songs).toHaveLength(20);
     expect(Math.max(...slow.songs.map((m) => m.tempo!))).toBeLessThan(Math.min(...upbeat.songs.map((m) => m.tempo!)));
-    expect(lists.find((l) => l.era === '80s')!.songs.every((m) => m.year! >= 1980 && m.year! < 1990)).toBe(true);
+    expect(lists.find((l) => l.era === 's80')!.songs.every((m) => m.year! >= 1980 && m.year! < 1990)).toBe(true);
   });
 
-  it('passes 10/10 and 18/20, fails 9/10 or 17/20', () => {
+  it('ranks the tempo ends on tempo alone: a popular mid-tempo song does not reach the slow end', () => {
+    const slowSongs = Array.from({ length: 25 }, (_, i) => song(100 + i, { year: 1995, tempo: 60 + i }));
+    const hit = song(0, { year: 1995, tempo: 120 });
+    const top = tempoLists(input([hit, ...slowSongs])).find((l) => l.era === 's90' && l.end === 'slow')!;
+    expect(top.songs.map((m) => m.track.id)).toEqual(slowSongs.slice(0, 20).map((m) => m.track.id));
+  });
+
+  it('passes an end at 18 of its top 20, fails it at 17, wherever the misses sit', () => {
     const songs = list(20);
     const l = { range: range.id, era: null, end: 'slow' as const, songs };
-    const labels = (miss: number[]) => new Map<string, JudgeLabel[]>(songs.map((m, i) => [m.track.id.slice(4), miss.includes(i) ? ['mid', 'mid', 'mid'] : ['slow', 'slow', 'slow']]));
-    expect(judgeList(l, labels([18, 19])).pass).toBe(true);
-    expect(judgeList(l, labels([3])).pass).toBe(false);
-    expect(judgeList(l, labels([15, 18, 19])).pass).toBe(false);
+    const split: JudgeLabel[] = ['slow', 'mid', 'slow'];
+    const oneOfThree: JudgeLabel[] = ['mid', 'slow', 'mid'];
+    const labels = (miss: number[]) => votes(songs, split, (_, i) => (miss.includes(i) ? oneOfThree : undefined));
+    expect(judgeList(l, labels([18, 19]))).toMatchObject({ counted: 18, pass: true });
+    expect(judgeList(l, labels([0, 1]))).toMatchObject({ counted: 18, pass: true });
+    expect(judgeList(l, labels([17, 18, 19]))).toMatchObject({ counted: 17, pass: false });
+    expect(judgeList(l, labels([0, 1, 2]))).toMatchObject({ counted: 17, pass: false, missed: ['Artist 0 - Song 0 (mid, slow, mid)', 'Artist 1 - Song 1 (mid, slow, mid)', 'Artist 2 - Song 2 (mid, slow, mid)'] });
     const results = [judgeList(l, labels([])), judgeList({ ...l, end: 'upbeat' }, labels([]))];
-    expect(checkTempo(range.id, results)).toMatchObject({ pass: false, value: '1/2 era-ends' });
+    const c = checkTempo(range.id, results);
+    expect(c).toMatchObject({ pass: false, value: '1/2 era-ends' });
+    expect(c.notes).toHaveLength(1);
+    expect(c.notes[0]).toMatch(/^any era upbeat: 0\/20 count\. Not counted: Artist 0 - Song 0 \(slow, mid, slow\); /);
+  });
+
+  it('grades all 16 era-ends of each of the nine ranges, and a PASS needs every one of them', () => {
+    const songs = list(300);
+    const results = TEST_RANGES.flatMap((t) => tempoLists(input(songs, t))).map((l) => judgeList(l, votes(songs, ['slow', 'upbeat', 'slow'])));
+    const tempo = TEST_RANGES.map((t) => checkTempo(t.id, results));
+    // 2 of 3 say slow and 1 of 3 upbeat: every slow end passes and every upbeat end fails, in each range.
+    expect(tempo.map((c) => [c.range, c.value])).toEqual(TEST_RANGES.map((t) => [t.id, '8/16 era-ends']));
+    const ok = (criterion: Check['criterion'], id: string): Check => ({ criterion, range: id, pass: true, value: 'ok', want: 'ok', notes: [] });
+    const others = ([1, 3, 4, 6, 9] as const).flatMap((c) => TEST_RANGES.map((t) => ok(c, t.id)));
+    const tempoOk = TEST_RANGES.map((t) => ok(2, t.id));
+    expect(verdict([...others, ...tempoOk])).toBe('PASS');
+    expect(verdict([...others, ...tempoOk.filter((c) => c.range !== 'soprano')])).toBe('INCOMPLETE');
+    expect(verdict([...others, ...tempo])).toBe('FAIL');
+  });
+
+  it('grades only the top 20 of a longer list', () => {
+    const songs = list(25);
+    const l = { range: range.id, era: null, end: 'slow' as const, songs };
+    expect(judgeList(l, votes(songs, ['slow', 'slow', 'slow'], (_, i) => (i < 3 ? ['mid', 'mid', 'mid'] : undefined)))).toMatchObject({ counted: 17, pass: false });
+  });
+
+  it('sends each run every song once, in its own order, not sorted by stored tempo', () => {
+    const songs = judgeSongs(tempoLists(input(list(300))));
+    const byKey = (xs: typeof songs) => [...xs].sort((a, b) => a.key.localeCompare(b.key));
+    const runs = [0, 1, 2].map((run) => judgeBatches(songs, run));
+    for (const batches of runs) {
+      expect(batches.every((b) => b.length <= JUDGE_BATCH)).toBe(true);
+      expect(byKey(batches.flat())).toEqual(byKey(songs));
+      expect(batches.flat()).not.toEqual(songs);
+    }
+    expect(judgeBatches(songs, 0)).toEqual(runs[0]);
+    expect(runs[0]!.flat()).not.toEqual(runs[1]!.flat());
+    expect(runs[1]!.flat()).not.toEqual(runs[2]!.flat());
+    expect(shuffled([1, 2, 3], 7)).toEqual(shuffled([1, 2, 3], 7));
+  });
+
+  it('grades an era whose pool is thin like the rest: it fails unless 18 songs count', () => {
+    // The ’20s: 30 songs fit, 6 of them slow, so mid songs fill out the slow end. The ’90s: 12 songs, all slow.
+    // The ’00s: 18 songs, all slow. The ’70s: no songs at all.
+    const s20 = Array.from({ length: 30 }, (_, i) => song(i, { year: 2021, tempo: 60 + i }));
+    const s90 = Array.from({ length: 12 }, (_, i) => song(100 + i, { year: 1995, tempo: 60 + i }));
+    const s00 = Array.from({ length: 18 }, (_, i) => song(200 + i, { year: 2005, tempo: 60 + i }));
+    const slowOnes = new Set([...s20.slice(0, 6), ...s90, ...s00]);
+    const all = [...s20, ...s90, ...s00];
+    const lists = tempoLists(input(all));
+    const results = lists.map((l) => judgeList(l, votes(all, ['mid', 'mid', 'mid'], (m) => (slowOnes.has(m) ? ['slow', 'slow', 'slow'] : undefined))));
+    const slowEnd = (era: EraId) => results.find((r) => r.list.era === era && r.list.end === 'slow')!;
+    expect(slowEnd('s20')).toMatchObject({ counted: 6, pass: false });
+    expect(slowEnd('s20').list.songs).toHaveLength(20);
+    expect(slowEnd('s90')).toMatchObject({ counted: 12, pass: false });
+    expect(slowEnd('s00')).toMatchObject({ counted: 18, pass: true });
+    expect(slowEnd('s70')).toMatchObject({ counted: 0, pass: false });
+    const c = checkTempo(range.id, results);
+    expect(c.pass).toBe(false);
+    expect(c.value).toMatch(/\/16 era-ends$/);
+    const note = (start: string) => c.notes.filter((n) => n.startsWith(start));
+    expect(note('’20s slow: 6/20 count. Not counted: ')).toHaveLength(1);
+    expect(note('’90s slow: 12/20 count (only 12 songs in the pool)')).toEqual(['’90s slow: 12/20 count (only 12 songs in the pool)']);
+    expect(note('’70s slow: 0/20 count (only 0 songs in the pool)')).toHaveLength(1);
   });
 
   it('sends each song to the judge once, with artist, title and year only', () => {
@@ -285,23 +460,45 @@ describe('tempo judge (criterion 2)', () => {
 });
 
 describe('report', () => {
-  it('is the same sample on every run, and the table says FAIL when any check fails', () => {
-    expect(sample([...Array(100).keys()], 5)).toEqual(sample([...Array(100).keys()], 5));
+  it('says FAIL when any check fails', () => {
     const md = toMarkdown({
       title: 'Release eval',
       checks: [checkTitles(input([song(0, { title: 'X [DUET]' })]))],
       top10: [{ range, songs: [] }],
-      tempoSample: [],
+      handCheck: null,
       meta: [],
     });
     expect(md).toContain('## Release eval: FAIL');
     expect(md).toContain('| 4. Titles (top 50) | **FAIL** 1 version, 0 duplicate | not run');
   });
+
+  it("lists the ’90s slow and upbeat top 20 for F2 to C5, as graded, for Quinn-Wai's hand check", () => {
+    // Each range gets songs of its own, so the hand check can only show low male's.
+    const pool = (t: TestRange) => Array.from({ length: 300 }, (_, i) => song(i, { title: `${t.id} ${i}` }));
+    const lists = TEST_RANGES.flatMap((t) => tempoLists(input(pool(t), t)));
+    const h = handCheck(lists, votes(TEST_RANGES.flatMap(pool), ['slow', 'mid', 'slow']));
+    expect(TEST_RANGES.find((t) => t.id === HAND_CHECK.range)!.range).toMatchObject({ low: 41, high: 72 }); // F2 to C5, one of the nine
+    expect(h.ends.every((e) => e.songs.every((s) => s.title.startsWith('low-male ')))).toBe(true);
+    expect(h).toMatchObject({ range: 'low-male', era: 's90' });
+    expect(h.ends.map((e) => [e.end, e.songs.length])).toEqual([
+      ['slow', 20],
+      ['upbeat', 20],
+    ]);
+    expect(h.ends[0]!.songs.every((s) => s.counts && s.year! >= 1990 && s.year! < 2000)).toBe(true);
+    expect(h.ends[1]!.songs.some((s) => s.counts)).toBe(false);
+    // Each end is its own list: the upbeat end starts with a faster song than any at the slow end.
+    expect(h.ends[1]!.songs[0]!.bpm!).toBeGreaterThan(Math.max(...h.ends[0]!.songs.map((s) => s.bpm!)));
+    const md = toMarkdown({ title: 'Release eval', checks: [], top10: [], handCheck: h, meta: [] });
+    expect(md).toContain('### Tempo hand check: Low male, Quinn-Wai (F2-C5), ’90s');
+    expect(md).toContain('**Slow end, top 20: 20 count**');
+    expect(md).toContain('**Upbeat end, top 20: 0 count**');
+    expect(md).toContain('| slow, mid, slow | **no** |');
+  });
 });
 
 describe('review fixes', () => {
   it('is INCOMPLETE, not PASS, when a criterion was skipped', () => {
-    const clean = TEST_RANGES.map((t) => checkTitles({ test: t, matches: list(60) }));
+    const clean = TEST_RANGES.map((t) => checkTitles(input(list(60), t)));
     expect(verdict(clean)).toBe('INCOMPLETE');
     expect(verdict([...clean, { ...clean[0]!, pass: false }])).toBe('FAIL');
   });
@@ -315,16 +512,16 @@ describe('review fixes', () => {
   });
 
   it('puts criterion 9 in the table, with its target', () => {
-    const md = toMarkdown({ title: 'Release eval', checks: [checkSungAsWritten(range, list(20))], top10: [{ range, songs: [] }], tempoSample: [], meta: [] });
+    const md = toMarkdown({ title: 'Release eval', checks: [checkSungAsWritten(range, list(20))], top10: [{ range, songs: [] }], handCheck: null, meta: [] });
     expect(md).toContain('| 9. Sung as written (top 20) | PASS 20/20 |');
     expect(md).toContain('9 at least 15 of the top 20 sung as written');
   });
 
   it('fails an empty tempo list and names a short one', () => {
-    expect(judgeList({ range: range.id, era: '60s', end: 'slow', songs: [] }, new Map()).pass).toBe(false);
+    expect(judgeList({ range: range.id, era: 'pre', end: 'slow', songs: [] }, new Map()).pass).toBe(false);
     const songs = list(5);
-    const r = judgeList({ range: range.id, era: '60s', end: 'slow', songs }, new Map());
-    expect(checkTempo(range.id, [r]).notes[0]).toContain('(only 5 songs)');
+    const r = judgeList({ range: range.id, era: 'pre', end: 'slow', songs }, new Map());
+    expect(checkTempo(range.id, [r]).notes[0]).toContain('(only 5 songs in the pool)');
   });
 
   it('reports a Deezer error apart from a missing preview', () => {

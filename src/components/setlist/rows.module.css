@@ -1,0 +1,375 @@
+/* The Setlist tuner's song list: the scroller, the rows (the ▶ or rank slot, the text, the badge) and what else the list says.
+   Split from setlist.module.css (QWW-57); the tokens (--sl-*) are defined on the screen's root there and inherited here. */
+
+/* ===== Song list ===== */
+
+.listScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #2a2833 transparent;
+  /* Rows reorder in the flow of the page, and flip.ts slides them from where they were: the browser must not also move
+     the scroll position to keep one of them still (Chrome's scroll anchoring would). */
+  overflow-anchor: none;
+}
+
+/* Room under the last thing in the list, clear of the handle's touch area, which reaches 11 px above the sheet (2 px over the list's bottom: the spacer is what is under it). It is a
+   spacer at the end of what scrolls, not padding on the box, so the box can still shrink to nothing on a screen with no room
+   (padding would keep it 24 px tall and push the sheet off the screen's bottom edge). */
+.listScroll::after {
+  content: '';
+  display: block;
+  height: 24px;
+}
+
+.list {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A row (README §4): the slot, the text and the badge, 10 px apart, 66 px tall. The slot is where the rank number was
+   (decision 3), and holds the number and the ▶ in turn (R3). The position also lives in data-rank and in the list being an <ol>. */
+.row {
+  height: 66px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--sl-row-line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* A row that changes place slides there: flip.ts animates it (README §4: 280 ms, as in Round 5). */
+}
+
+/* The slot (R3): a 44 px target at the start of the row, beside the row's own button, never inside it. It holds the row's
+   rank number and its ▶ in the same place, one at a time, and wherever the ▶ shows a thin circle surrounds it (R17: always on a
+   touch screen, and with the ▶ on hover or focus on a pointer device); while it plays the ⏸ sits in a ring that fills over the
+   preview. QWW-48's play button is styled with the app's colours (--ink, --faint, --pink); the slot hands it the tuner's, so
+   its glyph and its ring's fill are --pink-text, its circle is the badge's pink line a little dimmer (so the fill reads over it),
+   and it glows like the badge while it plays. */
+.playSlot {
+  --ink: var(--sl-pink-text);
+  --faint: rgba(240, 80, 154, 0.55);
+  --pink: var(--sl-pink-text);
+  --pink-glow: rgba(240, 80, 154, 0.35);
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+}
+
+/* The number and the ▶ share the slot's one cell. */
+.playSlot > * {
+  grid-area: 1 / 1;
+}
+
+/* 6A's rank style, centred in the slot. It is not drawn here: a touch screen cannot hover, so the ▶ stands in the number's
+   place there (below, under hover: hover, is where the number comes back). --sl-text-4 is 6A's #7C7887 (4.5:1), which the
+   screen's token list does not carry, so it is given here as the fallback. */
+.rankNumber {
+  display: none;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--sl-text-4, #7c7887);
+  text-align: center;
+}
+
+/* The ▶ is whatever button the slot holds: the placeholder's, or QWW-48's, which brings its own sizes and a margin-left of
+   -4px, so the slot sets them again. The button is round, so the keyboard focus outline, which is drawn inside the 44 px so the
+   list's scroller does not cut it off at the row's edge, goes round the circle QWW-48's button draws (its first svg: a track
+   circle and the fill that runs over it, R17) and not round a square. The button itself has no border or background. */
+.playSlot button {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--sl-pink-text);
+  cursor: pointer;
+}
+
+.playSlot button:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Not playable (the placeholder until QWW-48 is wired in, and later a song with no preview): the circle and the glyph both in a
+   faded pink (the whole button is faded, R17). */
+.playSlot button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.playSlot [data-preview='playing'] {
+  filter: drop-shadow(0 0 5px rgba(240, 80, 154, 0.55));
+}
+
+/* A pointer device: the number shows at rest and the ▶ does not (its circle and glyph are hidden, not the button, so the button keeps
+   its 44 px target and its place in the Tab order). Hovering the row, or keyboard focus on the ▶, swaps them. Hover is only
+   ever for pointer devices, so nothing sticks after a tap on a phone. */
+@media (hover: hover) {
+  .rankNumber {
+    display: block;
+  }
+
+  .playSlot button svg {
+    visibility: hidden;
+  }
+
+  .row:hover .rankNumber,
+  .playSlot:has(:focus-visible) .rankNumber {
+    display: none;
+  }
+
+  .row:hover .playSlot button svg,
+  .playSlot:has(:focus-visible) button svg {
+    visibility: visible;
+  }
+}
+
+/* A preview that is loading, playing or paused (QWW-48 marks its button with data-preview) keeps its circle and glyph in the number's
+   place without hover, on any device, so the row that is sounding shows. */
+.playSlot:has([data-preview='loading'], [data-preview='playing'], [data-preview='paused']) .rankNumber {
+  display: none;
+}
+
+.playSlot:has([data-preview='loading'], [data-preview='playing'], [data-preview='paused']) button svg {
+  visibility: visible;
+}
+
+/* Deezer's credit (QWW-48): the line under the list, over the credits link, in the tuner's quiet text colour. The element is also
+   given the app's .deezerCredit, which sets a negative margin for the earlier screens and the app's own colours, so this names the
+   element too, to be the more specific. */
+p.deezer {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 10px 0 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--sl-text-3);
+  --ink: var(--sl-text-2);
+}
+
+.rowOpen {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rowText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rowTitleBox {
+  /* How long one title takes to fill in (R12, below). */
+  --fill-ms: 600ms;
+  position: relative;
+  display: block;
+  min-width: 0;
+  /* The copies drawn over the title (R12's white fill, R16's pink sweep) are layered among themselves, inside the box. */
+  isolation: isolate;
+}
+
+.rowTitle,
+.rowSub,
+.rowWhy {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowTitle {
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--sl-text);
+}
+
+.rowSub {
+  font-size: 13px;
+  line-height: 17px;
+  font-weight: 400;
+  color: var(--sl-text-3);
+}
+
+.rowWhy {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  color: var(--sl-pink-line);
+}
+
+/* The reason line is the one line that runs on under the badge (QWW-57, R35). The badge's box ends at 45 px of the 66 px row and this line's starts at 44,
+   its letters well below, so the line may have the row's whole width, not the column beside the badge. "In your sweet spot · Unconventional pick" is
+   230 px at 12 px and "In your sweet spot · Crowd favourite" 205, and the column is 167 px beside a Medium badge at 360 px (186 beside the others, 182
+   and 201 at 375, 197 and 216 at 390), so an ellipsis cut both there; the row is 244 px wide at 360 (259, 274). Below about 350 px even that is not
+   enough, so the type tightens (never under 10.5 px: 10.4 would be needed on a 320 px phone) to keep the longest line whole. Without container units
+   the line is as it was, in its column. */
+@supports (width: 1cqw) {
+  .rowOpen {
+    container-type: inline-size;
+  }
+
+  .rowWhy {
+    width: max-content;
+    max-width: 100cqw;
+    font-size: clamp(10.5px, calc((100cqw - 4px) / 19.2), 12px);
+  }
+}
+
+/* The title's karaoke fill (R12, in place of the looping #1 wipe): when a row first comes into view its title fills in once,
+   left to right, in about 0.6 s, and ends in its normal white. Until then the title is dim, and a white copy of it, clipped
+   to nothing, waits on top of it; the transition opens the clip from the left.
+   It is a transition, not an animation, because React moves a row's DOM node when the list is re-ranked, and that restarts or
+   cancels an animation. A node that is moved and inserted again already holding data-filled is drawn in its last state, with
+   no transition, which is what a title that has filled needs. SongRows puts data-filled on a row once (useFillIn) and never takes
+   it off; --fill-delay is the row's place in the batch of rows that came into view together (60 ms each, for the first few).
+   The copy is generated from data-fill-text, so the page holds the title once: a screen reader, find-in-page and a copy all see one
+   title (the second `content` is the alt-text form, for the browsers that have it, which tells a screen reader there is
+   nothing to say). The copy is as wide as the title's own text, up to the box, so the sweep covers the text and not the room
+   after a short title. With reduced motion none of this is drawn: the titles simply show, white. */
+@media (prefers-reduced-motion: no-preference) {
+  .rowTitleBox[data-fill-text] .rowTitle {
+    color: var(--sl-text-3);
+  }
+
+  .rowTitleBox[data-fill-text]::after {
+    content: attr(data-fill-text);
+    content: attr(data-fill-text) / '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    max-width: 100%;
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 16px;
+    line-height: 20px;
+    font-weight: 600;
+    color: var(--sl-text);
+    clip-path: inset(0 100% 0 0);
+    pointer-events: none;
+  }
+
+  /* Filled: the clip opens. When it is open the title itself turns white and the copy is put away, each by a zero-length
+     transition that waits out the fill, so the settled title is one crisp line of text and not two laid over each other. */
+  .rowTitleBox[data-filled] .rowTitle {
+    color: var(--sl-text);
+    transition: color 0s linear calc(var(--fill-delay, 0ms) + var(--fill-ms));
+  }
+
+  .rowTitleBox[data-filled]::after {
+    clip-path: inset(0 0 0 0);
+    visibility: hidden;
+    transition:
+      clip-path var(--fill-ms) ease-out var(--fill-delay, 0ms),
+      visibility 0s linear calc(var(--fill-delay, 0ms) + var(--fill-ms));
+  }
+}
+
+/* The playing row's title (R16): while a preview plays, a pink copy of the title is revealed over it, left to right, as far as the
+   preview has played: the neon sweep of 6A's lyric wipe (--sl-pink-text with its glow) over the preview's length. SongRow puts that
+   share, 0 to 1, in --preview-progress on the row (usePreviewProgress, once a frame); this only draws it, so the sweep follows the
+   sound and holds where a paused preview stopped. The copy is the ::before of the title's box (the R12 fill is its ::after), made
+   from data-fill-text, so the title is still on the page once. It exists only on the row the player is on (the slot's condition above):
+   when the preview ends or another row plays that row is not it any more, the copy is gone, and the sweep starts over. It is not a
+   transition or an animation, so a re-rank that moves the row's node cannot restart it. With reduced motion there is no sweep: the
+   title is pink, whole, while its row sounds (6A's own rule for its wipe). */
+.row:has([data-preview='loading'], [data-preview='playing'], [data-preview='paused']) .rowTitleBox[data-fill-text]::before {
+  content: attr(data-fill-text);
+  content: attr(data-fill-text) / '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  max-width: 100%;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--sl-pink-text);
+  text-shadow: 0 0 8px rgba(255, 79, 160, 0.7);
+  clip-path: inset(0 calc((1 - var(--preview-progress, 0)) * 100%) 0 0);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row:has([data-preview='loading'], [data-preview='playing'], [data-preview='paused']) .rowTitleBox[data-fill-text]::before {
+    clip-path: none;
+  }
+}
+
+/* The difficulty badge: the song's own label, in one pink neon style for all three. */
+.badge {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border: 1.5px solid var(--sl-pink-line);
+  border-radius: 8px;
+  color: var(--sl-pink-text);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  box-shadow: 0 0 8px rgba(240, 80, 154, 0.3), inset 0 0 6px rgba(240, 80, 154, 0.15);
+}
+
+/* ===== What else the list says: all in 6A's quiet voice, 15/500 in --text-3 ===== */
+
+.empty,
+.note {
+  margin: 0;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--sl-text-3);
+}
+
+.empty {
+  padding: 20px 0;
+}
+
+.note {
+  padding: 10px 0;
+}
+
+.more {
+  display: block;
+  margin: 12px auto 4px;
+  padding: 9px 20px;
+  border: 1px solid #3a3742;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--sl-text-2);
+  cursor: pointer;
+}

@@ -431,7 +431,12 @@ describe('POSTHOG_PROPS', () => {
   });
 
   it('has every prop the tuner, the mic flow and the play row are documented to send', () => {
-    for (const key of ['gear', 'value', 'on', 'era', 'eras', 'off', 'position', 'step']) expect(POSTHOG_PROPS.has(key), key).toBe(true);
+    // gear_change: gear, value, on, mode. era_change: era, picked, on, eras, mode. row_play and song_open: position (and songKey). The mic flow: step.
+    for (const key of ['gear', 'value', 'on', 'era', 'picked', 'eras', 'mode', 'position', 'songKey', 'step']) expect(POSTHOG_PROPS.has(key), key).toBe(true);
+  });
+
+  it('does not keep a prop the tuner stopped sending: `off` went when gear_change and era_change said `on` instead', () => {
+    expect(POSTHOG_PROPS.has('off')).toBe(false);
   });
 });
 

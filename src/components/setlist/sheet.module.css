@@ -1,0 +1,567 @@
+/* The Setlist tuner's bottom sheet: the handle, the rack, the gear strips, the Era panel and the mini tab bar, in Round 6A's
+   neon look (docs/setlist-round6a, README §3.1, §5, §7 to §9; ported from the reference's .sheet, .handle, .strip, .track,
+   .knob, .era-panel and .tab rules). Split from setlist.module.css; the tokens (--sl-*) are defined on the screen's root
+   there and inherited here.
+
+   The colour a lit part is drawn in comes in through custom properties that the component sets on the strip, the Era panel
+   and each tab (neonVars in src/lib/setlist/sheet.ts): --sl-gear, and that colour at the alphas the design uses,
+   --sl-gear-glow and --sl-gear-inner (the selected tab's glow). An off part (data-off) ignores them (README §7: a switched-off
+   sign, not a faded one; no opacity or grayscale anywhere, the art draws itself unlit). A border is not drawn in the gear's
+   colour: a strip's and the Era panel's is the rail's grey in every state (QWW-57, R5), and a tab's only while it is the
+   selected one or, on a pointer device, hovered (R10). */
+
+/* ===== Bottom sheet ===== */
+
+.sheet {
+  flex-shrink: 0;
+  margin: 0 -12px;
+  box-sizing: border-box;
+  padding: 0 12px 12px;
+  background: linear-gradient(180deg, #1b1a21 0%, #131218 100%);
+  /* A neutral 1 px edge and the dark shadow, no pink (QWW-57, R8): 6A drew a pink line and a pink glow along the top. */
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.55);
+  /* Dragging the handle or a slider must not select the labels or open iOS's long-press callout. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.handleRow {
+  position: relative;
+  height: 22px;
+}
+
+/* 140×37 touch area with a 44×5 bar. touch-action: none keeps a drag on the handle from scrolling or pulling the page. Its box ends 1 px above where the first strip's
+   title begins (26 px down the row; the title is at 27) and starts 11 px above the sheet's top edge, 2 px over the list's bottom: there are only about 36 px between the
+   list's bottom and the title (9 + 22 + 5), so a taller box would cover the title (a tap on "DIFFICULTY" folded the sheet, the gates on 4e324f5 and 5ab0be7) or the list's
+   bottom rows (a swipe up from there expanded the sheet instead of scrolling, a tap on the bottom row toggled it, the gate on 7502275). The bar is in the middle of the
+   22 px row: the padding puts the middle of the box's content there. */
+.handle {
+  position: absolute;
+  /* Over the strips: the bottom 4 px of its box are the first one's, and the strip's own positioned parts painted over them, so a tap there did nothing in an expanded
+     sheet (the gate on 4e324f5). */
+  z-index: 2;
+  left: 50%;
+  top: -11px;
+  width: 140px;
+  height: 37px;
+  margin-left: -70px;
+  padding: 7px 0 0;
+  box-sizing: border-box;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.handle:active {
+  cursor: grabbing;
+}
+
+/* A screen too short for the expanded sheet keeps it in mini: the handle does nothing, and says so (aria-disabled). */
+.handle[aria-disabled='true'],
+.handle[aria-disabled='true']:active {
+  cursor: default;
+}
+
+.handle span {
+  width: 44px;
+  height: 5px;
+  border-radius: 3px;
+  background: #4a4654;
+}
+
+.rack {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: height 260ms ease;
+}
+
+.rack[data-dragging] {
+  transition: none;
+}
+
+/* ===== Gear strips ===== */
+
+.strips {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* The border is the rail's grey in every state, on, off or disabled, expanded or mini (QWW-57, R5). 6A drew it in the gear's
+   colour at 27% while the gear was on (README §5, §7). */
+.strip {
+  display: flex;
+  flex-shrink: 0;
+  height: 76px;
+  box-sizing: border-box;
+  padding: 0 10px 0 6px;
+  background: var(--sl-panel);
+  border: 1px solid var(--sl-rail);
+  border-radius: 10px;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The art's own size and the box it sits in (README §5): 120×64, and 140×75 in the mini sheet. The art brings its colours,
+   its glow and its turn-on flicker; this only sizes it. */
+.gearArt {
+  flex-shrink: 0;
+  width: 120px;
+  height: 64px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.sheet[data-compact] .strip {
+  height: 94px;
+  padding-left: 7px;
+}
+
+.sheet[data-compact] .gearArt {
+  width: 140px;
+  height: 75px;
+}
+
+.stripBody {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  /* A swipe up or down anywhere in the strip is the browser's, to scroll with, and a sideways move is not: not only over the fader's hit area but over the title
+     and the ✕ too, since a browser may hand a touch near them to those (QWW-57, R33, the gate on 1ee41b4), and the strip's pointer handlers read it all. */
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* The gear's label sizes its type by this box's width, not the window's (see .stripBody .eyebrow), and so do Tempo's end labels
+     (see .ends): the box is 21 px narrower in the mini sheet, and on a desktop the frame is 390 px wide whatever the window is. */
+  container-type: inline-size;
+}
+
+.gearHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* A strip's label and its reset button have no gap between them (the Era panel's header keeps its 8 px): the button's box has 20 px
+   of nothing to the left of its 16 px icon, so the label's last letter is never nearer the icon than that. Taking the 8 px out is
+   what lets "LISTENING HISTORY" stay on one line in a mini strip at 360 px (see .stripBody .eyebrow).
+
+   And a strip's title row is 3 px higher than its 14 px row would put it, with the rows below it where they were (the margins cancel), so there are
+   9 px between the title and the track and not 6. That is what lets the ✕'s whole box, icon included, end above the fader's hit area, which begins
+   8 px above the track (QWW-57, R33: the ✕ took the touches meant for the thumb under it). A strip with no track to press, the one that says why
+   (.unavailable), keeps its row where it was. */
+.stripBody .gearHead {
+  gap: 0;
+  margin: -3px 0 3px;
+  /* The row takes no press of its own, and neither does the title in it, which inherits this: only the ✕ does (QWW-57, the gate on 5ab0be7). The sheet's handle ends 1 px
+     above this row, and a touch browser hands a tap to the nearest label or row it takes for a target when one is within the finger's reach, so a tap on the bottom few px
+     of the handle went to the title's row and did nothing. The title is still a label for the slider: a script's click on it, which is how a mouse press on the fader gives
+     the slider the focus (afterClick), works as it did. */
+  pointer-events: none;
+}
+
+.stripBody .resetButton {
+  pointer-events: auto;
+}
+
+.stripBody:has(> .unavailable) .gearHead {
+  margin: 0;
+}
+
+/* A gear's label: its colour while it is on. Off, it is --sl-off (QWW-57, Quinn-Wai, 11 Nov), which is 4.8:1 where 6A's
+   #6e6a78 was 3.7:1. The Era panel's header is the same label in pink. */
+.eyebrow {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--sl-gear, var(--sl-text-2));
+}
+
+.strip[data-off] .eyebrow,
+.eraPanel[data-off] .eyebrow {
+  color: var(--sl-off);
+}
+
+/* The four gears' labels set their type by the strip body's width (QWW-57, R6), so "LISTENING HISTORY" is on one line and not cut
+   off. In Inter 700 it is 10 px per px of font size with no tracking and 12.04 with 0.12em (132.5 px at 6A's 11 px), and the reset
+   button's box takes 36 px of the head row beside it (44 px, 8 of them past the row's edge), so the label has the body's width
+   less 36 px. The body is 180 px wide in an expanded strip at 390 px, 6A's own 11 px and 0.12em with 11 px to spare; 165 at 375 px
+   and 150 at 360 px; and 21 px narrower again in the mini sheet (its art is 140 px): 159, 144 and 129. Below 180 the type tightens
+   to keep the label in its room: the size first, 12.04 px of body per px of font size, down to 9.5 px (at a body of 161 px); then the
+   tracking, from 0.12em down to none (142 px); then the size again, 10 px of body per px of font size, down to 9 px at a body of
+   129 px (a mini strip at 360 px), where the label is 90 of its 93 px. That keeps 3 px free at the tightest, and the type is never
+   under 9 px. The four labels share it, so the strips match. Narrower than 129 px the label wraps rather than be cut off. A browser
+   without container units drops the two declarations and keeps 6A's 11 px and 0.12em. */
+.stripBody .eyebrow {
+  white-space: normal;
+  font-size: clamp(9px, calc((100cqw - 39px) / 10), clamp(9.5px, calc((100cqw - 47px) / 12.04), 11px));
+  letter-spacing: clamp(0px, calc((100cqw - 142px) / 17), 0.12em);
+}
+
+.offTag {
+  color: var(--sl-off);
+  /* If the label wraps it breaks before the tag, not inside it. */
+  white-space: nowrap;
+}
+
+/* The ✕'s touch area (QWW-57, R34, R33): 44 px wide and 20 tall (29 in a mini strip, which has 9 px more above it, see below). It ends 1 px below the 14 px title row, where the icon's box ends, so the icon (16 px,
+   with its own centre on the title's) sits in the bottom of it and the area grows up from there: in a strip to the strip's own top edge (the rack clips
+   what is above that), in the Era panel to 3 px inside the panel's. It never reaches down. Under a strip's ✕ is the fader's hit area, which begins
+   where this ends, so a press on the thumb of a gear at 100 or 80 is the fader's and not the ✕'s; and in the Era panel it stops 3 px short of the
+   '20s button. The negative margins keep the title row 14 px tall, and the right margin and padding put the icon's right edge on the track's right
+   edge. The ring and the highlight of a press are drawn on the icon, so they are centred on the ✕ and not on the touch area. */
+.resetButton {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 44px;
+  height: 20px;
+  margin: -5px -8px -1px 0;
+  box-sizing: border-box;
+  padding: 0 8px 0 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sl-reset);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+}
+
+/* A mini strip is 94 px tall with its rows centred, so there are 9 px more above the ✕'s box before the strip's own top edge: the box is 29 px tall there. */
+.sheet[data-compact] .stripBody .resetButton {
+  height: 29px;
+  margin: -14px -8px -1px 0;
+}
+
+.resetButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.resetButton:hover,
+.resetButton:active {
+  color: var(--sl-text);
+}
+
+/* `button.` raises it over the screen's own `.app :focus-visible` ring, which has the same weight and may come later: with it the ✕ drew two rings. */
+button.resetButton:focus-visible {
+  outline: none;
+}
+
+.resetButton:focus-visible svg {
+  outline: 2px solid var(--sl-text);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* ===== The track: a 4 px rail, the gear's glowing fill and a fader-cap knob (README §5) ===== */
+
+.track {
+  position: relative;
+  height: 20px;
+}
+
+.track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--sl-rail);
+}
+
+.trackFill {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  height: 4px;
+  border-radius: 2px;
+  width: var(--pct, 0%);
+  background: var(--sl-gear);
+  box-shadow: 0 0 8px var(--sl-gear);
+}
+
+/* 14×20 with a 1 px border: the grey fader cap with a 2 px dark line down its middle (the 12 px inside it puts the line at
+   5 to 7). Centred on the value. */
+.knob {
+  position: absolute;
+  top: 0;
+  left: var(--pct, 0%);
+  width: 14px;
+  height: 20px;
+  margin-left: -7px;
+  box-sizing: border-box;
+  border: 1px solid #cfcad8;
+  border-radius: 3px;
+  background: linear-gradient(90deg, transparent 5px, rgba(0, 0, 0, 0.45) 5px, rgba(0, 0, 0, 0.45) 7px, transparent 7px),
+    linear-gradient(180deg, #bdb8c7 0%, #77727f 100%);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+}
+
+/* Off: no fill, and the knob is a flat dark cap at the default value (README §7). */
+.strip[data-off] .trackFill {
+  display: none;
+}
+
+.strip[data-off] .knob {
+  background: #1e1d24;
+  border-color: #4a4654;
+}
+
+.stripBody:has(.sliderInput:focus-visible) .knob {
+  outline: 2px solid var(--sl-text);
+  outline-offset: 2px;
+}
+
+.ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  line-height: 14px;
+  font-weight: 500;
+  color: var(--sl-text-3);
+}
+
+.strip[data-off] .ends {
+  color: var(--sl-off);
+}
+
+/* Tempo's pair, "Slow jams" and "Upbeat tracks", is the only one too wide for a mini strip at 360 px: 138.5 px at 6A's 12 px in Inter
+   500 (11.54 px per px of font size, over 22 characters) in a body of 129 px, so both labels wrapped, the row took two lines and the
+   slider sat 7 px off the drawn knob. The other pairs are 104 to 120 px and fit there with 8.5 px or more. The body is 144 px in the
+   mini sheet at 375 px, where Tempo's pair fits with 5.5 px between the labels, 6A's look. Narrower than that the tracking tightens to
+   keep the 5.5 px (22 px of body per px of tracking), down to -0.03em, the era labels' (at a body of 136 px); then the size, 10.88 px
+   of body per px of font size (11.54 less 22 characters of 0.03em), to 11.35 px at 129 px; never under 9 px. Wider than 144 px nothing
+   changes. A browser without container units drops the two declarations and keeps 12 px. */
+.strip[data-gear='tempo'] .ends {
+  font-size: clamp(9px, calc((100cqw - 5.5px) / 10.88), 12px);
+  letter-spacing: clamp(-0.03em, calc((100cqw - 144px) / 22), 0px);
+}
+
+/* What the strip says in the place of its end labels when the gear cannot be used (History without Spotify): all of it, on as many
+   lines as it takes (the adversarial review of #38 found it cut off). The strip is 76 px tall, 94 in the mini sheet, and the rack's height
+   is fixed with it, so the type is made to fit and the room is not made bigger: 11 px on 12 px lines, where 6A's 12 px on 14 px lines,
+   clamped to two, cut the rest off. In Inter 500 the longer hint, "Spotify could not be reached, so listening history is off", is 286 px
+   at 11 px: three lines in a strip body under about 155 px (an expanded strip at 360 px, a mini one at 360 and 375), two from 159 px. The
+   signed-out hint is 233 px: two lines in every body from 129 px. Three lines are 36 px and fit every strip (see the next rule). They
+   stay whole with a Linux browser's text, which is 2 to 4% wider than a Mac's, and with the type 15% bigger; a fourth line takes 20%. */
+.unavailable {
+  margin: 0;
+  font-size: 11px;
+  line-height: 12px;
+  font-weight: 500;
+  color: var(--sl-text-3);
+}
+
+/* An expanded strip has 74 px inside its borders; the label (14) and the track (20) leave 40 of them for the hint and the two gaps. So
+   its body fills the strip, as the old two lines of 14 px did, and the gaps take what the hint leaves: 8 px each for two lines, 2 for
+   three (6A's were 6). The mini strip has 92 px: its body stays centred with the 6 px gaps, 82 px with three lines. */
+.sheet:not([data-compact]) .stripBody:has(> .unavailable) {
+  align-self: stretch;
+  justify-content: space-between;
+  gap: 2px;
+}
+
+/* The fader's hit area (QWW-57, R33): a transparent box in the track, 44 px tall (the track is 20) and as wide as the track with 7 px more at each end,
+   half the knob, so the end values are easy to reach and a pointer at x gives the value the knob then shows (src/lib/setlist/fader.ts has the arithmetic).
+   It reaches 8 px above the track and 16 below it, so a finger 16 px above the knob's centre, or lower down than the knob, still has hold of it. It is the
+   last thing in the track, so it is over the strip's labels. Its top is where the ✕'s touch area ends (see .resetButton): the two never overlap, and the
+   ✕ is not what a press on the thumb reaches, wherever the thumb is. The track is in a strip that is 76 px tall (94 in mini), so the box stops 12 px
+   short of the strip's bottom edge and never reaches the next gear's. A swipe up or down is the browser's, to scroll with (the script ignores it); a
+   sideways one is the fader's. */
+.faderHit {
+  position: absolute;
+  left: -7px;
+  right: -7px;
+  top: -8px;
+  height: 44px;
+  cursor: ew-resize;
+  touch-action: pan-y;
+}
+
+/* The real <input type="range">, laid invisibly over the whole strip body, for the keyboard and screen readers. It takes no pointer: a
+   native one takes a touch only on its own 14 by 20 px thumb (on iOS nowhere else on its track), so the hit area above does that. */
+.sliderInput {
+  position: absolute;
+  left: -7px;
+  top: -6px;
+  width: calc(100% + 14px);
+  height: calc(100% + 12px);
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+/* ===== Era (README §8) ===== */
+
+/* An era button's label sets its type by the panel's width, not the window's (QWW-57): the panel is the container, and 100cqw is its
+   content box, 282 px on a 360 px phone and 332 px in the desktop frame, which is 390 px wide whatever the window is. A button
+   has (100cqw - 38px) / 7 inside its 1 px borders (6 gaps of 4 px between 7 buttons): 34.8 px at 360, 37 at 375, 39.1 at 390 and
+   42 in the frame. "Pre-’70s" is the widest label, 3.84 px per px of font size with this tracking (40.3 px at 6A's 10.5 px), so the
+   size is that room over 3.93, which leaves it 2% to spare, up to 6A's 10.5 px: 9 px on a 360, about 9.4 on a 375, about 10 on a
+   390, and 10.5 from about 405 px up (a panel of 327 px). Measured in a browser. A browser without container units drops the
+   second font-size (on .eraButton) and keeps 9 px, which fits everywhere. */
+.eraPanel {
+  container-type: inline-size;
+  display: flex;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 7px;
+  background: var(--sl-panel);
+  /* The rail's grey in every state, like the strips' (QWW-57, R5). */
+  border: 1px solid var(--sl-rail);
+  border-radius: 10px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The note after "ERA" while Era is off: "· OFF · all eras". */
+.eraNote {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--sl-text-3);
+}
+
+.eraGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+/* Idle. The three states of README §8: lit (aria-pressed), parked (an off default pick, dashed) and idle. */
+.eraButton {
+  height: 52px;
+  padding: 0;
+  border: 1px solid #2a2833;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  color: #8a8596;
+  font-family: inherit;
+  font-size: 9px;
+  font-size: clamp(9px, calc((100cqw - 38px) / 27.5), 10.5px);
+  line-height: 12px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.eraButton[aria-pressed='true'] {
+  border-color: var(--sl-pink);
+  color: #ff8cc3;
+  box-shadow: 0 0 12px rgba(255, 79, 160, 0.35), inset 0 0 10px rgba(255, 79, 160, 0.12);
+}
+
+.eraButton[aria-pressed='true'] svg {
+  filter: drop-shadow(0 0 3px var(--sl-pink));
+}
+
+/* A default pick while Era is off. (The app's defaults pick no era, so it does not show today; the style is the design's.) */
+.eraButton[data-parked] {
+  border-style: dashed;
+  border-color: #6a4459;
+  color: #a57891;
+}
+
+/* A pointer on an unpicked era button gives it the pink border, no glow (QWW-57, R10): the glow stays the lit button's. It is a
+   pointer thing only, so a tap on a phone leaves nothing behind. Keyboard focus has its outline already. */
+@media (hover: hover) {
+  .eraButton[aria-pressed='false']:hover {
+    border-color: var(--sl-pink);
+  }
+}
+
+.sheet[data-compact] .eraButton {
+  height: 60px;
+}
+
+/* ===== Tab bar (mini only; README §9) ===== */
+
+.tabs {
+  /* The tab labels set their type by this box's width (see .tab). */
+  container-type: inline-size;
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+
+/* The icon brings its own 34×27 and its own glow; the selected tab's border and glow are the gear's colour, on or off. */
+.tab {
+  height: 62px;
+  padding: 5px 2px 4px;
+  box-sizing: border-box;
+  border: 1px solid var(--sl-rail);
+  border-radius: 8px;
+  background: var(--sl-panel);
+  color: var(--sl-text-3);
+  font-family: inherit;
+  font-size: 11px;
+  /* The five labels share one size, set by the bar's width (QWW-57). "Popularity" is the widest, 4.95 px per px of font size in Inter
+     600 on a Mac (54.4 px at 6A's 11 px), and a tab is (100cqw - 16px) / 5 wide inside its 1 px borders: 54.4 px at 360, 57.4 at 375
+     and 60.4 at 390, so the label touched the border at 360 and ran into the 2 px of padding at 375. The size is the largest that
+     leaves 3 px clear on each side of a label 4.5% wider than that (and half a px for the rounding of clientWidth), up to 6A's 11 px:
+     9.3 px at 360, 9.8 at 375, 10.4 at 390 and 11 from about 405 px up, never under 9 px, the era labels' floor. The 4.5% is for Linux,
+     where Chromium sets the label about 2.3% wider than a Mac does (49.0 px against 47.9 px at 9.7 px, in CI): a fit with none to
+     spare passed on a Mac and failed there. A browser without container units drops this line and keeps 11 px. */
+  font-size: clamp(9px, calc((100cqw - 58.5px) / 25.85), 11px);
+  line-height: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.tab[aria-pressed='true'] {
+  border-color: var(--sl-gear);
+  box-shadow: 0 0 12px var(--sl-gear-glow), inset 0 0 8px var(--sl-gear-inner);
+  color: var(--sl-text);
+}
+
+/* A pointer on an idle tab gives it a border in its gear's colour, no glow: the border and the glow stay the selected tab's
+   (QWW-57, R10). Pointer devices only, so nothing is left lit after a tap on a phone. */
+@media (hover: hover) {
+  .tab[aria-pressed='false']:hover {
+    border-color: var(--sl-gear);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rack {
+    transition: none !important;
+  }
+}

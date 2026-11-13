@@ -26,7 +26,7 @@ import {
   type PreparedSetlist,
   type SetlistCandidate,
 } from '../../src/lib/songs/setlist';
-import { DEFAULTS, DEFAULT_OFF, ERA_LABEL, eraOf } from '../../src/lib/songs/setlistConfig';
+import { DEFAULTS, DEFAULT_OFF, DEFAULT_OFF_SIGNED_IN, ERA_LABEL, eraOf } from '../../src/lib/songs/setlistConfig';
 import { catalogueEntries, rng } from '../helpers/sliderFixtures';
 
 const deps = productionSongDeps(createMemoryStore(), false);
@@ -349,31 +349,29 @@ describe('the distance (spec §5, model A)', () => {
     expect(rankPrepared(preparedOf(...songs), state({ off: ['history', 'tempo', 'era', 'difficulty'] })).applied).toEqual(['popularity']);
   });
 
-  it('lists the catalogue in popularity order when every gear is off (spec test 18), inside each group, whatever order the songs came in', () => {
+  it('lists the catalogue in the default order when every gear is off (spec test 18, as QWW-57 R36 changed it), inside each group, whatever order the songs came in', () => {
     const range = TEST_RANGES[0]![1];
     const { matches } = prepareCatalogue(CATALOGUE, range, deps);
     const allOff = state({ off: [...GEAR_IDS, 'era'] });
     const first = rankSetlist(cands(...matches), { range, ...allOff });
     expect(first.songs).toHaveLength(matches.length);
     expect(first.applied).toEqual([]);
-    const pop = first.songs.map((s) => (s.match.parts?.popularityKnown ? s.match.parts.popularity : -1));
+    // Nothing counted, and the order is the defaults': the same list as the untouched tuner gives (the ties used to leave it popularity alone).
+    expect(ids(first)).toEqual(ids(rankSetlist(cands(...matches), { range, ...state() })));
     // The groups, in their order: sure songs sung as written, sure songs that need a jump, then the same two of the Maybe songs (QWW-58).
     const group = (s: (typeof first.songs)[number]) => (s.match.difficulty === 'maybe' ? 2 : 0) + (s.match.octave === 'none' ? 0 : 1);
     expect(new Set(first.songs.map(group)).size, 'groups in this list').toBeGreaterThanOrEqual(2); // songs sung as written and songs that need a jump
-    for (let i = 1; i < pop.length; i++) {
-      const [a, b] = [group(first.songs[i - 1]!), group(first.songs[i]!)];
-      expect(b, `song ${i}`).toBeGreaterThanOrEqual(a);
-      if (a === b) expect(pop[i]!).toBeLessThanOrEqual(pop[i - 1]!);
-    }
+    for (let i = 1; i < first.songs.length; i++) expect(group(first.songs[i]!), `song ${i}`).toBeGreaterThanOrEqual(group(first.songs[i - 1]!));
     for (const seed of [1, 2, 3]) {
       expect(ids(rankSetlist(cands(...shuffled(matches, seed)), { range, ...allOff })), `shuffle ${seed}`).toEqual(ids(first));
     }
   });
 
   it('breaks ties in order: the more popular song, then the easier, then artist and title, then id', () => {
-    // Nothing is active, so every song is tied on distance and only the tie-breaks speak. (The octave is not one of them:
+    // Tempo is the one gear on, at the place every song has on it, so every song is tied on distance and only the tie-breaks speak. (With every
+    // gear off the order is the default state's, R36, not the ties'. The octave is not a tie-break either:
     // songs sung as written come before songs that need a jump whatever the gears say, QWW-58, tested below.)
-    const allOff = state({ off: [...GEAR_IDS, 'era'] });
+    const allOff = state({ off: ['difficulty', 'history', 'popularity', 'era'], gears: { tempo: 50 } });
     const popularFirst = [placed('t1', {}, { popularity: 0.5 }), placed('t2', {}, { popularity: 0.9 }), placed('t3', { difficulty: 20 }, { popularity: 0.5 })];
     expect(ids(rankPrepared(preparedOf(...popularFirst), allOff))).toEqual(['t2', 't3', 't1']); // t3 is as popular as t1 but easier
 
@@ -770,6 +768,77 @@ describe('History (rule 3): the singer\'s own songs, only when logged in', () =>
     const place = (id: string) => list.songs.find((s) => s.candidate.match.track.id === id)!.gears.history!;
     // The song played more (lower play rank) sits further toward On repeat.
     expect([place('t3'), place('t2'), place('t1'), place('t0')]).toEqual([0, 100 / 3, 200 / 3, 100]);
+  });
+});
+
+describe('with every gear off the list is in the default order, not left to the ties (QWW-57, R36)', () => {
+  // Quinn-Wai, 12 Nov: "when all are disabled, go back to default ordering with history, popularity and difficulty". The request still has every gear
+  // off and `applied` says none counted; only the order is the default's: signed in, History first, then popularity, then the easiest; logged out,
+  // popularity, then the easiest, leaning low (Q1).
+  const ALL_OFF: TunerPart[] = [...GEAR_IDS, 'era'];
+  const defaultState = (loggedIn: boolean, gears: Parameters<typeof state>[0] = {}) => state({ ...gears, loggedIn, off: [...(loggedIn ? DEFAULT_OFF_SIGNED_IN : DEFAULT_OFF)] });
+
+  it('logged out, ranks by popularity then difficulty as the defaults do, not by popularity alone as the ties did', () => {
+    // A is the more popular song but hard, B a little less popular and easy: the default blend (Popularity counts double) puts B first.
+    const list = preparedOf(placed('A', { difficulty: 90, popularity: 100 }, { popularity: 0.9 }), placed('B', { difficulty: 0, popularity: 70 }, { popularity: 0.7 }));
+    const off = rankPrepared(list, state({ off: ALL_OFF }));
+    expect(ids(off)).toEqual(['B', 'A']);
+    expect(ids(off)).toEqual(ids(rankPrepared(list, defaultState(false))));
+    // Nothing counted, so the sheet has nothing to show on, and the era is not a filter here.
+    expect(off.applied).toEqual([]);
+  });
+
+  it('signed in, ranks with History first as the defaults do', () => {
+    // E is the one the singer plays most, and hard to like on the rest; F is in the library too but sits where Popularity and Difficulty want it.
+    const list = preparedOf(
+      placed('E', { history: 100, difficulty: 20, popularity: 40 }, { popularity: 0.9 }),
+      placed('F', { history: 60, difficulty: 0, popularity: 100 }, { popularity: 0.5 }),
+      placed('G', { history: null, difficulty: 0, popularity: 100 }, { popularity: 0.99 }),
+    );
+    const off = rankPrepared(list, state({ off: ALL_OFF, loggedIn: true }));
+    expect(ids(off)).toEqual(ids(rankPrepared(list, defaultState(true))));
+    expect(ids(off)).toEqual(['F', 'E', 'G']); // the singer's own songs first, then the blend; G is not in the library and comes after both
+    expect(off.applied).toEqual([]);
+  });
+
+  it('ignores where the gears were left: every value gives the default order, and only "off" matters', () => {
+    const list = preparedOf(placed('A', { difficulty: 90, popularity: 100 }, { popularity: 0.9 }), placed('B', { difficulty: 0, popularity: 70 }, { popularity: 0.7 }));
+    for (const gears of [{ difficulty: 100, popularity: 0 }, { difficulty: 50, popularity: 50, tempo: 0 }, { popularity: 100, difficulty: 100 }]) {
+      expect(ids(rankPrepared(list, state({ off: ALL_OFF, gears })))).toEqual(['B', 'A']);
+    }
+  });
+
+  it('keeps the era filter of the request: Era on with nothing else on lists the picked eras, in the default order', () => {
+    const list = preparedOf(
+      placed('A', { difficulty: 90, popularity: 100 }, { popularity: 0.9, era: 's80' }),
+      placed('B', { difficulty: 0, popularity: 70 }, { popularity: 0.7, era: 's80' }),
+      placed('C', { difficulty: 0, popularity: 100 }, { popularity: 0.95, era: 's90' }),
+    );
+    const noEra = GEAR_IDS as readonly TunerPart[] as TunerPart[];
+    const out = rankPrepared(list, state({ off: [...noEra], eras: ['s80'] }));
+    expect(ids(out)).toEqual(['B', 'A']);
+    expect(out.applied).toEqual(['era']);
+  });
+
+  it('is the default order on a catalogue-sized list too, logged out and signed in', () => {
+    for (const loggedIn of [false, true]) {
+      const rand = rng(11);
+      const many: SetlistCandidate[] = Array.from({ length: 300 }, (_, i) => ({
+        match: song(`m${i}`, { low: 45 + Math.floor(rand() * 8), high: 58 + Math.floor(rand() * 10), popularity: 0.3 + rand() * 0.6, tempo: 70 + Math.floor(rand() * 90) }),
+        ...(loggedIn && rand() < 0.7 ? { listening: rand() } : {}),
+      }));
+      const list = prepareSetlist(many, USER);
+      const off = rankPrepared(list, state({ off: ALL_OFF, loggedIn }));
+      expect(off.songs).toHaveLength(300);
+      expect(ids(off), loggedIn ? 'signed in' : 'logged out').toEqual(ids(rankPrepared(list, defaultState(loggedIn))));
+    }
+  });
+
+  it('does not touch a list with a gear on: Tempo alone still ranks by tempo', () => {
+    const list = preparedOf(placed('slow', { tempo: 5, popularity: 100 }, { popularity: 0.9 }), placed('fast', { tempo: 95, popularity: 10 }, { popularity: 0.1 }));
+    const tempoOnly: TunerPart[] = ['difficulty', 'history', 'popularity', 'era'];
+    expect(ids(rankPrepared(list, state({ off: tempoOnly, gears: { tempo: 100 } })))).toEqual(['fast', 'slow']);
+    expect(ids(rankPrepared(list, state({ off: tempoOnly, gears: { tempo: 0 } })))).toEqual(['slow', 'fast']);
   });
 });
 
