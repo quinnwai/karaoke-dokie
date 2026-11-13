@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EventValue } from '../../src/lib/contracts';
-import { FUNNEL, MAX_SESSIONS, median, summarizeEvents } from '../../src/lib/server/eventStats';
+import { controlsInUse, FUNNEL, MAX_SESSIONS, median, summarizeEvents } from '../../src/lib/server/eventStats';
 import type { StoredEvent } from '../../src/lib/server/store';
 
 /** Hand-built events, one second apart in the order they are made. */
@@ -125,6 +125,59 @@ describe('summarizeEvents: byControl', () => {
     expect(Object.keys(byControl).sort()).toEqual(['decade', 'mood']);
     expect(Object.getPrototypeOf(byControl)).toBe(Object.prototype);
     expect(({} as Record<string, unknown>).opened).toBeUndefined();
+  });
+});
+
+describe('controlsInUse: Era (QWW-46)', () => {
+  // What the Setlist tuner puts on an event (src/lib/client/funnel.ts viewProps): each gear 0 to 1 or null, the eras as a string or null.
+  const view = { mode: 'library', difficulty: null, familiarity: null, popularity: null, tempo: null, eras: null };
+
+  it('counts Era when the eras are a string, alone or with the gears that are set', () => {
+    expect(controlsInUse({ ...view, eras: 's90,s00' })).toEqual(['era']);
+    expect(controlsInUse({ ...view, difficulty: 0.2, tempo: 0.35, eras: 's80' })).toEqual(['difficulty', 'tempo', 'era']);
+    expect(controlsInUse({ ...view, familiarity: 0.7, eras: 's10' })).toEqual(['familiarity', 'era']);
+  });
+
+  it('counts Era on with nothing picked: the filter is on, whatever it leaves', () => {
+    expect(controlsInUse({ ...view, eras: '' })).toEqual(['era']);
+  });
+
+  it('does not count Era when it is off (null) or the value is not a string', () => {
+    expect(controlsInUse(view)).toEqual(['none']);
+    expect(controlsInUse({ ...view, difficulty: 0.2 })).toEqual(['difficulty']);
+    expect(controlsInUse({ ...view, eras: 90 })).toEqual(['none']);
+    expect(controlsInUse({ ...view, eras: true })).toEqual(['none']);
+  });
+
+  it('keeps the older chip rows as they were, next to Era', () => {
+    expect(controlsInUse({ ...view, decade: '80s', mood: 'upbeat', duetsOnly: true, eras: 's80' })).toEqual(['era', 'decade', 'mood', 'duets']);
+  });
+
+  it('counts opens, Spotify opens and thumbs under era, with the median position opened', () => {
+    const ev = timeline();
+    const events = [
+      ev('device-a', 'song_open', { ...view, eras: 's90,s00', position: 1 }),
+      // Two controls in use count toward both.
+      ev('device-a', 'song_open', { ...view, eras: 's80', difficulty: 0.2, position: 3 }),
+      ev('device-b', 'feedback_tapped', { ...view, eras: 's90', thumbs: 'up' }),
+      ev('device-b', 'spotify_link_pressed', { ...view, eras: 's90' }),
+      ev('device-c', 'song_open', { ...view, eras: '', position: 5 }),
+      // Era off, or not a string: nothing in use.
+      ev('device-c', 'song_open', { ...view, position: 9 }),
+      ev('device-c', 'song_open', { ...view, eras: 90, position: 7 }),
+    ];
+    expect(summarizeEvents(events).byControl).toEqual({
+      era: { opened: 3, spotify: 1, up: 1, down: 0, medianPosition: 3 },
+      difficulty: { opened: 1, spotify: 0, up: 0, down: 0, medianPosition: 3 },
+      none: { opened: 2, spotify: 0, up: 0, down: 0, medianPosition: 8 },
+    });
+  });
+
+  it('the key is only the fixed name, whatever the string holds', () => {
+    const ev = timeline();
+    const { byControl } = summarizeEvents([ev('device-a', 'song_open', { ...view, eras: '__proto__,constructor', position: 1 })]);
+    expect(Object.keys(byControl)).toEqual(['era']);
+    expect(Object.getPrototypeOf(byControl)).toBe(Object.prototype);
   });
 });
 
