@@ -12,9 +12,9 @@
 // the write run: its `wrote <key>` lines are exactly the keys it wrote (a row that changed after it was read is skipped
 // and not listed), and a rollback restores only those.
 // The new low and high stay in the stored octave (`histogramOffOctave` counts the rows where that took a shift: 0 on
-// production). A later `scripts/octave-fix.ts --dry-run` finds no move this run added, since it reads only a song's typical
-// note, which this never writes. It can find fewer: it also refuses a move that would take a range past PLAUSIBLE_SONG,
-// which a widened range can reach. Compare its moves before and after this run; do not expect a count of 0.
+// production). A later `scripts/octave-fix.ts --dry-run` finds no move this run added, since a move comes from a song's
+// typical note, which this never writes. It can find fewer: it also refuses a move that would take the range past
+// PLAUSIBLE_SONG, which a widened range can reach. Compare its moves before and after this run; do not expect a count of 0.
 
 import { parseArgs } from 'node:util';
 import { midiToNoteName } from '../src/lib/audio/notes';

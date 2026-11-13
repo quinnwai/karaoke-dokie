@@ -4,7 +4,7 @@ Find karaoke songs that fit your voice, from your own Spotify saved songs.
 
 You hold a button and sing your lowest note, then your highest. The app signs you in to Spotify,
 looks up the vocal range of each saved song, and lists the songs that fit your range, labeled
-Easy, Medium or Hard. Songs whose range we are less sure of (an artist estimate, a rough recording, or a song that stays on a note or two) come after them, under Maybe. Phone
+Easy, Medium or Hard. Songs whose range we are less sure of (an artist estimate, a rough recording, or a song that stays on a note or two) come after them with no difficulty label, and the song page calls them Maybe. Phone
 first, as a website.
 
 ## Features
@@ -57,7 +57,7 @@ npm run dev
 Offline demo, no accounts needed: `KARAOKE_STORE=memory SPOTIFY_MOCK=1 SESSION_SECRET=<32+ chars> npm run dev`.
 Mock mode signs you in as "Test Singer" with 25 well-known songs, and seeds the memory store with
 39 placeholder songs from general knowledge (`data/seed-song-ranges.json`): 24 from that library
-(five stand in for estimates and show under Maybe), plus 15 catalogue-only songs so the no-Spotify
+(five stand in for estimates and come last, as Maybe songs), plus 15 catalogue-only songs so the no-Spotify
 mode has every decade and three duets. Their years and genres are real; their ranges, USDB views and
 moods are placeholders. Duets and moods are hidden unless `DUETS_AND_MOODS=on` (QWW-43): add that and
 `MOODS_SHIPPED=upbeat,heartfelt` to see the "Duet: take ..." line and the mood pill on the song page, and

@@ -4,11 +4,15 @@
 // real data (QWW-57): the engine's places are percentiles among the songs that fit the singer, a null place skips its rule.
 
 import { describe, expect, it } from 'vitest';
-import type { Label, OctaveShift } from '../../src/lib/contracts';
+import type { Label, Match, OctaveShift, SongRange, Track } from '../../src/lib/contracts';
 import { ERA_LABEL } from '../../src/lib/setlist/eras';
 import { GEAR_META } from '../../src/lib/setlist/gears';
 import { badgeOf, SHIFT_REASON, SWEET_SPOT, toRow, toRows, whyOf, type WhyTuner } from '../../src/lib/setlist/rows';
 import { ERA_IDS, type EraId, type SetlistSong } from '../../src/lib/setlist/types';
+import { matchSong, toMatch } from '../../src/lib/songs/match';
+import { applyNarrowRule } from '../../src/lib/songs/range';
+import { prepareSetlist, rankPrepared } from '../../src/lib/songs/setlist';
+import { DEFAULT_OFF, DEFAULTS } from '../../src/lib/songs/setlistConfig';
 import { ranked, rankedSong, song, type Places } from '../helpers/setlist';
 
 /** The tuner a singer starts from: Difficulty at 0 and on, everything else off. */
@@ -136,6 +140,60 @@ describe('whyOf: In your sweet spot (needs Difficulty on, and a place on it)', (
     // The default tuner has Difficulty at 0 (the Light work end): the easiest songs are in the sweet spot, Medium ones are not.
     expect(whyOf(rankedSong('e', { difficulty: 'easy' }, { difficulty: 5 }), START)).toBe('In your sweet spot');
     expect(whyOf(rankedSong('m', { difficulty: 'medium' }), START)).toBe('Solid pick');
+  });
+});
+
+describe('whyOf: a Maybe song does not claim the sweet spot (QWW-60)', () => {
+  // The engine gives a Maybe song a place on Difficulty from the label its range would earn if it were sure (songs/setlist.ts bandOf), so a Maybe
+  // song can sit right at the slider. Its row shows no label and its page says Maybe, so its reason line may not say "In your sweet spot" either.
+  // A range under 5 semitones had no place, so it never could; since the narrow ranges were redone, a Maybe song of 5 semitones does.
+  const baritone = { low: 45, high: 69, source: 'test' as const };
+  const track = (id: string): Track => ({ id, title: `Song ${id}`, artist: `Artist ${id}`, artistId: `a-${id}`, spotifyUrl: '', playRank: 0 });
+  /** A song as the server matches it for the baritone, with the popularity a test gives it. */
+  const matched = (id: string, range: SongRange, popularity: number): Match => {
+    const fit = matchSong(baritone, range);
+    if (!fit) throw new Error(`${id} does not fit the baritone`);
+    return { ...toMatch(track(id), range, fit), parts: { comfort: 0.5, familiarity: 1, popularity, popularityKnown: true, penalty: 0 } };
+  };
+  /** Wallows, "Are You Bored Yet?" as the narrow rule leaves it: stored G3 to A3, measured again from its histogram as F#3 to B3, low confidence. */
+  const wallows = applyNarrowRule({
+    low: 55,
+    high: 57,
+    tessitura: 56.1,
+    source: 'note-file',
+    confidence: 'high',
+    fastLyrics: false,
+    pitchShare: [[48, 0.009], [54, 0.012], [55, 0.058], [56, 0.688], [57, 0.198], [58, 0.022], [59, 0.013]],
+  });
+  /** An artist estimate: a Maybe song too. */
+  const estimate = (id: string, low: number, high: number, popularity: number) =>
+    matched(id, { low, high, tessitura: (low + high) / 2, source: 'artist-typical', confidence: 'low', fastLyrics: false }, popularity);
+
+  it('says nothing of a sweet spot for a Maybe song the engine placed at the slider, and keeps its other reasons', () => {
+    // The real engine, for a baritone, with the tuner as a signed-out singer loads it: Difficulty on at 0, Popularity on at 100.
+    const candidates = [matched('wallows', wallows, 0.95), estimate('b', 50, 60, 0.5), estimate('c', 48, 66, 0.4)].map((match) => ({ match }));
+    const { songs } = rankPrepared(prepareSetlist(candidates, baritone), {
+      gears: { difficulty: DEFAULTS.difficulty, history: DEFAULTS.history, popularity: DEFAULTS.popularity, tempo: DEFAULTS.tempo },
+      off: [...DEFAULT_OFF],
+      eras: [...DEFAULTS.eras],
+      loggedIn: false,
+    });
+    const maybe = songs.find((s) => s.match.track.id === 'wallows')!;
+    expect(maybe.match.difficulty).toBe('maybe');
+    expect(maybe.match.range).toMatchObject({ low: 54, high: 59, confidence: 'low' });
+    expect(toRow(maybe, START).badge).toBeNull();
+    // The engine puts it within the sweet spot's reach of a slider at 0 (it is the lowest-strain song of its group) ...
+    expect(maybe.gears.difficulty).not.toBeNull();
+    expect(maybe.gears.difficulty!).toBeLessThanOrEqual(SWEET_SPOT);
+    // ... and the line does not call it one, while its other reasons stand.
+    expect(whyOf(maybe, START)).toBe('Crowd favourite');
+    expect(toRow(maybe, START).why).not.toMatch(/sweet spot/i);
+    // The same song at the same places says it as soon as it is a sure fit, so it is the Maybe label that holds it back.
+    expect(whyOf({ ...maybe, match: { ...maybe.match, difficulty: 'easy' } }, START)).toBe('In your sweet spot · Crowd favourite');
+  });
+
+  it.each([0, 16.7, 50, 100])('is never in a sweet spot, wherever its place is: a Maybe song at %s with the slider on it', (place) => {
+    expect(whyOf(ranked(song('m', { difficulty: 'maybe' }), { difficulty: place }), sweetAt(place))).toBe('Solid pick');
   });
 });
 
@@ -338,7 +396,7 @@ describe('badgeOf: the song\'s own label, the word the song page shows', () => {
     expect(toRow(ranked(song('e', { difficulty: 'easy' }), { difficulty: 90 }), START).badge).toBe('Easy');
   });
 
-  it('has none for a Maybe song, whatever its place on Difficulty or lack of one: its range is only an estimate', () => {
+  it('has none for a Maybe song, whatever its place on Difficulty or lack of one: we are less sure of its range', () => {
     for (const place of [0, 16.7, 50, 83.3, 100, null]) {
       const row = toRow(ranked(song('m', { difficulty: 'maybe' }), { difficulty: place }), START);
       expect(row.badge, `a Maybe song placed at ${place}`).toBeNull();

@@ -269,8 +269,8 @@ test('full flow: test, sign in, results, song detail, feedback', async ({ baseUR
   await page.waitForTimeout(1000);
   await shot(page, '07-results');
 
-  // Every song is on the list at once (no paging), from the one library request. Songs whose range is only an
-  // estimate come last, and their row says Maybe.
+  // Every song is on the list at once (no paging), from the one library request. Songs whose range we are less
+  // sure of come last, and their row says Maybe.
   await expect(page.getByRole('button', { name: 'Load more songs' })).toHaveCount(0);
   expect(api.recommendationCalls.filter((c) => c.startsWith('library'))).toHaveLength(1);
   const maybeRows = page.locator('[data-row]:has(button[aria-label$=", Maybe"])');
@@ -363,14 +363,14 @@ test("on a 360px phone Spotify's player gets the 280px it wants and the TV stays
   await context.close();
 });
 
-test('a Maybe song has no difficulty, and its info says the range is an estimate', async ({ browser, baseURL }) => {
+test('a Maybe song has no difficulty: its row and its song page say Maybe', async ({ browser, baseURL }) => {
   const api = freshState();
   api.user = me({ low: 45, high: 72, source: 'test' });
   const context = await browser.newContext({ ...iPhone, baseURL, reducedMotion: 'reduce' });
   await mockApi(context, api);
   const page = await context.newPage();
   await page.goto('/');
-  // The tuner's list has no Maybe section: a song whose range is only an estimate comes last, and its row says Maybe.
+  // The tuner's list has no Maybe section: a song whose range we are less sure of comes last, and its row says Maybe.
   const maybe = page.getByRole('button', { name: 'Sukiyaki by Kyu Sakamoto, Maybe' });
   await expect(maybe).toBeVisible();
   await maybe.scrollIntoViewIfNeeded();

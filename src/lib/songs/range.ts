@@ -104,7 +104,8 @@ export function trimmedRange(notes: { midi: number; length: number }[], share = 
  * at any whole octave). The octave fix moves a histogram along with the range (shiftRange), so the whole-octave gap
  * between the histogram's mean and the typical note, `octaves`, is 0 for every stored range; it is applied all the
  * same, so a histogram left in the file's octave lands the range in the stored one and not an octave away. `gap` is the
- * widest step between neighbouring pitches that are sung (a share above 0) inside that range.
+ * widest step between neighbouring pitches that are sung (a share above 0) inside that range. A pitch (or a run of end
+ * pitches) with exactly 1% of the sung time is dropped, whatever the shares add up to as floats.
  */
 export function gentleRange(range: SongRange): { low: number; high: number; octaves: number; gap: number } | null {
   const shares = range.pitchShare;
@@ -114,7 +115,11 @@ export function gentleRange(range: SongRange): { low: number; high: number; octa
   const mean = shares.reduce((sum, [midi, share]) => sum + midi * share, 0) / total;
   const octaves = Math.round((range.tessitura - mean) / 12);
   if (Math.abs(range.tessitura - mean - 12 * octaves) > HISTOGRAM_MEAN_TOLERANCE) return null;
-  const { low, high } = trimmedRange(shares.map(([midi, length]) => ({ midi, length })), NARROW_OUTLIER_SHARE);
+  // `measure` stores the shares to 3 decimals, so they are trimmed as whole thousandths: `cum > share * total` in trimmedRange is then exact, and a pitch
+  // with exactly 1% of the time is dropped. As floats the shares of some note files add up to 0.9999999999999999, which put the cut a hair under 1% and let
+  // such a pitch through, 2 semitones too wide at one end (Club Can’t Handle Me, Geraldine, Medieval Steel). The cut is still 1% of what the shares add up
+  // to, as it was. The 5% trim of measured notes is not changed.
+  const { low, high } = trimmedRange(shares.map(([midi, share]) => ({ midi, length: Math.round(share * 1000) })), NARROW_OUTLIER_SHARE);
   const sung = shares.filter(([midi, share]) => share > 0 && midi >= low && midi <= high).map(([midi]) => midi).sort((a, b) => a - b);
   let gap = 0;
   for (let i = 1; i < sung.length; i++) gap = Math.max(gap, sung[i]! - sung[i - 1]!);

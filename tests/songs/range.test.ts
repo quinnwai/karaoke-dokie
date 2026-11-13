@@ -279,6 +279,79 @@ describe('the narrow-range rule (QWW-60)', () => {
     expect(trimmedRange([{ midi: 52, length: 5 }, { midi: 56, length: 45 }, { midi: 57, length: 50 }])).toEqual({ low: 56, high: 57 });
   });
 
+  describe('a pitch with exactly 1% of the time is dropped, whatever the float total of the shares', () => {
+    // The shares are stored to 3 decimals and add up to 1, but in floats they come to a hair under or over 1, by the luck of the order they are added in.
+    // The 1% cut was `cum > 0.01 * total`: with a total of 0.9999999999999999 the cut sat a hair under 0.01 and a pitch with exactly 1% got through it.
+    // The cases below say which side of 1 their float total falls, so each keeps testing what it claims.
+    const floatTotal = (shares: [number, number][]) => shares.reduce((sum, [, share]) => sum + share, 0);
+    const ends = (shares: [number, number][]) => gentleRange(noteFile(shares));
+
+    it.each<[string, [number, number][], -1 | 0 | 1, number, number]>([
+      ['below 1', [[52, 0.01], [56, 0.29], [57, 0.35], [58, 0.35]], -1, 56, 58],
+      ['exactly 1', [[52, 0.01], [56, 0.49], [57, 0.5]], 0, 56, 57],
+      ['above 1', [[52, 0.01], [55, 0.17], [56, 0.28], [57, 0.2], [58, 0.34]], 1, 55, 58],
+    ])('at the low end, with the shares adding up to %s in floats', (_, shares, side, low, high) => {
+      expect(Math.sign(floatTotal(shares) - 1)).toBe(side);
+      expect(ends(shares)).toMatchObject({ low, high });
+    });
+
+    it.each<[string, [number, number][], -1 | 0 | 1, number, number]>([
+      ['below 1', [[55, 0.29], [56, 0.35], [57, 0.35], [61, 0.01]], -1, 55, 57],
+      ['exactly 1', [[56, 0.5], [57, 0.49], [61, 0.01]], 0, 56, 57],
+      ['above 1', [[54, 0.17], [55, 0.28], [56, 0.2], [57, 0.34], [61, 0.01]], 1, 54, 57],
+    ])('at the high end, with the shares adding up to %s in floats', (_, shares, side, low, high) => {
+      expect(Math.sign(floatTotal(shares) - 1)).toBe(side);
+      expect(ends(shares)).toMatchObject({ low, high });
+    });
+
+    // The three note files of the review (production, 12 Nov) that came out 2 semitones too wide at one end, with the ranges production stores for them.
+    it.each<[string, [number, number][], [number, number], [number, number]]>([
+      ['Club Can’t Handle Me by Flo Rida', [[55, 0.01], [57, 0.008], [60, 0.415], [62, 0.138], [64, 0.297], [65, 0.132]], [60, 65], [57, 65]],
+      ['Geraldine by Glasvegas', [[55, 0.01], [57, 0.021], [59, 0.038], [60, 0.476], [62, 0.19], [64, 0.233], [65, 0.013], [67, 0.019]], [59, 64], [57, 67]],
+      ['Medieval Steel by Medieval Steel', [[58, 0.045], [61, 0.095], [63, 0.304], [65, 0.345], [66, 0.176], [68, 0.025], [70, 0.01]], [61, 66], [58, 68]],
+    ])('widens %s only as far as the exact trim says', (_, shares, [storedLow, storedHigh], [low, high]) => {
+      const stored = noteFile(shares);
+      expect(stored).toMatchObject({ low: storedLow, high: storedHigh });
+      expect(floatTotal(shares)).toBeLessThan(1);
+      expect(applyNarrowRule(stored)).toEqual({ ...stored, low, high });
+    });
+
+    it.each<[string, [number, number][]]>([
+      ['0.006 and 0.004', [[50, 0.006], [52, 0.004], [56, 0.29], [57, 0.6], [58, 0.1]]],
+      ['0.003, 0.003 and 0.004', [[49, 0.003], [50, 0.003], [52, 0.004], [56, 0.29], [57, 0.6], [58, 0.1]]],
+      ['0.007 and 0.003', [[50, 0.007], [52, 0.003], [56, 0.29], [57, 0.6], [58, 0.1]]],
+    ])('drops a run of pitches at the low end that add up to exactly one percent: %s', (_, shares) => {
+      expect(floatTotal(shares)).toBeLessThan(1);
+      expect(ends(shares)).toMatchObject({ low: 56, high: 58 });
+    });
+
+    it.each<[string, [number, number][]]>([
+      ['0.004 and 0.006', [[54, 0.29], [55, 0.6], [56, 0.1], [61, 0.004], [63, 0.006]]],
+      ['0.004, 0.003 and 0.003', [[54, 0.29], [55, 0.6], [56, 0.1], [61, 0.004], [62, 0.003], [63, 0.003]]],
+      ['0.003 and 0.007', [[54, 0.29], [55, 0.6], [56, 0.1], [61, 0.003], [63, 0.007]]],
+    ])('drops a run of pitches at the high end that add up to exactly one percent: %s', (_, shares) => {
+      expect(floatTotal(shares)).toBeLessThan(1);
+      expect(ends(shares)).toMatchObject({ low: 54, high: 56 });
+    });
+
+    it.each<[string, [number, number][], number, number]>([
+      ['0.011 at the low end is kept', [[52, 0.011], [56, 0.289], [57, 0.35], [58, 0.35]], 52, 58],
+      ['0.009 at the low end is dropped', [[52, 0.009], [56, 0.291], [57, 0.35], [58, 0.35]], 56, 58],
+      ['0.011 at the high end is kept', [[55, 0.29], [56, 0.35], [57, 0.349], [61, 0.011]], 55, 61],
+      ['0.009 at the high end is dropped', [[55, 0.29], [56, 0.35], [57, 0.351], [61, 0.009]], 55, 57],
+    ])('only the tie is decided exactly: a pitch with %s', (_, shares, low, high) => {
+      expect(floatTotal(shares)).toBeLessThan(1);
+      expect(ends(shares)).toMatchObject({ low, high });
+    });
+
+    it('measures the 1% against what the stored shares add up to: 0.010 of 0.999 is more than 1%, of 1.001 less', () => {
+      expect(ends([[52, 0.01], [56, 0.489], [57, 0.5]])).toMatchObject({ low: 52, high: 57 });
+      expect(ends([[52, 0.01], [56, 0.491], [57, 0.5]])).toMatchObject({ low: 56, high: 57 });
+      expect(ends([[56, 0.5], [57, 0.489], [61, 0.01]])).toMatchObject({ low: 56, high: 61 });
+      expect(ends([[56, 0.5], [57, 0.491], [61, 0.01]])).toMatchObject({ low: 56, high: 57 });
+    });
+  });
+
   it('counts 5 semitones as narrow and 6 as wide, before and after the 1% trim', () => {
     const six = noteFile([[56, 0.5], [62, 0.5]]);
     expect(isNarrow(six)).toBe(false);
