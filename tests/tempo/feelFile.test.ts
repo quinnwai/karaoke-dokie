@@ -89,3 +89,29 @@ describe('data/tempo-feel.json: every method is classed as strict or weak on pur
     expect([...used].some((m) => STRICT.includes(m))).toBe(true);
   });
 });
+
+describe('data/tempo-feel.json: one label per song across its spellings (QWW-54, 13 Nov)', () => {
+  // The catalogue knows a song under more than one key (an apostrophe, a credit, a hyphen), and a label that differs between them would
+  // surface the day the other key becomes the song's row. These songs had two labels; each now has one under every key. Day 'n' Nite and
+  // Summertime Sadness are not here on purpose: their "vs." credits are the remixes, other recordings with their own labels.
+  const SPELLINGS: [string, string[]][] = [
+    ['NSYNC, Bye Bye Bye', ['★n sync|bye bye bye', 'nsync|bye bye bye']],
+    ["NSYNC, It's Gonna Be Me", ['★n sync|it’s gonna be me', "nsync|it's gonna be me"]],
+    ['NSYNC, I Want You Back', ['★n sync|i want you back', 'nsync|i want you back', '*nsync|i want you back']],
+    ['Zedd, Clarity', ['zedd & foxes|clarity', 'zedd|clarity']],
+    ["James Arthur, Say You Won't Let Go", ["james arthur|say you won't let go", 'james arthur|say you won’t let go']],
+    ["The Who, Won't Get Fooled Again", ["the who|won't get fooled again", 'the who|won’t get fooled again']],
+    ['KT Tunstall, Black Horse and the Cherry Tree', ['kt tunstall|black horse & the cherry tree', 'kt tunstall|black horse and the cherry tree']],
+    ['Ne-Yo, Let Me Love You', ['ne‐yo|let me love you', 'ne-yo|let me love you']],
+    ['Kendrick Lamar, DNA.', ['kendrick lamar|dna', 'kendrick lamar|dna.']],
+    ["En Vogue, My Lovin'", ['en vogue|my lovin’', "en vogue|my lovin'"]],
+    ["Imagine Dragons, It's Time", ['imagine dragons|it’s time', "imagine dragons|it's time"]],
+  ];
+  const labels = parseFeelFile(readFileSync(join(__dirname, '../../data/tempo-feel.json'), 'utf8'));
+  const feelOf = new Map(labels.labels.flatMap((l) => l.keys.map((k) => [k, l.feel] as const)));
+
+  it.each(SPELLINGS)('%s has the same label under every spelling', (_song, keys) => {
+    for (const k of keys) expect(feelOf.has(k), `${k} is in the file`).toBe(true);
+    expect(new Set(keys.map((k) => feelOf.get(k))).size, keys.map((k) => `${k}: ${feelOf.get(k)}`).join('; ')).toBe(1);
+  });
+});
