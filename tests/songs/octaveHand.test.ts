@@ -63,7 +63,7 @@ describe('the hand-checked evidence file', () => {
   it('sets AC/DC at A#4 and keeps the songs a person checked, each saying where it came from', () => {
     expect(handFile.artists['ac/dc']).toMatchObject({ typical: 70 });
     expect(handFile.artists['ac/dc']!.source).toMatch(/Quinn-Wai, by ear, 11 Nov/);
-    expect(Object.keys(handFile.keep)).toEqual(KEPT);
+    expect(Object.keys(handFile.keep)).toEqual(expect.arrayContaining(KEPT));
     for (const entry of [...Object.values(handFile.artists), ...Object.values(handFile.keep)]) expect(entry.source.length).toBeGreaterThan(20);
   });
 
@@ -75,7 +75,7 @@ describe('the hand-checked evidence file', () => {
 
   it('is merged in at load, takes the place of a measured artist, and says which artists are hand-checked', () => {
     expect(evidence.artists['ac/dc']).toBe(70);
-    expect(evidence.hand).toEqual({ artists: ['ac/dc'], keep: KEPT });
+    expect(evidence.hand).toEqual({ artists: ['ac/dc'], keep: Object.keys(handFile.keep) });
     expect(Object.keys(evidence.songs)).toEqual(Object.keys(generated.songs)); // the generated songs are untouched
     const merged = withHandChecked({ songs: {}, artists: { a: 55, b: 60 } }, { artists: { a: { typical: 70, source: 'by ear' } }, keep: {} });
     expect(merged.artists).toEqual({ a: 70, b: 60 });
@@ -217,6 +217,57 @@ describe('songs kept at the octave their note file was written in (QWW-62)', () 
     expect(songKey('ABBA', 'Money, Money, Money')).toBe('abba|money, money, money');
     expect(songKey('Pixies', 'Where Is My Mind?')).toBe('pixies|where is my mind?');
     for (const [key] of cases) expect(Object.hasOwn(generated.songs, key), key).toBe(true); // each has the recording evidence that moved it
+  });
+});
+
+// QWW-62, 13 Nov: chief-keef's read-only sweep listed 46 up-moves the fix had made on a song's own recording and 44 more the artist
+// rule would make. Each was checked against Singing Carrots, which gives sung pitch (Johnny Cash F2 to C4, Commodores' Easy D#3 to
+// G#4), or, for a singer whose other songs it lists, against that register. The ones whose move is wrong are under keep with the
+// numbers behind them; the rest were left alone (a move Singing Carrots supports, a range too wide to say, no page).
+describe('songs the QWW-62 sweep keeps at their written octave', () => {
+  const swept = Object.entries(handFile.keep).filter(([, e]) => e.source.endsWith('(QWW-62 sweep).'));
+  const pending = (JSON.parse(readFileSync(join(__dirname, '../fixtures/octave-sweep-pending.json'), 'utf8')) as { moves: { key: string; low: number; high: number; typical: number; semitones: number }[] }).moves;
+
+  it('has the 41 entries the sweep proposed, each saying where its numbers came from and how far the move it stops would go', () => {
+    expect(swept).toHaveLength(41);
+    const twoOctaves = new Set(pending.filter((m) => m.semitones === 24).map((m) => m.key));
+    expect(twoOctaves).toEqual(new Set(['rammstein|amerika']));
+    for (const [key, entry] of swept) {
+      expect(key, key).toBe(key.trim());
+      expect(entry.source, key).toMatch(/Singing Carrots/);
+      expect(entry.source, key).toContain(twoOctaves.has(key) ? ' up two octaves to ' : ' up an octave to '); // the move it stops, in the right number of octaves
+      expect(entry.source, key).not.toMatch(/\u2014/); // no em-dashes
+    }
+  });
+
+  it('is only for songs the evidence would move: each has its own recording in the evidence, or an artist that has a register', () => {
+    for (const [key] of swept) expect(Object.hasOwn(generated.songs, key) || Object.hasOwn(generated.artists, artistOfKey(key)), key).toBe(true);
+  });
+
+  it(`stops the ${pending.length} moves the artist rule would make: the evidence alone moves each note file up (an octave, and two for one), and keep does not`, () => {
+    expect(pending).toHaveLength(20);
+    for (const m of pending) {
+      const stored: SongRange = { low: m.low, high: m.high, tessitura: m.typical, source: 'note-file', confidence: 'high', fastLyrics: false };
+      expect(octaveMove(m.key, stored, generated), m.key).toEqual({ semitones: m.semitones, from: 'artist' });
+      expect(octaveMove(m.key, stored, evidence), m.key).toBeNull();
+      expect(Object.hasOwn(handFile.keep, m.key), m.key).toBe(true);
+    }
+  });
+
+  it('holds back a rerun of the fix over every pending row: 20 rows, none moved with keep, all moved without it', async () => {
+    const store = createMemoryStore();
+    for (const m of pending) {
+      await store.putSongRange(m.key, { range: { low: m.low, high: m.high, tessitura: m.typical, source: 'note-file', confidence: 'high', fastLyrics: false }, log: log() });
+    }
+    expect(await fixStoredOctaves(store, evidence, { dryRun: true })).toMatchObject({ checked: 20, moved: 0 });
+    expect(await fixStoredOctaves(store, generated, { dryRun: true })).toMatchObject({ checked: 20, moved: 20, fromArtist: 20 });
+  });
+
+  it('reads the two sources by what each gives: Singing Carrots sung pitch, Musicnotes written pitch', () => {
+    expect(JSON.parse(readFileSync(paths.hand, 'utf8')).about).toMatch(/Musicnotes lists a male lead at written pitch, an octave above where he sings/);
+    // the three songs QWW-62 restored first say which way Musicnotes was read
+    expect(handFile.keep['pixies|where is my mind?']!.source).toMatch(/male lead at written pitch/);
+    expect(handFile.keep['abba|money, money, money']!.source).toMatch(/a female lead is listed at the pitch she sings/);
   });
 });
 
