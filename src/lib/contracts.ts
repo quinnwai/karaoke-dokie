@@ -242,7 +242,7 @@ export const ERA_IDS: EraId[] = ['pre', 's70', 's80', 's90', 's00', 's10', 's20'
 
 /**
  * A gear's value, or a song's place on it: 0 to 100. The ends of the tracks: Difficulty Light work to Locked in,
- * History Rediscover to On repeat, Popularity Deep cuts to Pop hits, Tempo Slow jams to Upbeat tracks.
+ * History Rediscover to On repeat, Popularity Deep cuts to Pop hits, Tempo Slow jams to Fast tracks.
  */
 export type GearValues = Record<GearId, number>;
 

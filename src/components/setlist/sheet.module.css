@@ -348,17 +348,10 @@ button.resetButton:focus-visible {
   color: var(--sl-off);
 }
 
-/* Tempo's pair, "Slow jams" and "Upbeat tracks", is the only one too wide for a mini strip at 360 px: 138.5 px at 6A's 12 px in Inter
-   500 (11.54 px per px of font size, over 22 characters) in a body of 129 px, so both labels wrapped, the row took two lines and the
-   slider sat 7 px off the drawn knob. The other pairs are 104 to 120 px and fit there with 8.5 px or more. The body is 144 px in the
-   mini sheet at 375 px, where Tempo's pair fits with 5.5 px between the labels, 6A's look. Narrower than that the tracking tightens to
-   keep the 5.5 px (22 px of body per px of tracking), down to -0.03em, the era labels' (at a body of 136 px); then the size, 10.88 px
-   of body per px of font size (11.54 less 22 characters of 0.03em), to 11.35 px at 129 px; never under 9 px. Wider than 144 px nothing
-   changes. A browser without container units drops the two declarations and keeps 12 px. */
-.strip[data-gear='tempo'] .ends {
-  font-size: clamp(9px, calc((100cqw - 5.5px) / 10.88), 12px);
-  letter-spacing: clamp(-0.03em, calc((100cqw - 144px) / 22), 0px);
-}
+/* The four pairs of end labels fit on one line in the narrowest strip body, 129 px (the mini sheet at 360 px), at 6A's 12 px in Inter 500:
+   104 to 121 px, 8.1 px or more apart ("Slow jams" and "Fast tracks" is the widest, 120.9 px; `tests/setlist/tuner.test.ts` has each pair's
+   width). A longer word has to be measured again: Tempo's "Upbeat tracks" was 138.5 px, so both labels wrapped there, the row took two
+   lines and the slider sat 7 px off the drawn knob, and Tempo's pair had a rule of its own that tightened its tracking and size. */
 
 /* What the strip says in the place of its end labels when the gear cannot be used (History without Spotify): all of it, on as many
    lines as it takes (the adversarial review of #38 found it cut off). The strip is 76 px tall, 94 in the mini sheet, and the rack's height

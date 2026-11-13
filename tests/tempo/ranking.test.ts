@@ -53,7 +53,7 @@ describe('Tempo slider with feel labels', () => {
     expect(order(0)[0]).toBe('louis armstrong|what a wonderful world'); // 66 is the slowest published tempo
   });
 
-  it('Upbeat tracks puts the labelled upbeat songs last of all, and the fastest reading first', () => {
+  it('Fast tracks puts the labelled upbeat songs last of all, and the fastest reading first', () => {
     const upbeat = ['a-ha|take on me', 'the weeknd|blinding lights'];
     expect(order(1).slice(0, 2).sort()).toEqual(upbeat.sort());
     // an upbeat song read at 100 (Dancing Queen) is upbeat all the same, behind the ones the numbers back up
@@ -77,7 +77,7 @@ describe('Tempo slider with feel labels', () => {
 // ---------- QWW-54 follow-up: "I See Fire" ----------
 // Ed Sheeran's "I See Fire", a slow ballad, was labelled mid and read by Deezer at double time. The label only moves a reading by
 // whole octaves when that is cheaper than leaving it, so the song was pinned just inside the top edge of the mid band, right
-// under every upbeat song: 124.8 bpm and 72 of 100 on the Tempo gear, near the top at "Upbeat tracks". A slow label halves the
+// under every upbeat song: 124.8 bpm and 72 of 100 on the Tempo gear, near the top at "Fast tracks". A slow label halves the
 // same reading into the slow band, and nothing in the ranking can lift a slow-labelled song out of it.
 
 /** The readings effectiveTempo takes: Deezer's, the beat tracker's and UltraStar's bpm. */
@@ -94,7 +94,7 @@ describe('Tempo gear: a slow label wins over a double-time reading', () => {
     expect(mid.tempo).toBeLessThan(125);
   });
 
-  /** The Tempo gear alone, turned to "Upbeat tracks". */
+  /** The Tempo gear alone, turned to "Fast tracks". */
   const UPBEAT_END: SetlistInput = {
     range: { low: 41, high: 72 },
     gears: { difficulty: 50, history: 50, popularity: 50, tempo: 100 },
@@ -152,7 +152,7 @@ describe('Tempo gear: a slow label wins over a double-time reading', () => {
       expect(song.match.tempo, key).toBeLessThan(90); // in the slow band
       expect(song.gears.tempo, key).toBeLessThan(70); // so below the top 30% of the gear
     }
-    // and none is among the first 30% of "Upbeat tracks"
+    // and none is among the first 30% of "Fast tracks"
     const front = new Set(list.songs.slice(0, Math.ceil(list.songs.length * 0.3)).map((s) => s.match.track.id));
     expect(slow.filter((key) => front.has(key))).toEqual([]);
   });

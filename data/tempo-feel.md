@@ -44,7 +44,7 @@ the label, 228 of the 297 slow songs are halved into the slow band, 53 go to its
 Mid is not neutral for a song read at double time. A label only moves a reading by whole octaves when that is cheaper than
 leaving it, so a slow ballad whose reading sits near the mid band stays there and is pinned just inside the top edge of the
 mid band (about 125 bpm), right under every upbeat song. That is what happened to Ed Sheeran's "I See Fire", labelled mid: 124.8
-bpm and 72 of 100 on the Tempo gear, near the top at "Upbeat tracks". With the slow label the same reading is halved into the
+bpm and 72 of 100 on the Tempo gear, near the top at "Fast tracks". With the slow label the same reading is halved into the
 slow band. So a wrong mid on a slow or upbeat song shows as a song pinned within a bpm or two of an edge of its band (90 or
 125) while its reading says otherwise; that is where to look for wrong labels.
 

@@ -34,7 +34,7 @@ export const SLIDERS: SliderDef[] = [
   { id: 'difficulty', left: 'Light work', right: 'Locked in' },
   { id: 'familiarity', left: 'Rediscover', right: 'On repeat' },
   { id: 'popularity', left: 'Deep cuts', right: 'Pop hits' },
-  { id: 'tempo', left: 'Slow jams', right: 'Upbeat tracks' },
+  { id: 'tempo', left: 'Slow jams', right: 'Fast tracks' },
 ];
 
 export const DECADES: { id: Decade; label: string }[] = [

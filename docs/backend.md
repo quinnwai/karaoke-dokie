@@ -189,7 +189,7 @@ import. The model is the design's distance ranking (round 5 spec section 5), dec
    - *Listening history* (Rediscover to On repeat): how much the signed-in singer plays the song (familiarity), then
      Spotify's order. A song that is not in their library has none.
    - *Popularity* (Deep cuts to Pop hits): `popularityScore`, the score the old Pop hits slider used.
-   - *Tempo* (Slow jams to Upbeat tracks): the song's tempo, read through `effectiveTempo` in `setlist.ts`, the one
+   - *Tempo* (Slow jams to Fast tracks): the song's tempo, read through `effectiveTempo` in `setlist.ts`, the one
      place QWW-54's effective tempo switches in (the old `browse.ts` sliders read `m.tempo` directly, and go with them).
 
    Popularity, Tempo and History are by rank among the songs that fit the singer, so every tenth of the track holds about
