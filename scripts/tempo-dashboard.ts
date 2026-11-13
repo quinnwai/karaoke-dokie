@@ -27,6 +27,7 @@ async function main() {
   // One row per song with a tempo reading. Year: USDB's, else the Billboard Year-End year (as the app's `year`, minus Spotify's album year, which is not stored per song).
   const rows = await query(
     `SELECT t.song_key, t.deezer_bpm, t.tracker_bpm, t.ultrastar_bpm, f.feel,
+            EXISTS (SELECT 1 FROM song_ranges r WHERE r.song_key = t.song_key AND r.skipped = false AND r.range_json IS NOT NULL) AS in_catalogue,
             COALESCE((SELECT MIN(u.year) FROM usdb_songs u WHERE u.song_key = t.song_key AND u.year > 0), p.chart_year) AS year
        FROM song_tempo t
        LEFT JOIN song_feel f ON f.song_key = t.song_key
@@ -34,7 +35,7 @@ async function main() {
       WHERE t.deezer_bpm IS NOT NULL OR t.tracker_bpm IS NOT NULL OR t.ultrastar_bpm IS NOT NULL`,
   );
 
-  // [combined, deezer, tracker, ultrastar, feel(-1 none), era(-1 none)], tempos folded into 70 to 180 as the app does.
+  // [combined, deezer, tracker, ultrastar, feel(-1 none), era(-1 none), in catalogue 1/0], tempos folded into 70 to 180 as the app does.
   const songs = rows.map((r) => {
     const rec = { deezerBpm: (r.deezer_bpm as number | null) ?? undefined, trackerBpm: (r.tracker_bpm as number | null) ?? undefined, ultrastarBpm: (r.ultrastar_bpm as number | null) ?? undefined };
     const year = r.year === null || r.year === undefined ? null : Number(r.year);
@@ -45,6 +46,7 @@ async function main() {
       r1(ultrastarTempo(rec.ultrastarBpm)),
       r.feel ? (FEEL_CODE[String(r.feel)] ?? -1) : -1,
       ERA_CODE(year),
+      r.in_catalogue ? 1 : 0,
     ];
   });
 
@@ -72,22 +74,24 @@ td,th{padding:6px 10px;text-align:right;border-bottom:1px solid #eef0f3}th:first
 <p class="sub" id="sub"></p>
 <div class="row"><b>Era</b><span id="eras"></span></div>
 <div class="row"><b>Tempo from</b><span id="srcs"></span></div>
+<div class="row"><b>Songs</b><span id="cat"></span></div>
 <div class="row"><b>Split by feel</b><span id="split"></span></div>
 <svg id="chart" viewBox="0 0 900 420"></svg>
 <table id="tbl"></table>
-<p class="note">Songs are counted from the tempo table. Tempo is in beats per minute, folded into 70 to 180 the way the app reads it. Dashed lines are the feel bands the app uses (slow under 90, mid 90 to 125, upbeat 125 and over). The feel label is a separate, hand-and-model judgement of how a song feels, so a "slow" song can measure faster than 90 and the colours overlap on purpose. Era is the release year (USDB, else the Billboard Year-End year); songs with no year appear only under All.</p>
+<p class="note">The default counts the catalogue: songs with a note-file or recording range, the only ones that have feel labels. Switch to Everything to include other measured songs, which have no label. Tempo is in beats per minute, folded into 70 to 180 the way the app reads it. Dashed lines are the feel bands the app uses (slow under 90, mid 90 to 125, upbeat 125 and over). The feel label is a separate, hand-and-model judgement of how a song feels, so a "slow" song can measure faster than 90 and the colours overlap on purpose. Era is the release year (USDB, else the Billboard Year-End year); songs with no year appear only under All.</p>
 <script>
 const D=__DATA__, COL=['#3b82c4','#8a8f99','#e0663a','#c9ccd2'], NAMES=['slow','mid','upbeat','no label'];
 const SRC=[['Combined (what the app uses)',0],['Deezer',1],['Beat tracker',2],['Note file',3]];
-let era=-2, src=0, split=true;
+let era=-2, src=0, split=true, cat=true;
 const $=id=>document.getElementById(id);
 function btns(el,items,get,set){el.innerHTML='';items.forEach(([l,v])=>{const b=document.createElement('button');b.textContent=l;b.className=get()===v?'on':'';b.onclick=()=>{set(v);draw()};el.appendChild(b)})}
 const q=(a,p)=>a.length?a[Math.min(a.length-1,Math.floor(p*a.length))]:null;
 function draw(){
   btns($('eras'),[['All',-2],...D.eras.map((e,i)=>[e,i])],()=>era,v=>era=v);
   btns($('srcs'),SRC.map(([l,i])=>[l,i]),()=>src,v=>src=v);
+  btns($('cat'),[['Catalogue (has a range; the songs the app ranks)',true],['Everything with a tempo',false]],()=>cat,v=>cat=v);
   btns($('split'),[['Yes',true],['No',false]],()=>split,v=>split=v);
-  const pick=D.songs.filter(s=>s[src]!==null&&(era===-2||s[5]===era));
+  const pick=D.songs.filter(s=>s[src]!==null&&(!cat||s[6]===1)&&(era===-2||s[5]===era));
   $('sub').textContent=pick.length+' songs'+(era===-2?'':' in '+D.eras[era])+'. Bars are how many songs sit at each tempo (5 bpm per bar).';
   const lo=70,hi=180,W=5,nb=(hi-lo)/W,X0=50,X1=880,Y0=380,Y1=20;
   const bins=[0,1,2,3].map(()=>new Array(nb).fill(0));
