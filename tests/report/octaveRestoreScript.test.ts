@@ -336,6 +336,9 @@ describe('npm run octave:moves', () => {
     await listMoves({ argv, query, host: 'db.example', log: (l) => out.push(l), paths: paths(songs) });
     return out.join('\n');
   };
+  /** The rows of a listing (not the headings or the uncomparable section), as `[mark, key, whole line]`. */
+  const rowsOf = (text: string) => text.split('\n').flatMap((l) => (/^(AWAY | {5}) \S/.test(l) && l.includes(': ') && l.includes('typical notes:') ? [[l.startsWith('AWAY') ? 'AWAY' : 'rest', l.slice(6, l.indexOf(': ')), l] as const] : []));
+  const popularityOf = (line: string) => Number(/popularity (-?[\d.]+|unknown)$/.exec(line)![1] === 'unknown' ? -1 : /popularity (-?[\d.]+)$/.exec(line)![1]);
 
   it('lists the moves up by default, marks one that leaves the artist, and is read only', async () => {
     const { query, store } = await database('karaoke_pr4_preview');
@@ -344,62 +347,84 @@ describe('npm run octave:moves', () => {
     expect(out).toContain('Database karaoke_pr4_preview on db.example (read only), against song_ranges_bak_qww53');
     expect(out).toContain('2 rows were moved by their own recording (1 up, 1 down); 1 more cannot be compared with the backup');
     expect(out).toContain('Listing the moves up: 1, of which 1 are marked AWAY');
-    expect(out).toContain(`AWAY  ${JUNGLE}: C#4-D#5 (61-75) -> C#5-D#6 (73-87), +12; recording E5 (76.4), artist D#4 (63.0)`);
-    expect(out).not.toContain(ABBA); // a move down is not in the default list
+    // the typical notes the mark is worked out from are on the line: the note file's before and after, the recording's, the artist's
+    expect(out).toMatch(new RegExp(`AWAY  ${JUNGLE.replace(/[|']/g, (c) => `\\${c}`)}: C#4-D#5 \\(61-75\\) -> C#5-D#6 \\(73-87\\), \\+12; typical notes: note file G4 \\(67\\.0\\) -> G5 \\(79\\.0\\), recording E5 \\(76\\.4\\), artist D#4 \\(63\\.0\\); popularity \\d\\.\\d\\d$`, 'm'));
+    expect(rowsOf(out).map(([, key]) => key)).toEqual([JUNGLE]); // a move down is not in the default list
     expect(await store.getSongRanges(Object.keys(AS_WRITTEN))).toEqual(before);
   });
 
-  it('lists the moves down, or both, and counts the rows that cannot be compared with the backup', async () => {
+  it('lists the moves down, or both', async () => {
     const { query } = await database('karaoke_pr4_preview');
     const down = await lines(query, ['--backup', BACKUP, '--direction', 'down']);
-    expect(down).toContain(`${ABBA}: E4-F5 (64-77) -> E3-F4 (52-65), -12; recording C4 (59.7), artist F4 (64.7)`);
-    expect(down).not.toContain(JUNGLE);
-    // CHANGED differs from its backup in more than its octave, so it is counted and not listed
-    expect(down).toContain('1 more cannot be compared with the backup (it was itself moved before the backup was taken, or another step changed the row since) and are not listed');
-    expect(down).not.toContain(CHANGED);
+    expect(rowsOf(down).map(([, key]) => key)).toEqual([ABBA]);
+    expect(down).toContain(`${ABBA}: E4-F5 (64-77) -> E3-F4 (52-65), -12; typical notes: note file A#4 (70.2) -> A#3 (58.2), recording C4 (59.7), artist F4 (64.7)`);
     const both = await lines(query, ['--backup', BACKUP, '--direction', 'both']);
     expect(both).toContain('Listing all moves: 2');
-    expect(both).toContain(JUNGLE);
-    expect(both).toContain(ABBA);
+    expect(rowsOf(both).map(([, key]) => key).sort()).toEqual([ABBA, JUNGLE].sort());
   });
 
-  it('does not list a row whose backup was itself moved as if the backup were as written', async () => {
+  it('lists the rows that cannot be compared with the backup, each with how far it moved and why', async () => {
+    const { query } = await database('karaoke_pr4_preview');
+    const out = await lines(query, ['--backup', BACKUP]);
+    // CHANGED was moved down an octave and then another step changed its usdbViews
+    expect(out).toContain('Rows that cannot be compared with the backup (1):');
+    expect(out).toContain(`  ${CHANGED}: backup E4-F5 (64-77) -> now E3-F4 (52-65); low -12, high -12; it differs from the backup in more than its octave: another step changed it since`);
+    expect(rowsOf(out).map(([, key]) => key)).not.toContain(CHANGED); // listed apart, not among the moves
+  });
+
+  it('does not list a row whose backup was itself moved as if the backup were as written, and says why', async () => {
     const { query, store } = await database('karaoke_pr4_preview');
     // the backup holds a row moved earlier (marked 'artist') at 64-77; the stored row, marked 'recording', is at 52-65
     const asBacked = { ...AS_WRITTEN[ABBA]!, octaveFrom: 'artist' as const };
     await query(`UPDATE ${BACKUP} SET range_json = $1 WHERE song_key = $2`, [JSON.stringify(asBacked), ABBA]);
     const down = await lines(query, ['--backup', BACKUP, '--direction', 'down']);
-    expect(down).not.toContain(`${ABBA}:`);
-    expect(down).toContain('2 more cannot be compared with the backup');
+    expect(rowsOf(down)).toEqual([]);
+    expect(down).toContain('Rows that cannot be compared with the backup (2):');
+    expect(down).toContain(`  ${ABBA}: backup E4-F5 (64-77) -> now E3-F4 (52-65); low -12, high -12; the backup row was already moved (octaveFrom artist), so the as-written range is not in this backup`);
     // and identical rows on both sides, both marked: untouched since an earlier move, so not a move against this backup
     const rec = (await store.getSongRange(JUNGLE))!;
     await query(`UPDATE ${BACKUP} SET range_json = $1 WHERE song_key = $2`, [JSON.stringify(rec.range), JUNGLE]);
     const up = await lines(query, ['--backup', BACKUP]);
-    expect(up).not.toContain(`${JUNGLE}:`);
+    expect(rowsOf(up)).toEqual([]);
     expect(up).toContain('0 rows were moved by their own recording (0 up, 0 down); 3 more cannot be compared');
+    expect(up).toContain('Rows that cannot be compared with the backup (3):');
   });
 
-  it('puts the marked rows first, most viewed first, then the most viewed of the others up to the limit', async () => {
+  it('puts the marked rows first, then the others, each most popular first and up to the limit, by the popularity the app ranks by', async () => {
     const { query, store } = await database('karaoke_pr4_preview');
-    // three more rows moved down by their own recording, by an artist the evidence knows nothing about: never marked
-    const extra = [['nobody|few views', 10], ['nobody|many views', 90_000], ['nobody|some views', 5_000]] as const;
-    for (const [key, views] of extra) {
+    // rows moved down by their own recording, by an artist the evidence knows nothing about: never marked. Their popularity comes
+    // from USDB views, or from karaoke views, or from nothing at all, and the order follows the popularity the app ranks by: the hit
+    // with no USDB views scores 1 (60M karaoke views), as the song with 90,000 views does, and is listed before it only by key.
+    const extra = [
+      ['nobody|a hit with no USDB views', undefined, 60_000_000],
+      ['nobody|many views', 90_000, undefined],
+      ['nobody|some views', 5_000, undefined],
+      ['nobody|nothing known', undefined, undefined],
+    ] as const;
+    for (const [key, views, karaoke] of extra) {
       const range = note(64, 77, 70.2, { usdbViews: views });
       await store.putSongRange(key, { range, log: log(key) });
       await query(`INSERT INTO ${BACKUP} (song_key, skipped, range_json, log_json) VALUES ($1, false, $2, $3)`, [key, JSON.stringify(range), JSON.stringify(log(key))]);
+      if (karaoke) await store.putSongPopularity([{ key, karaokeViews: karaoke, source: 'test' }]);
     }
     const songs = { ...evidence.songs, ...Object.fromEntries(extra.map(([key]) => [key, 59.7])) };
     await fixStoredOctaves(store, withHandChecked({ ...evidence, songs }, handFile([ROCK]).hand));
-    const text = await lines(query, ['--backup', BACKUP, '--direction', 'both', '--limit', '2'], songs);
-    const rows = text.split('\n').filter((l) => /^(AWAY | {5}) \S/.test(l));
-    expect(rows.map((l) => `${l.startsWith('AWAY') ? 'AWAY' : 'rest'} ${l.slice(6, l.indexOf(': '))}`)).toEqual([
-      `AWAY ${ABBA}`, // equal views: the lower key first
-      `AWAY ${JUNGLE}`,
-      'rest nobody|many views',
-      'rest nobody|some views',
-    ]);
-    expect(text).toContain('Listing all moves: 5, of which 2 are marked AWAY');
-    expect(text).toContain('(1 more not listed: raise --limit.)');
+    const all = await lines(query, ['--backup', BACKUP, '--direction', 'both'], songs);
+    const rows = rowsOf(all);
+    // the two marked rows first (equal popularity: the lower key first), then every other row, most popular first
+    expect(rows.map(([mark]) => mark)).toEqual(['AWAY', 'AWAY', 'rest', 'rest', 'rest', 'rest']);
+    expect(rows.slice(0, 2).map(([, key]) => key)).toEqual([ABBA, JUNGLE]);
+    const rest = rows.slice(2);
+    expect(rest.map(([, key]) => key)).toEqual(['nobody|a hit with no USDB views', 'nobody|many views', 'nobody|some views', 'nobody|nothing known']);
+    const pops = rest.map(([, , line]) => popularityOf(line));
+    expect(pops).toEqual([...pops].sort((a, b) => b - a));
+    expect(pops[3]).toBe(-1);
+    expect(rest[3]![2]).toMatch(/popularity unknown$/);
+    expect(all).not.toContain('; USDB views'); // the old trailer, which printed "unknown" for every production row
+    // the limit counts the rows that are not marked
+    const limited = rowsOf(await lines(query, ['--backup', BACKUP, '--direction', 'both', '--limit', '2'], songs));
+    expect(limited.map(([, key]) => key)).toEqual([ABBA, JUNGLE, 'nobody|a hit with no USDB views', 'nobody|many views']);
+    expect(await lines(query, ['--backup', BACKUP, '--direction', 'both', '--limit', '2'], songs)).toContain('(2 more not listed: raise --limit.)');
   });
 
   it('refuses a backup with two rows for a song instead of listing the song twice', async () => {

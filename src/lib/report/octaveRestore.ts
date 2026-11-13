@@ -158,6 +158,20 @@ export function movedRow(key: string, now: SongRange, asWritten: SongRange, semi
   return { key, semitones, asWritten, now, recording, artist, awayFromArtist };
 }
 
+/** A row `movedBy` cannot explain: it moved by something other than whole octaves, or another step changed it, or its backup was itself moved. */
+export interface Uncomparable {
+  key: string;
+  current: SongRange;
+  backup: SongRange;
+  reason: string;
+}
+
+/** One such row as a line: the backup range, the range now, how far each end moved, and why it is not an octave move. */
+export function describeUncomparable({ key, current, backup, reason }: Uncomparable): string {
+  const by = (n: number) => `${n > 0 ? '+' : ''}${n}`;
+  return `${key}: backup ${notes(backup)} (${backup.low}-${backup.high}) -> now ${notes(current)} (${current.low}-${current.high}); low ${by(current.low - backup.low)}, high ${by(current.high - backup.high)}; ${reason}`;
+}
+
 export interface MovedPage {
   rows: { key: string; current: SongRange; backup: SongRange }[];
   /** The last key read, to ask for the next page after; null when there are no more. */

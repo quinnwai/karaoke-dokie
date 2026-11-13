@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DataSourceLogEntry, SongRange } from '../../src/lib/contracts';
-import { checkBackupTable, describeRestore, movedBy, movedRow, planRestore } from '../../src/lib/report/octaveRestore';
+import { checkBackupTable, describeRestore, describeUncomparable, movedBy, movedRow, planRestore } from '../../src/lib/report/octaveRestore';
 import type { SongRangeRecord } from '../../src/lib/server/store';
 import { correctOctave, octaveLogNote, shiftRange, type OctaveEvidence } from '../../src/lib/songs/octave';
 
@@ -127,6 +127,23 @@ describe('describeRestore', () => {
     expect(describeRestore(planRestore(KEY, moved(), undefined))).toBe(`SKIP ${KEY}: the backup has no row for it`);
     const up = describeRestore({ ...(plan as Extract<typeof plan, { action: 'restore' }>), semitones: 12 });
     expect(up).toContain('moved +12 by recording');
+  });
+});
+
+describe('describeUncomparable: a row the tool cannot compare with its backup', () => {
+  it('prints both ranges, how far each end moved, and why it is not a move of whole octaves', () => {
+    const backupRange: SongRange = { ...written, low: 59, high: 64 };
+    const now: SongRange = { ...written, low: 45, high: 53 };
+    const reason = (movedBy(now, backupRange) as { reason: string }).reason;
+    expect(describeUncomparable({ key: 'aaron|u-turn', current: now, backup: backupRange, reason })).toBe(
+      "aaron|u-turn: backup B3-E4 (59-64) -> now A2-F3 (45-53); low -14, high -11; its low note is -14 semitones from the backup's, not whole octaves",
+    );
+  });
+
+  it('signs a move up, and says so when only a field other than the range changed', () => {
+    const now: SongRange = { ...written, usdbViews: 250 };
+    const line = describeUncomparable({ key: 'k|t', current: { ...now, low: written.low + 2, high: written.high }, backup: written, reason: 'because' });
+    expect(line).toBe('k|t: backup E4-F5 (64-77) -> now F#4-F5 (66-77); low +2, high 0; because');
   });
 });
 
