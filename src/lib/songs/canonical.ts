@@ -17,10 +17,11 @@
 //    that is one melody written in two octaves, and the better evidenced part supplies the row shown. Every row folded
 //    in has to sit an octave from the row shown, not only from the head of its part, so the matcher's octave shift
 //    reaches it. Equal evidence stays two rows, and a part folded in this way takes no other part with it, so a row is
-//    never hidden for one two octaves away. A part that takes another never shows a low-confidence row (the matcher
-//    shows that as a Maybe) when it has any other: a Maybe must not hide a row the matcher shows as a fit.
+//    never hidden for one two octaves away.
 //  - The row shown is the main version: the one whose title carries no version tag, the most popular
-//    of those. An alternate is shown instead only when it is clearly more popular (see below).
+//    of those. An alternate is shown instead only when it is clearly more popular (see below). Never a low-confidence
+//    row (the matcher shows that as a Maybe) when another row whose range agrees is confident: a Maybe must not hide
+//    a row the matcher shows as a fit. That holds for every song, folded across octaves or not (QWW-62).
 //  - Instrumental, karaoke and dub rows are never folded or shown as a song (hasLittleSinging hides them).
 //  - What is shown is always the clean title and the artist line, whichever row is picked.
 
@@ -91,6 +92,8 @@ export interface CanonicalInput {
   source?: string;
   confidence?: string;
   octaveFrom?: string;
+  /** The row is on a Billboard Year-End chart (a chart rank in its karaoke popularity): the catalogue reads every such row, whatever its rank. */
+  charted?: boolean;
 }
 
 /** Why a row is as it is: shown as written, shown with a cleaned title or artist line, or folded into another row. */
@@ -153,9 +156,10 @@ interface Prepared {
 }
 
 const byRank = (a: Prepared, b: Prepared) => b.input.rank - a.input.rank || (a.input.key < b.input.key ? -1 : a.input.key > b.input.key ? 1 : 0);
-const gapOf = (a: CanonicalInput, b: CanonicalInput) => Math.max(Math.abs(a.low - b.low), Math.abs(a.high - b.high));
+/** The widest gap between the ends of two ranges, in semitones. */
+export const gapOf = (a: CanonicalInput, b: CanonicalInput) => Math.max(Math.abs(a.low - b.low), Math.abs(a.high - b.high));
 /** True when both ends of `a` sit one octave (12 semitones, give or take OCTAVE_TOLERANCE) above those of `b`, or both below. */
-function octaveApart(a: CanonicalInput, b: CanonicalInput): boolean {
+export function octaveApart(a: CanonicalInput, b: CanonicalInput): boolean {
   const lowDiff = a.low - b.low;
   const highDiff = a.high - b.high;
   return [12, -12].some((shift) => Math.abs(lowDiff - shift) <= OCTAVE_TOLERANCE && Math.abs(highDiff - shift) <= OCTAVE_TOLERANCE);
@@ -201,13 +205,13 @@ interface Song {
 /**
  * The row shown for some rows of one song: the main version, the most popular row with no tag on its title, unless an
  * alternate (a row with a tag on its title) is clearly more popular, the most popular such alternate first. Another
- * plain row never beats the main one. Without a plain row, the most popular. With `confidentOnly`, rows the matcher
- * shows as a Maybe (low confidence) are left out when any other row is there.
+ * plain row never beats the main one. Without a plain row, the most popular. Rows the matcher shows as a Maybe (low
+ * confidence) are left out when any other row is there, so a song with a confident row is never shown as a Maybe.
  */
-function pickShown(rows: Prepared[], confidentOnly: boolean): { shown: Prepared; alternate: boolean } {
+function pickShown(rows: Prepared[]): { shown: Prepared; alternate: boolean } {
   const ranked = [...rows].sort(byRank);
   const confident = ranked.filter((m) => m.input.confidence !== 'low');
-  const pool = confidentOnly && confident.length > 0 ? confident : ranked;
+  const pool = confident.length > 0 ? confident : ranked;
   const main = pool.find((m) => m.plain) ?? pool[0]!;
   const challenger = main.plain ? pool.find((m) => !m.plain && clearlyMorePopular(m.input, main.input)) : undefined;
   return { shown: challenger ?? main, alternate: challenger !== undefined };
@@ -218,10 +222,9 @@ function pickShown(rows: Prepared[], confidentOnly: boolean): { shown: Prepared;
  * its rows is an octave (OCTAVE_TOLERANCE) from the row that other part shows, and the other part's best row is strictly
  * better evidenced (`trust`); equal evidence, or any other gap, leaves two songs. The best evidenced part goes first and
  * takes every part it can, and a part that was folded in takes no other with it: the matcher tries a song one octave up
- * and one down, so a row hidden for another is never more than an octave from the row shown. A part that takes another
- * shows a confident row of its own when it has one (a Maybe must not hide a fit); one that takes none is shown as the
- * usual rules say. Which part goes first is decided by trust, then by the popularity of its head, so the result does not
- * depend on the order of the rows.
+ * and one down, so a row hidden for another is never more than an octave from the row shown. The row shown comes from the
+ * part that takes, by the usual rules (pickShown). Which part goes first is decided by trust, then by the popularity of
+ * its head, so the result does not depend on the order of the rows.
  */
 function joinOctaves(parts: Prepared[][]): Song[] {
   const order = [...parts].sort((a, b) => bestTrust(b) - bestTrust(a) || byRank(a[0]!, b[0]!));
@@ -229,10 +232,10 @@ function joinOctaves(parts: Prepared[][]): Song[] {
   const songs: Song[] = [];
   for (const part of order) {
     if (joined.has(part)) continue;
-    const confident = pickShown(part, true);
-    const taken = order.filter((other) => !joined.has(other) && bestTrust(other) < bestTrust(part) && other.every((m) => octaveApart(m.input, confident.shown.input)));
+    const picked = pickShown(part);
+    const taken = order.filter((other) => !joined.has(other) && bestTrust(other) < bestTrust(part) && other.every((m) => octaveApart(m.input, picked.shown.input)));
     for (const t of taken) joined.add(t);
-    songs.push(taken.length > 0 ? { parts: [part, ...taken], ...confident } : { parts: [part], ...pickShown(part, false) });
+    songs.push({ parts: [part, ...taken], ...picked });
   }
   return songs;
 }

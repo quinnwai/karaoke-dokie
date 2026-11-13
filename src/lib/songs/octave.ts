@@ -25,8 +25,9 @@
 // hand: data/octave-hand-checked.json, kept apart from the generated evidence so a rebuild cannot drop
 // it, and merged in by withHandChecked. An artist listed there takes the place of the measured one in
 // the artist rule (same limit), which also keeps the pitch rule off that artist; its moves are marked
-// 'hand'. A song listed under keep never moves. It exists because a typical note is only a guess at
-// who sings: AC/DC sings high, so the pitch rule moved 14 of their songs down an octave.
+// 'hand'. A song listed under keep never moves (scripts/octave-restore.ts puts back one the fix had already moved).
+// It exists because a typical note is only a guess at who sings: AC/DC sings high, so the pitch rule moved
+// 14 of their songs down an octave.
 // Only plain note-file ranges move. Duets with parts are left alone: the two singers may sit
 // an octave apart, and a recording measures neither part. Moving by evidence rather than by
 // a stored offset makes the fix idempotent.

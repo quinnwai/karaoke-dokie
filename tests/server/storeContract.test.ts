@@ -9,7 +9,7 @@ import { SCHEMA_SQL } from '../../src/lib/server/schema';
 import { pickStoreKind } from '../../src/lib/server/getStore';
 import type { Store } from '../../src/lib/server/store';
 import type { SongCanonical, SongMoodsRecord, SongPopularityRecord } from '../../src/lib/server/store';
-import { byCatalogueRank } from '../../src/lib/songs/score';
+import { byCatalogueRank, pickCatalogue } from '../../src/lib/songs/score';
 
 function pgMemQuery(opts: Parameters<typeof newDb>[0] = {}): QueryFn {
   const db = newDb(opts);
@@ -326,6 +326,10 @@ describe.each(factories)('Store contract: %s', (_name, make) => {
       expect(inputs.find((i) => i.key === 'abba|sos')).toMatchObject({ low: recording.low, high: recording.high });
       expect(inputs.find((i) => i.key === 'abba|waterloo')).toMatchObject({ low: songRange.low, high: songRange.high });
       expect(inputs.find((i) => i.key === 'nobody|skipped')).toBeUndefined();
+      // whether a row is on a Year-End chart, which the catalogue's cut keeps whatever its rank (QWW-62): the cut can be worked out from these inputs
+      expect(inputs.filter((i) => i.charted).map((i) => i.key)).toEqual(['abba|waterloo']);
+      const pool = inputs.map((i) => ({ key: i.key, rank: i.rank, charted: i.charted === true }));
+      for (const limit of [1, 2, 3]) expect(pickCatalogue(pool, limit).map((i) => i.key), `limit ${limit}`).toEqual((await s.listCatalogue(limit)).map((c) => c.key));
       expect(await make().listCanonicalInputs()).toEqual([]);
       // how far each range's octave can be trusted (rangeTrust): a recording measured with high confidence, a note file moved to sit
       // with its own recording or by a person, anything else

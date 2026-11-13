@@ -436,8 +436,7 @@ language versions ("(German Version)", "(Spanish Radio Edit)": the lyrics differ
   octaves, the matcher already tries a song an octave up and down, and the row is shown from the better evidenced part.
   Every row folded in has to sit an octave (give or take 2) from the row shown, not only from the head of its part, and a
   part folded in takes no other part with it, so a row is never hidden for one two octaves away (the matcher tries one
-  octave each way). A part that takes another never shows a low-confidence row when it has any other: a Maybe must not
-  hide a row the matcher shows as a fit. Any other disagreement (a fifth apart, two octaves, an octave with equal evidence) keeps two rows,
+  octave each way). Any other disagreement (a fifth apart, two octaves, an octave with equal evidence) keeps two rows,
   because folding would pick one measurement for everyone; the dry run lists them, and lists every octave fold with the
   evidence behind it;
 - neither is an instrumental, karaoke or dub row.
@@ -445,8 +444,11 @@ language versions ("(German Version)", "(Spanish Radio Edit)": the lyrics differ
 The row shown is the main version, the one with no tag on its title (the most popular such row), unless an alternate
 (a row with a tag on its title) is clearly more popular: 0.15 higher on the popularity score (`ALTERNATE_MARGIN`; the
 score is `catalogueRank`, which counts Deezer rank, USDB and karaoke views and a Year-End chart entry). Its title is
-clean either way. A row that is not shown but is on a Year-End chart is still loaded by the catalogue, and stands in
-for the song if the row shown ranked too low to load.
+clean either way. Rows the matcher shows as a Maybe (low confidence) do not compete while another row of the same part
+is confident, so a song with a confident row is never shown as a Maybe: a Maybe must not hide a row the matcher shows
+as a fit (QWW-62; before it, only a part that took another octave's rows followed this, and eight songs on production
+showed a low-confidence recording over a confident note file at nearly the same range). A row that is not shown but is
+on a Year-End chart is still loaded by the catalogue, and stands in for the song if the row shown ranked too low to load.
 
 **Until the table is on a database, and when it goes wrong.** The app shows the titles as stored: no row, an empty or
 missing table, or a read that fails (retried once, logged, and kept for a minute rather than the hour) all fall back
@@ -464,10 +466,18 @@ npm run titles:build -- --apply --confirm-database neondb --production   # produ
 Needs `DATABASE_URL`. Resumable: a run writes only the rows that are missing or differ, so after a stop, run it
 again. `--apply` refuses unless `--confirm-database` names the database it is connected to, and a database named
 `neondb` (production) also needs `--production`; a Neon branch of production keeps that name, so check the host the
-script prints. The dry run prints: songs before and after folding, tags removed by kind, the brackets still in shown titles
-(to see tags the rules do not know), the most popular folded songs, the alternates shown, and the names kept apart for
-their ranges. `--lists` writes the logged-out list for the release eval harness's five test ranges
-before and after, with counts of tagged titles and duplicates in the top 50, 200 and 1000.
+script prints. The dry run prints: songs before and after folding, tags removed by kind, two checks, every row the run would
+write with the row it showed before and the row it shows now (the first 200), the brackets still in shown titles (to see tags
+the rules do not know), the most popular folded songs, the alternates shown, and the names kept apart for their ranges. The
+first check is the songs the list would show as a Maybe although a row folded into them is confident, stored now and after
+the run, each with both rows' popularity and catalogue position. It is worked out as the app reads rows: the 6,000 most
+popular and every Year-End row (`pickCatalogue`), the row the mapping shows, or, when that row was not read, the first row of
+the song that was (`applyCanonical`). The row shown carries the song's popularity, so a confident row that ranks outside the
+read leaves the Maybe on screen, and the song is listed after the run until it ranks inside. The second check is the rows
+hidden behind a row more than 4 semitones away, which a group held together by its most popular row can allow when another
+row is shown; the rows a run newly puts there are listed. `--lists` writes
+the logged-out list for the release eval harness's five test ranges before and after, with counts of tagged titles and
+duplicates in the top 50, 200 and 1000.
 
 **Feedback and events.** Both keep the key of the row the visitor saw (`cat:<key>`), which after the build is the
 shown row. Anything recorded against a folded row, before or after, joins to its song through the table:

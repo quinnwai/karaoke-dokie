@@ -32,6 +32,8 @@
     "tempo:ultrastar": "tsx scripts/tempo-ultrastar.ts",
     "tempo:report": "tsx scripts/tempo-report.ts",
     "titles:build": "tsx scripts/song-titles.ts",
+    "octave:restore": "tsx scripts/octave-restore.ts",
+    "octave:moves": "tsx scripts/octave-up-moves.ts",
     "tempo:feel": "tsx scripts/tempo-feel.ts",
     "genres:deezer": "tsx scripts/genres-deezer.ts",
     "smoke:live": "tsx scripts/smoke-live.ts",

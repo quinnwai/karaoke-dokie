@@ -627,6 +627,7 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
           high: num(r.high),
           trust: rangeTrust(evidence),
           ...evidence,
+          charted: isSet(r.chart_rank),
         };
       });
     },

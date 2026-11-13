@@ -1,5 +1,5 @@
 {
-  "about": "Octave evidence a person set, kept apart from the generated data/octave-evidence.json so a rebuild cannot drop it. src/lib/songs/octaveFiles.ts merges the two when the evidence is loaded (scripts/octave-fix.ts does). An artist listed here takes the place of the measured typical note in the artist rule (same limit, ARTIST_MAX_DISTANCE), which also keeps the pitch rule off that artist, and the moves that rest on it are marked octaveFrom: 'hand'. A song under keep is never moved. To add an artist: the artist part of the song key, a typical note as a MIDI number (A#4 is 70) and where it came from; run scripts/octave-fix.ts with --dry-run first.",
+  "about": "Octave evidence a person set, kept apart from the generated data/octave-evidence.json so a rebuild cannot drop it. src/lib/songs/octaveFiles.ts merges the two when the evidence is loaded (scripts/octave-fix.ts does). An artist listed here takes the place of the measured typical note in the artist rule (same limit, ARTIST_MAX_DISTANCE), which also keeps the pitch rule off that artist, and the moves that rest on it are marked octaveFrom: 'hand'. A song under keep is never moved. To add an artist: the artist part of the song key, a typical note as a MIDI number (A#4 is 70) and where it came from; run scripts/octave-fix.ts with --dry-run first. A song under keep that the fix had already moved before it was listed is put back as written by scripts/octave-restore.ts, from the copy of song_ranges taken before the fix ran (dry run first); listing it here is also what stops a rerun of the fix moving it again.",
   "artists": {
     "ac/dc": {
       "typical": 70,
@@ -7,8 +7,17 @@
     }
   },
   "keep": {
+    "abba|money, money, money": {
+      "source": "Musicnotes leadsheet MN0116300 (original published key A minor) gives the vocal range E4 to G5 (64 to 79), its piano/vocal/chords edition MN0070824 gives E4 to Ab5 and Singing Carrots gives E4 to G5. The note file as written is E4 to F5. The recording's typical note (59.7) had moved it an octave down to E3 to F4, below all three (QWW-62)."
+    },
     "ac/dc|let there be rock": {
       "source": "Its note file is C3 to E5, so the artist rule would move it to C4 to E6, which PLAUSIBLE_SONG (up to G6) does not catch."
+    },
+    "guns n' roses|don't cry": {
+      "source": "Singing Carrots gives C3 to E5 (original key A minor); the Musicnotes piano/vocal/guitar edition MN0148353 (A minor) shows no vocal range, so no sheet music range was found and this rests on Singing Carrots and the artist's register. The recording's typical note (54.3) had moved the note file an octave down to D2 to C4, whose lowest note is 10 semitones below the lowest published note, and the band's other recordings sit near D#4 (63.0) (QWW-62)."
+    },
+    "pixies|where is my mind?": {
+      "source": "Musicnotes piano/vocal/guitar MN0085635 (original published key E major) gives the vocal range C#4 to G#5 and piano/vocal/chords MN0252808 gives A3 to G#5; Singing Carrots gives G3 to E5. The recording's typical note (70.8) had moved the note file an octave up to C#5 to A5, whose lowest note is at least an octave above the lowest note of all three (QWW-62)."
     }
   }
 }
