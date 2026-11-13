@@ -1,0 +1,145 @@
+{
+ "about": "Note files the octave fix would move up an octave by the artist rule, from the dry run of scripts/octave-fix.ts on production on 13 Nov 2026 (QWW-62): the key, the stored range (midi, C4 = 60) and its typical note as written, and the move it would make in semitones. Each is under keep in data/octave-hand-checked.json because Singing Carrots (sung pitch), or the singer's voice, says the move is wrong. Used by tests/songs/octaveHand.test.ts.",
+ "moves": [
+  {
+   "key": "barry white|let the music play",
+   "low": 53,
+   "high": 65,
+   "typical": 59.7,
+   "semitones": 12
+  },
+  {
+   "key": "barry white|you’re the first, the last, my everything",
+   "low": 55,
+   "high": 64,
+   "typical": 60.4,
+   "semitones": 12
+  },
+  {
+   "key": "calvin harris|i’m not alone",
+   "low": 49,
+   "high": 61,
+   "typical": 54.4,
+   "semitones": 12
+  },
+  {
+   "key": "flo rida|i don’t like it, i love it",
+   "low": 50,
+   "high": 60,
+   "typical": 54.8,
+   "semitones": 12
+  },
+  {
+   "key": "gary numan|we are glass",
+   "low": 53,
+   "high": 65,
+   "typical": 58.7,
+   "semitones": 12
+  },
+  {
+   "key": "luciano pavarotti|la donna e mobile",
+   "low": 56,
+   "high": 71,
+   "typical": 63.4,
+   "semitones": 12
+  },
+  {
+   "key": "rammstein|adieu",
+   "low": 52,
+   "high": 71,
+   "typical": 60.9,
+   "semitones": 12
+  },
+  {
+   "key": "rammstein|amerika",
+   "low": 41,
+   "high": 58,
+   "typical": 50.1,
+   "semitones": 24
+  },
+  {
+   "key": "rammstein|buck dich",
+   "low": 50,
+   "high": 64,
+   "typical": 54.8,
+   "semitones": 12
+  },
+  {
+   "key": "rammstein|deutschland",
+   "low": 51,
+   "high": 74,
+   "typical": 61.6,
+   "semitones": 12
+  },
+  {
+   "key": "rammstein|feuer frei!",
+   "low": 61,
+   "high": 67,
+   "typical": 62.6,
+   "semitones": 12
+  },
+  {
+   "key": "rammstein|fruhling in paris",
+   "low": 54,
+   "high": 66,
+   "typical": 59.6,
+   "semitones": 12
+  },
+  {
+   "key": "rammstein|ich tu dir weh",
+   "low": 57,
+   "high": 64,
+   "typical": 61.0,
+   "semitones": 12
+  },
+  {
+   "key": "rammstein|ohne dich",
+   "low": 52,
+   "high": 69,
+   "typical": 62.6,
+   "semitones": 12
+  },
+  {
+   "key": "rammstein|radio",
+   "low": 55,
+   "high": 65,
+   "typical": 61.9,
+   "semitones": 12
+  },
+  {
+   "key": "rammstein|rosenrot",
+   "low": 55,
+   "high": 68,
+   "typical": 62.2,
+   "semitones": 12
+  },
+  {
+   "key": "rammstein|zeit",
+   "low": 50,
+   "high": 62,
+   "typical": 56.6,
+   "semitones": 12
+  },
+  {
+   "key": "tears for fears|mad world",
+   "low": 54,
+   "high": 63,
+   "typical": 56.8,
+   "semitones": 12
+  },
+  {
+   "key": "the gaslight anthem|blue dahlia",
+   "low": 53,
+   "high": 70,
+   "typical": 61.9,
+   "semitones": 12
+  },
+  {
+   "key": "the gaslight anthem|the ’59 sound",
+   "low": 58,
+   "high": 74,
+   "typical": 61.8,
+   "semitones": 12
+  }
+ ]
+}

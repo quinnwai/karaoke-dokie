@@ -1,5 +1,5 @@
 {
-  "about": "Octave evidence a person set, kept apart from the generated data/octave-evidence.json so a rebuild cannot drop it. src/lib/songs/octaveFiles.ts merges the two when the evidence is loaded (scripts/octave-fix.ts does). An artist listed here takes the place of the measured typical note in the artist rule (same limit, ARTIST_MAX_DISTANCE), which also keeps the pitch rule off that artist, and the moves that rest on it are marked octaveFrom: 'hand'. A song under keep is never moved. To add an artist: the artist part of the song key, a typical note as a MIDI number (A#4 is 70) and where it came from; run scripts/octave-fix.ts with --dry-run first. A song under keep that the fix had already moved before it was listed is put back as written by scripts/octave-restore.ts, from the copy of song_ranges taken before the fix ran (dry run first); listing it here is also what stops a rerun of the fix moving it again.",
+  "about": "Octave evidence a person set, kept apart from the generated data/octave-evidence.json so a rebuild cannot drop it. src/lib/songs/octaveFiles.ts merges the two when the evidence is loaded (scripts/octave-fix.ts does). An artist listed here takes the place of the measured typical note in the artist rule (same limit, ARTIST_MAX_DISTANCE), which also keeps the pitch rule off that artist, and the moves that rest on it are marked octaveFrom: 'hand'. A song under keep is never moved. To add an artist: the artist part of the song key, a typical note as a MIDI number (A#4 is 70) and where it came from; run scripts/octave-fix.ts with --dry-run first. A song under keep that the fix had already moved before it was listed is put back as written by scripts/octave-restore.ts, from the copy of song_ranges taken before the fix ran (dry run first); listing it here is also what stops a rerun of the fix moving it again. A source has to say whether it gives sung pitch: Singing Carrots does (its ranges for male leads sit an octave below Musicnotes'), while Musicnotes lists a male lead at written pitch, an octave above where he sings and a female lead at the pitch she sings.",
   "artists": {
     "ac/dc": {
       "typical": 70,
@@ -8,16 +8,139 @@
   },
   "keep": {
     "abba|money, money, money": {
-      "source": "Musicnotes leadsheet MN0116300 (original published key A minor) gives the vocal range E4 to G5 (64 to 79), its piano/vocal/chords edition MN0070824 gives E4 to Ab5 and Singing Carrots gives E4 to G5. The note file as written is E4 to F5. The recording's typical note (59.7) had moved it an octave down to E3 to F4, below all three (QWW-62)."
+      "source": "Musicnotes leadsheet MN0116300 (original published key A minor) gives the vocal range E4 to G5 (64 to 79), its piano/vocal/chords edition MN0070824 gives E4 to Ab5 and Singing Carrots gives E4 to G5; a female lead is listed at the pitch she sings. The note file as written is E4 to F5. The recording's typical note (59.7) had moved it an octave down to E3 to F4, below all three (QWW-62)."
     },
     "ac/dc|let there be rock": {
       "source": "Its note file is C3 to E5, so the artist rule would move it to C4 to E6, which PLAUSIBLE_SONG (up to G6) does not catch."
     },
+    "avicii|waiting for love": {
+      "source": "Singing Carrots (sung pitch) gives D3 to G4 for the song (original key E Minor). The note file as written, F#3 to F#4, sits inside that range. The recording's typical note (A4, 68.7) moved it up an octave to F#4 to F#5, which put its lowest note 16 semitones and its highest 11 semitones above the published ones (QWW-62 sweep)."
+    },
+    "barry white|let the music play": {
+      "source": "No Singing Carrots page for this song. The 2 songs by the artist that Singing Carrots lists both have C3 as their lowest note (sung pitch). The artist rule (the artist's other recordings, measured near A#4, 70.35) would move the note file F3 to F4 up an octave to F4 to F5, putting its lowest note, F4, 17 semitones above that lowest note; as written its lowest note, F3, is 5 semitones above that lowest note (QWW-62 sweep)."
+    },
+    "barry white|you’re the first, the last, my everything": {
+      "source": "Singing Carrots (sung pitch) gives C3 to F4 for the song (original key F Major). The artist rule (the artist's other recordings, measured near A#4, 70.35) would move the note file G3 to E4 up an octave to G4 to E5, which would put its lowest note 19 semitones and its highest 11 semitones above the published ones; as written it sits inside that range (QWW-62 sweep)."
+    },
+    "billie myers|kiss the rain": {
+      "source": "Singing Carrots (sung pitch) gives E3 to C#5 for the song (original key A Major). The note file as written, A3 to G#4, sits inside that range. The recording's typical note (G#4, 67.7) moved it up an octave to A4 to G#5, which put its lowest note 17 semitones and its highest 7 semitones above the published ones (QWW-62 sweep)."
+    },
+    "bon jovi|bad medicine": {
+      "source": "Singing Carrots (sung pitch) gives E2 to B4 for the song (original key E Major). The note file as written, C#4 to A4, sits inside that range. The recording's typical note (C5, 72.5) moved it up an octave to C#5 to A5, which put its lowest note 33 semitones and its highest 10 semitones above the published ones (QWW-62 sweep)."
+    },
+    "bon jovi|you give love a bad name": {
+      "source": "Singing Carrots (sung pitch) gives G2 to A#4 for the song (original key C Minor). The note file as written, C4 to G#4, sits inside that range. The recording's typical note (B4, 70.9) moved it up an octave to C5 to G#5, which put its lowest note 29 semitones and its highest 10 semitones above the published ones (QWW-62 sweep)."
+    },
+    "bruno mars|liquor store blues": {
+      "source": "Singing Carrots (sung pitch) gives G#2 to C#5 for the song (original key C# Minor). The note file as written, G3 to F#4, sits inside that range. The recording's typical note (G4, 67.1) moved it up an octave to G4 to F#5, which put its lowest note 23 semitones and its highest 5 semitones above the published ones (QWW-62 sweep)."
+    },
+    "calvin harris|feel so close": {
+      "source": "Singing Carrots (sung pitch) gives A2 to B3 for the song (original key C Major). The note file as written, D3 to B3, sits inside that range. The recording's typical note (E4, 63.5) moved it up an octave to D4 to B4, which put its lowest note 17 semitones and its highest 12 semitones above the published ones (QWW-62 sweep)."
+    },
+    "calvin harris|i’m not alone": {
+      "source": "Singing Carrots (sung pitch) gives C3 to G4 for the song (original key G Major). The artist rule (the artist's other recordings, measured near D#4, 62.74) would move the note file C#3 to C#4 up an octave to C#4 to C#5, which would put its lowest note 13 semitones and its highest 6 semitones above the published ones; as written it sits inside that range (QWW-62 sweep)."
+    },
+    "celine dion|i drove all night": {
+      "source": "Singing Carrots (sung pitch) gives G#3 to C#5 for the song (original key G# Minor). The note file as written, B3 to B4, sits inside that range. The recording's typical note (C#5, 73.0) moved it up an octave to B4 to B5, which put its lowest note 15 semitones and its highest 10 semitones above the published ones (QWW-62 sweep)."
+    },
+    "cher|gimme! gimme! gimme!": {
+      "source": "Singing Carrots (sung pitch) has no page for Cher's version, but lists ABBA's original of the same song, Gimme! Gimme! Gimme! (A Man After Midnight), at A3 to D5 (original key D minor). The note file as written, D4 to A4, sits inside that range. The recording's typical note (B4, 71.3) moved it up an octave to D5 to A5: its lowest note, D5, is 17 semitones above the bottom of that range and level with the top, and its highest note, A5, is 7 semitones above the top. Cher's own 15 songs on Singing Carrots have lowest notes from F3 to A4 (QWW-62 sweep)."
+    },
+    "david guetta|lovers on the sun": {
+      "source": "Singing Carrots (sung pitch) gives A2 to B4 for the song (original key B Minor). The note file as written, B2 to A4, sits inside that range. The recording's typical note (F#4, 66.3) moved it up an octave to B3 to A5, which put its lowest note 14 semitones and its highest 10 semitones above the published ones (QWW-62 sweep)."
+    },
+    "ella henderson|ghost": {
+      "source": "Singing Carrots (sung pitch) gives F#3 to D5 for the song (original key A Major). The note file as written, F#3 to A4, sits inside that range. The recording's typical note (F#4, 66.5) moved it up an octave to F#4 to A5, which put its lowest note 12 semitones and its highest 7 semitones above the published ones (QWW-62 sweep)."
+    },
+    "flo rida|i don’t like it, i love it": {
+      "source": "Singing Carrots (sung pitch) gives C3 to D4 for the song (original key D Minor). The artist rule (the artist's other recordings, measured near F#4, 66.17) would move the note file D3 to C4 up an octave to D4 to C5, which would put its lowest note 14 semitones and its highest 10 semitones above the published ones; as written it sits inside that range (QWW-62 sweep)."
+    },
+    "flo rida|whistle": {
+      "source": "Singing Carrots (sung pitch) gives G2 to A4 for the song (original key A Minor). The note file as written, A3 to G4, sits inside that range. The recording's typical note (A4, 68.8) moved it up an octave to A4 to G5, which put its lowest note 26 semitones and its highest 10 semitones above the published ones (QWW-62 sweep)."
+    },
+    "florence + the machine|breath of life": {
+      "source": "Singing Carrots (sung pitch) gives D3 to C5 for the song (original key D Minor). The note file as written, G3 to F4, sits inside that range. The recording's typical note (G#4, 68.5) moved it up an octave to G4 to F5, which put its lowest note 17 semitones and its highest 5 semitones above the published ones (QWW-62 sweep)."
+    },
+    "gary numan|we are glass": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Cars, at E3 to E4 (sung pitch). The artist rule (the artist's other recordings, measured near A#4, 70.05) would move the note file F3 to F4 up an octave to F4 to F5, putting its lowest note, F4, 13 semitones above that lowest note; as written its lowest note, F3, is 1 semitone above that lowest note (QWW-62 sweep)."
+    },
     "guns n' roses|don't cry": {
-      "source": "Singing Carrots gives C3 to E5 (original key A minor); the Musicnotes piano/vocal/guitar edition MN0148353 (A minor) shows no vocal range, so no sheet music range was found and this rests on Singing Carrots and the artist's register. The recording's typical note (54.3) had moved the note file an octave down to D2 to C4, whose lowest note is 10 semitones below the lowest published note, and the band's other recordings sit near D#4 (63.0) (QWW-62)."
+      "source": "Singing Carrots (sung pitch) gives C3 to E5 (original key A minor); the Musicnotes piano/vocal/guitar edition MN0148353 (A minor) shows no vocal range, so no sheet music range was found and this rests on Singing Carrots and the artist's register. The recording's typical note (54.3) had moved the note file an octave down to D2 to C4, whose lowest note is 10 semitones below the lowest published note, and the band's other recordings sit near D#4 (63.0) (QWW-62)."
+    },
+    "imagine dragons|thunder": {
+      "source": "Singing Carrots (sung pitch) gives E3 to G4 for the song (original key C Major). The note file as written, F#3 to E4, sits inside that range. The recording's typical note (G#4, 67.9) moved it up an octave to F#4 to E5, which put its lowest note 14 semitones and its highest 9 semitones above the published ones (QWW-62 sweep)."
+    },
+    "linkin park|given up": {
+      "source": "Singing Carrots (sung pitch) gives E3 to B4 for the song (original key E Minor). The note file as written, E3 to B4, sits inside that range. The recording's typical note (A5, 80.7) moved it up an octave to E4 to B5, which put its lowest note 12 semitones and its highest 12 semitones above the published ones (QWW-62 sweep)."
+    },
+    "luciano pavarotti|la donna e mobile": {
+      "source": "No Singing Carrots page for this song. The 4 songs by the artist that Singing Carrots lists have lowest notes from D3 to E3, median D3 (sung pitch). The artist rule (the artist's other recordings, measured near C5, 72.11) would move the note file G#3 to B4 up an octave to G#4 to B5, putting its lowest note, G#4, 18 semitones above that median; as written its lowest note, G#3, is 6 semitones above that median (QWW-62 sweep)."
+    },
+    "luciano pavarotti|nessun dorma": {
+      "source": "No Singing Carrots page for this song. The 4 songs by the artist that Singing Carrots lists have lowest notes from D3 to E3, median D3 (sung pitch). The recording's typical note (C5, 72.1) moved the note file F#3 to B4 up an octave to F#4 to B5, putting its lowest note, F#4, 16 semitones above that median; as written its lowest note, F#3, is 4 semitones above that median (QWW-62 sweep)."
+    },
+    "mgmt|kids": {
+      "source": "Singing Carrots (sung pitch) gives E3 to E4 for the song (original key F# Minor). The note file as written, A3 to E4, sits inside that range. The recording's typical note (C#5, 72.9) moved it up an octave to A4 to E5, which put its lowest note 17 semitones and its highest 12 semitones above the published ones (QWW-62 sweep)."
+    },
+    "michel sardou|les lacs du connemara": {
+      "source": "No Singing Carrots page for this song. The 3 songs by the artist that Singing Carrots lists have lowest notes from A2 to F#3, median D3 (sung pitch). The recording's typical note (D#4, 63.1) moved the note file C3 to E4 up an octave to C4 to E5, putting its lowest note, C4, 10 semitones above that median; as written its lowest note, C3, falls among them (QWW-62 sweep)."
+    },
+    "paul simon|me and julio down by the schoolyard": {
+      "source": "Singing Carrots (sung pitch) gives C3 to F4 for the song (original key F Major). The note file as written, G#3 to F#4, sits within 1 semitone of that range. The recording's typical note (F#4, 65.7) moved it up an octave to G#4 to F#5, which put its lowest note 20 semitones and its highest 13 semitones above the published ones (QWW-62 sweep)."
     },
     "pixies|where is my mind?": {
-      "source": "Musicnotes piano/vocal/guitar MN0085635 (original published key E major) gives the vocal range C#4 to G#5 and piano/vocal/chords MN0252808 gives A3 to G#5; Singing Carrots gives G3 to E5. The recording's typical note (70.8) had moved the note file an octave up to C#5 to A5, whose lowest note is at least an octave above the lowest note of all three (QWW-62)."
+      "source": "Musicnotes lists a male lead at written pitch, an octave above where he sings: its piano/vocal/guitar edition MN0085635 (original published key E major) gives C#4 to G#5 and its piano/vocal/chords edition MN0252808 gives A3 to G#5, so about C#3 to G#4 and A2 to G#4 as sung; Singing Carrots (sung pitch) gives G3 to E5. The recording's typical note (70.8) had moved the note file up an octave to C#5 to A5, above every source. As written, C#4 to A4, is closer to all of them but may itself sit an octave high (QWW-62)."
+    },
+    "rammstein|adieu": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file E3 to B4 up an octave to E4 to B5, putting its lowest note, E4, 14 semitones above that lowest note; as written its lowest note, E3, is 2 semitones above that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "rammstein|amerika": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file F2 to A#3 up two octaves to F4 to A#5, putting its lowest note, F4, 15 semitones above that lowest note; as written its lowest note, F2, is 9 semitones below that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "rammstein|buck dich": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file D3 to E4 up an octave to D4 to E5, putting its lowest note, D4, 12 semitones above that lowest note; as written its lowest note, D3, is level with that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "rammstein|deutschland": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file D#3 to D5 up an octave to D#4 to D6, putting its lowest note, D#4, 13 semitones above that lowest note; as written its lowest note, D#3, is 1 semitone above that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "rammstein|feuer frei!": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file C#4 to G4 up an octave to C#5 to G5, putting its lowest note, C#5, 23 semitones above that lowest note; as written its lowest note, C#4, is 11 semitones above that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "rammstein|fruhling in paris": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file F#3 to F#4 up an octave to F#4 to F#5, putting its lowest note, F#4, 16 semitones above that lowest note; as written its lowest note, F#3, is 4 semitones above that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "rammstein|ich tu dir weh": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file A3 to E4 up an octave to A4 to E5, putting its lowest note, A4, 19 semitones above that lowest note; as written its lowest note, A3, is 7 semitones above that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "rammstein|ohne dich": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file E3 to A4 up an octave to E4 to A5, putting its lowest note, E4, 14 semitones above that lowest note; as written its lowest note, E3, is 2 semitones above that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "rammstein|radio": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file G3 to F4 up an octave to G4 to F5, putting its lowest note, G4, 17 semitones above that lowest note; as written its lowest note, G3, is 5 semitones above that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "rammstein|rosenrot": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file G3 to G#4 up an octave to G4 to G#5, putting its lowest note, G4, 17 semitones above that lowest note; as written its lowest note, G3, is 5 semitones above that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "rammstein|zeit": {
+      "source": "No Singing Carrots page for this song. Singing Carrots lists one song by the artist, Du Hast, at D3 to A5 (sung pitch). The artist rule (the artist's other recordings, measured near B4, 70.77) would move the note file D3 to D4 up an octave to D4 to D5, putting its lowest note, D4, 12 semitones above that lowest note; as written its lowest note, D3, is level with that lowest note. The singer, Till Lindemann, is a bass-baritone (QWW-62 sweep)."
+    },
+    "robbie williams|let me entertain you": {
+      "source": "Singing Carrots (sung pitch) gives D#3 to G#4 for the song (original key F Major). The note file as written, F3 to F4, sits inside that range. The recording's typical note (A4, 68.9) moved it up an octave to F4 to F5, which put its lowest note 14 semitones and its highest 9 semitones above the published ones (QWW-62 sweep)."
+    },
+    "tears for fears|mad world": {
+      "source": "No Singing Carrots page for this song. The 4 songs by the artist that Singing Carrots lists have lowest notes from C3 to G3, median D#3 (sung pitch). The artist rule (the artist's other recordings, measured near F#4, 65.92) would move the note file F#3 to D#4 up an octave to F#4 to D#5, putting its lowest note, F#4, 15 semitones above that median; as written its lowest note, F#3, falls among them (QWW-62 sweep)."
+    },
+    "tears for fears|shout": {
+      "source": "Singing Carrots (sung pitch) gives C3 to D4 for the song (original key F Major). The note file as written, F3 to F4, sits within 3 semitones of that range. The recording's typical note (G4, 66.7) moved it up an octave to F4 to F5, which put its lowest note 17 semitones and its highest 15 semitones above the published ones (QWW-62 sweep)."
+    },
+    "the gaslight anthem|blue dahlia": {
+      "source": "No Singing Carrots page for this song. The 2 songs by the artist that Singing Carrots lists have lowest notes from A#2 to G3, median D#3 (sung pitch). The artist rule (the artist's other recordings, measured near A#4, 70.04) would move the note file F3 to A#4 up an octave to F4 to A#5, putting its lowest note, F4, 14 semitones above that median; as written its lowest note, F3, falls among them (QWW-62 sweep)."
+    },
+    "the gaslight anthem|the ’59 sound": {
+      "source": "Singing Carrots (sung pitch) gives G3 to A4 for the song (original key C Major). The artist rule (the artist's other recordings, measured near A#4, 70.04) would move the note file A#3 to D5 up an octave to A#4 to D6, which would put its lowest note 15 semitones and its highest 17 semitones above the published ones; as written it sits within 5 semitones of that range (QWW-62 sweep)."
+    },
+    "x ambassadors|renegades": {
+      "source": "Singing Carrots (sung pitch) gives E3 to E4 for the song (original key A Minor). The note file as written, A3 to F#4, sits within 2 semitones of that range. The recording's typical note (G#4, 67.6) moved it up an octave to A4 to F#5, which put its lowest note 17 semitones and its highest 14 semitones above the published ones (QWW-62 sweep)."
     }
   }
 }
