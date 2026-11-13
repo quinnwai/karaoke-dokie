@@ -1,4 +1,5 @@
-// Who the app's data and know-how come from. Shown on /credits and kept in step with the README.
+// Who the app's data and know-how come from. Shown in the Sources and credits panel inside the TV (CreditsPanel) and on /credits, both
+// by CreditsContent, and kept in step with the README.
 
 export interface Credit {
   name: string;
@@ -50,6 +51,16 @@ export const CREDITS: Credit[] = [
     what: "An AI model that suggests Upbeat and Heartfelt labels from a song's artist, title and year, ahead of time. We show a mood only once its labels pass our accuracy check.",
   },
   {
+    name: 'Inter, by Rasmus Andersson',
+    url: 'https://rsms.me/inter/',
+    what: 'The typeface of the Setlist tuner (SIL Open Font License 1.1), served from this site, not from Google.',
+  },
+  {
+    name: 'Noto Sans JP, Google',
+    url: 'https://fonts.google.com/noto/specimen/Noto+Sans+JP',
+    what: 'The four katakana of the カラオケ sign on the Setlist tuner, a tiny subset of the typeface (SIL Open Font License 1.1), served from this site, not from Google.',
+  },
+  {
     name: 'Material Symbols, Google',
     url: 'https://fonts.google.com/icons',
     what: 'The fast-lyrics, book and reset icons (Apache 2.0).',
@@ -77,7 +88,7 @@ export const CREDITS: Credit[] = [
 ];
 
 /**
- * What the beta records about its testers, shown on /credits (QWW-51). Kept in step with the README's Beta event log
+ * What the beta records about its testers, shown with the credits (QWW-51). Kept in step with the README's Beta event log
  * row and docs/backend.md: if what is recorded changes, this changes with it.
  */
 export const ANALYTICS_NOTE = {

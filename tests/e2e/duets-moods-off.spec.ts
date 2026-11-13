@@ -46,7 +46,7 @@ test('switch off: nothing about duets or moods in the API, and the same songs in
   expect(on.some((m) => m.moods?.includes('upbeat'))).toBe(true);
 });
 
-test('switch off: the results screen has decade chips but no Duets or mood chip, and no duet line on a song', async ({ browser }) => {
+test('switch off: the results screen shows no duet or mood anywhere, and no duet line on a song', async ({ browser }) => {
   test.setTimeout(60_000);
   const context = await browser.newContext({ ...devices['iPhone 13'], baseURL: OFF, reducedMotion: 'reduce' });
   await context.addInitScript(() => {
@@ -58,20 +58,24 @@ test('switch off: the results screen has decade chips but no Duets or mood chip,
   const page = await context.newPage();
   await page.goto('/');
   await page.getByRole('button', { name: 'Continue' }).click();
-  const songs = page.locator('ol li');
-  await expect(songs).toHaveCount(5, { timeout: 20_000 });
+  const songs = page.locator('[data-row]');
+  await expect(songs.first()).toBeVisible({ timeout: 20_000 });
 
-  const filters = page.getByRole('group', { name: 'Filter songs' });
-  await expect(filters.getByRole('button', { name: /^80s, \d+ songs?$/ })).toBeVisible();
-  await expect(filters.getByRole('button', { name: /^Duets/ })).toHaveCount(0);
-  await expect(filters.getByRole('button', { name: /^Upbeat/ })).toHaveCount(0);
-  await expect(filters.getByRole('button', { name: /^Heartfelt/ })).toHaveCount(0);
+  // The Setlist tuner has no duet or mood control (and never did with the switch off): no chip, no duet line.
+  await expect(page.getByRole('button', { name: /^Duets/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Upbeat$/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Heartfelt/ })).toHaveCount(0);
+  await expect(page.getByText(/Duet/)).toHaveCount(0);
   await page.screenshot({ path: path.join(SCREENS, 'duets-moods-off-01-list.png') });
 
-  // The 80s hold a duet in the demo's catalogue (Islands in the Stream, 1983; with the switch on its row
-  // says whose part to take). The whole 80s list is paged through: the duet is still in it, and no row
-  // says "Duet". Opened, the song carries no duet line and no mood pill either.
-  await filters.getByRole('button', { name: /^80s, \d+ songs?$/ }).click();
+  // The 80s hold a duet in the demo's catalogue (Islands in the Stream, 1983; with the switch on its song page
+  // says whose part to take). Only the 80s picked (the first tap on an era picks just that era), and the whole list
+  // paged through: the duet is still in it, and no row says "Duet". Opened, the song carries no duet line and no mood
+  // pill either.
+  const era = (id: string) => page.locator(`button[data-era="${id}"]`);
+  // A phone this short opens the tuner's sheet in mini (QWW-57), which shows the Era panel from its tab.
+  await page.locator('[data-tab][data-gear="era"]').click();
+  await era('s80').click();
   const more = page.getByRole('button', { name: 'Load more songs' });
   for (let i = 0; i < 10 && (await more.count()) > 0; i++) await more.click();
   const duet = songs.filter({ hasText: 'Islands in the Stream' });

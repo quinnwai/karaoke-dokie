@@ -1,0 +1,47 @@
+/* The gear art's own styles (Round 6A §6, §10), copied from the reference's <style> block. The strip art's size, corner
+   radius and the box behind it belong to the parent, which passes a className; the svg draws no background, and an off gear
+   is dimmed by drawing it in unlit tubes (GearArt.tsx), not by CSS. */
+
+/* A note or a bolt lights and goes dark over 180 ms as the value crosses its threshold (README §10). The reference hides the
+   part with an opacity fade; here an item the value does not reach is drawn unlit instead (QWW-57, R7), so what fades is the
+   tube's colour, which is on the group's one child: a note's inner group, a bolt's path. The tab's rays have no fade. */
+.fade > * {
+  transition: fill 180ms;
+}
+
+@keyframes bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-2px);
+  }
+}
+/* The strip's notes and bolts bob. Each keeps its own inline animation-delay, so they do not move in step. */
+.bob {
+  animation: bob 1.1s ease-in-out infinite alternate;
+}
+
+/* The pendulum swings around its pivot: (75, 56) in the strip's 150x80 viewBox, (14, 15.5) in the tab's 28x22. Its keyframes
+   are global, in setlist-global.css: the animation is an inline style, and an inline style cannot name a keyframes rule
+   that CSS Modules would rename. */
+.pend {
+  transform-origin: 75px 56px;
+}
+.pendTab {
+  transform-origin: 14px 15.5px;
+}
+
+/* !important so it also beats the inline animations: the pendulum's, and the strip's turn-on flicker (`.flick`, the strip's
+   root, has no other rule; its flicker is an inline style that is set only while a flicker is due: on first load and when the gear goes from off to on). */
+@media (prefers-reduced-motion: reduce) {
+  .pend,
+  .pendTab,
+  .bob,
+  .flick {
+    animation: none !important;
+  }
+  .fade > * {
+    transition: none !important;
+  }
+}

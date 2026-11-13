@@ -1,0 +1,1071 @@
+<!doctype html>
+<!--
+  Setlist tuner, Round 5 ("L2 with mini view")
+  Reference implementation. Read setlist-round5-spec.md first.
+
+  - Plain HTML/CSS/JS. No build step, no framework, no runtime.
+  - Open directly in a browser. Add ?mini=1 to start in the mini sheet
+    (board "L2 mini"); default is expanded (board "L2 expanded").
+  - Single state object -> render(). All behavior lives in the <script> at the bottom.
+  - Each gear has a reset button (circular arrow). Reset puts the gear back to its
+    default value and turns it off, so it is not factored into the ranking. Touching
+    the gear again turns it back on, starting from the default.
+  - Default values live in the DEFAULTS constant. They are mockup placeholders;
+    choosing real ones is a build-ticket task (spec §11).
+  - window.setlist is a test hook for agents (Playwright etc). Remove in production.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tune your setlist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;700&display=swap">
+<style>
+/* ===== Design tokens ===== */
+:root {
+  --bg: #191714;          /* screen background, unselected era button */
+  --sheet: #211E1A;       /* bottom sheet */
+  --panel: #2B2723;       /* strip / era panel / unselected tab */
+  --line: #3A3631;        /* sheet border, slider track */
+  --row-line: #2C2925;    /* list row divider */
+  --text: #F7F3EA;        /* primary text */
+  --text-2: #D9D3C4;      /* labels */
+  --text-3: #B8B2A6;      /* secondary text, handle */
+  --cream: #F4E7C5;       /* selected state, slider fill */
+  --ink: #191714;         /* text on cream */
+  --lane-bg: #252047;     /* difficulty lane background */
+  --lane-grid: #3A3466;
+  --red: #A8283D;
+  --yellow: #FFD84D;
+  --dot-off: #4A1B0C;
+  --easy: #4FD17A;        /* difficulty < 34 */
+  --mid: #F5B82E;         /* difficulty 34-66 */
+  --hard: #FF6B70;        /* difficulty >= 67 */
+  --font: 'Barlow Semi Condensed', system-ui, sans-serif;
+}
+
+[hidden] { display: none !important; }
+
+html, body { margin: 0; }
+body {
+  min-height: 100vh;
+  background: #0E0D0B;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ===== Screen ===== */
+.app {
+  width: 390px;
+  height: 844px;
+  box-sizing: border-box;
+  padding: 20px 12px 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* On a real phone the screen fills the viewport; 390x844 is the mock size. */
+@media (max-width: 430px) {
+  body { display: block; }
+  .app { width: 100%; height: 100dvh; }
+}
+
+.app h1 {
+  margin: 0;
+  flex-shrink: 0;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
+}
+
+/* ===== Song list ===== */
+.list-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.list { position: relative; margin: 0; padding: 0; list-style: none; }
+.empty {
+  margin: 0;
+  padding: 24px 0;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 58px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--row-line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: top 280ms ease, opacity 180ms ease;
+}
+.row-rank {
+  width: 20px;
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-align: right;
+}
+.row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.row-title, .row-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-title { font-size: 18px; line-height: 22px; font-weight: 700; }
+.row-sub { font-size: 14px; line-height: 18px; font-weight: 500; color: var(--text-3); }
+.row-lane {
+  position: relative;
+  width: 44px;
+  height: 30px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--lane-bg);
+}
+.row-lane .band { position: absolute; left: 0; right: 0; opacity: 0.25; }
+.row-lane .dash { position: absolute; height: 3px; border-radius: 2px; }
+
+/* ===== Bottom sheet ===== */
+.sheet {
+  flex-shrink: 0;
+  margin: 0 -12px;
+  box-sizing: border-box;
+  padding: 0 12px 16px;
+  background: var(--sheet);
+  border-top: 1px solid var(--line);
+  border-radius: 16px 16px 0 0;
+}
+.handle-row { position: relative; height: 22px; }
+.handle {
+  position: absolute;
+  left: 50%;
+  top: -11px;
+  width: 140px;
+  height: 44px;
+  margin-left: -70px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.handle:active { cursor: grabbing; }
+.handle span { width: 48px; height: 6px; border-radius: 3px; background: var(--text-3); }
+
+.rack {
+  height: 416px; /* overwritten by JS: 416 expanded, 164 mini */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: height 260ms ease;
+}
+.rack.is-dragging { transition: none; }
+
+/* ===== Gear strips (slider rows) ===== */
+.strips { display: flex; flex-shrink: 0; flex-direction: column; gap: 6px; }
+.strip {
+  display: flex;
+  flex-shrink: 0;
+  height: 76px;
+  box-sizing: border-box;
+  padding: 0 12px 0 6px;
+  background: var(--panel);
+  border-radius: 8px;
+  align-items: center;
+  gap: 10px;
+}
+.strip .gear-art { flex-shrink: 0; width: 120px; height: 64px; border-radius: 4px; }
+.app.is-compact .strip { height: 94px; padding-left: 7px; }
+.app.is-compact .strip .gear-art { width: 150px; height: 80px; }
+
+.art-lane { background: var(--lane-bg); }
+.art-cream { background: var(--cream); }
+.art-dark { background: var(--bg); }
+.art-black { background: #0E0D0B; }
+
+.strip-body { flex: 1; min-width: 0; position: relative; display: flex; flex-direction: column; gap: 6px; }
+.eyebrow {
+  font-size: 12px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+}
+.track { position: relative; height: 14px; }
+.track::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 5px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.track-fill {
+  position: absolute;
+  left: 0; top: 5px;
+  height: 4px;
+  border-radius: 2px;
+  width: var(--pct, 0%);
+  background: var(--cream);
+}
+.track-thumb {
+  position: absolute;
+  top: 0;
+  left: var(--pct, 0%);
+  width: 18px;
+  height: 14px;
+  margin-left: -9px;
+  border-radius: 4px;
+  background: var(--cream);
+}
+.strip-body:has(.slider-input:focus-visible) .track-thumb { outline: 2px solid var(--text); outline-offset: 2px; }
+.ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  line-height: 14px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+/* Real <input type=range>, invisible, laid over the custom track. */
+.slider-input {
+  position: absolute;
+  left: 0;
+  top: -6px;
+  width: 100%;
+  height: calc(100% + 12px);
+  margin: 0;
+  opacity: 0;
+  cursor: ew-resize;
+}
+
+/* ===== Gear header: label + reset button ===== */
+.gear-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.off-tag { color: var(--text-3); }
+/* 44x26 hit area; negative margins keep the row 14px tall so rack heights don't change. */
+.reset-btn {
+  position: relative;
+  z-index: 1;            /* sits above the invisible slider input */
+  flex-shrink: 0;
+  width: 44px;
+  height: 26px;
+  margin: -8px -8px -4px 0;
+  box-sizing: border-box;
+  padding: 4px 8px 0 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.reset-btn svg { width: 16px; height: 16px; }
+.reset-btn:hover { color: var(--text); }
+.reset-btn:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+
+/* ===== Off state (gear not factored in) ===== */
+.strip.is-off .gear-art,
+.tab.is-off svg { opacity: 0.3; filter: grayscale(1); }
+.strip.is-off .gear-art *,
+.tab.is-off svg * { animation-play-state: paused !important; }
+.strip.is-off .track-fill { display: none; }
+.strip.is-off .track-thumb { background: transparent; box-shadow: inset 0 0 0 2px var(--text-3); }
+.strip.is-off .ends { color: var(--text-3); }
+
+/* ===== Era panel ===== */
+.era-panel {
+  display: flex;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 8px;
+  background: var(--panel);
+  border-radius: 8px;
+  flex-direction: column;
+  gap: 4px;
+}
+.era-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.era-btn {
+  height: 52px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.era-btn[aria-pressed="true"] { background: var(--cream); color: var(--ink); }
+.era-btn.is-parked { box-shadow: inset 0 0 0 2px var(--text-3); }  /* default pick while Era is off */
+.app.is-compact .era-btn { height: 60px; }
+
+/* ===== Tab bar (mini only) ===== */
+.tabs { display: grid; flex-shrink: 0; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.tab {
+  height: 62px;
+  padding: 4px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.tab[aria-pressed="true"] { background: var(--cream); color: var(--ink); }
+.tab svg { flex-shrink: 0; width: 62px; height: 33px; border-radius: 3px; }
+
+/* ===== Gear art animation ===== */
+.hist-note, .pop-bolt { transition: opacity 180ms; }
+.metro-pend { transform-origin: 75px 62px; }
+@keyframes swing20 { from { transform: rotate(-20deg); } to { transform: rotate(20deg); } }
+@keyframes swing18 { from { transform: rotate(-18deg); } to { transform: rotate(18deg); } }
+@keyframes swing16 { from { transform: rotate(-16deg); } to { transform: rotate(16deg); } }
+@keyframes swing14 { from { transform: rotate(-14deg); } to { transform: rotate(14deg); } }
+@keyframes swing12 { from { transform: rotate(-12deg); } to { transform: rotate(12deg); } }
+@keyframes swing10 { from { transform: rotate(-10deg); } to { transform: rotate(10deg); } }
+@keyframes swing8  { from { transform: rotate(-8deg); }  to { transform: rotate(8deg); } }
+@keyframes bob { from { transform: translateY(0); } to { transform: translateY(-2px); } }
+.bob, .zap { animation: bob 1.1s ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) {
+  .metro-pend, .bob, .zap { animation: none !important; }
+  .row, .rack { transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<main class="app" id="app" data-mode="expanded" data-open="history">
+  <h1>Tune your setlist</h1>
+
+  <!-- ===== Ranked song list ===== -->
+  <div class="list-scroll">
+    <p class="empty" id="empty" hidden>Pick an era to see songs.</p>
+    <ol class="list" id="list" aria-label="Ranked songs"></ol>
+  </div>
+
+  <template id="row-template">
+    <li class="row">
+      <span class="row-rank"></span>
+      <div class="row-text">
+        <span class="row-title"></span>
+        <span class="row-sub"></span>
+      </div>
+      <div class="row-lane" aria-hidden="true">
+        <div class="band"></div>
+        <div class="dash" style="left: 3px; width: 10px"></div>
+        <div class="dash" style="left: 16px; width: 12px"></div>
+        <div class="dash" style="left: 31px; width: 10px"></div>
+      </div>
+    </li>
+  </template>
+
+  <!-- ===== Bottom sheet ===== -->
+  <section class="sheet" aria-label="Setlist controls">
+    <div class="handle-row">
+      <button type="button" class="handle" id="handle" aria-controls="rack" aria-expanded="true" aria-label="Show one gear">
+        <span></span>
+      </button>
+    </div>
+
+    <div class="rack" id="rack">
+
+      <div class="strips" id="strips">
+
+        <!-- Difficulty -->
+        <div class="strip" data-gear="difficulty">
+          <svg class="gear-art art-lane" viewBox="0 0 150 80" aria-hidden="true">
+            <rect class="lane-band" x="0" y="0" width="150" height="0" fill-opacity="0.2"></rect>
+            <g stroke="#3A3466" stroke-width="1">
+              <line x1="0" y1="12" x2="150" y2="12"></line>
+              <line x1="0" y1="26" x2="150" y2="26"></line>
+              <line x1="0" y1="40" x2="150" y2="40"></line>
+              <line x1="0" y1="54" x2="150" y2="54"></line>
+              <line x1="0" y1="68" x2="150" y2="68"></line>
+            </g>
+            <g class="lane-dashes">
+              <rect class="lane-dash" data-i="0" x="6" width="18" height="6" rx="3"></rect>
+              <rect class="lane-dash" data-i="1" x="27" width="12" height="6" rx="3"></rect>
+              <rect class="lane-dash" data-i="2" x="43" width="22" height="6" rx="3"></rect>
+              <rect class="lane-dash" data-i="3" x="68" width="12" height="6" rx="3"></rect>
+              <rect class="lane-dash" data-i="4" x="84" width="16" height="6" rx="3"></rect>
+              <rect class="lane-dash" data-i="5" x="104" width="14" height="6" rx="3"></rect>
+              <rect class="lane-dash" data-i="6" x="122" width="22" height="6" rx="3"></rect>
+            </g>
+          </svg>
+          <div class="strip-body">
+            <div class="gear-head">
+              <label class="eyebrow" for="slider-difficulty">DIFFICULTY<span class="off-tag" aria-hidden="true" hidden> · OFF</span></label>
+              <button type="button" class="reset-btn" data-reset="difficulty" aria-label="Reset difficulty (stop factoring it in)" title="Reset: don't factor in">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12A7.5 7.5 0 1 0 12 4.5"></path><path d="M14.5 1.75L11.75 4.5L14.5 7.25"></path></svg>
+              </button>
+            </div>
+            <div class="track" aria-hidden="true"><div class="track-fill"></div><div class="track-thumb"></div></div>
+            <div class="ends"><span>Light work</span><span>Locked in</span></div>
+            <input class="slider-input" id="slider-difficulty" data-gear="difficulty" type="range" min="0" max="100" step="1">
+          </div>
+        </div>
+
+        <!-- Listening history -->
+        <div class="strip" data-gear="history">
+          <svg class="gear-art art-cream" viewBox="0 0 150 80" aria-hidden="true">
+            <path d="M49.3 50 A26 26 0 1 1 100.7 50" fill="none" stroke="#191714" stroke-width="5" stroke-linecap="round"></path>
+            <g transform="rotate(-7 49 60)">
+              <rect x="41" y="46" width="16" height="28" rx="8" fill="#191714"></rect>
+              <rect x="54" y="49" width="6" height="22" rx="3" fill="#A8283D"></rect>
+              <rect x="45.5" y="61" width="3" height="7" rx="1.5" fill="#D9D3C4"></rect>
+            </g>
+            <g transform="rotate(7 101 60)">
+              <rect x="93" y="46" width="16" height="28" rx="8" fill="#191714"></rect>
+              <rect x="90" y="49" width="6" height="22" rx="3" fill="#A8283D"></rect>
+            </g>
+            <g class="hist-note" data-i="0" transform="translate(33 38) rotate(-10)">
+              <g class="bob" fill="#191714"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.3" y="-12" width="1.3" height="12"></rect><path d="M3.6 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            </g>
+            <g class="hist-note" data-i="1" transform="translate(118 38) rotate(10)">
+              <g class="bob" fill="#A8283D" style="animation-delay: 0.2s"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.3" y="-12" width="1.3" height="12"></rect><path d="M3.6 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            </g>
+            <g class="hist-note" data-i="2" transform="translate(22 64) rotate(-14) scale(1.1)">
+              <g class="bob" fill="#A8283D" style="animation-delay: 0.4s"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><ellipse cx="9" cy="-2" rx="3.4" ry="2.6" transform="rotate(-20 9 -2)"></ellipse><rect x="2.3" y="-12" width="1.3" height="12"></rect><rect x="11.3" y="-14" width="1.3" height="12"></rect><polygon points="2.3,-12 12.6,-14 12.6,-11 2.3,-9"></polygon></g>
+            </g>
+            <g class="hist-note" data-i="3" transform="translate(126 58) rotate(12) scale(1.05)">
+              <g class="bob" fill="#191714" style="animation-delay: 0.1s"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.3" y="-12" width="1.3" height="12"></rect><path d="M3.6 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            </g>
+            <g class="hist-note" data-i="4" transform="translate(56 20) rotate(-8) scale(0.85)">
+              <g class="bob" fill="#191714" style="animation-delay: 0.3s"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.3" y="-12" width="1.3" height="12"></rect><path d="M3.6 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            </g>
+            <g class="hist-note" data-i="5" transform="translate(92 18) rotate(8) scale(0.85)">
+              <g class="bob" fill="#A8283D" style="animation-delay: 0.5s"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.3" y="-12" width="1.3" height="12"></rect><path d="M3.6 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            </g>
+            <g class="hist-note" data-i="6" transform="translate(10 40) rotate(-18) scale(0.9)">
+              <g class="bob" fill="#191714" style="animation-delay: 0.6s"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.3" y="-12" width="1.3" height="12"></rect><path d="M3.6 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            </g>
+          </svg>
+          <div class="strip-body">
+            <div class="gear-head">
+              <label class="eyebrow" for="slider-history">LISTENING HISTORY<span class="off-tag" aria-hidden="true" hidden> · OFF</span></label>
+              <button type="button" class="reset-btn" data-reset="history" aria-label="Reset listening history (stop factoring it in)" title="Reset: don't factor in">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12A7.5 7.5 0 1 0 12 4.5"></path><path d="M14.5 1.75L11.75 4.5L14.5 7.25"></path></svg>
+              </button>
+            </div>
+            <div class="track" aria-hidden="true"><div class="track-fill"></div><div class="track-thumb"></div></div>
+            <div class="ends"><span>Rediscover</span><span>On repeat</span></div>
+            <input class="slider-input" id="slider-history" data-gear="history" type="range" min="0" max="100" step="1">
+          </div>
+        </div>
+
+        <!-- Popularity -->
+        <div class="strip" data-gear="popularity">
+          <svg class="gear-art art-dark" viewBox="0 0 150 80" aria-hidden="true">
+            <g transform="translate(75 44) rotate(-16)">
+              <polygon points="-6.8,19 6.8,19 6.3,26 -6.3,26" fill="#6E685F"></polygon>
+              <polygon points="-6,27 6,27 4.2,60 -4.2,60" fill="#6E685F"></polygon>
+              <polygon points="-4,19 -2.4,19 -1.6,60 -2.6,60" fill="#8F897E"></polygon>
+              <rect x="-7" y="15.5" width="14" height="3.5" fill="#A8283D"></rect>
+              <polygon points="-9.6,9.5 9.6,9.5 7.2,15.5 -7.2,15.5" fill="#6E685F"></polygon>
+              <polygon points="-5.5,9.5 -3.5,9.5 -3,15.5 -4.5,15.5" fill="#8F897E"></polygon>
+              <circle cx="0" cy="0" r="13" fill="#D9D3C4"></circle>
+              <g fill="none" stroke="#6A645A" stroke-width="0.8">
+                <ellipse cx="0" cy="0" rx="5" ry="13"></ellipse>
+                <ellipse cx="0" cy="0" rx="10" ry="13"></ellipse>
+                <path d="M-9.4 -9 Q0 -11 9.4 -9"></path>
+                <path d="M-12.2 -4.5 Q0 -6 12.2 -4.5"></path>
+                <path d="M-12.2 4.5 Q0 6 12.2 4.5"></path>
+                <path d="M-9.4 9 Q0 11 9.4 9"></path>
+              </g>
+              <rect x="-14.2" y="-1.9" width="28.4" height="3.8" rx="1.9" fill="#F7F3EA"></rect>
+            </g>
+            <g class="pop-bolt" data-i="0" transform="translate(75 14) scale(1.25)">
+              <path class="zap" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z" fill="#FFD84D"></path>
+            </g>
+            <g class="pop-bolt" data-i="1" transform="translate(100 18.8) rotate(44.8) scale(1.1)">
+              <path class="zap" style="animation-delay: 0.1s" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z" fill="#FFD84D"></path>
+            </g>
+            <g class="pop-bolt" data-i="2" transform="translate(50 18.8) rotate(-44.8) scale(1.1)">
+              <path class="zap" style="animation-delay: 0.2s" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z" fill="#FFD84D"></path>
+            </g>
+            <g class="pop-bolt" data-i="3" transform="translate(117 31.8) rotate(73.8) scale(1.2)">
+              <path class="zap" style="animation-delay: 0.3s" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z" fill="#FFD84D"></path>
+            </g>
+            <g class="pop-bolt" data-i="4" transform="translate(33 31.8) rotate(-73.8) scale(1.2)">
+              <path class="zap" style="animation-delay: 0.4s" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z" fill="#FFD84D"></path>
+            </g>
+            <g class="pop-bolt" data-i="5" transform="translate(120.3 49.2) rotate(96.5) scale(1.05)">
+              <path class="zap" style="animation-delay: 0.5s" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z" fill="#FFD84D"></path>
+            </g>
+            <g class="pop-bolt" data-i="6" transform="translate(29.7 49.2) rotate(-96.5) scale(1.05)">
+              <path class="zap" style="animation-delay: 0.6s" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z" fill="#FFD84D"></path>
+            </g>
+          </svg>
+          <div class="strip-body">
+            <div class="gear-head">
+              <label class="eyebrow" for="slider-popularity">POPULARITY<span class="off-tag" aria-hidden="true" hidden> · OFF</span></label>
+              <button type="button" class="reset-btn" data-reset="popularity" aria-label="Reset popularity (stop factoring it in)" title="Reset: don't factor in">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12A7.5 7.5 0 1 0 12 4.5"></path><path d="M14.5 1.75L11.75 4.5L14.5 7.25"></path></svg>
+              </button>
+            </div>
+            <div class="track" aria-hidden="true"><div class="track-fill"></div><div class="track-thumb"></div></div>
+            <div class="ends"><span>Deep cuts</span><span>Pop hits</span></div>
+            <input class="slider-input" id="slider-popularity" data-gear="popularity" type="range" min="0" max="100" step="1">
+          </div>
+        </div>
+
+        <!-- Tempo -->
+        <div class="strip" data-gear="tempo">
+          <svg class="gear-art art-cream" viewBox="0 0 150 80" aria-hidden="true">
+            <polygon points="75,2 86,8 64,8" fill="#8E5F35"></polygon>
+            <polygon points="65,8 85,8 107,78 43,78" fill="#8E5F35"></polygon>
+            <polygon points="68,11 82,11 94.5,54 55.5,54" fill="#191714"></polygon>
+            <rect x="71" y="14" width="8" height="40" fill="#4A453D"></rect>
+            <line x1="75" y1="14" x2="75" y2="54" stroke="#D9D3C4" stroke-width="1"></line>
+            <g stroke="#D9D3C4" stroke-width="0.8">
+              <line x1="72.5" y1="18" x2="77.5" y2="18"></line>
+              <line x1="72.5" y1="23" x2="77.5" y2="23"></line>
+              <line x1="72.5" y1="28" x2="77.5" y2="28"></line>
+              <line x1="72.5" y1="33" x2="77.5" y2="33"></line>
+              <line x1="72.5" y1="38" x2="77.5" y2="38"></line>
+              <line x1="72.5" y1="43" x2="77.5" y2="43"></line>
+              <line x1="72.5" y1="48" x2="77.5" y2="48"></line>
+            </g>
+            <g class="metro-pend">
+              <line x1="75" y1="62" x2="75" y2="14" stroke="#4A453D" stroke-width="3"></line>
+              <line x1="75" y1="62" x2="75" y2="14" stroke="#F7F3EA" stroke-width="1.6"></line>
+              <polygon class="metro-weight" points="66,0 84,0 80,10 70,10" fill="#F4E7C5" stroke="#4A453D" stroke-width="0.8"></polygon>
+            </g>
+            <polygon points="50.6,54 99.4,54 107,78 43,78" fill="#A5703F"></polygon>
+            <line x1="102.6" y1="64" x2="109" y2="64" stroke="#6A645A" stroke-width="1.6"></line>
+            <circle cx="112" cy="64" r="3.5" fill="none" stroke="#6A645A" stroke-width="1.6"></circle>
+          </svg>
+          <div class="strip-body">
+            <div class="gear-head">
+              <label class="eyebrow" for="slider-tempo">TEMPO<span class="off-tag" aria-hidden="true" hidden> · OFF</span></label>
+              <button type="button" class="reset-btn" data-reset="tempo" aria-label="Reset tempo (stop factoring it in)" title="Reset: don't factor in">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12A7.5 7.5 0 1 0 12 4.5"></path><path d="M14.5 1.75L11.75 4.5L14.5 7.25"></path></svg>
+              </button>
+            </div>
+            <div class="track" aria-hidden="true"><div class="track-fill"></div><div class="track-thumb"></div></div>
+            <div class="ends"><span>Slow jams</span><span>Upbeat tracks</span></div>
+            <input class="slider-input" id="slider-tempo" data-gear="tempo" type="range" min="0" max="100" step="1">
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Era picker (multi-select) -->
+      <div class="era-panel" id="era-panel" role="group" aria-labelledby="era-label">
+        <div class="gear-head">
+          <span class="eyebrow" id="era-label">ERA: PICK ANY<span class="off-tag" hidden> · OFF</span></span>
+          <button type="button" class="reset-btn" data-reset="era" aria-label="Reset era (stop factoring it in)" title="Reset: don't factor in">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12A7.5 7.5 0 1 0 12 4.5"></path><path d="M14.5 1.75L11.75 4.5L14.5 7.25"></path></svg>
+          </button>
+        </div>
+        <div class="era-grid">
+          <button type="button" class="era-btn" data-era="pre" aria-pressed="false">
+            <svg width="26" height="26" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="15" cy="15" r="12.5"></circle><circle cx="15" cy="15" r="8.5" stroke-width="0.9"></circle><circle cx="15" cy="15" r="4.6"></circle></svg>
+            <span>Pre-’70s</span>
+          </button>
+          <button type="button" class="era-btn" data-era="s70" aria-pressed="false">
+            <svg width="26" height="26" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="6" width="24" height="18" rx="2"></rect><circle cx="13" cy="15" r="6.2"></circle><circle cx="13" cy="15" r="1.3" fill="currentColor" stroke="none"></circle><circle cx="23" cy="9.5" r="1.3" fill="currentColor" stroke="none"></circle><path d="M23 9.5 V16.5 L17.5 19.5"></path></svg>
+            <span>’70s</span>
+          </button>
+          <button type="button" class="era-btn" data-era="s80" aria-pressed="false">
+            <svg width="26" height="26" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2.5" y="6" width="25" height="18" rx="2"></rect><path d="M6.5 9 H23.5 L25 10.5 V18 H5 V10.5 Z" stroke-width="1"></path><rect x="9" y="11.2" width="12" height="4.6" rx="2.3" stroke-width="1"></rect><circle cx="11.4" cy="13.5" r="1.2" fill="currentColor" stroke="none"></circle><circle cx="18.6" cy="13.5" r="1.2" fill="currentColor" stroke="none"></circle><path d="M9.5 24 L11 20.5 H19 L20.5 24" stroke-width="1"></path></svg>
+            <span>’80s</span>
+          </button>
+          <button type="button" class="era-btn" data-era="s90" aria-pressed="false">
+            <svg width="26" height="26" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="15" cy="15" r="12.5"></circle><circle cx="15" cy="15" r="2.6"></circle><path d="M15 6.5 A8.5 8.5 0 0 1 23.5 15"></path><path d="M6.5 15 A8.5 8.5 0 0 0 15 23.5"></path></svg>
+            <span>’90s</span>
+          </button>
+          <button type="button" class="era-btn" data-era="s00" aria-pressed="false">
+            <svg width="26" height="26" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="10" width="24" height="10" rx="2.5"></rect><rect x="6" y="12.5" width="9" height="5" fill="currentColor" stroke="none"></rect><circle cx="19.5" cy="15" r="1.2" fill="currentColor" stroke="none"></circle><circle cx="23" cy="15" r="1.2" fill="currentColor" stroke="none"></circle></svg>
+            <span>’00s</span>
+          </button>
+          <button type="button" class="era-btn" data-era="s10" aria-pressed="false">
+            <svg width="26" height="26" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="8.5" y="3" width="13" height="24" rx="2.5"></rect><path d="M13 11 L19 15 L13 19 Z" fill="currentColor" stroke="none"></path></svg>
+            <span>’10s</span>
+          </button>
+          <button type="button" class="era-btn" data-era="s20" aria-pressed="false">
+            <svg width="26" height="26" viewBox="0 0 30 30" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="5" y1="11" x2="5" y2="19"></line><line x1="10" y1="7" x2="10" y2="23"></line><line x1="15" y1="3" x2="15" y2="27"></line><line x1="20" y1="8" x2="20" y2="22"></line><line x1="25" y1="12" x2="25" y2="18"></line></svg>
+            <span>’20s</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab bar: only visible in the mini (compact) sheet -->
+      <div class="tabs" id="tabs" role="group" aria-label="Choose gear">
+
+        <button type="button" class="tab" data-gear="difficulty" aria-pressed="false">
+          <svg class="art-lane" viewBox="0 0 150 80" aria-hidden="true">
+            <rect class="lane-band" x="0" y="0" width="150" height="0" fill-opacity="0.2"></rect>
+            <g class="lane-dashes">
+              <rect class="lane-dash" data-i="0" x="6" width="18" height="8" rx="4"></rect>
+              <rect class="lane-dash" data-i="1" x="27" width="12" height="8" rx="4"></rect>
+              <rect class="lane-dash" data-i="2" x="43" width="22" height="8" rx="4"></rect>
+              <rect class="lane-dash" data-i="3" x="68" width="12" height="8" rx="4"></rect>
+              <rect class="lane-dash" data-i="4" x="84" width="16" height="8" rx="4"></rect>
+              <rect class="lane-dash" data-i="5" x="104" width="14" height="8" rx="4"></rect>
+              <rect class="lane-dash" data-i="6" x="122" width="22" height="8" rx="4"></rect>
+            </g>
+          </svg>
+          <span>Difficulty</span>
+        </button>
+
+        <button type="button" class="tab" data-gear="history" aria-pressed="false">
+          <svg class="art-cream" viewBox="0 0 150 80" aria-hidden="true">
+            <path d="M49.3 50 A26 26 0 1 1 100.7 50" fill="none" stroke="#191714" stroke-width="6" stroke-linecap="round"></path>
+            <g transform="rotate(-7 49 60)">
+              <rect x="41" y="46" width="16" height="28" rx="8" fill="#191714"></rect>
+              <rect x="54" y="49" width="6" height="22" rx="3" fill="#A8283D"></rect>
+            </g>
+            <g transform="rotate(7 101 60)">
+              <rect x="93" y="46" width="16" height="28" rx="8" fill="#191714"></rect>
+              <rect x="90" y="49" width="6" height="22" rx="3" fill="#A8283D"></rect>
+            </g>
+            <g class="hist-note" data-i="0" transform="translate(30 40) rotate(-10) scale(1.6)" fill="#191714"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.1" y="-12" width="1.6" height="12"></rect><path d="M3.7 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            <g class="hist-note" data-i="1" transform="translate(118 40) rotate(10) scale(1.6)" fill="#A8283D"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.1" y="-12" width="1.6" height="12"></rect><path d="M3.7 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            <g class="hist-note" data-i="2" transform="translate(16 68) rotate(-14) scale(1.4)" fill="#A8283D"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><ellipse cx="9" cy="-2" rx="3.4" ry="2.6" transform="rotate(-20 9 -2)"></ellipse><rect x="2.1" y="-12" width="1.6" height="12"></rect><rect x="11.1" y="-14" width="1.6" height="12"></rect><polygon points="2.1,-12 12.7,-14 12.7,-10.8 2.1,-8.8"></polygon></g>
+            <g class="hist-note" data-i="3" transform="translate(124 66) rotate(12) scale(1.6)" fill="#191714"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.1" y="-12" width="1.6" height="12"></rect><path d="M3.7 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            <g class="hist-note" data-i="4" transform="translate(56 20) rotate(-8) scale(1.4)" fill="#191714"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.1" y="-12" width="1.6" height="12"></rect><path d="M3.7 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            <g class="hist-note" data-i="5" transform="translate(93 19) rotate(8) scale(1.4)" fill="#A8283D"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.1" y="-12" width="1.6" height="12"></rect><path d="M3.7 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+            <g class="hist-note" data-i="6" transform="translate(8 38) rotate(-18) scale(1.4)" fill="#191714"><ellipse rx="3.4" ry="2.6" transform="rotate(-20)"></ellipse><rect x="2.1" y="-12" width="1.6" height="12"></rect><path d="M3.7 -12 q4 1.5 4.2 5.5 q-1.2 -2.6 -4.2 -2.8 Z"></path></g>
+          </svg>
+          <span>History</span>
+        </button>
+
+        <button type="button" class="tab" data-gear="popularity" aria-pressed="false">
+          <svg class="art-dark" viewBox="0 0 150 80" aria-hidden="true">
+            <g transform="translate(75 44) rotate(-16)">
+              <polygon points="-6.8,19 6.8,19 4.2,60 -4.2,60" fill="#8F897E"></polygon>
+              <rect x="-7" y="15.5" width="14" height="3.5" fill="#A8283D"></rect>
+              <polygon points="-9.6,9.5 9.6,9.5 7.2,15.5 -7.2,15.5" fill="#8F897E"></polygon>
+              <circle cx="0" cy="0" r="13" fill="#D9D3C4"></circle>
+              <ellipse cx="0" cy="0" rx="6" ry="13" fill="none" stroke="#6A645A" stroke-width="1.6"></ellipse>
+              <rect x="-14.2" y="-2.4" width="28.4" height="4.8" rx="2.4" fill="#F7F3EA"></rect>
+            </g>
+            <g fill="#FFD84D">
+              <path class="pop-bolt" data-i="0" transform="translate(75 14) scale(1.6)" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z"></path>
+              <path class="pop-bolt" data-i="1" transform="translate(100 18.8) rotate(44.8) scale(1.6)" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z"></path>
+              <path class="pop-bolt" data-i="2" transform="translate(50 18.8) rotate(-44.8) scale(1.6)" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z"></path>
+              <path class="pop-bolt" data-i="3" transform="translate(117 31.8) rotate(73.8) scale(1.6)" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z"></path>
+              <path class="pop-bolt" data-i="4" transform="translate(33 31.8) rotate(-73.8) scale(1.6)" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z"></path>
+              <path class="pop-bolt" data-i="5" transform="translate(120.3 49.2) rotate(96.5) scale(1.6)" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z"></path>
+              <path class="pop-bolt" data-i="6" transform="translate(29.7 49.2) rotate(-96.5) scale(1.6)" d="M2 -8 L-3 1 L0 1 L-2 8 L3 -1 L0 -1 Z"></path>
+            </g>
+          </svg>
+          <span>Popularity</span>
+        </button>
+
+        <button type="button" class="tab" data-gear="tempo" aria-pressed="false">
+          <svg class="art-cream" viewBox="0 0 150 80" aria-hidden="true">
+            <polygon points="75,2 86,8 64,8" fill="#8E5F35"></polygon>
+            <polygon points="65,8 85,8 107,78 43,78" fill="#8E5F35"></polygon>
+            <polygon points="68,11 82,11 94.5,54 55.5,54" fill="#191714"></polygon>
+            <g class="metro-pend">
+              <line x1="75" y1="62" x2="75" y2="14" stroke="#4A453D" stroke-width="4.5"></line>
+              <line x1="75" y1="62" x2="75" y2="14" stroke="#F7F3EA" stroke-width="2.6"></line>
+              <polygon class="metro-weight" points="66,0 84,0 80,10 70,10" fill="#F4E7C5" stroke="#4A453D" stroke-width="1.2"></polygon>
+            </g>
+            <polygon points="50.6,54 99.4,54 107,78 43,78" fill="#A5703F"></polygon>
+          </svg>
+          <span>Tempo</span>
+        </button>
+
+        <button type="button" class="tab" data-gear="era" aria-pressed="false">
+          <svg class="art-black" viewBox="0 0 62 33" aria-hidden="true">
+            <path d="M14 31 V15 A17 13 0 0 1 48 15 V31 Z" fill="#A8283D"></path>
+            <path d="M19 21 V15 A12 9 0 0 1 43 15 V21 Z" fill="#F4E7C5"></path>
+            <g stroke="#A8283D" stroke-width="1">
+              <line x1="25" y1="9" x2="25" y2="21"></line>
+              <line x1="31" y1="6" x2="31" y2="21"></line>
+              <line x1="37" y1="9" x2="37" y2="21"></line>
+            </g>
+            <circle class="era-dot" data-era="pre" cx="19" cy="26" r="1.6"></circle>
+            <circle class="era-dot" data-era="s70" cx="23" cy="26" r="1.6"></circle>
+            <circle class="era-dot" data-era="s80" cx="27" cy="26" r="1.6"></circle>
+            <circle class="era-dot" data-era="s90" cx="31" cy="26" r="1.6"></circle>
+            <circle class="era-dot" data-era="s00" cx="35" cy="26" r="1.6"></circle>
+            <circle class="era-dot" data-era="s10" cx="39" cy="26" r="1.6"></circle>
+            <circle class="era-dot" data-era="s20" cx="43" cy="26" r="1.6"></circle>
+          </svg>
+          <span>Era</span>
+        </button>
+
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ===== Constants ===== */
+  const ROW_H = 58;            // list row height, px
+  const RACK_FULL = 416;       // rack height when expanded, px
+  const RACK_MINI = 164;       // rack height when mini, px
+  const DRAG_START_PX = 6;     // pointer travel before a press counts as a drag
+  const SNAP_PX = 50;          // drag distance needed to switch mode on release
+  const UNCOMPACT_PX = 8;      // dragging up this far from mini switches to the full layout
+
+  const GEARS = ['difficulty', 'history', 'popularity', 'tempo'];   // slider gears
+  const ERAS = ['pre', 's70', 's80', 's90', 's00', 's10', 's20'];
+  const ERA_LABEL = { pre: 'Pre-’70s', s70: '’70s', s80: '’80s', s90: '’90s', s00: '’00s', s10: '’10s', s20: '’20s' };
+
+  /* Mock catalogue. Each score is 0-100 on the same scale as its slider. */
+  const SONGS = [
+    { title: "Can't Help Falling in Love", artist: 'Elvis Presley', era: 'pre', difficulty: 25, history: 30, popularity: 75, tempo: 10 },
+    { title: 'Stand by Me', artist: 'Ben E. King', era: 'pre', difficulty: 20, history: 45, popularity: 80, tempo: 30 },
+    { title: 'Respect', artist: 'Aretha Franklin', era: 'pre', difficulty: 70, history: 35, popularity: 70, tempo: 60 },
+    { title: 'Sweet Caroline', artist: 'Neil Diamond', era: 'pre', difficulty: 30, history: 70, popularity: 85, tempo: 35 },
+    { title: "These Boots Are Made for Walkin'", artist: 'Nancy Sinatra', era: 'pre', difficulty: 15, history: 20, popularity: 55, tempo: 40 },
+    { title: 'Dancing Queen', artist: 'ABBA', era: 's70', difficulty: 60, history: 75, popularity: 90, tempo: 50 },
+    { title: 'I Will Survive', artist: 'Gloria Gaynor', era: 's70', difficulty: 55, history: 50, popularity: 85, tempo: 70 },
+    { title: 'Bohemian Rhapsody', artist: 'Queen', era: 's70', difficulty: 95, history: 80, popularity: 95, tempo: 40 },
+    { title: 'A Case of You', artist: 'Joni Mitchell', era: 's70', difficulty: 70, history: 15, popularity: 25, tempo: 15 },
+    { title: "Don't Stop Believin'", artist: 'Journey', era: 's80', difficulty: 75, history: 90, popularity: 95, tempo: 55 },
+    { title: 'Africa', artist: 'Toto', era: 's80', difficulty: 50, history: 60, popularity: 85, tempo: 45 },
+    { title: "Livin' on a Prayer", artist: 'Bon Jovi', era: 's80', difficulty: 85, history: 65, popularity: 90, tempo: 65 },
+    { title: 'Bizarre Love Triangle', artist: 'New Order', era: 's80', difficulty: 45, history: 20, popularity: 35, tempo: 85 },
+    { title: 'I Will Always Love You', artist: 'Whitney Houston', era: 's90', difficulty: 100, history: 40, popularity: 90, tempo: 5 },
+    { title: 'Wannabe', artist: 'Spice Girls', era: 's90', difficulty: 35, history: 55, popularity: 80, tempo: 80 },
+    { title: 'I Want It That Way', artist: 'Backstreet Boys', era: 's90', difficulty: 45, history: 85, popularity: 85, tempo: 45 },
+    { title: 'Harvest Moon', artist: 'Neil Young', era: 's90', difficulty: 30, history: 10, popularity: 30, tempo: 10 },
+    { title: 'Mr. Brightside', artist: 'The Killers', era: 's00', difficulty: 40, history: 95, popularity: 90, tempo: 90 },
+    { title: 'Since U Been Gone', artist: 'Kelly Clarkson', era: 's00', difficulty: 70, history: 60, popularity: 70, tempo: 75 },
+    { title: 'Valerie', artist: 'Mark Ronson ft. Amy Winehouse', era: 's00', difficulty: 45, history: 50, popularity: 60, tempo: 70 },
+    { title: 'Rolling in the Deep', artist: 'Adele', era: 's10', difficulty: 75, history: 70, popularity: 90, tempo: 55 },
+    { title: 'Shallow', artist: 'Lady Gaga and Bradley Cooper', era: 's10', difficulty: 90, history: 55, popularity: 85, tempo: 20 },
+    { title: 'Motion Sickness', artist: 'Phoebe Bridgers', era: 's10', difficulty: 40, history: 25, popularity: 30, tempo: 60 },
+    { title: 'Levitating', artist: 'Dua Lipa', era: 's20', difficulty: 40, history: 75, popularity: 80, tempo: 65 },
+    { title: 'good 4 u', artist: 'Olivia Rodrigo', era: 's20', difficulty: 60, history: 90, popularity: 85, tempo: 95 }
+  ];
+
+  /* ===== Defaults =====
+     PLACEHOLDERS copied from the mockup. Picking real defaults is a build-ticket task
+     (spec §11). Reset puts a gear back to these values. Keep them in this one place. */
+  const DEFAULTS = Object.freeze({
+    difficulty: 30,
+    history: 65,
+    popularity: 80,
+    tempo: 45,
+    eras: Object.freeze(['s90', 's00', 's10'])
+  });
+
+  /* ===== State (the only source of truth) ===== */
+  const params = new URLSearchParams(location.search);
+  const state = {
+    difficulty: DEFAULTS.difficulty,
+    history: DEFAULTS.history,
+    popularity: DEFAULTS.popularity,
+    tempo: DEFAULTS.tempo,
+    eras: [...DEFAULTS.eras],
+    off: [],                         // gear ids ('difficulty'...'tempo', 'era') that are reset: not factored in
+    open: 'history',                 // which gear the mini sheet shows: a GEARS id or 'era'
+    mini: params.get('mini') === '1',
+    dragY: null                      // px the handle has moved while dragging (negative = up); null when idle
+  };
+
+  function setState(patch) {
+    Object.assign(state, patch);
+    render();
+  }
+
+  /* ===== Pure helpers ===== */
+  const laneColor = (v) => (v < 34 ? '#4FD17A' : v < 67 ? '#F5B82E' : '#FF6B70');
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  const isOn = (s, g) => !s.off.includes(g);
+  const withOff = (g) => (state.off.includes(g) ? state.off : state.off.concat(g));
+  const withoutOff = (g) => state.off.filter((x) => x !== g);
+
+  /**
+   * Songs that pass the era filter (skipped when Era is off), sorted by L1 distance
+   * over the sliders that are on (closest first). Off gears are skipped entirely.
+   */
+  function rankSongs(s) {
+    const active = GEARS.filter((g) => isOn(s, g));
+    return SONGS
+      .map((song, i) => ({
+        i,
+        dist: active.reduce((sum, g) => sum + Math.abs(song[g] - s[g]), 0)
+      }))
+      .filter((x) => !isOn(s, 'era') || s.eras.includes(SONGS[x.i].era))
+      .sort((a, b) => a.dist - b.dist);
+  }
+
+  /** Sheet geometry for the current state. */
+  function sheetLayout(s) {
+    const dragging = s.dragY !== null;
+    const base = s.mini ? RACK_MINI : RACK_FULL;
+    return {
+      dragging,
+      rackHeight: Math.round(dragging ? clamp(base - s.dragY, RACK_MINI, RACK_FULL) : base),
+      compact: s.mini && !(dragging && s.dragY < -UNCOMPACT_PX)
+    };
+  }
+
+  /* ===== DOM refs ===== */
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  const app = $('#app');
+  const listEl = $('#list');
+  const emptyEl = $('#empty');
+  const rack = $('#rack');
+  const stripsEl = $('#strips');
+  const eraPanel = $('#era-panel');
+  const tabsEl = $('#tabs');
+  const handle = $('#handle');
+  const strips = Object.fromEntries(GEARS.map((g) => [g, $(`.strip[data-gear="${g}"]`)]));
+  const inputs = Object.fromEntries(GEARS.map((g) => [g, $(`#slider-${g}`)]));
+
+  /* ===== Build list rows once (one per song); render() only moves them ===== */
+  const rowTpl = $('#row-template');
+  const rowEls = SONGS.map((song, i) => {
+    const li = rowTpl.content.firstElementChild.cloneNode(true);
+    li.dataset.song = String(i);
+    $('.row-title', li).textContent = song.title;
+    $('.row-sub', li).textContent = `${song.artist} · ${ERA_LABEL[song.era]}`;
+
+    // Mini difficulty lane: fixed per song.
+    const band = 6 + song.difficulty * 0.22;
+    const dashTop = (o) => Math.round(15 + o * (band / 2 - 1.5) - 1.5);
+    const color = laneColor(song.difficulty);
+    const bandEl = $('.band', li);
+    bandEl.style.top = Math.round(15 - band / 2) + 'px';
+    bandEl.style.height = Math.round(band) + 'px';
+    bandEl.style.background = color;
+    $$('.dash', li).forEach((d, k) => {
+      d.style.top = dashTop([0.7, -1, 0.2][k]) + 'px';
+      d.style.background = color;
+    });
+
+    listEl.appendChild(li);
+    return li;
+  });
+
+  /* ===== Render: state -> DOM ===== */
+  function render() {
+    const s = state;
+    const layout = sheetLayout(s);
+
+    // Root flags (also used by tests)
+    app.dataset.mode = s.mini ? 'mini' : 'expanded';
+    app.dataset.open = s.open;
+    app.classList.toggle('is-compact', layout.compact);
+
+    // Sliders (off = hollow thumb resting at the default value, no fill, art dimmed)
+    for (const g of GEARS) {
+      const on = isOn(s, g);
+      const pos = s[g];
+      strips[g].classList.toggle('is-off', !on);
+      strips[g].style.setProperty('--pct', pos + '%');
+      if (Number(inputs[g].value) !== pos) inputs[g].value = String(pos);
+      if (on) inputs[g].removeAttribute('aria-valuetext');
+      else inputs[g].setAttribute('aria-valuetext', 'Off');
+    }
+
+    // Reset buttons + OFF tags + dimmed tabs
+    for (const g of [...GEARS, 'era']) {
+      const on = isOn(s, g);
+      $(`.reset-btn[data-reset="${g}"]`).hidden = !on;
+      const panel = g === 'era' ? eraPanel : strips[g];
+      panel.classList.toggle('is-off', !on);
+      $('.off-tag', panel).hidden = on;
+      $(`.tab[data-gear="${g}"]`).classList.toggle('is-off', !on);
+    }
+
+    // Art values: an off gear draws at its (default) value, dimmed by CSS
+    const art = (g) => s[g];
+
+    // Difficulty lane art: band grows with difficulty, colour by tier
+    const bandH = 14 + art('difficulty') * 0.62;
+    const color = laneColor(art('difficulty'));
+    $$('.lane-band').forEach((el) => {
+      el.setAttribute('y', String(Math.round(40 - bandH / 2)));
+      el.setAttribute('height', String(Math.round(bandH)));
+      el.setAttribute('fill', color);
+    });
+    const DASH_OFFSETS = [0.8, 0.2, -1, -0.3, 1, -0.6, -0.9];
+    $$('.lane-dashes').forEach((el) => el.setAttribute('fill', color));
+    $$('.lane-dash').forEach((el) => {
+      const o = DASH_OFFSETS[Number(el.dataset.i)];
+      el.setAttribute('y', String(Math.round(40 + o * (bandH / 2 - 3) - 3)));
+    });
+
+    // History notes / popularity bolts: item i shows when value >= (i + 0.5) * 100 / 7
+    const shown = (value, i) => (value >= ((i + 0.5) * 100) / 7 ? '1' : '0');
+    $$('.hist-note').forEach((el) => { el.style.opacity = shown(art('history'), Number(el.dataset.i)); });
+    $$('.pop-bolt').forEach((el) => { el.style.opacity = shown(art('popularity'), Number(el.dataset.i)); });
+
+    // Metronome: faster swing and lower weight as tempo rises
+    const tempo = art('tempo');
+    const weightY = Math.round(16 + tempo * 0.27);
+    const period = (60 / (50 + tempo * 1.5)).toFixed(2);
+    const swing = 'swing' + (20 - 2 * Math.round((tempo / 100) * 6));
+    const anim = `${swing} ${period}s ease-in-out infinite alternate`;
+    $$('.metro-pend').forEach((el) => { if (el.style.animation !== anim) el.style.animation = anim; });
+    $$('.metro-weight').forEach((el) => el.setAttribute('transform', `translate(0 ${weightY})`));
+
+    // Eras: when Era is off, the default picks show as outlined ("parked"), not pressed
+    const eraOn = isOn(s, 'era');
+    $$('.era-btn').forEach((el) => {
+      const picked = s.eras.includes(el.dataset.era);
+      el.setAttribute('aria-pressed', String(eraOn && picked));
+      el.classList.toggle('is-parked', !eraOn && picked);
+    });
+    $$('.era-dot').forEach((el) => el.setAttribute('fill', s.eras.includes(el.dataset.era) ? '#FFD84D' : '#4A1B0C'));
+
+    // Tabs
+    $$('.tab').forEach((el) => el.setAttribute('aria-pressed', String(s.open === el.dataset.gear)));
+
+    // Sheet
+    rack.style.height = layout.rackHeight + 'px';
+    rack.classList.toggle('is-dragging', layout.dragging);
+    stripsEl.hidden = layout.compact && s.open === 'era';
+    for (const g of GEARS) strips[g].hidden = layout.compact && s.open !== g;
+    eraPanel.hidden = layout.compact && s.open !== 'era';
+    tabsEl.hidden = !layout.compact;
+    handle.setAttribute('aria-expanded', String(!s.mini));
+    handle.setAttribute('aria-label', s.mini ? 'Show all gears' : 'Show one gear');
+
+    // List
+    const ranked = rankSongs(s);
+    const rankOf = new Map(ranked.map((x, r) => [x.i, r]));
+    const parkAt = Math.max(ranked.length - 1, 0);
+    rowEls.forEach((li, i) => {
+      const r = rankOf.get(i);
+      const on = r !== undefined;
+      li.style.top = (on ? r : parkAt) * ROW_H + 'px';
+      li.style.opacity = on ? '1' : '0';
+      li.setAttribute('aria-hidden', String(!on));
+      li.dataset.rank = on ? String(r + 1) : '';
+      $('.row-rank', li).textContent = on ? String(r + 1) : '';
+    });
+    listEl.style.height = ranked.length * ROW_H + 'px';
+    emptyEl.hidden = ranked.length > 0;
+  }
+
+  /* ===== Events ===== */
+
+  // Sliders: set value, turn the gear on, make it the open gear.
+  // pointerdown turns an off slider on even if the tap lands exactly on its default value
+  // (no value change = no input event). Moving from there resumes from the default.
+  for (const g of GEARS) {
+    inputs[g].addEventListener('input', (e) => setState({ [g]: Number(e.target.value), off: withoutOff(g), open: g }));
+    inputs[g].addEventListener('pointerdown', () => {
+      if (!isOn(state, g)) setState({ off: withoutOff(g), open: g });
+    });
+  }
+
+  // Reset buttons: put the gear back to its default value AND turn it off (not factored in).
+  // The button hides itself, so move focus to the gear's own control to keep keyboard users in place.
+  $$('.reset-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const g = btn.dataset.reset;
+      if (g === 'era') {
+        setState({ eras: [...DEFAULTS.eras], off: withOff('era'), open: 'era' });
+        $('.era-btn').focus();
+      } else {
+        setState({ [g]: DEFAULTS[g], off: withOff(g), open: g });
+        inputs[g].focus();
+      }
+    });
+  });
+
+  // Era toggles: multi-select; also makes Era the open gear. If Era is off, this turns it
+  // back on starting from the default picks, then applies the toggle.
+  $$('.era-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.era;
+      const eras = state.eras.includes(id) ? state.eras.filter((x) => x !== id) : state.eras.concat(id);
+      setState({ eras, off: withoutOff('era'), open: 'era' });
+    });
+  });
+
+  // Tabs (mini only): pick which gear is shown
+  $$('.tab').forEach((btn) => btn.addEventListener('click', () => setState({ open: btn.dataset.gear })));
+
+  // Handle: tap toggles mode; drag resizes live, snaps on release past SNAP_PX
+  let dragStartY = null;
+  let didDrag = false;
+
+  handle.addEventListener('pointerdown', (e) => {
+    dragStartY = e.clientY;
+    didDrag = false;
+    try { handle.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    setState({ dragY: 0 });
+  });
+
+  handle.addEventListener('pointermove', (e) => {
+    if (dragStartY === null) return;
+    const dy = e.clientY - dragStartY;
+    if (Math.abs(dy) > DRAG_START_PX) didDrag = true;
+    setState({ dragY: dy });
+  });
+
+  const endDrag = (e) => {
+    if (dragStartY === null) return;
+    const dy = e.clientY - dragStartY;
+    dragStartY = null;
+    if (didDrag) {
+      let mini = state.mini;
+      if (state.mini && dy < -SNAP_PX) mini = false;
+      if (!state.mini && dy > SNAP_PX) mini = true;
+      setState({ mini, dragY: null });
+    } else {
+      setState({ dragY: null });
+    }
+  };
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+
+  // Click fires after pointerup; swallow it if that press was a drag. Keyboard Enter/Space lands here too.
+  handle.addEventListener('click', () => {
+    if (didDrag) { didDrag = false; return; }
+    setState({ mini: !state.mini });
+  });
+
+  /* ===== Test hook for agents (remove in production) ===== */
+  window.setlist = {
+    getState: () => JSON.parse(JSON.stringify(state)),
+    setState,
+    ranking: () => rankSongs(state).map((x) => SONGS[x.i].title),
+    songs: SONGS
+  };
+
+  render();
+})();
+</script>
+</body>
+</html>

@@ -20,7 +20,7 @@ import { neonQuery } from '../src/lib/server/getStore';
 import { createPostgresStore } from '../src/lib/server/postgresStore';
 import { productionSongDeps } from '../src/lib/server/wiring';
 import { DECADES, DEFAULT_VIEW, decadeOf, orderMatches } from '../src/lib/songs/browse';
-import { effectiveTempo, fitReading, readingsOf } from '../src/lib/tempo/feel';
+import { effectiveTempo, fitReading, isWeakLabelSource, readingsOf } from '../src/lib/tempo/feel';
 import { combineTempo, foldBpm, ultrastarTempo } from '../src/lib/tempo/tempo';
 
 const pct = (n: number, d: number) => `${n}/${d} (${d ? ((100 * n) / d).toFixed(1) : '0'}%)`;
@@ -126,7 +126,7 @@ async function main() {
   const tempos = await store.getSongTempos(libKeys);
   const libFeels = await store.getSongFeels(libKeys).catch(() => new Map<string, SongFeelRecord>());
   // The tempo the app ranks a signed-in person's songs on (songService.ts): the measured tempo, or the feel label's.
-  const libTempo = (key: string) => effectiveTempo({ key, record: tempos.get(key), feel: libFeels.get(key)?.feel })?.tempo;
+  const libTempo = (key: string) => effectiveTempo({ key, record: tempos.get(key), feel: libFeels.get(key)?.feel, weak: isWeakLabelSource(libFeels.get(key)?.source) })?.tempo;
   const matches: Match[] = [];
   lib.forEach((r, i) => {
     const track: Track = { id: String(r.track_id), title: String(r.title), artist: String(r.artist), artistId: '', spotifyUrl: '', playRank: i, known: true };

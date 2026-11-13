@@ -113,3 +113,25 @@ export function clearSavedRange(): void {
     local()?.removeItem(SAVED_RANGE_KEY);
   } catch {}
 }
+
+// ---- a like or dislike stays (R26, QWW-57) ----
+
+/** One key for each song, by its track id (a library song's Spotify id, a catalogue song's `cat:artist|title`). */
+const FEEDBACK_PREFIX = 'kd.feedback:';
+
+/** What the singer gave this song on this device; anything stored that is not 'up' or 'down' is ignored. */
+export function loadFeedback(trackId: string): 'up' | 'down' | undefined {
+  try {
+    const stored = local()?.getItem(FEEDBACK_PREFIX + trackId);
+    return stored === 'up' || stored === 'down' ? stored : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Keeps a like or dislike for the song. Nothing is sent anywhere: it is the device's own storage, and a blocked one only forgets. */
+export function saveFeedback(trackId: string, thumbs: 'up' | 'down'): void {
+  try {
+    local()?.setItem(FEEDBACK_PREFIX + trackId, thumbs);
+  } catch {}
+}

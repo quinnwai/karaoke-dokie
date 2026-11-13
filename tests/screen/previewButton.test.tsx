@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
-// The play button in each song row (QWW-48), alone and in today's rows.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+// The play button in each song row (QWW-48), alone and in the Setlist tuner's rows (QWW-57 moved it from the earlier results
+// screen into the tuner's slot, where hovering swaps the rank number for it).
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeezerCredit, PreviewButton, PreviewPlayerContext } from '../../src/components/PreviewButton';
-import { Results } from '../../src/components/Results';
+import { SetlistScreen } from '../../src/components/setlist/SetlistScreen';
 import type { Match } from '../../src/lib/contracts';
 import { createPreviewPlayer, type PreviewCheck } from '../../src/lib/client/preview';
+import type { SetlistSong } from '../../src/lib/setlist/types';
 import { FakeAudio, settle } from '../helpers/fakeAudio';
-import { resultsProps } from '../helpers/results';
-import { match } from '../fixtures/screen';
+import { RANGE, rankedSong, setlistProps } from '../helpers/setlist';
 
 afterEach(cleanup);
 
@@ -20,8 +21,8 @@ function withPlayer(check: PreviewCheck = async () => 'retry', onStart?: (key: s
   return { audio, player, wrap };
 }
 
-const range = { low: 45, high: 72, source: 'test' as const };
-const withId = (m: Match, deezerId: number): Match => ({ ...m, deezerId });
+/** A returned song that has a Deezer track. */
+const withId = (song: SetlistSong, deezerId: number): SetlistSong => ({ ...song, match: { ...song.match, deezerId } });
 
 describe('PreviewButton', () => {
   it('is a disabled button, not a broken one, for a song with nothing to play', () => {
@@ -139,11 +140,19 @@ describe('two rows with one Deezer track', () => {
   });
 });
 
-describe('play button in the result rows', () => {
-  it('sits beside each row, plays without opening the song page, and the row still opens it', () => {
+describe('play button in the tuner rows', () => {
+  const plastic = () => rankedSong('t0', { title: 'Plastic Love', artist: 'Mariya Takeuchi' });
+  const lemon = () => rankedSong('t1', { title: 'Lemon', artist: 'Kenshi Yonezu' });
+  /** What the app mounts in a row's slot (KaraokeApp's previewPlay). */
+  const play = (m: Match, position: number): ReactNode => <PreviewButton id={m.track.id} deezerId={m.deezerId} title={m.track.title} artist={m.track.artist} position={position} />;
+  const draw = (wrap: (ui: ReactNode) => ReactNode, songs: SetlistSong[], onSelect = vi.fn()) => {
+    render(wrap(<SetlistScreen {...setlistProps(RANGE, songs, { renderPlay: play, onSelect })} />));
+    return onSelect;
+  };
+
+  it('sits in the first slot of each row, plays without opening the song page, and the row still opens it', () => {
     const { audio, wrap } = withPlayer();
-    const onSelect = vi.fn();
-    render(wrap(<Results {...resultsProps(range, [withId(match(0), 101), match(1)])} onSelect={onSelect} />));
+    const onSelect = draw(wrap, [withId(plastic(), 101), lemon()]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Play Plastic Love by Mariya Takeuchi' }));
     expect(onSelect).not.toHaveBeenCalled();
@@ -158,7 +167,7 @@ describe('play button in the result rows', () => {
   it("reports a row's preview with the row's place in the list on screen (QWW-51)", async () => {
     const onStart = vi.fn();
     const { audio, wrap } = withPlayer(undefined, onStart);
-    render(wrap(<Results {...resultsProps(range, [withId(match(0), 101), withId(match(1), 102), withId(match(2), 103)])} />));
+    draw(wrap, [withId(plastic(), 101), withId(lemon(), 102), withId(rankedSong('t2', { title: 'Third', artist: 'Someone' }), 103)]);
     // The second row on screen, whatever its song.
     const plays = screen.getAllByRole('button', { name: /^Play / });
     fireEvent.click(plays[1]!);
@@ -170,20 +179,47 @@ describe('play button in the result rows', () => {
     expect(onStart.mock.calls[0]![1]).toBe(2);
   });
 
-  it('is never inside the row button, so the two are separate buttons', () => {
+  it('is in the row\'s slot with the rank number, and never inside the row button, so the two are separate buttons', () => {
     const { wrap } = withPlayer();
-    render(wrap(<Results {...resultsProps(range, [withId(match(0), 101)])} />));
+    draw(wrap, [withId(plastic(), 101)]);
     const play = screen.getByRole('button', { name: 'Play Plastic Love by Mariya Takeuchi' });
     expect(play.parentElement!.closest('button')).toBeNull();
+    const slot = play.closest('[data-play-slot]')!;
+    expect(slot.querySelector('[data-rank-number]')?.textContent).toBe('1');
   });
 
-  it("shows Deezer's logo by the list when a song on it has a preview, and not otherwise", () => {
+  it('shows pause in the slot of the song that is playing, and only there', async () => {
+    const { audio, wrap } = withPlayer();
+    draw(wrap, [withId(plastic(), 101), withId(lemon(), 102)]);
+    fireEvent.click(screen.getByRole('button', { name: 'Play Plastic Love by Mariya Takeuchi' }));
+    await act(async () => {
+      audio.start();
+      await settle();
+    });
+    expect(screen.getByRole('button', { name: 'Pause Plastic Love by Mariya Takeuchi' }).getAttribute('data-preview')).toBe('playing');
+    expect(screen.getByRole('button', { name: 'Play Lemon by Kenshi Yonezu' }).getAttribute('data-preview')).toBe('idle');
+  });
+
+  // R29 (QWW-57): the line stays where it is. The book icon's link that used to follow it is the TV's chin now (R28), so nothing follows it here.
+  it("shows Deezer's logo under the list when a song on it has a preview, and not otherwise", () => {
     const { wrap } = withPlayer();
-    const { unmount } = render(wrap(<Results {...resultsProps(range, [withId(match(0), 101), match(1)])} />));
+    const { unmount } = render(wrap(<SetlistScreen {...setlistProps(RANGE, [withId(plastic(), 101), lemon()], { renderPlay: play })} />));
     expect(screen.getByText('Previews from')).toBeTruthy();
     expect(screen.getByText('Deezer')).toBeTruthy();
+    // Under the list: after the rows.
+    const credit = screen.getByText('Previews from').closest('p')!;
+    const rows = document.getElementById('list')!;
+    expect(rows.compareDocumentPosition(credit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // And it is the list's only link to the credits, and no row carries a Deezer mark.
+    expect(document.querySelectorAll('a[href="/credits"]')).toHaveLength(1);
+    expect(within(rows).queryByText('Deezer')).toBeNull();
     unmount();
-    render(wrap(<Results {...resultsProps(range, [match(0), match(1)])} />));
+    render(wrap(<SetlistScreen {...setlistProps(RANGE, [plastic(), lemon()], { renderPlay: play })} />));
+    expect(screen.queryByText('Previews from')).toBeNull();
+  });
+
+  it('shows no Deezer line where no play button is offered (the screen was given no renderPlay)', () => {
+    render(<SetlistScreen {...setlistProps(RANGE, [withId(plastic(), 101)])} />);
     expect(screen.queryByText('Previews from')).toBeNull();
   });
 
@@ -191,6 +227,9 @@ describe('play button in the result rows', () => {
     render(<DeezerCredit />);
     const link = screen.getByRole('link', { name: 'Previews from Deezer, for private listening. Sources and credits' });
     expect(link.getAttribute('href')).toBe('/credits');
+    // It opens in a new tab, so reading the credits does not cost the singer their range and tuning (QWW-57).
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
     expect(link.textContent).toBe('Previews fromDeezer');
   });
 });

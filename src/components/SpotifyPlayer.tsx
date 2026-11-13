@@ -1,5 +1,7 @@
+import type { CSSProperties } from 'react';
 import type { Track } from '../lib/contracts';
 import { spotifyEmbedUrl } from '../lib/client/spotifyEmbed';
+import { ExternalLinkIcon } from './Icon';
 import styles from './screen.module.css';
 
 /**
@@ -15,20 +17,24 @@ interface SpotifyPlayerProps {
   label?: string;
   /** The fallback link was tapped (for the beta event log). */
   onOpen?(): void;
+  /** The song page holds the link, and the player, for a moment after it opens (SongDetail's holdMs): the style is `pointer-events: none` then. */
+  style?: CSSProperties;
 }
 
-export function SpotifyPlayer({ track, label = 'Open in Spotify', onOpen }: SpotifyPlayerProps) {
+export function SpotifyPlayer({ track, label = 'Open in Spotify', onOpen, style }: SpotifyPlayerProps) {
   const src = spotifyEmbedUrl(track.spotifyUrl);
   if (!src) {
     return (
-      <a className={styles.spotify} href={track.spotifyUrl} target="_blank" rel="noreferrer" onClick={onOpen}>
+      <a className={styles.spotify} style={style} href={track.spotifyUrl} target="_blank" rel="noreferrer" onClick={onOpen}>
         {label}
+        <ExternalLinkIcon className={styles.externalIcon} />
       </a>
     );
   }
   return (
     <iframe
       className={styles.player}
+      style={style}
       title={`Spotify player: ${track.title} by ${track.artist}`}
       src={src}
       allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"

@@ -1,0 +1,257 @@
+/* The Setlist tuner (round 5 design, QWW-46; Round 6A's neon reskin, QWW-57): the screen, its header and the song list. The
+   bottom sheet is sheet.module.css. Sizes, colours and radii are Round 6A's (docs/setlist-round6a, §3 to §5).
+
+   The tuner lives inside the TV (Tv.tsx), which draws the bezel, the scanlines, the inner shadow and the chin. This file
+   draws only what is inside the TV's screen: it has no background of its own and does not scroll as a whole (the list
+   scrolls, the sheet stays put). Its tokens carry an --sl- prefix: the rest of the app already uses --bg and --ink with other
+   values, and the earlier steps keep theirs. */
+
+/* Noto Sans JP, only the four characters of the sign (カ ラ オ ケ), 700, self-hosted. */
+@font-face {
+  font-family: 'Noto Sans JP';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/noto-sans-jp-700-karaoke.woff2') format('woff2');
+  unicode-range: U+30aa-30ab, U+30b1, U+30e9;
+}
+
+.app {
+  /* Round 6A's tokens (README §3.1), scoped to the tuner: the earlier steps keep theirs. The sheet's CSS reads these too. */
+  --sl-panel: rgba(255, 255, 255, 0.025);
+  --sl-rail: #26242d; /* slider rail, idle borders */
+  --sl-row-line: #1f1d25;
+  --sl-text: #f3eff7;
+  --sl-text-strong: #f6f2fa; /* the heading */
+  --sl-text-2: #b9b4c4; /* header controls */
+  --sl-text-3: #9e99aa; /* secondary text, slider end labels, the era count */
+  --sl-off: #8e8a99; /* an off gear's label, its " · OFF" tag and its end labels. Raised from 6A's #6e6a78 and #5e5a68 (3.7:1 and 2.9:1) to 4.8:1 on the strip (QWW-57, Quinn-Wai, 11 Nov) */
+  --sl-reset: #8e8a99; /* the reset icon (hover --sl-text) */
+  --sl-unlit: #34313d; /* an unlit neon tube */
+  --sl-pink: #ff4fa0; /* Era, lit selections, the mic */
+  --sl-pink-text: #ff6fb1; /* badge text, and the range notes and redo while hovered or focused (R9) */
+  --sl-pink-line: #f0509a; /* badge border, reason line */
+  --sl-cyan: #4fdde8; /* History */
+  --sl-amber: #ffc24a; /* Popularity, the Era jukebox lights, Difficulty's middle tier */
+  --sl-violet: #b583ff; /* Tempo */
+  --sl-easy: #4de89a; /* Difficulty, easy third */
+  --sl-hard: #ff5a8a; /* Difficulty, hard third */
+  --sl-font: 'Inter', system-ui, sans-serif;
+
+  /* The screen's inside: 6A's padding 16 12 0 and 8 px between its parts. It fills the TV's screen, which is phone-shaped on
+     every screen (QWW-57, R2), so there is no column to cap. */
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 16px 12px 0;
+  overflow: hidden;
+  color: var(--sl-text);
+  font-family: var(--sl-font);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Panning and pinching stay; a fast second tap (an era button, a reset) is not a double-tap zoom. */
+  touch-action: manipulation;
+}
+
+/* [hidden] must win over the display each of these sets, or a hidden gear would still draw. */
+.app [hidden] {
+  display: none !important;
+}
+
+.app :focus-visible {
+  outline: 2px solid var(--sl-text);
+  outline-offset: 2px;
+}
+
+/* ===== Header (README §3.4): a 28 px row, then the heading ===== */
+
+.head {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.topbar {
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rangeChip {
+  flex-shrink: 0;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--sl-text-2);
+  white-space: nowrap;
+}
+
+/* The two notes are the singer's real range, and each is a button that re-sings that end. Their look is 6A's (a 1 px dotted
+   underline), their hit area is 44 px tall: the ::after reaches 14 px above and below the 16 px line, past the 28 px row
+   into the screen's padding and the heading, which have nothing to tap. */
+.rangeNote {
+  position: relative;
+  height: 16px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  line-height: 16px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.rangeNote::after {
+  content: '';
+  position: absolute;
+  inset: -14px -4px;
+}
+
+/* The 1 px dotted underline of a range note (6A §3.4). */
+.noteMark {
+  border-bottom: 1px dotted #6b6776;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+/* Redo re-sings both ends (QWW-57, R14): a round icon button, a 28 px circle with the redo arrow in it and no text, 44 px to tap (the
+   ::after reaches 9 px past the padding box, which is 1 px inside the border: 44 px square). */
+.redo {
+  position: relative;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #3a3742;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--sl-text-2);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.redo::after {
+  content: '';
+  position: absolute;
+  inset: -9px;
+}
+
+/* R9 (QWW-57): hover and keyboard focus turn the range notes (text and dotted underline) and redo (text and border) pink. Hover only
+   where there is a pointer to hover with, so nothing stays pink after a tap on a phone. */
+.rangeNote:focus-visible .noteMark {
+  color: var(--sl-pink-text);
+  border-bottom-color: var(--sl-pink-text);
+}
+
+.redo:focus-visible {
+  color: var(--sl-pink-text);
+  border-color: var(--sl-pink-text);
+}
+
+@media (hover: hover) {
+  .rangeNote:hover .noteMark {
+    color: var(--sl-pink-text);
+    border-bottom-color: var(--sl-pink-text);
+  }
+
+  .redo:hover {
+    color: var(--sl-pink-text);
+    border-color: var(--sl-pink-text);
+  }
+}
+
+/* The sign is centred on the header's own middle, not in the room between redo and the Spotify button (QWW-57, R1: the
+   room's middle sits right of the screen's). It is out of the row's flow, so it does not push anything, and a long range or a
+   narrow phone can run it into redo: useSignFit shrinks it (an inline font-size, 16 px down to 13 px) to keep 8 px clear of redo
+   and the Spotify button, and hides it (`data-hidden`, still laid out so it can be measured) only when even 13 px does not fit.
+   The 16 px here is what it is before that runs, and what it is measured at. */
+.sign {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  font-family: 'Noto Sans JP', sans-serif;
+  font-size: 16px;
+  line-height: 28px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  pointer-events: none;
+  color: #ff5fa8;
+  text-shadow: 0 0 6px rgba(255, 79, 160, 0.9), 0 0 16px rgba(255, 79, 160, 0.5);
+  /* A slow buzz: the opacity dips to 0.55 for a moment every 3.2 s. */
+  animation: buzz 3.2s linear infinite;
+}
+
+.sign[data-hidden] {
+  visibility: hidden;
+}
+
+@keyframes buzz {
+  0%,
+  46%,
+  54%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* The Spotify logo (Connect, or the signed-in account) stays at the far right. */
+.spotify {
+  flex-shrink: 0;
+  display: flex;
+  margin-left: auto;
+}
+
+/* The title and, at the right, under the Spotify button, the count of songs that fit (R19). The count keeps its width and the title
+   gives way (it is cut with an ellipsis) where the two do not fit. */
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.count {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--sl-text-3);
+  white-space: nowrap;
+}
+
+.title {
+  min-width: 0;
+  margin: 0;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--sl-text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sign {
+    animation: none !important;
+  }
+
+  .noteMark,
+  .redo {
+    transition: none;
+  }
+}

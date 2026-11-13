@@ -35,7 +35,7 @@ export const EVENT = {
   // The Setlist tuner (QWW-46).
   /** A gear moved or was reset. Props: `gear` ('difficulty', 'history', 'popularity' or 'tempo'), `value` (0 to 100), `on` (true while the gear counts toward the ranking). */
   gearChange: 'gear_change',
-  /** An era was toggled, or Era was reset. Props: `era` (the one toggled, null for a reset), `on` (that era is picked now), `eras` (all picked, comma-separated), `off` (Era is reset, so every era counts). */
+  /** An era was toggled, or Era was reset. Props: `era` (the one toggled, null for a reset), `picked` (that era is picked now), `on` (Era counts toward the ranking), `eras` (all picked, comma-separated), `mode`. */
   eraChange: 'era_change',
 
   /** A row's preview started playing, from a tap on its play button (QWW-48): the first sound, not a pause or a resume. Props: `position` (1-based place in the list), and `songKey` for a catalogue song only. */
@@ -88,8 +88,8 @@ export const POSTHOG_PROPS: ReadonlySet<string> = new Set([
   'on',
   'gear',
   'era',
+  'picked',
   'eras',
-  'off',
   // The rest of the funnel.
   'from',
   'signedIn',

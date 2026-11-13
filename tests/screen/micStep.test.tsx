@@ -439,3 +439,55 @@ describe('MicStep: when it did not work', () => {
     expect(lyric()).toBe('The microphone is blocked');
   });
 });
+
+describe('the mic and note steps for a singer who already has a range (a redo, QWW-57)', () => {
+  // Every screen of the step has "Back to songs" first, in the corner the song page's ‹ is in; the step's own box follows it, which is how
+  // screen.module.css makes room for it (`.backToSongs + .mic`). None is a dead end, the blank ones included.
+  const SCREENS: [string, MicView, BrowserInfo | null, Partial<MicGate>][] = [
+    ['looking at the browser', 'checking', null, {}],
+    ['opening a microphone already allowed', 'opening', IOS_SAFARI, {}],
+    ['inside another app', 'inapp', INSTAGRAM, {}],
+    ['before the browser asks', 'prompt', IOS_SAFARI, {}],
+    ['while the browser asks', 'asking', IOS_SAFARI, {}],
+    ['after a refusal', 'recovery', IOS_SAFARI, { problem: 'denied', fails: 1 }],
+    ['after a refusal, inside another app', 'recovery', INSTAGRAM, { problem: 'denied', fails: 1 }],
+  ];
+
+  it.each(SCREENS)('%s has "Back to songs", before the step’s own box, and it calls onBack once', (_name, view, env, extra) => {
+    const onBack = vi.fn();
+    const gate: MicGate = { ...initialState.mic, view, env, ...extra };
+    const { container } = render(<MicStep gate={gate} onAsk={vi.fn()} onTryHere={vi.fn()} onReload={vi.fn()} onBack={onBack} />);
+    const back = screen.getByRole('button', { name: 'Back to songs' });
+    expect(screen.getAllByRole('button', { name: 'Back to songs' })).toHaveLength(1);
+    expect(container.firstElementChild).toBe(back);
+    expect(back.nextElementSibling).not.toBeNull();
+    expect(back.textContent).toBe('‹Back to songs');
+    expect(back.querySelector('span')!.getAttribute('aria-hidden')).toBe('true'); // the ‹ is not read out
+    fireEvent.click(back);
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(SCREENS)('%s has none for the first test, which has no range to go back to', (_name, view, env, extra) => {
+    show(view, env, extra);
+    expect(screen.queryByRole('button', { name: 'Back to songs' })).toBeNull();
+  });
+
+  it.each(['low', 'high'] as const)('the %s note step has it too, before the step’s own box, and holding the note still works', (kind) => {
+    const onBack = vi.fn();
+    const onPress = vi.fn();
+    const { container } = render(<HoldStep kind={kind} status="ready" live={null} lowNote={null} onPress={onPress} onRelease={() => {}} onBack={onBack} />);
+    const back = screen.getByRole('button', { name: 'Back to songs' });
+    expect(container.firstElementChild).toBe(back);
+    expect(back.nextElementSibling!.querySelector('[aria-pressed]')).not.toBeNull(); // the hold button is in the box that follows
+    fireEvent.click(back);
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(onPress).not.toHaveBeenCalled();
+    fireEvent.pointerDown(screen.getByRole('button', { name: /^Hold to record/ }));
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+
+  it('the note step has none without onBack', () => {
+    render(<HoldStep kind="low" status="ready" live={null} lowNote={null} onPress={() => {}} onRelease={() => {}} />);
+    expect(screen.queryByRole('button', { name: 'Back to songs' })).toBeNull();
+  });
+});

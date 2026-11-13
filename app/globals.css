@@ -10,6 +10,10 @@
   --cyan-glow: rgba(60, 229, 255, 0.45);
   /* Apple-style squircle corners where the browser draws them (corner-shape); plain rounding elsewhere. */
   --squircle: 12px;
+  /* 1% of the width of a phone: 1vw up to a 430 px window, and no more above it. The TV is phone-shaped on every screen (QWW-57,
+     R2), so the type that scales with the width (the lyrics, the sign, the big note) stops growing where the phone does; it
+     is what the same step looks like on the widest phone. */
+  --vw: min(1vw, 4.3px);
   color-scheme: dark;
 }
 

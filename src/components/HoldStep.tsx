@@ -2,6 +2,7 @@ import { useRef, type KeyboardEvent, type PointerEvent } from 'react';
 import { midiToNoteName } from '../lib/audio/notes';
 import { SCALE_HIGH, SCALE_LOW, scalePosition } from '../lib/client/display';
 import type { HoldStatus } from '../lib/client/flow';
+import { BackToSongs } from './BackToSongs';
 import { Lyric } from './Lyric';
 import { RoundButton } from './RoundButton';
 import styles from './screen.module.css';
@@ -15,6 +16,8 @@ interface HoldStepProps {
   lowNote: string | null;
   onPress(): void;
   onRelease(): void;
+  /** Given when the singer already has a range (a redo): "Back to songs" is then on the step, and the old range stays. */
+  onBack?(): void;
 }
 
 function lyricFor(kind: 'low' | 'high', status: HoldStatus): string {
@@ -30,7 +33,16 @@ function lyricFor(kind: 'low' | 'high', status: HoldStatus): string {
 
 const TICKS = Array.from({ length: (SCALE_HIGH - SCALE_LOW) / 12 + 1 }, (_, i) => SCALE_LOW + i * 12);
 
-export function HoldStep({ kind, status, live, lowNote, onPress, onRelease }: HoldStepProps) {
+export function HoldStep({ onBack, ...step }: HoldStepProps) {
+  return (
+    <>
+      {onBack && <BackToSongs onBack={onBack} />}
+      <HoldScreen {...step} />
+    </>
+  );
+}
+
+function HoldScreen({ kind, status, live, lowNote, onPress, onRelease }: Omit<HoldStepProps, 'onBack'>) {
   const down = useRef(false);
   const holding = status === 'holding';
 
