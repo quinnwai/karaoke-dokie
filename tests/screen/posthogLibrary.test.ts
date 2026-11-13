@@ -6,9 +6,10 @@ import type { BeforeSendFn } from 'posthog-js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PostHogSettings } from '../../src/lib/contracts';
 import { createPostHogSink, type PostHogClient } from '../../src/lib/client/posthog';
+import { POSTHOG_PROXY_PATH } from '../../src/lib/postHogProxy';
 
 const ANON = '0f8fad5b-d9cb-469f-a165-70867728950e';
-const SETTINGS: PostHogSettings = { key: 'phc_testtoken', host: 'https://posthog.test', environment: 'preview' };
+const SETTINGS: PostHogSettings = { key: 'phc_testtoken', host: POSTHOG_PROXY_PATH, uiHost: 'https://us.posthog.com', environment: 'preview' };
 
 interface Sent {
   url: string;
@@ -19,9 +20,12 @@ interface Sent {
 const sent: Sent[] = [];
 /** Every event the library made before our own filter ran: what its settings let it produce on its own. */
 const attempted: string[] = [];
+/** Every request the library made, of any kind. */
+const requested: string[] = [];
 const fetchMock = vi.fn(async (input: unknown, init?: { body?: unknown }) => {
   const url = String(input);
-  if (url.startsWith(SETTINGS.host) && typeof init?.body === 'string') {
+  requested.push(url);
+  if (url.startsWith(`${location.origin}${SETTINGS.host}/`) && typeof init?.body === 'string') {
     try {
       const parsed = JSON.parse(init.body) as { batch?: Sent['events'] };
       if (Array.isArray(parsed.batch)) sent.push({ url, events: parsed.batch });
@@ -91,12 +95,20 @@ describe('posthog-js as the sink sets it up', () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
   });
 
-  it('sends our events to the configured host, with the time they happened', () => {
+  it('sends our events to our own origin, with the time they happened', () => {
     expect(sent.length).toBeGreaterThan(0);
-    for (const s of sent) expect(s.url.startsWith('https://posthog.test/')).toBe(true);
+    for (const s of sent) expect(s.url.startsWith(`${location.origin}${POSTHOG_PROXY_PATH}/`)).toBe(true);
     expect(named('title_view')).toHaveLength(1);
     expect(named('list_view')[0]!.properties).toMatchObject({ mode: 'catalogue', matchCount: 8 });
     expect(new Date(named('list_view')[0]!.timestamp!).toISOString()).toBe('2026-11-10T12:00:07.000Z');
+  });
+
+  it('talks to no other origin (QWW-63): a blocker that refuses *.posthog.com sees nothing to block', () => {
+    expect(requested.length).toBeGreaterThan(0);
+    expect(requested.filter((url) => new URL(url, location.href).origin !== location.origin)).toEqual([]);
+    // Nor does it ask for a script from anywhere else (the remote config, and the recorder later, are scripts).
+    const scripts = Array.from(document.querySelectorAll('script')).map((el) => el.src).filter(Boolean);
+    expect(scripts.filter((src) => new URL(src, location.href).origin !== location.origin)).toEqual([]);
   });
 
   it('uses the device id as the distinct id, with no person profile', () => {

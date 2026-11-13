@@ -431,8 +431,13 @@ export interface EventsRequest {
 export interface PostHogSettings {
   /** The project token ("phc_..."), public by design: it ships to every browser. */
   key: string;
-  /** The ingest address, https and without a trailing slash; it has a path only when it is a reverse proxy's. */
+  /**
+   * Where the screen sends PostHog's traffic: a path on our own origin (POSTHOG_PROXY_PATH, QWW-63), which our server
+   * forwards to PostHog, so a blocker that refuses *.posthog.com cannot hide it.
+   */
   host: string;
+  /** PostHog's own app address (https://us.posthog.com), for the links the library builds back to it. Nothing is sent there. */
+  uiHost: string;
   /** production, preview or local. Sent on every event so the release funnel can leave the rest out. */
   environment: string;
 }
