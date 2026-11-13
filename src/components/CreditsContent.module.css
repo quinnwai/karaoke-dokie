@@ -1,0 +1,38 @@
+/* What Sources and credits says, in the TV's panel (CreditsPanel) and on the /credits page (QWW-57, R28): one stylesheet for both, in the
+   app's own colours (--ink, --dim), which the panel has too, since it is drawn by the TV and not by the tuner. */
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 18px;
+}
+
+.list a {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.list p {
+  margin: 4px 0 0;
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.note {
+  margin-top: 32px;
+}
+
+.note h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.note p {
+  margin: 8px 0 0;
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1.45;
+}

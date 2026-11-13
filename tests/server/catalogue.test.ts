@@ -310,6 +310,25 @@ describe('karaoke popularity (QWW-6)', () => {
       expect(endOf(after, 0)).toEqual(['Double Time Ballad', 'Unlabelled', 'Really Fast']);
     });
 
+    it('ranks a label from a plain-definition pass behind the strict ones at the slow end, still inside the slow band', async () => {
+      const store = createMemoryStore();
+      const strict = song('Strict', 'Strict Ballad', range(57, 63));
+      const loose = song('Loose', 'Loose Ballad', range(57, 63));
+      for (const s of [strict, loose]) await store.putSongRange(s.key, { range: s.range, log: s.log });
+      await store.putSongTempo([{ key: strict.key, deezerBpm: 80 }, { key: loose.key, deezerBpm: 50 }]);
+      await store.putSongFeel([
+        { key: strict.key, feel: 'slow', source: 'claude-opus-5-5/feel-v1' },
+        { key: loose.key, feel: 'slow', source: 'claude-opus-5-5/feel-edge-recheck-v1' },
+      ]);
+      const loaded = await loadCatalogue(store);
+      const by = (key: string) => loaded.find((s) => s.key === key)!;
+      expect(by(strict.key).tempo).toBe(80);
+      expect(by(loose.key)).toMatchObject({ tempoSource: 'deezer' });
+      expect(by(loose.key).tempo).toBeCloseTo(89.5 + 0.4 * ((50 - 40) / 50), 6); // the strip at the top of the slow band
+      // Taken by tempo alone the 50 would come first.
+      expect(endOf(loaded, 0)).toEqual(['Strict Ballad', 'Loose Ballad']);
+    });
+
     it('does no tempo work for a request: the tempos and labels are read once when the cache fills, and never again', async () => {
       const { store } = await withLabels('both');
       const getSongTempos = vi.spyOn(store, 'getSongTempos');
@@ -392,6 +411,70 @@ describe('karaoke popularity (QWW-6)', () => {
     ]);
     const byTitle = Object.fromEntries(recommendCatalogue(tracks, user, deps, { all: true }).matches.map((m) => [m.track.title, [m.year, m.yearSource]]));
     expect(byTitle).toEqual({ Dated: [1975, 'usdb'], Undated: [1988, 'chart'], 'No row': [2003, 'chart'] });
+  });
+});
+
+describe('Deezer genres (QWW-61)', () => {
+  const checkedAt = '2026-11-12T00:00:00.000Z';
+  /** Four songs: one USDB names, one only Deezer names, one whose album lists no genre, one with no row at all. */
+  async function withGenres() {
+    const store = createMemoryStore();
+    const named = song('Wet Leg', 'Chaise Longue', range(57, 63));
+    const unnamed = song('Wallows', 'Are You Bored Yet?', range(57, 63));
+    const miss = song('C', 'Album Lists None', range(57, 63));
+    const plain = song('D', 'Never Looked Up', range(57, 63));
+    for (const s of [named, unnamed, miss, plain]) await store.putSongRange(s.key, { range: s.range, log: s.log });
+    await store.putUsdbSongs([{ id: 1, key: named.key, artist: named.artist, title: named.title, genre: 'Post-Punk' }]);
+    await store.putSongGenre([
+      { key: named.key, genres: 'Alternative, Rock', albumId: 1, source: 'deezer-album', checkedAt },
+      { key: unnamed.key, genres: 'Alternative, Pop', albumId: 2, source: 'deezer-album', checkedAt },
+      { key: miss.key, albumId: 3, source: 'deezer-album', checkedAt },
+    ]);
+    return store;
+  }
+  const genres = async (store: Parameters<typeof loadCatalogue>[0]) =>
+    Object.fromEntries(recommendCatalogue(catalogueTracks(await loadCatalogue(store)), user, deps, { all: true }).matches.map((m) => [m.track.title, m.genre]));
+  /** What the catalogue showed before song_genre existed: USDB's genre or none. */
+  const usdbOnly = { 'Chaise Longue': 'Post-Punk', 'Are You Bored Yet?': undefined, 'Album Lists None': undefined, 'Never Looked Up': undefined };
+
+  it("shows USDB's genre when the song has one, else Deezer's album genres, else none", async () => {
+    const shown = await genres(await withGenres());
+    expect(shown).toEqual({ 'Chaise Longue': 'Post-Punk', 'Are You Bored Yet?': 'Alternative, Pop', 'Album Lists None': undefined, 'Never Looked Up': undefined });
+    expect(Object.keys(shown)).toHaveLength(4);
+  });
+
+  it('reads the genres once per cache fill, never per request', async () => {
+    const store = await withGenres();
+    const getSongGenres = vi.spyOn(store, 'getSongGenres');
+    const catalogue = createCatalogue(() => loadCatalogue(store), deps);
+    for (const page of [{ all: true as const }, { offset: 0, limit: 2 }]) await catalogue.recommend(user, page);
+    await catalogue.setlist(user);
+    expect(getSongGenres).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows exactly what it showed before when song_genre is empty or missing, or the store has no genre method', async () => {
+    const store = await withGenres();
+    const empty = createMemoryStore();
+    for (const s of await store.listCatalogue(10)) await empty.putSongRange(s.key, { range: s.range, log: s.log });
+    await empty.putUsdbSongs(await store.listUsdbSongs());
+    expect(await genres(empty)).toEqual(usdbOnly);
+    const { getSongGenres: _, ...withoutGenres } = store;
+    expect(await genres(withoutGenres)).toEqual(usdbOnly);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(store, 'getSongGenres').mockRejectedValueOnce(Object.assign(new Error('relation "song_genre" does not exist'), { code: '42P01' }));
+    expect(await genres(store)).toEqual(usdbOnly);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('fails a fill whose genres read fails for another reason, so the next fill asks again', async () => {
+    const store = await withGenres();
+    vi.spyOn(store, 'getSongGenres').mockRejectedValueOnce(new Error('fetch failed (timeout)'));
+    let now = 0;
+    const catalogue = createCatalogue(() => loadCatalogue(store), deps, { now: () => now });
+    await expect(catalogue.get()).rejects.toThrow('fetch failed');
+    now += 1;
+    expect((await catalogue.get()).find((t) => t.title === 'Are You Bored Yet?')!.deezerGenres).toBe('Alternative, Pop');
   });
 });
 

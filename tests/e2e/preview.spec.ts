@@ -1,6 +1,6 @@
-// The play button in each song row (QWW-48), with a real browser's <audio>: Chromium as the Android phone and, where
+// The play button in each song row (QWW-48), in the Setlist tuner's first slot (QWW-57, R3), with a real browser's <audio>: Chromium as the Android phone and, where
 // it is installed, WebKit as the iPhone (both emulated: neither is a real phone, so the review guide asks for one).
-// The API is mocked, and /api/preview/<id> answers with a short tone after a delay, in byte ranges as Deezer's CDN does
+// The API is mocked, and /api/preview/<id> answers with a short silence after a delay, in byte ranges as Deezer's CDN does
 // (Safari asks for media in ranges). The app's route answers with a redirect to Deezer's CDN instead, and that hop
 // cannot be stood in for here: Playwright neither fulfils a redirect for a media request nor routes the request a
 // redirect leads to (tried in Chromium and WebKit, Nov 2026: the follow-up goes to the real CDN). So the redirect is
@@ -9,34 +9,15 @@
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { Match, RecommendationsResponse } from '../../src/lib/contracts';
+import type { Match, RecommendationsResponse, SetlistRequest } from '../../src/lib/contracts';
 import { allMatches, me } from '../fixtures/screen';
+import { setlistAnswer } from '../helpers/setlistServer';
+import { silentWav } from '../helpers/silentWav';
 
 const SCREENS = path.resolve('test-results/screens');
 
-/** 16-bit mono WAV: `seconds` of a quiet 440 Hz tone. */
-function toneWav(seconds: number, sampleRate = 22050): Buffer {
-  const n = Math.round(seconds * sampleRate);
-  const data = Buffer.alloc(n * 2);
-  for (let i = 0; i < n; i++) data.writeInt16LE(Math.round(0.1 * 32767 * Math.sin((2 * Math.PI * 440 * i) / sampleRate)), i * 2);
-  const header = Buffer.alloc(44);
-  header.write('RIFF', 0);
-  header.writeUInt32LE(36 + data.length, 4);
-  header.write('WAVE', 8);
-  header.write('fmt ', 12);
-  header.writeUInt32LE(16, 16);
-  header.writeUInt16LE(1, 20); // PCM
-  header.writeUInt16LE(1, 22); // mono
-  header.writeUInt32LE(sampleRate, 24);
-  header.writeUInt32LE(sampleRate * 2, 28);
-  header.writeUInt16LE(2, 32);
-  header.writeUInt16LE(16, 34);
-  header.write('data', 36);
-  header.writeUInt32LE(data.length, 40);
-  return Buffer.concat([header, data]);
-}
-
-const TONE = toneWav(30);
+/** What the preview route serves: 30 s of silence, so a WebKit pass plays nothing out of the speakers (tests/helpers/silentWav.ts). */
+const SILENCE = silentWav(30);
 
 /** The fixture songs, each with a Deezer id (1000 + its index) except those in `without`. */
 function songs(without: number[] = []): RecommendationsResponse {
@@ -52,17 +33,17 @@ interface Mock {
   previewCalls: string[];
 }
 
-/** The tone, or the bytes a Range header asks for (206), as Deezer's CDN answers: Safari asks for media in ranges. */
+/** The silence, or the bytes a Range header asks for (206), as Deezer's CDN answers: Safari asks for media in ranges. */
 function audioAnswer(rangeHeader: string | undefined): { status: number; contentType: string; headers: Record<string, string>; body: Buffer } {
   const range = /bytes=(\d+)-(\d*)/.exec(rangeHeader ?? '');
-  if (!range) return { status: 200, contentType: 'audio/wav', headers: { 'accept-ranges': 'bytes' }, body: TONE };
+  if (!range) return { status: 200, contentType: 'audio/wav', headers: { 'accept-ranges': 'bytes' }, body: SILENCE };
   const start = Number(range[1]);
-  const end = Math.min(range[2] ? Number(range[2]) : TONE.length - 1, TONE.length - 1);
+  const end = Math.min(range[2] ? Number(range[2]) : SILENCE.length - 1, SILENCE.length - 1);
   return {
     status: 206,
     contentType: 'audio/wav',
-    headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${TONE.length}` },
-    body: TONE.subarray(start, end + 1),
+    headers: { 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${SILENCE.length}` },
+    body: SILENCE.subarray(start, end + 1),
   };
 }
 
@@ -79,6 +60,8 @@ async function mockApi(context: BrowserContext, mock: Mock) {
       await new Promise((r) => setTimeout(r, 250));
       return route.fulfill(audioAnswer(route.request().headers()['range']));
     }
+    // The tuner asks the server's engine for its list: its own ranking of the same songs, signed in.
+    if (url.pathname === '/api/setlist') return json(setlistAnswer(mock.response, route.request().postDataJSON() as SetlistRequest, true));
     switch (url.pathname) {
       case '/api/me':
         return json(me({ low: 45, high: 72, source: 'test' }));
@@ -101,7 +84,8 @@ async function open(browser: Browser, baseURL: string | undefined, mock: Mock, v
   await mockApi(context, mock);
   const page = await context.newPage();
   await page.goto('/');
-  await expect(page.locator('ol li')).toHaveCount(5);
+  // The tuner lists every fixture song at once (the earlier screen showed 5 at a time).
+  await expect(page.locator('[data-row]')).toHaveCount(10);
   return { context, page };
 }
 
@@ -143,6 +127,13 @@ for (const engine of engines) {
 
       await play(page, titles[0]!).click();
       await expect(play(page, titles[0]!)).toHaveAttribute('data-preview', 'playing');
+      // In the tuner's slot (QWW-57, R3) the playing row shows the pause glyph where the rank number was, in the ring the button draws
+      // (R17): the track circle and the fill that runs over it, with the glyph, and nothing else of the row's number.
+      const slot = page.locator('[data-row]', { has: play(page, titles[0]!) }).locator('[data-play-slot]');
+      await expect(slot.locator('[data-preview] > svg').first()).toBeVisible();
+      await expect(slot.locator('circle:visible')).toHaveCount(2);
+      await expect(slot.locator('svg:visible')).toHaveCount(2);
+      await expect(slot.locator('[data-rank-number]')).toBeHidden();
       await shot(page, `qww-48-${engine.key}-playing-375x667`);
 
       // Five taps inside five seconds: each lands while the one before is still loading.
@@ -195,6 +186,25 @@ for (const engine of engines) {
       await expect.poll(async () => (await audio(page)).paused).toBe(true);
       expect((await audio(page)).src).toBeNull();
 
+      // R27: the page's own ▶ ("Play 30 s") is its first action: above the fold of this 375 x 667 phone and above the range chart, while Spotify's
+      // own player (an embed for this song) stays below the chart, where it was.
+      await expect(page.locator('button[data-preview]')).toHaveAccessibleName('Play 30 s');
+      const at = await page.evaluate(() => {
+        const big = document.querySelector('button[data-preview]')!;
+        const rect = (e: Element) => e.getBoundingClientRect();
+        let scroller: HTMLElement | null = big.parentElement;
+        while (scroller && getComputedStyle(scroller).overflowY !== 'auto') scroller = scroller.parentElement;
+        return {
+          wordsBottom: rect(big.querySelector('span')!).bottom,
+          chart: rect(document.querySelector('[role="img"][aria-label^="Song goes from"]')!),
+          frameTop: rect(document.querySelector('iframe[title^="Spotify player"]')!).top,
+          fold: scroller!.getBoundingClientRect().bottom,
+        };
+      });
+      expect(at.wordsBottom).toBeLessThanOrEqual(at.fold);
+      expect(at.wordsBottom).toBeLessThanOrEqual(at.chart.top);
+      expect(at.frameTop).toBeGreaterThanOrEqual(at.chart.bottom);
+
       await page.getByRole('button', { name: 'Back to songs' }).click();
       await expect(play(page, 'Plastic Love')).toHaveAttribute('data-preview', 'idle');
       await context.close();
@@ -203,11 +213,22 @@ for (const engine of engines) {
   });
 }
 
-test('the row and its play button fit a 375 px phone, with Deezer named over the list', async ({ browser, baseURL }) => {
+test('the row and its play button fit a 375 px phone, with Deezer named under the list', async ({ browser, baseURL }) => {
   const mock: Mock = { response: songs([1]), missing: new Set(), previewCalls: [] };
   for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
     const { context, page } = await open(browser, baseURL, mock, viewport);
-    await expect(page.getByText('Previews from')).toBeVisible();
+    // Deezer is named under the list (#34's notes; it stays there: QWW-57, R29): below the last row, at the end of what scrolls.
+    const credit = page.getByText('Previews from');
+    await credit.scrollIntoViewIfNeeded();
+    await expect(credit).toBeVisible();
+    expect(
+      await page.evaluate(() => {
+        const line = [...document.querySelectorAll('p')].find((p) => /Previews from/.test(p.textContent ?? ''))!;
+        const last = [...document.querySelectorAll('[data-row]')].at(-1)!;
+        return line.getBoundingClientRect().top >= last.getBoundingClientRect().bottom;
+      }),
+    ).toBe(true);
+    await page.locator('#list-scroll').evaluate((el) => el.scrollTo(0, 0));
     const button = (await play(page, 'Plastic Love').boundingBox())!;
     expect(button.width).toBeGreaterThanOrEqual(44);
     expect(button.height).toBeGreaterThanOrEqual(44);
@@ -220,4 +241,3 @@ test('the row and its play button fit a 375 px phone, with Deezer named over the
     await context.close();
   }
 });
-

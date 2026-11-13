@@ -1,0 +1,122 @@
+/* Sources and credits inside the TV (QWW-57, R28): the link in the chin, and the panel it opens over the screen. */
+
+/* The link: the book, at the chin's left end where the "karaoke-dokie" label used to be (the label is centred now). The chin is 34 px, and
+   a touch target is 44: the box is 44 tall and reaches 10 px below the chin into the page's padding (12 px on a phone, 16 on a desktop),
+   never up into the screen, where it would take a tap meant for the tuner's sheet. The negative bottom margin keeps the chin 34 tall, and
+   the bottom padding keeps the book in the middle of the chin. It is 44 wide, 13 px each side of the 18 px book, so the book starts where
+   the chin's own 10 px padding does, 3 px of the box reaching out to the left of it. */
+.link {
+  grid-column: 1;
+  justify-self: start;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0 0 -10px -13px;
+  padding: 0 0 10px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link {
+    transition: none;
+  }
+}
+
+/* Open (it is inert then, and out of the page's tab order; this is what the singer sees of it under the panel). */
+.link[aria-expanded='true'] {
+  color: var(--ink);
+}
+
+/* Only where a pointer can hover: a tap on a touch screen leaves :hover stuck on the button. */
+@media (hover: hover) {
+  .link:hover {
+    color: var(--ink);
+  }
+}
+
+/* The ring is drawn round the book, not round the 44 px box that reaches out under the TV. */
+.link:focus-visible {
+  outline: none;
+  color: var(--ink);
+}
+
+.link:focus-visible svg {
+  outline: 2px solid var(--pink);
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+
+/* The panel: the whole of the TV's screen (its rounded corners cut it), above everything the tuner stacks (2) and below the landscape
+   message (1000). Opaque, so nothing of the step shows through. It is the scroller. */
+.panel {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #2a2833 transparent;
+  background: #0d0b12;
+  color: var(--ink);
+  /* It takes the focus when it comes up (CreditsPanel.tsx), as a dialog does, but it is not a control: no ring. */
+  outline: none;
+}
+
+/* The heading and the ✕ stay at the top while the text scrolls under them. */
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 8px 20px;
+  background: #0d0b12;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+/* The ✕: 44 px to tap, with the 20 px mark in the middle. */
+.close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .close:hover {
+    color: var(--ink);
+  }
+}
+
+.close:focus-visible {
+  color: var(--ink);
+}
+
+.body {
+  padding: 16px 20px 32px;
+}

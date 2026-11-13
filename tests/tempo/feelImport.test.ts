@@ -61,6 +61,14 @@ describe('planFeelImport: what the step would write and what it does to the Temp
     expect(moves).toEqual(['    2. B - Double Time Ballad: 148 bpm (upbeat) -> 74 (slow)']);
   });
 
+  it('shows a song from a plain-definition pass where it will rank: in the strip at its band\'s inner edge, not at its own tempo (QWW-54)', () => {
+    const plain = parseFeelFile(
+      JSON.stringify({ method: 'test/v1', labeledAt: '2026-11-10', labels: [{ keys: ['b|double time ballad'], feel: 'slow', method: 'claude-opus-5-5/feel-plain-v1' }] }),
+    );
+    // Halved to 74 for a clear label, as in the test above; a weak one is put at 89.5 + 0.4 * (74 - 40) / 50 = 89.77, which prints as 90.
+    expect(planFeelImport({ catalogue, tempos, current: new Map(), file: plain }).moves).toEqual(['    2. B - Double Time Ballad: 148 bpm (upbeat) -> 90 (slow)']);
+  });
+
   it('writes only what is missing or different, so a rerun does the rest and a finished run does nothing', () => {
     const row = (key: string, feel: SongFeelRecord['feel'], source = 'test/v1'): SongFeelRecord => ({ key, feel, source, labeledAt: '2026-11-01' });
     // one row already there and equal (only its time differs), one there with another label, one missing

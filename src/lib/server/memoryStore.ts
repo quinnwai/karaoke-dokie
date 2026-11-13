@@ -11,6 +11,7 @@ import {
   type SongMoodsRecord,
   type SongDeezerRecord,
   type SongFeelRecord,
+  type SongGenreRecord,
   type SongTempoRecord,
   type SongPopularityRecord,
   type SongRangeRecord,
@@ -38,6 +39,7 @@ export function createMemoryStore(): Store {
   const songTempo = new Map<string, SongTempoRecord>();
   const songCanonical = new Map<string, SongCanonical>();
   const songFeel = new Map<string, SongFeelRecord>();
+  const songGenre = new Map<string, SongGenreRecord>();
   let spotifyBlock: number | null = null;
   const libraryStates = new Map<string, StoredLibraryState>();
   const savedTracks = new Map<string, Map<string, { track: Track; pos: number; gen: number }>>();
@@ -344,6 +346,22 @@ export function createMemoryStore(): Store {
     },
     async listSongFeels() {
       return new Map([...songFeel].map(([k, v]) => [k, clone(v)]));
+    },
+
+    // ---- Deezer album genres (QWW-61) ----
+    async putSongGenre(entries) {
+      for (const e of entries) songGenre.set(e.key, clone(e));
+    },
+    async getSongGenres(songKeys) {
+      const out = new Map<string, SongGenreRecord>();
+      for (const k of songKeys) {
+        const g = songGenre.get(k);
+        if (g) out.set(k, clone(g));
+      }
+      return out;
+    },
+    async listSongGenres() {
+      return new Map([...songGenre].map(([k, v]) => [k, clone(v)]));
     },
   };
 }

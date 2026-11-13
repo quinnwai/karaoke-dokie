@@ -76,6 +76,13 @@ export interface RangeBar {
 const PAD = 2; // semitones of breathing room at each end
 
 /**
+ * A bar narrower than this (percent of the chart) is too short for its two note names to stand side by side, each centred on its end: the
+ * chart then puts the low name to the left of its end and the high one to the right of its (R25). A name is at most 25 px wide at 11 px (G#1
+ * in DejaVu Sans, the widest font a page falls back to) and the bar is 214 px on a 360 px phone, so 14% is 30 px: a name and a gap.
+ */
+export const NAMES_APART = 14;
+
+/**
  * Lays the song's range over the user's range on one scale.
  * When the song fits an octave up or down, the song span shows the notes the
  * user will actually sing.

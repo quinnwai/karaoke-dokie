@@ -168,7 +168,10 @@ export interface Match {
    * tempo (Deezer, a beat tracker or the note file, QWW-40) squeezed into 90 to 125. Not a plain bpm. Unset when unknown.
    */
   tempo?: number;
-  /** Genre as USDB lists it (free text, e.g. "Rock"). */
+  /**
+   * Genre: USDB's when it lists one (free text, e.g. "Rock"), else the genres Deezer gives the album of the song's Deezer
+   * track, joined by ", " ("Pop, Rock"; song_genre, QWW-61). Unset when neither has one.
+   */
   genre?: string;
   /** For a duet matched on one singer's part: which part (1 = P1, 2 = P2) and that singer's name. */
   part?: number;
@@ -236,7 +239,10 @@ export type GearValues = Record<GearId, number>;
 export interface SetlistState {
   gears: GearValues;
   off: TunerPart[];
-  /** The picked eras. Used only while 'era' is not in `off`; picked and empty then means no songs (spec §4a). */
+  /**
+   * The picked eras. Used only while 'era' is not in `off`; picked and empty then means no songs (spec §4a). The tuner never sends that
+   * state since QWW-57's R23 (unpicking the last era turns Era off), and while Era is off it sends `[]` with 'era' in `off` (R22).
+   */
   eras: EraId[];
 }
 
@@ -280,7 +286,10 @@ export interface SetlistResponse {
   nextOffset: number | null;
   /** Data-source lines for the songs on this page, keyed by track id (the song page's info button). */
   sources: Record<string, DataSourceLogEntry>;
-  /** The parts that counted: not the ones in `off`, and not History unless the singer's library was read. */
+  /**
+   * The parts that counted: not the ones in `off`, and not History unless the singer's library was read. With none of the four gears counting (QWW-57, R36)
+   * the list is in the default order all the same, and this says none counted.
+   */
   applied: TunerPart[];
   /**
    * Why there are no songs: Era is on with no era picked ('no-era-picked', the design's "Pick an era to see songs."),

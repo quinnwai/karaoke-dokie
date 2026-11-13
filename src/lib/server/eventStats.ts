@@ -44,14 +44,20 @@ function funnel(events: StoredEvent[]): AdminEventsResponse['funnel'] {
 
 /**
  * The controls in use when an event happened, from its view props: each slider that was set
- * (a number), each chip row that had a pick, or 'none' when nothing was set. Empty for an event
+ * (a number), the eras when Era is on, each older chip row that had a pick, or 'none' when nothing was set. Empty for an event
  * that carries no view.
+ *
+ * "In use" means factored into the ranking, not touched: the Setlist tuner (QWW-46) starts with Difficulty and
+ * Popularity on, so they count for anyone who has not reset them. History, Tempo and Era count only once someone turned
+ * them on. What a tester actually moved is in the `gear_change` and `era_change` events.
  */
 export function controlsInUse(props: StoredEvent['props']): string[] {
   // Events from before the sliders (a `sort` prop, no slider props) say nothing about these controls.
   if (!props || !('difficulty' in props)) return [];
   const used: string[] = [];
   for (const slider of SLIDER_IDS) if (typeof props?.[slider] === 'number') used.push(slider);
+  // The Setlist tuner (QWW-46) sends the picked eras as one string, and only while Era is on.
+  if (typeof props?.eras === 'string') used.push('era');
   if (typeof props?.decade === 'string') used.push('decade');
   if (typeof props?.mood === 'string') used.push('mood');
   if (props?.duetsOnly === true) used.push('duets');

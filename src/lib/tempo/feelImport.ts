@@ -1,7 +1,7 @@
 // What `npm run tempo:feel` decides (QWW-54), kept here so it can be tested without a database: whether a write may go
 // ahead, which rows it would write, and what they do to the Tempo gear.
 
-import { effectiveTempo, feelOfTempo, type SongFeelRecord } from './feel';
+import { effectiveTempo, feelOfTempo, isWeakLabelSource, type SongFeelRecord } from './feel';
 import { feelRows, type FeelFile } from './feelFile';
 import { tempoOf, type SongTempoRecord } from './tempo';
 
@@ -50,7 +50,7 @@ export function planFeelImport(input: {
   for (const r of rows) {
     const hit = at.get(r.key)!;
     const measured = tempoOf(tempos.get(r.key), r.key);
-    const eff = effectiveTempo({ key: r.key, record: tempos.get(r.key), feel: r.feel })!;
+    const eff = effectiveTempo({ key: r.key, record: tempos.get(r.key), feel: r.feel, weak: isWeakLabelSource(r.source) })!;
     if (measured === undefined) effect.noMeasured++;
     else if (feelOfTempo(measured) === feelOfTempo(eff.tempo)) effect.sameBand++;
     else {

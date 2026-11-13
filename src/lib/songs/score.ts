@@ -132,6 +132,52 @@ export function popularityKnown(track: Pick<Track, 'popularity'>, song: Populari
 }
 
 /**
+ * How much a song's popularity counts, by its language as USDB lists it (the note file's #LANGUAGE, exactly as written:
+ * "German", "Japanese (romanized)", "German, English"), when its USDB views are its only popularity signal
+ * (usdbOnlyPopularity). A language that is not named counts in full. Weights are multiplied into the 0 to 1 score.
+ */
+export type LanguageWeights = Readonly<Record<string, number>>;
+
+/**
+ * The weights a list uses when no signed-in library is read (QWW-59, Quinn-Wai, 12 Nov): German, Polish and French
+ * count half. USDB is a German fan site, so its views lift German, Polish and French party songs that no KaraFun views,
+ * Billboard entry or Deezer rank vouches for (Kreuzberger Nächte, 2,056 views and nothing else). Spanish and Japanese
+ * songs stay as they are. A future language preference passes its own map instead.
+ */
+export const LANGUAGE_POPULARITY_WEIGHTS: LanguageWeights = Object.freeze({ German: 0.5, Polish: 0.5, French: 0.5 });
+
+/**
+ * True when a song's USDB views are its only popularity signal: without them popularityKnown would find nothing (no
+ * Spotify popularity, KaraFun views, Billboard Year-End entry or Deezer rank), so a signal added there counts here too.
+ */
+export function usdbOnlyPopularity(track: Pick<Track, 'popularity'>, song: PopularityInputs): boolean {
+  const { usdbViews, ...others } = song;
+  return typeof usdbViews === 'number' && !popularityKnown(track, others);
+}
+
+/**
+ * What `weights` multiplies a song's popularity by: its language's weight when USDB views are its only signal, else 1.
+ * A weight that is not a number from 0 up counts as 1.
+ */
+export function languageWeight(song: { language?: string; usdbOnly?: boolean }, weights: LanguageWeights): number {
+  if (!song.usdbOnly || song.language === undefined || !Object.hasOwn(weights, song.language)) return 1;
+  const w = weights[song.language];
+  return typeof w === 'number' && Number.isFinite(w) && w >= 0 ? w : 1;
+}
+
+/**
+ * The match with its popularity multiplied by `weight`, kept within 0 to 1 (a language weight). Its score and reasons
+ * follow, so "Crowd favourite" goes with the weighted popularity. `user` is the range the match was scored for. The
+ * match is not changed; a match with no score parts comes back as it is.
+ */
+export function withPopularityWeight(user: Pick<VocalRange, 'low' | 'high'>, m: Match, weight: number): Match {
+  if (!m.parts || weight === 1) return m;
+  const parts: ScoreParts = { ...m.parts, popularity: Math.min(1, Math.max(0, m.parts.popularity * weight)) };
+  const { side } = edgeTime({ ...user, source: 'test' }, m.range, shiftOf(m.octave));
+  return { ...m, parts, score: totalScore(parts), reasons: reasonsFor(parts, { difficulty: m.difficulty, side }, m.track) };
+}
+
+/**
  * Where a song goes in the no-Spotify catalogue, highest first (QWW-32): its popularityScore
  * without Spotify, from its USDB views (the range's own, else its USDB row's, as the
  * catalogue scores it), its karaoke popularity and its Deezer rank. -1 when there is none of these, so a song we
