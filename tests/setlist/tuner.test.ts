@@ -598,43 +598,22 @@ describe('sheet.module.css (QWW-57: R5, R6, R8, R10; the review of #38: findings
     for (let body = 134; body <= 260; body++) expect(length(size, body), `a body of ${body} px`).toBeCloseTo(Math.min(Math.max((body - 47) / 12.04, 9.5), 11), 5);
   });
 
-  it('keeps every pair of end labels on one line from a strip body of 129 px up: Tempo\'s tighten 5.5 px apart below a body of 144 px, the others fit at 6A\'s 12 px', () => {
-    // 6A's pairs, word for word. Their widths were measured for these words: change one and they must be measured again.
+  it('keeps every pair of end labels on one line from a strip body of 129 px up, at 6A\'s 12 px and with no rule of its own for any gear', () => {
+    // The pairs, word for word. Their widths were measured for these words: change one and they must be measured again.
     const PAIRS: Record<GearId, [string, string]> = {
       difficulty: ['Light work', 'Locked in'],
       popularity: ['Deep cuts', 'Pop hits'],
-      tempo: ['Slow jams', 'Upbeat tracks'],
+      tempo: ['Slow jams', 'Fast tracks'],
       history: ['Rediscover', 'On repeat'],
     };
     for (const g of GEAR_IDS) expect([GEAR_META[g].left, GEAR_META[g].right], g).toEqual(PAIRS[g]);
-    // Inter 500 at 12 px: each pair's width, in px. The three without a rule fit in the narrowest body, 129 px, with 8.5 px or more between the labels.
-    const AT_12 = { difficulty: 115.594, popularity: 104.141, history: 120.438 };
+    // Inter 500 at 12 px, as Chromium lays it out: each pair's width, in px. All four fit in the narrowest body, 129 px (the mini sheet at 360 px),
+    // with 8 px or more between the labels. Tempo's was "Upbeat tracks" (138.516 px, so 9.5 px too wide there, and it had a rule that tightened
+    // its tracking and size below a body of 144 px); "Fast tracks" (QWW-54) is the widest of the four now, and the rule is gone.
+    const AT_12 = { difficulty: 115.594, popularity: 104.141, tempo: 120.891, history: 120.438 };
     expect(rule('.ends')).toContain('font-size: 12px;');
-    for (const g of ['difficulty', 'popularity', 'history'] as const) expect(129 - AT_12[g], g).toBeGreaterThanOrEqual(8.5);
-    // Tempo's: 138.516 px at 12 px, which is 11.5416 px per px of font size over 22 characters (22 px of tracking per px of it).
-    const tempo = ".strip[data-gear='tempo'] .ends";
-    const size = declared(tempo, 'font-size');
-    const tracking = declared(tempo, 'letter-spacing');
-    expect(size).toMatch(/^clamp\(9px, [^;]*100cqw[^;]*, 12px\)$/);
-    expect(tracking).toMatch(/^clamp\(-0\.03em, [^;]*100cqw[^;]*, 0px\)$/);
-    for (let body = 129; body <= 260; body++) {
-      const s = length(size, body);
-      const t = length(tracking, body, s);
-      expect(s, `a body of ${body} px`).toBeGreaterThanOrEqual(9);
-      expect(s, `a body of ${body} px`).toBeLessThanOrEqual(12);
-      expect(t, `a body of ${body} px`).toBeGreaterThanOrEqual(-0.03 * s - 1e-9);
-      expect(t, `a body of ${body} px`).toBeLessThanOrEqual(0);
-      // At 375 px in the mini sheet (a body of 144 px) the pair fits as it is, 5.5 px apart: the labels are never nearer than that.
-      expect(body - (11.5416 * s + 22 * t), `Tempo's pair in a body of ${body} px`).toBeGreaterThanOrEqual(5.4);
-    }
-    // 6A's look from that body up, and the tracking before the size.
-    for (let body = 144; body <= 260; body++) {
-      expect(length(size, body), `a body of ${body} px`).toBe(12);
-      expect(length(tracking, body, 12), `a body of ${body} px`).toBeCloseTo(0, 9);
-    }
-    expect(length(size, 137)).toBe(12);
-    expect(length(tracking, 137, 12)).toBeLessThan(0);
-    expect(length(size, 129)).toBeCloseTo(11.35, 2);
+    for (const g of GEAR_IDS) expect(129 - AT_12[g], g).toBeGreaterThanOrEqual(8);
+    expect(css).not.toMatch(/\.strip\[data-gear=['"]?tempo['"]?\]\s*\.ends/);
   });
 
   it('sets the tab labels\' type by the tab bar\'s width: 3 px clear each side of "Popularity" with 4% to spare, from 360 px, 11 px where that fits (finding 7)', () => {

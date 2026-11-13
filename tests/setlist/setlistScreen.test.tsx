@@ -653,7 +653,7 @@ describe('gear strips', () => {
     ['difficulty', 'Light work', 'Locked in'],
     ['history', 'Rediscover', 'On repeat'],
     ['popularity', 'Deep cuts', 'Pop hits'],
-    ['tempo', 'Slow jams', 'Upbeat tracks'],
+    ['tempo', 'Slow jams', 'Fast tracks'],
   ] as const)('%s draws its end labels, %s and %s, under the track', (gear, left, right) => {
     draw([rankedSong('a')], signedIn({ off: [] }));
     const ends = within(el(SEL.strip(gear)));

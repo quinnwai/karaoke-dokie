@@ -209,7 +209,7 @@ const knobBox = (page: Page, gear: GearId) =>
 const ENDS: Record<GearId, [string, string]> = {
   difficulty: ['Light work', 'Locked in'],
   popularity: ['Deep cuts', 'Pop hits'],
-  tempo: ['Slow jams', 'Upbeat tracks'],
+  tempo: ['Slow jams', 'Fast tracks'],
   history: ['Rediscover', 'On repeat'],
 };
 

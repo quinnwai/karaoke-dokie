@@ -85,7 +85,7 @@ async function main() {
     const fit = catalogue.length; // every catalogue song is scored; the response keeps the best 1,000
     console.log(`- ${label}: the ${matches.length} songs shown, ${pct(matches.filter((m) => m.tempo !== undefined).length, matches.length)} with a tempo (catalogue of ${fit})`);
     if (label === 'F2 to C5') {
-      for (const [end, v] of [['Slow jams (0)', 0], ['Upbeat tracks (1)', 1]] as const) {
+      for (const [end, v] of [['Slow jams (0)', 0], ['Fast tracks (1)', 1]] as const) {
         const first = orderMatches(matches, { ...DEFAULT_VIEW, tempo: v }, range, 'catalogue').slice(0, 10);
         console.log(`  - ${end}, first 10: ${first.map(name).join('; ')}`);
       }
@@ -136,7 +136,7 @@ async function main() {
   });
   console.log(`\n## Library songs stored from Spotify: ${lib.length} stored, ${matches.length} fit ${pick ? `${pick.user_id}'s saved range` : 'F2 to C5'}`);
   console.log(`- with a tempo: ${pct(matches.filter((m) => m.tempo !== undefined).length, matches.length)}; of all ${lib.length}: ${pct(libKeys.filter((k) => libTempo(k) !== undefined).length, lib.length)}; with a feel label: ${pct(libKeys.filter((k) => libFeels.has(k)).length, lib.length)}`);
-  for (const [end, v] of [['Slow jams (0)', 0], ['Upbeat tracks (1)', 1]] as const) {
+  for (const [end, v] of [['Slow jams (0)', 0], ['Fast tracks (1)', 1]] as const) {
     const first = orderMatches(matches, { ...DEFAULT_VIEW, tempo: v }, userRange, 'library').slice(0, 10);
     console.log(`  - ${end}, first 10: ${first.map(name).join('; ')}`);
   }
