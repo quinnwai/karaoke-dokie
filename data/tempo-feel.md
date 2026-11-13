@@ -11,12 +11,12 @@ a measurement: no audio, no measured tempo and no lyrics went in. They were made
 `claude-opus-5-5`, in three passes. The first pass (method `claude-opus-5-5/feel-v1`) labelled batches of about 350 to 410
 songs, each batch a separate fresh run that saw only its own songs and the instructions below; a song the model did not know
 got no label, and a song that two batches labelled differently became "mid". The second look and the recheck are described
-further down. The file holds 6,236 labels, which cover 6,242 of the catalogue's 7,638 songs (82%): **808 slow, 4,655 mid and 779
+further down. The file holds 6,236 labels, which cover 6,242 of the catalogue's 7,638 songs (82%): **894 slow, 4,569 mid and 779
 upbeat songs** since the pace relabel of 13 Nov, described below (on 12 Nov, before it, there were 6,202 labelled
 songs, 97 to 98% of the 300, 1,000, 2,000 and 3,000 most popular, and 878 slow, 3,312 mid and 2,012 upbeat). Of the mids, 436 are
 songs the strict recheck took a slow or upbeat label from (method `claude-opus-5-5/feel-recheck-v1`); the band-edge audit below
-changed 430 labels, but only 2 of them to mid (the other 428 went from mid to slow or upbeat); and the pace relabel took 1,305 keys to
-mid. Thirty-one labels were set by hand: a-ha, Take On Me, from mid to upbeat (method `manual/hand-fix-qww-54`); Ed Sheeran, I See
+changed 430 labels, but only 2 of them to mid (the other 428 went from mid to slow or upbeat); and the pace relabel took 1,246 keys to
+mid (his 25 by hand, 1,221 by the recheck). Thirty-one labels were set by hand: a-ha, Take On Me, from mid to upbeat (method `manual/hand-fix-qww-54`); Ed Sheeran, I See
 Fire, from mid to slow (`manual/hand-fix-qww-54b`); four songs whose label the independent judge put at the opposite end and a second
 model did not back (`manual/hand-fix-qww-54d`, listed below); and Quinn-Wai's 25 songs of 13 Nov (`manual/hand-check-qww54-1`).
 
@@ -181,20 +181,27 @@ still `upbeat`.) The change list, by era and end, with his 25 marked, is on QWW-
    Rude Boy, The Diary of Jane, Home (Three Days Grace), Alive (P.O.D.), Cochise, Wavin' Flag, Pour Some Sugar on Me, Major Tom, Lola
    and Zombified were upbeat, and so was Danger Zone, the one he asked to have checked against the artist and genre: it is published at
    about 126 bpm, a driving mid-tempo beat and not a clearly fast one, so it is mid too.
-2. **Every other slow or upbeat label of a song in the release harness' nine test ranges was rechecked**: 2,775 songs, 1,920 upbeat
-   and 855 slow (labels set by hand were left alone). Three blind runs of `claude-opus-5-5` per song (method
-   `claude-opus-5-5/feel-pace-recheck-v1`), each a fresh run that saw the artist, title and year, the instructions below and 30 worked
-   examples: his 24 songs other than Danger Zone as mid, and six anchors (Take On Me, Barbara Ann, Born To Be Wild, Basket Case and
-   Mambo No. 5 fast; I See Fire slow). **A label changed only when two of the three runs said mid** (a song's other spellings count
-   together: two thirds of all their votes), and the song's other keys with the same label changed with it. 1,180 upbeat labels (61%
-   of 1,920) and 82 slow ones (10% of 855) became mid; all three runs agreed on 1,053 of the upbeat and 54 of the slow, two of three on
-   127 and 28. Nothing moved the other way (no song had a majority for fast on a slow label or for slow on an upbeat one) and 8 songs
-   came back unknown or split and kept their labels.
+2. **Every other upbeat label of a song in the release harness' nine test ranges was rechecked**: 1,920 songs (labels set by hand were
+   left alone). Three blind runs of `claude-opus-5-5` per song (method `claude-opus-5-5/feel-pace-recheck-v1`), each a fresh run that
+   saw the artist, title and year, the instructions below and 30 worked examples: his 24 songs other than Danger Zone as mid, and six
+   anchors (Take On Me, Barbara Ann, Born To Be Wild, Basket Case and Mambo No. 5 fast; I See Fire slow). **A label changed only when
+   two of the three runs said mid** (a song's other spellings count together: two thirds of all their votes), and the song's other
+   upbeat keys changed with it. 1,180 upbeat labels (61% of 1,920) became mid; all three runs agreed on 1,053 of them, two of three on
+   127. The recheck moved nothing the other way (no song had a majority for fast on a slow label or for slow on an upbeat one), and 8
+   songs came back unknown or split and kept their labels.
+   **Run but not applied: the slow end.** The 855 slow labels went through the same three runs, and 83 keys (81 songs) drew two thirds
+   mid votes. They stay slow, because his standard says "slow" means a slow ballad and the recheck's pace bar moved ballads that standard
+   keeps slow (Yesterday, In My Life, Dust in the Wind, Dido's Thank You at a felt 80). His four slow complaints were gentle songs with
+   a walking beat and are set to mid by hand above, as examples of mid and not as a bar for every ballad under about 105 bpm. The 83 are
+   listed in the change list on QWW-54.
 3. **QWW-56's two items went in first**, so the recheck saw them: the label the band-edge audit set on one spelling of a song was
    copied to its other spellings (24 keys: 21 with a mid label and 3 with none), and 43 songs the catalogue's fold left with no
    label (3 of them among the 24) took the label of their other spelling. Three of the 43 are different recordings that share a
    title and were left out (Disney's Goofy und Max and Chip & Chap intros, the Gummi Bears and DuckTales theme songs, Robin
-   Schulz's and Robin S.'s Show Me Love). So 61 keys: 21 changed and 40 new rows.
+   Schulz's and Robin S.'s Show Me Love). So 61 keys: 21 changed and 40 new rows. Ten keys go from mid to slow this way, each a spelling
+   that takes the label of its main row, and all are ballads: November Rain, Don't Let the Sun Go Down on Me (two credits), Say You,
+   Say Me, Die with a Smile, Cat's in the Cradle, Don't Let Go, I'm with You, Where'd You Go and Young Forever. (The other copies and the
+   new rows went through the recheck like any other label, so a spelling copied as upbeat that the recheck sent to mid is back where it was.)
 
 **How the instructions were chosen.** The first draft, the plain standard with his 25 as examples, kept only 156 of the 1,920 upbeat
 labels as fast, and on the '60s and '90s lists he had called good it moved most of the songs too. The instructions below add what
@@ -207,15 +214,15 @@ pool the songs that stayed fast were felt at a median of 138 bpm (5th percentile
 percentile 126): in effect, the fast end is songs felt at about 128 bpm or more.
 
 **What it did to the ends.** Of the 63 lists (nine ranges by seven eras) 60 still have 20 or more upbeat songs to fill a fast top 20 from
-labelled songs alone (63 before), the smallest has 17 and the median list 92 (209 before); at the slow end 60 of 63 have 20 or more
-(61 before), the smallest 11, the median 61 (69). Reggaeton and other Latin urban songs, which the runs tagged: 33, all labelled upbeat,
-30 are mid now; the three that stay fast are Bad Bunny's Después de la Playa (felt at 158) and Danza Kuduro (130, two keys), neither
+labelled songs alone (63 before), the smallest has 17 and the median list 92 (209 before); the slow end is as it was (61 of 63 have 20 or
+more, the smallest 12, the median 67 against 69 before). Reggaeton and other Latin urban songs, which the runs tagged: 33, all labelled
+upbeat, 30 are mid now; the three that stay fast are Bad Bunny's Después de la Playa (felt at 158) and Danza Kuduro (130, two keys), neither
 a dembow groove. Hip-hop and rap: 169 tagged, 151 upbeat, 121 of them mid now; the 30 that stay are felt at 126 to 165 bpm, and the
 ones near the line (Pitbull, Flo Rida, Nicki Minaj at 126 to 133) are where his ear may differ.
 
 **What to trust.** The recheck is the same kind of model as the first pass, working from memory with no audio and no measured tempo, and
-its felt tempos are recollections, not measurements; nothing here grades it except his ear. The 127 upbeat and 28 slow labels that only
-two of three runs sent to mid are the least certain moves. Two of his complaints are not about labels: the wrong
+its felt tempos are recollections, not measurements; nothing here grades it except his ear. The 127 upbeat labels that only two
+of three runs sent to mid are the least certain moves. Two of his complaints are not about labels: the wrong
 recording behind Chasing Cars and Wavin' Flag is the Deezer match (QWW-67).
 
 ## The instructions (feel-pace-recheck-v1)

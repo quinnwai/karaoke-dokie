@@ -65,7 +65,7 @@ describe('data/tempo-feel.json: every method is classed as strict or weak on pur
     'manual/hand-fix-qww-54b', // I See Fire
     'manual/hand-fix-qww-54d', // the 12 Nov fixes after the review; a hand-set label counts as clear
     'manual/hand-check-qww54-1', // Quinn-Wai's hand check of the lists (13 Nov): his 25 songs, set to mid by hand; counts as clear
-    'claude-opus-5-5/feel-pace-recheck-v1', // the pace recheck (13 Nov): three blind runs on felt pace with his 25 as examples, a label moved only when two agreed, only ever to mid
+    'claude-opus-5-5/feel-pace-recheck-v1', // the pace recheck (13 Nov): three blind runs on felt pace with his 25 as examples, a label moved only when two agreed, and only ever from upbeat to mid
   ];
   const WEAK = [
     'claude-opus-5-5/feel-plain-v1', // the second look, plain definitions
