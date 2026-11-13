@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { SongPart, SongRange, VocalRange } from '../../src/lib/contracts';
 import { edgeTime, MAYBE_SLACK, matchSong, partRange } from '../../src/lib/songs/match';
-import { songRangeFromUltrastar } from '../../src/lib/songs/range';
+import { applyNarrowRule, songRangeFromUltrastar } from '../../src/lib/songs/range';
+import { PENALTIES, scoreMatch } from '../../src/lib/songs/score';
 import { fixture } from './fixture';
 
 const user = (low: number, high: number): VocalRange => ({ low, high, source: 'test' });
@@ -169,5 +170,44 @@ describe('matchSong for low-confidence ranges (the Maybe group)', () => {
     expect(matchSong(C3C5, song(47, 72))).toBeNull();
     expect(matchSong(C3C5, { ...song(47, 72), source: 'audio-full' })).toBeNull();
     expect(matchSong(C3C5, { ...song(56, 64), source: 'audio-full' })).toEqual({ difficulty: 'easy', octave: 'none' });
+  });
+});
+
+describe('a narrow note file ends up in the Maybe group (QWW-60)', () => {
+  // Are You Bored Yet? by Wallows, as production stored it: G3 to A3 with 69% of the singing on G#3, so it fitted anyone and looked Easy.
+  const stored: SongRange = {
+    low: 55,
+    high: 57,
+    tessitura: 56.130472103004294,
+    source: 'note-file',
+    confidence: 'high',
+    fastLyrics: false,
+    octaveFrom: 'recording',
+    pitchShare: [[48, 0.009], [54, 0.012], [55, 0.058], [56, 0.688], [57, 0.198], [58, 0.022], [59, 0.013]],
+  };
+  // A catalogue track: nobody has played it, so no reason is about listening.
+  const track = { id: 'cat:wallows', title: 'Are You Bored Yet?', artist: 'Wallows', artistId: '', spotifyUrl: '', playRank: 0, familiarity: 1, known: false };
+
+  it('was Easy before the rule, for any singer whose range held G3 to A3 with room to spare', () => {
+    expect(matchSong(C3C5, stored)).toEqual({ difficulty: 'easy', octave: 'none' });
+    expect(matchSong(user(52, 64), stored)).toEqual({ difficulty: 'easy', octave: 'none' });
+  });
+
+  it('is a Maybe after it: no Easy badge, and the range it fits is the widened one give or take 2 semitones', () => {
+    const redone = applyNarrowRule(stored);
+    expect(redone).toMatchObject({ low: 54, high: 59, confidence: 'low' });
+    expect(matchSong(C3C5, redone)).toEqual({ difficulty: 'maybe', octave: 'none' });
+    expect(matchSong(user(52, 64), redone)).toEqual({ difficulty: 'maybe', octave: 'none' });
+    expect(matchSong(user(56, 58), redone)).toEqual({ difficulty: 'maybe', octave: 'none' }); // 54 to 60 holds 54 to 59
+    expect(matchSong(user(57, 58), redone)).toBeNull(); // 55 to 60 does not reach 54
+  });
+
+  it('takes the low-confidence penalty off its score and says nothing about where it sits in the range', () => {
+    const redone = applyNarrowRule(stored);
+    const fit = matchSong(C3C5, redone)!;
+    const scored = scoreMatch(C3C5, { track, range: redone, ...fit });
+    expect(scored.difficulty).toBe('maybe');
+    expect(scored.parts!.penalty).toBeCloseTo(PENALTIES.artistEstimate);
+    expect(scored.reasons).toEqual([]);
   });
 });

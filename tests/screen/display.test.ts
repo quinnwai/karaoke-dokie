@@ -163,12 +163,16 @@ describe('sourceTooltip', () => {
     expect(sourceTooltip(undefined)).toMatch(/don't have details/);
   });
 
-  it('says a Maybe song’s range is an estimate', () => {
+  it('says we are less sure of a Maybe song’s range, and never calls a measured one an estimate', () => {
     expect(sourceTooltip(source(9), true)).toBe(
       'From a recording of this song. Measured from the full recording: vocals separated and pitch-tracked, 9 s of clear singing. ' +
-        'This range is only an estimate, so the song is a maybe: it fits your range, give or take a couple of notes.',
+        'We’re less sure of this song’s range, so it’s a maybe: it fits your range, give or take a couple of notes.',
     );
-    expect(sourceTooltip(undefined, true)).toMatch(/don't have details.* This range is only an estimate/);
+    expect(sourceTooltip(undefined, true)).toMatch(/don't have details.* We’re less sure of this song’s range/);
+    // A narrow note file is a Maybe too (QWW-60): its line says it was measured from a note file, so the maybe text must not say "estimate".
+    const noteFile = sourceTooltip(source(0), true);
+    expect(noteFile).toMatch(/^Measured from a note-by-note file of this song\./);
+    expect(noteFile).not.toMatch(/estimate/i);
   });
 });
 

@@ -27,7 +27,7 @@ export interface SetlistRow {
   why: string;
   /**
    * The badge at the end of the row: the song's own label, the word the song page shows. null for a Maybe song, whose
-   * range is only an estimate, so no difficulty is shown anywhere. It is the label and not the song's place on the
+   * range we are less sure of, so no difficulty is shown anywhere. It is the label and not the song's place on the
    * Difficulty gear: Medium places start at 33.3, so a cut at 34 would call some Medium songs Easy.
    */
   badge: RowBadge | null;
@@ -54,15 +54,16 @@ export const SHIFT_REASON = { up: 'Shifted up to fit range', down: 'Shifted down
 /**
  * The reason line of a song (README §4): the first two reasons that hold, in this order, joined by " · ". A song that fits
  * only an octave away says so and nothing else (R13): it fits after the shift, so it claims no sweet spot, and the line is that
- * one reason, which fits a phone's row whole where a second reason was cut off. Its badge stays.
+ * one reason, which fits a phone's row whole where a second reason was cut off. Its badge stays. A Maybe song never says "In your sweet spot".
  */
 export function whyOf(song: SetlistSong, tuner: WhyTuner): string {
   const { difficulty, popularity, history, tempo } = song.gears;
   const { octave } = song.match;
   if (octave !== 'none') return SHIFT_REASON[octave];
   const reasons: string[] = [];
-  // 1. Difficulty counts, and the song sits near where it is set.
-  if (!tuner.off.includes('difficulty') && difficulty !== null && Math.abs(difficulty - tuner.difficulty) <= SWEET_SPOT) reasons.push('In your sweet spot');
+  // 1. Difficulty counts, and the song sits near where it is set. Not for a Maybe song (QWW-60): the engine gives it a place from the label its range would earn if
+  // we were sure of it, but we are not, its row has no badge and its page says Maybe, so the line claims no sweet spot for it.
+  if (!tuner.off.includes('difficulty') && difficulty !== null && song.match.difficulty !== 'maybe' && Math.abs(difficulty - tuner.difficulty) <= SWEET_SPOT) reasons.push('In your sweet spot');
   // 2. Among the best known songs, or the least known (QWW-57, R35, Quinn-Wai's word: "Unconventional pick", since even the bottom of the scale
   // holds well-known songs while logged out; the Popularity gear's end label stays "Deep cuts").
   if (popularity !== null) {

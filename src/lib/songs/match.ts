@@ -24,7 +24,8 @@
 // that part's own notes (toMatch).
 //
 // All of that is for confident ranges. A low-confidence range (an artist
-// estimate, or a mostly-rap or thinly sung recording) is too rough for a
+// estimate, a mostly-rap or thinly sung recording, or a note file or recording
+// of 5 semitones or fewer, see applyNarrowRule in range.ts) is too rough for a
 // label: it goes in the Maybe group, shown after the other songs without a
 // difficulty, when it fits the user's range widened by MAYBE_SLACK semitones
 // at each end (as written or an octave away). Two semitones is about the

@@ -10,7 +10,7 @@
 //   3. Era filter, then the songs are sorted. The first thing that counts is how a song is sung (QWW-58,
 //      Quinn-Wai's decision A, 11 Nov): every song that fits as written comes before any song that needs an
 //      octave jump, whatever the gears say. The jump songs still follow, so a singer whose popular songs all
-//      need a jump still gets a full list. The Maybe songs (estimated ranges) come after all the others, as
+//      need a jump still gets a full list. The Maybe songs (ranges we are less sure of) come after all the others, as
 //      everywhere else, and are sorted that way inside too. Inside each of those groups the songs are sorted
 //      by distance to the gear values (rankPrepared):
 //        distance = sum over the active gears of weight × |song's place − gear value|
@@ -142,7 +142,7 @@ export interface SetlistCandidate {
 interface PreparedSong {
   candidate: SetlistCandidate;
   era: EraId | null;
-  /** A Maybe song (an estimated range): shown after all the others. */
+  /** A Maybe song (a range we are less sure of): shown after all the others. */
   maybe: boolean;
   gears: Record<GearId, number | null>;
   /** The song's own popularity score (0 to 1), or -1 when unknown. Breaks ties. */

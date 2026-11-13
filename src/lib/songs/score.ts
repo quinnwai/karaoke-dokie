@@ -22,6 +22,7 @@ import { POPULARITY_SCALE } from './popularityScale';
 export const WEIGHTS = { fit: 0.85, popularity: 0.15 } as const;
 /** How much each part counts when picking the reasons shown for a rank. */
 const REASON_WEIGHTS = { comfort: 0.5, familiarity: 0.35, popularity: 0.15 } as const;
+/** `artistEstimate` is the penalty for any low-confidence range: an artist estimate, a rough recording, or a narrow range (QWW-60). */
 export const PENALTIES = { octave: 0.1, artistEstimate: 0.1, fastLyrics: 0.05 } as const;
 /** Used when we know nothing about a song's popularity. */
 export const UNKNOWN_POPULARITY = 0.4;
@@ -264,7 +265,7 @@ function listeningReason(t: TrackListening | undefined, familiarity: number): st
 /**
  * The one or two biggest contributors, in words. With a FitNote the range reason follows the
  * difficulty label, so a Hard song never says "In your sweet spot"; a Hard song always says why.
- * A Maybe song's range is only an estimate, so it gets no range reason.
+ * A Maybe song's range is not one we are sure of (an estimate, a rough recording, a very narrow range), so it gets no range reason.
  * A song with familiarity 0.3 or more gets a listening reason (listeningReason), unless the user
  * does not know it (`known` false): catalogue songs carry familiarity 1 only so that comfort
  * alone decides their fit. Saved-only songs are also not known, but their familiarity is below

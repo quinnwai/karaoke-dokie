@@ -171,6 +171,28 @@ describe('importBulkRanges', () => {
     });
   });
 
+  it('marks a recording of 5 semitones or fewer low confidence on its way in, so a newer export does not undo it (QWW-60)', async () => {
+    const store = createMemoryStore();
+    const narrow = audioRow('a|narrow', { low: 59, high: 64, pitchShare: [[59, 0.2], [61, 0.6], [64, 0.2]] });
+    const wide = audioRow('a|wide');
+    expect(await importBulkRanges(store, [narrow, wide], { now: at })).toEqual({ imported: 2, kept: 0, fastUpdated: 0 });
+    expect((await store.getSongRange('a|narrow'))!.range).toEqual({ ...narrow.range, confidence: 'low' });
+    expect((await store.getSongRange('a|wide'))!.range).toEqual(wide.range);
+
+    // The same song in a newer export replaces it, and is marked again.
+    const newer = audioRow('a|narrow', { low: 59, high: 64, method: 'pyin-v2/app-range-v1', pitchShare: [[59, 0.2], [61, 0.6], [64, 0.2]] });
+    expect(await importBulkRanges(store, [newer], { now: at })).toEqual({ imported: 1, kept: 0, fastUpdated: 0 });
+    expect((await store.getSongRange('a|narrow'))!.range).toMatchObject({ method: 'pyin-v2/app-range-v1', confidence: 'low' });
+  });
+
+  it('widens a narrow note file from an older ranges file, which was measured with the 5% trim only (QWW-60)', async () => {
+    const store = createMemoryStore();
+    const stray = [[52, 0.015], [55, 0.03], [56, 0.5], [57, 0.4], [58, 0.03], [61, 0.025]] as [number, number][];
+    const old = audioRow('a|older file', { source: 'note-file', method: undefined, mbid: undefined, low: 56, high: 58, tessitura: 56.495, pitchShare: stray });
+    await importBulkRanges(store, [{ ...old, outcome: undefined }], { now: at });
+    expect((await store.getSongRange('a|older file'))!.range).toMatchObject({ low: 52, high: 61, confidence: 'high' });
+  });
+
   it('writes only over a lower-ranked source, or the same source from another export', async () => {
     const store = createMemoryStore();
     const note = { ...audioRow('').range, source: 'note-file' as const, method: undefined, mbid: undefined, low: 40 };

@@ -22,12 +22,15 @@ const OUTCOME_TEXT: Record<LogOutcome, string> = {
   skipped: "We couldn't find range info for this song.",
 };
 
-/** Under the Maybe heading in the results. */
-export const MAYBE_NOTE = 'We only have an estimate of these songs’ range. They fit yours, give or take a couple of notes.';
+/**
+ * Under the Maybe heading in the results. A Maybe range is an artist's estimate, a rough recording, or a very narrow
+ * range of a song that stays on a note or two (QWW-60), so this says only that we are less sure, never that it is an estimate.
+ */
+export const MAYBE_NOTE = 'We’re less sure of these songs’ range. They fit yours, give or take a couple of notes.';
 
-const MAYBE_TEXT = 'This range is only an estimate, so the song is a maybe: it fits your range, give or take a couple of notes.';
+const MAYBE_TEXT = 'We’re less sure of this song’s range, so it’s a maybe: it fits your range, give or take a couple of notes.';
 
-/** Text for the "i" button on a song; Maybe songs also say their range is an estimate. */
+/** Text for the "i" button on a song; Maybe songs also say we are less sure of their range. */
 export function sourceTooltip(entry: DataSourceLogEntry | undefined, maybe = false): string {
   const reason = entry?.reason.trim();
   const text = !entry
