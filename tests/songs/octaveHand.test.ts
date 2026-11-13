@@ -56,12 +56,14 @@ const SHOULD_GO_BACK = [
   'shoot to thrill', 'shot in the dark', 'sink the pink', 'thunderstruck', 'who made who', 'whole lotta rosie', 'you shook me all night long',
 ];
 const SHOULD_MOVE_UP = ['back in black', 'big gun', 'fire your guns', 'hells bells', 'riff raff', 'rocker', 'stiff upper lip'];
+// QWW-62: AC/DC's Let There Be Rock, and three songs the fix moved on their own recording's typical note against published ranges.
+const KEPT = ['abba|money, money, money', 'ac/dc|let there be rock', "guns n' roses|don't cry", 'pixies|where is my mind?'];
 
 describe('the hand-checked evidence file', () => {
-  it('sets AC/DC at A#4 and keeps Let There Be Rock, each saying where it came from', () => {
+  it('sets AC/DC at A#4 and keeps the songs a person checked, each saying where it came from', () => {
     expect(handFile.artists['ac/dc']).toMatchObject({ typical: 70 });
     expect(handFile.artists['ac/dc']!.source).toMatch(/Quinn-Wai, by ear, 11 Nov/);
-    expect(Object.keys(handFile.keep)).toEqual(['ac/dc|let there be rock']);
+    expect(Object.keys(handFile.keep)).toEqual(KEPT);
     for (const entry of [...Object.values(handFile.artists), ...Object.values(handFile.keep)]) expect(entry.source.length).toBeGreaterThan(20);
   });
 
@@ -73,7 +75,7 @@ describe('the hand-checked evidence file', () => {
 
   it('is merged in at load, takes the place of a measured artist, and says which artists are hand-checked', () => {
     expect(evidence.artists['ac/dc']).toBe(70);
-    expect(evidence.hand).toEqual({ artists: ['ac/dc'], keep: ['ac/dc|let there be rock'] });
+    expect(evidence.hand).toEqual({ artists: ['ac/dc'], keep: KEPT });
     expect(Object.keys(evidence.songs)).toEqual(Object.keys(generated.songs)); // the generated songs are untouched
     const merged = withHandChecked({ songs: {}, artists: { a: 55, b: 60 } }, { artists: { a: { typical: 70, source: 'by ear' } }, keep: {} });
     expect(merged.artists).toEqual({ a: 70, b: 60 });
@@ -174,6 +176,47 @@ describe('AC/DC', () => {
     expect(hellsBells.log.reason).toBe("Used the note file. Moved an octave up to match the artist's register, checked by hand.");
     expect(notes((await store.getSongRange('ac/dc|you shook me all night long'))!.range!)).toBe('G4 to D5');
     expect(notes((await store.getSongRange('ac/dc|let there be rock'))!.range!)).toBe('C3 to E5');
+  });
+});
+
+// QWW-62: three songs whose note file the fix moved an octave on the typical note of its own recording, against the published
+// ranges in the keep list's sources. The rows below are note files as written (the ranges are what the preview and production held
+// before the fix, from the review of #40 and the backup song_ranges_bak_qww53), and the evidence is the real generated file.
+describe('songs kept at the octave their note file was written in (QWW-62)', () => {
+  const asWritten = (low: number, high: number, tessitura: number): SongRange => ({ low, high, tessitura, source: 'note-file', confidence: 'high', fastLyrics: false });
+  const cases = [
+    // key, note file as written, the move the recording's typical note makes, the lowest note (midi) each published source gives:
+    // ABBA E4 (Musicnotes twice, Singing Carrots); Pixies A3 and C#4 (Musicnotes) and G3 (Singing Carrots); Don't Cry C3 (Singing Carrots)
+    ['abba|money, money, money', asWritten(64, 77, 70.2), -12, [64]],
+    ['pixies|where is my mind?', asWritten(61, 69, 63), 12, [57, 61, 55]],
+    ["guns n' roses|don't cry", asWritten(50, 72, 62), -12, [48]],
+  ] as const;
+
+  it.each(cases)('%s: the recording evidence alone moves the note file away from every published range, and keep stops it', (key, stored, semitones, published) => {
+    expect(octaveMove(key, stored, generated)).toEqual({ semitones, from: 'recording' });
+    const moved = shiftRange(stored, semitones);
+    // the moved row's lowest note is far from the lowest note every source gives; the note file's is close to at least one
+    for (const lowest of published) expect(Math.abs(moved.low - lowest), `moved row against ${lowest}`).toBeGreaterThanOrEqual(9);
+    expect(published.some((lowest) => Math.abs(stored.low - lowest) <= 3)).toBe(true);
+    expect(octaveMove(key, stored, evidence)).toBeNull(); // with the keep list merged in, it is not moved
+    expect(correctOctave(key, stored, evidence)).toBe(stored);
+  });
+
+  it('keeps a row that was moved from moving again, and a rerun of the fix over a restored row writes nothing', async () => {
+    for (const [key, stored] of cases) {
+      const store = createMemoryStore();
+      await store.putSongRange(key, { range: { ...stored }, log: log() });
+      expect(await fixStoredOctaves(store, evidence)).toMatchObject({ checked: 1, moved: 0 });
+      // the same row on the generated evidence alone would be moved: the keep list is what holds it
+      expect(await fixStoredOctaves(store, generated, { dryRun: true })).toMatchObject({ moved: 1 });
+    }
+  });
+
+  it('uses the keys the app uses, spelling and punctuation included', () => {
+    expect(songKey("Guns N' Roses", "Don't Cry")).toBe("guns n' roses|don't cry");
+    expect(songKey('ABBA', 'Money, Money, Money')).toBe('abba|money, money, money');
+    expect(songKey('Pixies', 'Where Is My Mind?')).toBe('pixies|where is my mind?');
+    for (const [key] of cases) expect(Object.hasOwn(generated.songs, key), key).toBe(true); // each has the recording evidence that moved it
   });
 });
 
