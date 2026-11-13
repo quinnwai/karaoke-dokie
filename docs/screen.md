@@ -128,8 +128,8 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      its track id: a catalogue id has spaces ("cat:michael jackson|beat it"), which split the list of ids. The reason line is
      `whyOf` in `src/lib/setlist/rows.ts`: the first two of "In your sweet spot" (Difficulty on, the song's place within 15
      of it, and not for a Maybe song: the engine places it from the label its range would earn if we were sure, QWW-60), "Crowd favourite" or "Unconventional pick" (place on Popularity at least 85, or at most 35; R35: it was "Deep cut", which misdescribed well-known songs while logged out, and "Wildcard" for a day; the Popularity gear's end label stays "Deep cuts"; Quinn-Wai may still choose "Rare request", one string), "On repeat" or "Rediscover"
-     (History at least 85, or at most 20), and when none holds "For the party people" / "Slow burn" / "Solid pick"
-     (Tempo at least 70, at most 25, or unknown; the two tempo words are Quinn-Wai's, R32). The reason line is the one line that runs on under the badge (R35), so it has the row's whole width and no reason line is cut off with an ellipsis at 360, 375 or 390 px ("In your sweet spot · Unconventional pick" is 230 px at 12 px, the column beside a Medium badge 167 px at 360); below about 350 px its type tightens, never under 10.5 px. The places are the engine's, percentiles among the songs that fit the
+     (History at least 85, or at most 20), and when none holds the song's zone on the Mood gear: "Party bop" / "Slow jam" / "Feel-good"
+     (its Tempo place at least 67, under 34, or between or unknown; QWW-72, Round 7 §2. It was "For the party people" / "Slow burn" / "Solid pick" at 70 and 25, R32). The reason line is the one line that runs on under the badge (R35), so it has the row's whole width and no reason line is cut off with an ellipsis at 360, 375 or 390 px ("In your sweet spot · Unconventional pick" is 230 px at 12 px, the column beside a Medium badge 167 px at 360); below about 350 px its type tightens, never under 10.5 px. The places are the engine's, percentiles among the songs that fit the
      singer; a place that is null skips its rule, so a signed-out singer never sees the History ones. A song that fits only an octave away says "Shifted down to fit range" or "Shifted up to fit range" and nothing else (R13; its badge stays). The badge is the song's
      own label (what the song page shows); a Maybe song has none. Each title fills in once, left to right (about 0.6 s,
      `useFillIn`), as its row scrolls into view, and ends the normal white. It plays once per visit, and a visit lasts until the
@@ -142,7 +142,7 @@ Blocking landscape conflicts with WCAG 1.3.4 (Orientation); a real landscape lay
      while Era is on. When there are no songs the engine says why (`empty`): a line saying none of the picked eras fit the range, or that
      nothing fits it. The tuner is never on with nothing picked (R23, below), so "Pick an era to see songs." (the engine's
      `no-era-picked`) is reached only by a state set by hand (the test hook).
-   - **The sheet**: four gears (Difficulty, Popularity, Tempo, Listening history: the one that has to be unlocked is last,
+   - **The sheet**: four gears (Difficulty, Popularity, Tempo (shown as Mood, with a neon speaker, QWW-72), Listening history: the one that has to be unlocked is last,
      in the strips and in the tabs, R11; `SHEET_GEARS` in `gears.ts`) and a multi-select Era. The History strip reads
      "LISTENING HISTORY" (its tab says "History") and sets its type by the strip's width so it is never cut off (R6). Every
      strip and the Era panel have a grey border (`--sl-rail`) in every state; only the selected mini tab has a gear-coloured

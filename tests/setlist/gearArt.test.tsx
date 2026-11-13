@@ -33,6 +33,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EraIcon, EraTabArt, GearArt, type GearArtVariant } from '../../src/components/setlist/GearArt';
 import { FLICKER_MS, TAB_PX_PER_UNIT, flickerSession, neonFlicker, resetFlickerSession, speaker } from '../../src/lib/setlist/art';
+import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { ERA_IDS, GEAR_IDS, type EraId, type GearId } from '../../src/lib/setlist/types';
 
 const REFERENCE = join(__dirname, '../../docs/setlist-round7/setlist-round7-mood.html');
@@ -1029,15 +1030,17 @@ describe('GearArt: an off gear is a switched-off sign (README §7, test 25)', ()
     }
   });
 
-  it('stills the speaker: a reset Tempo (Mood) has unlit strokes and a cone with no animation, drawn at the default 45 with 2 waves a side, strip and tab', () => {
+  it('stills the speaker: a reset Tempo (Mood) has unlit strokes and a cone with no animation, drawn at the default with 2 waves a side, strip and tab', () => {
+    // The app's default is 50 (QWW-47); the README's mock default is 45. Both are Feel-good, so 2 waves a side either way.
+    expect(DEFAULTS.tempo).toBe(50);
     for (const variant of VARIANTS) {
-      const root = art('tempo', variant, 45, true);
+      const root = art('tempo', variant, DEFAULTS.tempo, true);
       expect(paints(root), variant).toEqual([COLOR.unlit]);
       expect(styleOf(one(root, '[data-thump]')).animation, variant).toBe('none');
       // It still has the shape its value gives it.
       const shown = all(root, '[data-wave]').filter((el) => styleOf(el).opacity !== '0');
       expect(shown, variant).toHaveLength(4);
-      expect(one(root, '[data-cone]').getAttribute('r'), variant).toBe(variant === 'strip' ? '11.3' : '1.97');
+      expect(one(root, '[data-cone]').getAttribute('r'), variant).toBe(variant === 'strip' ? '11.5' : '2.00');
     }
   });
 
