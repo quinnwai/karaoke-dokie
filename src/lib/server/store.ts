@@ -116,6 +116,8 @@ export interface SongPopularityRecord {
   chartYear?: number;
   /** Deezer's track rank (QWW-37), from song_deezer; higher is more popular. */
   deezerRank?: number;
+  /** The Deezer track that rank belongs to (song_deezer), for the row's play button (QWW-48); never scored with. */
+  deezerId?: number;
   /**
    * Which files the numbers came from: "karafun", "billboard" or "karafun+billboard"; "deezer"
    * when a song has only a Deezer rank.
@@ -129,6 +131,23 @@ export interface SongDeezerRecord {
   key: string;
   rank?: number;
   deezerId?: number;
+  /** ISO time of the lookup. */
+  checkedAt: string;
+}
+
+/**
+ * Deezer's genres for one song (QWW-61): the genres of the album of its Deezer track (song_deezer), or a miss. Shown
+ * only when USDB lists no genre for the song (src/lib/genres/genres.ts shownGenre).
+ */
+export interface SongGenreRecord {
+  /** songKey(artist, title). */
+  key: string;
+  /** The album's genre names joined by ", " ("Pop, Rock"). Unset for a miss: the track or album is gone, or the album lists none. */
+  genres?: string;
+  /** The Deezer album the genres were read from; unset when the track is gone. */
+  albumId?: number;
+  /** Where the genres came from: "deezer-album". */
+  source: string;
   /** ISO time of the lookup. */
   checkedAt: string;
 }
@@ -205,7 +224,7 @@ export interface Store {
   putSongPopularity(entries: SongPopularityRecord[]): Promise<void>;
   /**
    * Batch read; the map only has keys that have a row or a Deezer rank. Carries the song's Deezer
-   * rank (song_deezer) as well.
+   * rank and track id (song_deezer) as well.
    */
   getSongPopularity(songKeys: string[]): Promise<Map<string, SongPopularityRecord>>;
 
@@ -281,6 +300,14 @@ export interface Store {
   getSongFeels(songKeys: string[]): Promise<Map<string, SongFeelRecord>>;
   /** Every row, for the import script's comparison. */
   listSongFeels(): Promise<Map<string, SongFeelRecord>>;
+
+  // ---- Deezer album genres (QWW-61) ----
+  /** Adds rows, or replaces a key's row: the last entry for a key wins. */
+  putSongGenre(entries: SongGenreRecord[]): Promise<void>;
+  /** Batch read; the map only has keys that have a row, misses included. */
+  getSongGenres(songKeys: string[]): Promise<Map<string, SongGenreRecord>>;
+  /** Every row, for the fetch script's skip list. */
+  listSongGenres(): Promise<Map<string, SongGenreRecord>>;
 }
 
 export const DEFAULT_LIST_LIMIT = 200;

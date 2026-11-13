@@ -16,6 +16,7 @@ import {
   type SongMoodsRecord,
   type SongDeezerRecord,
   type SongFeelRecord,
+  type SongGenreRecord,
   type SongTempoRecord,
   type SongPopularityRecord,
   type SongRangeRecord,
@@ -165,6 +166,13 @@ function toSongFeel(r: Row): SongFeelRecord | null {
   const f: SongFeelRecord = { key: str(r.song_key), feel: r.feel, source: str(r.source) };
   if (isSet(r.labeled_at)) f.labeledAt = str(r.labeled_at);
   return f;
+}
+
+function toSongGenre(r: Row): SongGenreRecord {
+  const g: SongGenreRecord = { key: str(r.song_key), source: str(r.source), checkedAt: str(r.checked_at) };
+  if (isSet(r.genres)) g.genres = str(r.genres);
+  if (isSet(r.album_id)) g.albumId = num(r.album_id);
+  return g;
 }
 
 function toSongPopularity(r: Row): SongPopularityRecord {
@@ -502,12 +510,14 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
         const [rows, deezer] = await Promise.all([
           query(`SELECT * FROM song_popularity WHERE song_key IN (${placeholders})`, chunk),
-          query(`SELECT song_key, rank FROM song_deezer WHERE rank IS NOT NULL AND song_key IN (${placeholders})`, chunk),
+          query(`SELECT song_key, rank, deezer_id FROM song_deezer WHERE rank IS NOT NULL AND song_key IN (${placeholders})`, chunk),
         ]);
         for (const r of rows) out.set(str(r.song_key), toSongPopularity(r));
         for (const r of deezer) {
           const key = str(r.song_key);
-          out.set(key, { ...(out.get(key) ?? { key, source: 'deezer' }), deezerRank: num(r.rank) });
+          const p: SongPopularityRecord = { ...(out.get(key) ?? { key, source: 'deezer' }), deezerRank: num(r.rank) };
+          if (isSet(r.deezer_id)) p.deezerId = num(r.deezer_id);
+          out.set(key, p);
         }
       }
       return out;
@@ -788,6 +798,37 @@ export function createPostgresStore(rawQuery: QueryFn, opts: PostgresStoreOption
         if (f) out.set(f.key, f);
       }
       return out;
+    },
+
+    // ---- Deezer album genres (QWW-61) ----
+    async putSongGenre(entries) {
+      const unique = [...new Map(entries.map((e) => [e.key, e])).values()]; // one row per key: an upsert cannot touch a row twice
+      for (let i = 0; i < unique.length; i += 200) {
+        const params: unknown[] = [];
+        const rows = unique.slice(i, i + 200).map((e) => {
+          params.push(e.key, e.genres ?? null, e.albumId ?? null, e.source, e.checkedAt);
+          const n = params.length;
+          return `($${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}, $${n})`;
+        });
+        await query(
+          `INSERT INTO song_genre (song_key, genres, album_id, source, checked_at) VALUES ${rows.join(', ')}
+           ON CONFLICT (song_key) DO UPDATE SET genres = EXCLUDED.genres, album_id = EXCLUDED.album_id,
+             source = EXCLUDED.source, checked_at = EXCLUDED.checked_at`,
+          params,
+        );
+      }
+    },
+    async getSongGenres(songKeys) {
+      const out = new Map<string, SongGenreRecord>();
+      for (let i = 0; i < songKeys.length; i += 1000) {
+        const chunk = songKeys.slice(i, i + 1000);
+        const placeholders = chunk.map((_, j) => `$${j + 1}`).join(', ');
+        for (const r of await query(`SELECT * FROM song_genre WHERE song_key IN (${placeholders})`, chunk)) out.set(str(r.song_key), toSongGenre(r));
+      }
+      return out;
+    },
+    async listSongGenres() {
+      return new Map((await query('SELECT * FROM song_genre')).map((r) => [str(r.song_key), toSongGenre(r)] as const));
     },
   };
 }

@@ -5,15 +5,17 @@
 // Catalogue songs are shown as tracks nobody has played. Familiarity is 1, so comfort alone
 // decides the fit part of the score, and known is false, so no reason says the user listens to
 // them (score.ts). Popularity comes from the song's USDB views and stars and from our karaoke
-// popularity (KaraFun views, Billboard Year-End rank), whatever measured its range.
+// popularity (KaraFun views, Billboard Year-End rank), whatever measured its range. The genre is
+// USDB's, or Deezer's album genres for a song USDB lists none for (QWW-61, genres/genres.ts).
 
 import type { DataSourceLogEntry, Match, RecommendationsResponse, SetlistInput, SongRange, Track, VocalRange } from '../contracts';
+import { readSongGenres, shownGenre } from '../genres/genres';
 import { applyCanonical, type SongCanonical } from '../songs/canonical';
 import { partRange } from '../songs/match';
 import { hasLittleSinging } from '../songs/resolve';
-import { withKaraokePopularity } from '../songs/score';
-import { prepareSetlist, rankPrepared, type PreparedSetlist, type RankedSetlist } from '../songs/setlist';
-import { effectiveTempo, type EffectiveSource } from '../tempo/feel';
+import { LANGUAGE_POPULARITY_WEIGHTS, languageWeight, usdbOnlyPopularity, withKaraokePopularity, withPopularityWeight, type LanguageWeights } from '../songs/score';
+import { prepareSetlist, rankPrepared, type PreparedSetlist, type RankedSetlist, type SetlistCandidate } from '../songs/setlist';
+import { effectiveTempo, isWeakLabelSource, type EffectiveSource } from '../tempo/feel';
 import { readSongFeels } from './songFeel';
 import { MAX_ALL_MATCHES, type SongDeps } from './songService';
 import type { CatalogueSong, SongPopularityRecord, Store, UsdbIndexEntry } from './store';
@@ -32,6 +34,8 @@ export interface CatalogueEntry extends CatalogueSong {
   tempo?: number;
   /** Where `tempo` came from: a measurement, a checked tempo, or the song's feel label. */
   tempoSource?: EffectiveSource;
+  /** Deezer's genres for the song's album ("Pop, Rock"; song_genre, QWW-61), when it has some: shown only when USDB lists none. */
+  deezerGenres?: string;
 }
 
 /** A catalogue song and the track it is shown as. Its log line carries the track id. */
@@ -74,14 +78,15 @@ async function readCanonical(
 }
 
 /**
- * Reads the catalogue, most popular first, and its songs' karaoke popularity, measured tempo and feel
- * labels in batched reads. The cache keeps all of it, so requests read none of it, and the one tempo of
+ * Reads the catalogue, most popular first, and its songs' karaoke popularity, measured tempo, feel
+ * labels and Deezer genres in batched reads. The cache keeps all of it, so requests read none of it, and the one tempo of
  * each song is worked out here, once per cache fill (effectiveTempo), never per request. A store with no
- * feel labels, or one that cannot give them, leaves every song on its measured tempo. With `canonical`, one
+ * feel labels, or one that cannot give them, leaves every song on its measured tempo, and one with no Deezer genres
+ * leaves every song with USDB's genre only (genres/genres.ts readSongGenres). With `canonical`, one
  * row per song with its clean title and artist line, from the stored one-song-one-row mapping when there is one.
  */
 export async function loadCatalogue(
-  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'> & Partial<Pick<Store, 'getSongCanonical' | 'getSongFeels'>>,
+  store: Pick<Store, 'listCatalogue' | 'getSongPopularity' | 'getSongTempos'> & Partial<Pick<Store, 'getSongCanonical' | 'getSongFeels' | 'getSongGenres'>>,
   size: number = CATALOGUE_SIZE,
   opts: LoadOptions = {},
 ): Promise<LoadedCatalogue> {
@@ -89,11 +94,18 @@ export async function loadCatalogue(
   const read = opts.canonical ? await readCanonical(store, listed.map((s) => s.key)) : { mapping: new Map<string, SongCanonical>(), failed: false };
   const songs = applyCanonical(listed, read.mapping);
   const keys = songs.map((s) => s.key);
-  const [popularity, tempos, feels] = await Promise.all([store.getSongPopularity(keys), store.getSongTempos(keys), readSongFeels(store, keys)]);
+  const [popularity, tempos, feels, genres] = await Promise.all([
+    store.getSongPopularity(keys),
+    store.getSongTempos(keys),
+    readSongFeels(store, keys),
+    readSongGenres(store, keys),
+  ]);
   const entries: LoadedCatalogue = songs.map((s) => {
     const p = popularity.get(s.key);
-    const t = effectiveTempo({ key: s.key, record: tempos.get(s.key), feel: feels.get(s.key)?.feel });
-    return { ...s, ...(p ? { popularity: p } : {}), ...(t ? { tempo: t.tempo, tempoSource: t.source } : {}) };
+    const label = feels.get(s.key);
+    const t = effectiveTempo({ key: s.key, record: tempos.get(s.key), feel: label?.feel, weak: isWeakLabelSource(label?.source) });
+    const g = genres.get(s.key);
+    return { ...s, ...(p ? { popularity: p } : {}), ...(t ? { tempo: t.tempo, tempoSource: t.source } : {}), ...(g ? { deezerGenres: g } : {}) };
   });
   if (read.failed) entries.degraded = true;
   return entries;
@@ -151,18 +163,23 @@ function withoutPitchShare(range: SongRange): SongRange {
   return rest;
 }
 
+/** What a language weight reads from a catalogue song (QWW-59): its USDB language, and whether USDB views are its only popularity signal. */
+export type PopularitySignals = Pick<SetlistCandidate, 'language' | 'usdbOnly'>;
+
 /**
  * The catalogue songs that fit `userRange` (the hard range filter: `deps.matchSong` is null for a song that does
- * not), as matches carrying their year, genre and tempo, and the log line of each by track id. Neither ranked nor
- * cut, and the stored range, pitch histogram included, is kept.
+ * not), as matches carrying their year, genre and tempo, the log line of each by track id, and what a language
+ * weight reads from each by track id (`signals`). Neither ranked nor cut, and the stored range, pitch histogram
+ * included, is kept.
  */
 export function catalogueMatches(
   songs: CatalogueTrack[],
   userRange: VocalRange,
   deps: Pick<CatalogueDeps, 'matchSong'>,
-): { matches: Match[]; logs: Map<string, DataSourceLogEntry> } {
+): { matches: Match[]; logs: Map<string, DataSourceLogEntry>; signals: Map<string, PopularitySignals> } {
   const matches: Match[] = [];
   const logs = new Map<string, DataSourceLogEntry>();
+  const signals = new Map<string, PopularitySignals>();
   for (const song of songs) {
     if (hasLittleSinging(song.title)) continue; // a dub or karaoke version shares the original's key
     const scored = withKaraokePopularity(scoringRange(song.range, song.usdb), song.popularity);
@@ -179,22 +196,33 @@ export function catalogueMatches(
       m.year = song.popularity.chartYear;
       m.yearSource = 'chart';
     }
-    if (song.usdb?.genre) m.genre = song.usdb.genre;
+    const genre = shownGenre(song.usdb?.genre, song.deezerGenres);
+    if (genre !== undefined) m.genre = genre;
     if (song.tempo !== undefined) m.tempo = song.tempo;
+    if (song.popularity?.deezerId !== undefined) m.deezerId = song.popularity.deezerId;
     matches.push(m);
     logs.set(song.track.id, song.log);
+    const signal: PopularitySignals = { usdbOnly: usdbOnlyPopularity(song.track, scored) };
+    if (song.usdb?.language) signal.language = song.usdb.language;
+    signals.set(song.track.id, signal);
   }
-  return { matches, logs };
+  return { matches, logs, signals };
 }
 
-/** Matches the whole catalogue against the visitor's range, ranks it, then returns all of it or one page. */
+/**
+ * Matches the whole catalogue against the visitor's range, ranks it, then returns all of it or one page. The visitor is
+ * never signed in here, so `languageWeights` (score.ts) applies to every song whose only popularity signal is its USDB
+ * views, before the ranking: its popularity, score and "Crowd favourite" reason are the weighted ones (QWW-59).
+ */
 export function recommendCatalogue(
   songs: CatalogueTrack[],
   userRange: VocalRange,
   deps: CatalogueDeps,
   page: CataloguePage,
+  languageWeights: LanguageWeights = LANGUAGE_POPULARITY_WEIGHTS,
 ): RecommendationsResponse {
-  const { matches, logs } = catalogueMatches(songs, userRange, deps);
+  const { matches: found, logs, signals } = catalogueMatches(songs, userRange, deps);
+  const matches = found.map((m) => withPopularityWeight(userRange, m, languageWeight(signals.get(m.track.id) ?? {}, languageWeights)));
 
   // Ranked as a whole, then paged. The order is the same on every request while the cached
   // catalogue lasts, so pages never repeat or skip a song.
@@ -219,6 +247,8 @@ export interface CatalogueSetlist {
   /** Every catalogue song that fits the range. */
   matches: Match[];
   logs: Map<string, DataSourceLogEntry>;
+  /** What a language weight reads from each song, by track id (catalogueMatches). */
+  signals: Map<string, PopularitySignals>;
   prepared: PreparedSetlist;
 }
 
@@ -228,8 +258,8 @@ export function prepareCatalogue(
   range: Pick<VocalRange, 'low' | 'high'>,
   deps: Pick<CatalogueDeps, 'matchSong'>,
 ): CatalogueSetlist {
-  const { matches, logs } = catalogueMatches(songs, { low: range.low, high: range.high, source: 'test' }, deps);
-  return { matches, logs, prepared: prepareSetlist(matches.map((match) => ({ match })), range) };
+  const { matches, logs, signals } = catalogueMatches(songs, { low: range.low, high: range.high, source: 'test' }, deps);
+  return { matches, logs, signals, prepared: prepareSetlist(matches.map((match) => ({ match, ...signals.get(match.track.id) })), range) };
 }
 
 /**
@@ -246,7 +276,8 @@ export const SETLIST_RANGES_KEPT = 6;
 export interface Catalogue {
   /** The catalogue as tracks: read from the store on first use, and again once the TTL has passed. */
   get(): Promise<CatalogueTrack[]>;
-  recommend(userRange: VocalRange, page: CataloguePage): Promise<RecommendationsResponse>;
+  /** `languageWeights` replaces LANGUAGE_POPULARITY_WEIGHTS for this request (recommendCatalogue). */
+  recommend(userRange: VocalRange, page: CataloguePage, languageWeights?: LanguageWeights): Promise<RecommendationsResponse>;
   /** The tuner's songs for a range, kept for the next requests (the last SETLIST_RANGES_KEPT ranges), and dropped when the catalogue reloads. */
   setlist(range: Pick<VocalRange, 'low' | 'high'>): Promise<CatalogueSetlist>;
 }
@@ -281,8 +312,8 @@ export function createCatalogue(
   let listsFrom: CatalogueTrack[] | null = null;
   return {
     get,
-    async recommend(userRange, page) {
-      return recommendCatalogue(await get(), userRange, deps, page);
+    async recommend(userRange, page, languageWeights) {
+      return recommendCatalogue(await get(), userRange, deps, page, languageWeights);
     },
     async setlist(range) {
       const tracks = await get();

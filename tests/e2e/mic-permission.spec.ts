@@ -205,8 +205,9 @@ test('on Android Chrome it reads the same, and the events say which browser it w
 });
 
 test('on a computer it says "browser", and there is no dark band behind the button', async ({ browser, baseURL }) => {
-  // As wide as the TV gets (880px), where a band behind the button runs the whole width of the screen. The project's
-  // default is an iPhone, which `newContext` would carry over, so the computer is named in full.
+  // On a computer the TV is the same phone-shaped 390 px frame (QWW-57, R2), 768 px tall at 1280x800: the step fits it, so the
+  // button is not held up over scrolling words and no band is drawn behind it. The project's default is an iPhone, which
+  // `newContext` would carry over, so the computer is named in full.
   const context = await browser.newContext({ ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 }, baseURL });
   await mockApi(context);
   const page = await context.newPage();

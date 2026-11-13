@@ -168,13 +168,21 @@ export interface Match {
    * tempo (Deezer, a beat tracker or the note file, QWW-40) squeezed into 90 to 125. Not a plain bpm. Unset when unknown.
    */
   tempo?: number;
-  /** Genre as USDB lists it (free text, e.g. "Rock"). */
+  /**
+   * Genre: USDB's when it lists one (free text, e.g. "Rock"), else the genres Deezer gives the album of the song's Deezer
+   * track, joined by ", " ("Pop, Rock"; song_genre, QWW-61). Unset when neither has one.
+   */
   genre?: string;
   /** For a duet matched on one singer's part: which part (1 = P1, 2 = P2) and that singer's name. */
   part?: number;
   partSinger?: string;
   /** Moods that passed the label gate, for the mood chips. Unset when the song has no shipped label. */
   moods?: Mood[];
+  /**
+   * The song's Deezer track id (song_deezer), for the play button in its row (QWW-48): it plays the track's 30 s
+   * preview through GET /api/preview/<deezerId>. Unset when Deezer had no matching track, and the button is disabled.
+   */
+  deezerId?: number;
 }
 
 // ---------- results view (QWW-9, QWW-13, QWW-22, QWW-23) ----------
@@ -231,7 +239,10 @@ export type GearValues = Record<GearId, number>;
 export interface SetlistState {
   gears: GearValues;
   off: TunerPart[];
-  /** The picked eras. Used only while 'era' is not in `off`; picked and empty then means no songs (spec §4a). */
+  /**
+   * The picked eras. Used only while 'era' is not in `off`; picked and empty then means no songs (spec §4a). The tuner never sends that
+   * state since QWW-57's R23 (unpicking the last era turns Era off), and while Era is off it sends `[]` with 'era' in `off` (R22).
+   */
   eras: EraId[];
 }
 
@@ -275,7 +286,10 @@ export interface SetlistResponse {
   nextOffset: number | null;
   /** Data-source lines for the songs on this page, keyed by track id (the song page's info button). */
   sources: Record<string, DataSourceLogEntry>;
-  /** The parts that counted: not the ones in `off`, and not History unless the singer's library was read. */
+  /**
+   * The parts that counted: not the ones in `off`, and not History unless the singer's library was read. With none of the four gears counting (QWW-57, R36)
+   * the list is in the default order all the same, and this says none counted.
+   */
   applied: TunerPart[];
   /**
    * Why there are no songs: Era is on with no era picked ('no-era-picked', the design's "Pick an era to see songs."),
@@ -345,6 +359,9 @@ export interface FeedbackEntry {
 // Beta event log (QWW-16, QWW-20):
 // POST /api/events     body EventsRequest -> 204 (also 204 when collection is switched off)
 // GET  /api/admin/events (header x-admin-token) -> AdminEventsResponse
+// Row play button (QWW-48), no session needed:
+// GET  /api/preview/<deezerId>         -> 302 to the track's 30 s Deezer preview (an MP3 link that expires after
+//   15 minutes, so it is never stored), 404 when Deezer has no preview, 502 when Deezer cannot be reached
 
 export interface MeResponse {
   userId: string;
@@ -395,7 +412,7 @@ export type EventValue = string | number | boolean | null;
 
 /** One thing a tester did. Never carries a Spotify id or a song from someone's Spotify library. */
 export interface AppEvent {
-  /** e.g. 'landing_viewed', 'range_shown', 'results_viewed', 'slider_changed', 'song_opened'. */
+  /** e.g. 'title_view', 'range_shown', 'list_view', 'slider_changed', 'song_open'. The release funnel's names are in eventNames.ts. */
   name: string;
   /** ISO time on the device. */
   at: string;
@@ -405,6 +422,19 @@ export interface AppEvent {
 export interface EventsRequest {
   anonId: string;
   events: AppEvent[];
+}
+
+/**
+ * What the screen needs to send events to PostHog, the event log's second sink (QWW-51). app/page.tsx reads it from the
+ * environment (postHogSettings in src/lib/server/config.ts) and hands it to KaraokeApp.
+ */
+export interface PostHogSettings {
+  /** The project token ("phc_..."), public by design: it ships to every browser. */
+  key: string;
+  /** The ingest address, https and without a trailing slash; it has a path only when it is a reverse proxy's. */
+  host: string;
+  /** production, preview or local. Sent on every event so the release funnel can leave the rest out. */
+  environment: string;
 }
 
 export interface AdminEventsResponse {

@@ -2,22 +2,20 @@
 // in, AdminEventsResponse out. Every grouping uses a Map, because device ids are free text and
 // a plain object keyed by "__proto__" or "constructor" would hit its prototype.
 import { SLIDER_IDS, type AdminEventsResponse, type AppEvent } from '../contracts';
+import { EVENT } from '../eventNames';
 import type { StoredEvent } from './store';
 
-/**
- * The onboarding funnel in order. note_detected fires for each end of the range, so its `step`
- * prop splits it into two steps.
- */
-export const FUNNEL: { label: string; name: string; step?: 'low' | 'high' }[] = [
-  { label: 'landing_viewed', name: 'landing_viewed' },
+/** The onboarding funnel in order. The release funnel's names come from eventNames.ts, so PostHog and this view agree. */
+export const FUNNEL: { label: string; name: string }[] = [
+  { label: EVENT.titleView, name: EVENT.titleView },
   { label: 'start_pressed', name: 'start_pressed' },
-  { label: 'low_note_detected', name: 'note_detected', step: 'low' },
-  { label: 'high_note_detected', name: 'note_detected', step: 'high' },
+  { label: EVENT.lowNoteDone, name: EVENT.lowNoteDone },
+  { label: EVENT.highNoteDone, name: EVENT.highNoteDone },
   { label: 'range_shown', name: 'range_shown' },
-  { label: 'results_viewed', name: 'results_viewed' },
-  { label: 'song_opened', name: 'song_opened' },
+  { label: EVENT.listView, name: EVENT.listView },
+  { label: EVENT.songOpen, name: EVENT.songOpen },
   { label: 'spotify_link_pressed', name: 'spotify_link_pressed' },
-  { label: 'spotify_connect_pressed', name: 'spotify_connect_pressed' },
+  { label: EVENT.spotifyConnect, name: EVENT.spotifyConnect },
 ];
 
 /** The replay lists this many devices, the most recently active ones. */
@@ -38,7 +36,7 @@ function funnel(events: StoredEvent[]): AdminEventsResponse['funnel'] {
   return FUNNEL.map((step) => {
     const devices = new Set<string>();
     for (const e of events) {
-      if (e.name === step.name && (step.step === undefined || e.props?.step === step.step)) devices.add(e.anonId);
+      if (e.name === step.name) devices.add(e.anonId);
     }
     return { name: step.label, devices: devices.size };
   });
@@ -46,14 +44,20 @@ function funnel(events: StoredEvent[]): AdminEventsResponse['funnel'] {
 
 /**
  * The controls in use when an event happened, from its view props: each slider that was set
- * (a number), each chip row that had a pick, or 'none' when nothing was set. Empty for an event
+ * (a number), the eras when Era is on, each older chip row that had a pick, or 'none' when nothing was set. Empty for an event
  * that carries no view.
+ *
+ * "In use" means factored into the ranking, not touched: the Setlist tuner (QWW-46) starts with Difficulty and
+ * Popularity on, so they count for anyone who has not reset them. History, Tempo and Era count only once someone turned
+ * them on. What a tester actually moved is in the `gear_change` and `era_change` events.
  */
 export function controlsInUse(props: StoredEvent['props']): string[] {
   // Events from before the sliders (a `sort` prop, no slider props) say nothing about these controls.
   if (!props || !('difficulty' in props)) return [];
   const used: string[] = [];
   for (const slider of SLIDER_IDS) if (typeof props?.[slider] === 'number') used.push(slider);
+  // The Setlist tuner (QWW-46) sends the picked eras as one string, and only while Era is on.
+  if (typeof props?.eras === 'string') used.push('era');
   if (typeof props?.decade === 'string') used.push('decade');
   if (typeof props?.mood === 'string') used.push('mood');
   if (props?.duetsOnly === true) used.push('duets');
@@ -67,11 +71,11 @@ export function controlsInUse(props: StoredEvent['props']): string[] {
 function byControl(events: StoredEvent[]): AdminEventsResponse['byControl'] {
   const acc = new Map<string, { stats: ControlStats; positions: number[] }>();
   for (const e of events) {
-    if (e.name !== 'song_opened' && e.name !== 'spotify_link_pressed' && e.name !== 'feedback_tapped') continue;
+    if (e.name !== EVENT.songOpen && e.name !== 'spotify_link_pressed' && e.name !== 'feedback_tapped') continue;
     for (const control of controlsInUse(e.props)) {
       let a = acc.get(control);
       if (!a) acc.set(control, (a = { stats: { opened: 0, spotify: 0, up: 0, down: 0, medianPosition: null }, positions: [] }));
-      if (e.name === 'song_opened') {
+      if (e.name === EVENT.songOpen) {
         a.stats.opened++;
         const position = e.props?.position;
         if (typeof position === 'number' && Number.isFinite(position)) a.positions.push(position);

@@ -7,8 +7,9 @@
 import { devices, expect, test, type BrowserContext } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { Match, RecommendationsResponse } from '../../src/lib/contracts';
+import type { Match, RecommendationsResponse, SetlistRequest } from '../../src/lib/contracts';
 import { shapeOf } from '../../src/lib/songs/score';
+import { setlistAnswer } from '../helpers/setlistServer';
 import { areYouWithMe, USER_D2_TO_D5 } from '../songs/rangeBarFixture';
 
 const SCREENS = path.resolve('test-results/screens');
@@ -74,16 +75,16 @@ test('a refused sign-in says so under the range and under the list, and Cancel o
   await withRange(context, 39, 72);
   const page = await context.newPage();
   await page.goto('/?authError=spotify');
-  await expect(page.getByRole('status')).toHaveText('Couldn’t sign in to Spotify.');
+  await expect(page.getByRole('status')).toHaveText('Couldn’t sign in. Spotify sign-in is for invited testers only right now.');
   expect(new URL(page.url()).search).toBe('');
   await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(SCREENS, 'qww55-sign-in-refused-range-375px.png') });
 
   await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page.locator('ol li').first()).toBeVisible();
-  await expect(page.getByRole('status')).toHaveText('Couldn’t sign in to Spotify.');
-  // Still the plain list, with both ways to try again.
-  await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(2);
+  await expect(page.locator('[data-row]').first()).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('Couldn’t sign in. Spotify sign-in is for invited testers only right now.');
+  // Still the plain list, with the header's way to try again (the block under the list is gone, R18).
+  await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(1);
   await expect(page.getByText('Couldn’t load songs.')).toHaveCount(0);
   await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(SCREENS, 'qww55-sign-in-refused-list-375px.png') });
@@ -116,21 +117,33 @@ test('a signed-in singer whose Spotify library could not be read sees catalogue 
     asked++;
     return route.fulfill({ json: { ...catalogue, libraryUnavailable: true } });
   });
+  // The tuner asks the server for its ranking: a library it cannot read comes back as the catalogue's list and the flag.
+  await context.route('**/api/setlist', (route) => route.fulfill({ json: setlistAnswer(catalogue, route.request().postDataJSON() as SetlistRequest, false, { libraryUnavailable: true }) }));
 
   const page = await context.newPage();
   await page.goto('/');
   const note = page.getByRole('status');
   await expect(note).toHaveText('Couldn’t reach Spotify, showing popular songs.');
-  await expect(page.locator('ol li')).toHaveCount(5);
+  await expect(page.locator('[data-row]')).toHaveCount(Math.min(catalogue.matches.length, 40));
   // Still signed in (the green logo), and nothing offers to connect Spotify or to retry a failed load.
   await expect(page.getByRole('button', { name: 'Spotify account' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect to Spotify' })).toHaveCount(0);
   await expect(page.getByText('Couldn’t load songs.')).toHaveCount(0);
-  await expect(page.getByRole('slider', { name: 'Rediscover to On repeat' })).toHaveCount(0);
-  await expect(page.getByRole('slider', { name: 'Light work to Locked in' })).toBeVisible();
-  // The note fits one line on the narrowest phone, under the bar and clear of the logo.
+  // A catalogue list has no listening history: the gear is off and says why, whatever Spotify was before.
+  await expect(page.locator('#slider-history')).toBeDisabled();
+  await expect(page.locator('#slider-difficulty')).toBeVisible();
+  // The hint stands where History's end labels would. A phone this short opens the sheet in mini (QWW-57), so open History's tab.
+  await page.locator('[data-tab][data-gear="history"]').click();
+  await expect(page.getByText('Spotify could not be reached, so listening history is off')).toBeVisible();
+  // The note is a few words, above the list and inside the screen. Round 6A's quiet voice is 15/500 (it was 14 px), so on the
+  // narrowest phone it takes two lines at most.
+  const lines = await note.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+  });
+  expect(lines).toBeLessThanOrEqual(2);
   const box = (await note.boundingBox())!;
-  expect(box.height).toBeLessThan(24);
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(375);
   expect(asked).toBe(1);
@@ -159,9 +172,9 @@ test('song page: no bar for an empty bin and none outside the pink range (Are Yo
   };
   const context = await browser.newContext({ ...PHONE_375, baseURL: OFF, reducedMotion: 'reduce' });
   await withRange(context, USER_D2_TO_D5.low, USER_D2_TO_D5.high);
-  await context.route('**/api/catalogue/recommendations**', (route) =>
-    route.fulfill({ json: { matches: [are], nextOffset: null, sources: {}, complete: true } satisfies RecommendationsResponse }),
-  );
+  const only: RecommendationsResponse = { matches: [are], nextOffset: null, sources: {}, complete: true };
+  await context.route('**/api/catalogue/recommendations**', (route) => route.fulfill({ json: only }));
+  await context.route('**/api/setlist', (route) => route.fulfill({ json: setlistAnswer(only, route.request().postDataJSON() as SetlistRequest, false) }));
   const page = await context.newPage();
   await page.goto('/');
   await page.getByRole('button', { name: 'Continue' }).click();

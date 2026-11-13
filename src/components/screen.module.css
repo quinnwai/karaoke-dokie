@@ -13,13 +13,15 @@
 }
 
 .tv {
-  width: min(100%, 880px);
+  /* Phone-shaped on every screen (QWW-57, R2; 6A's reference is a 390x844 device): 390 px wide, and as tall as 844 px or the
+     window. On a phone it is the whole page (below). */
+  width: min(100%, 390px);
   min-width: 0;
-  height: min(calc(100svh - 32px), 660px);
+  height: min(calc(100svh - 32px), 844px);
   display: flex;
   flex-direction: column;
-  padding: 12px 12px 0;
-  border-radius: 26px;
+  padding: 9px 9px 0;
+  border-radius: 30px;
   background: linear-gradient(160deg, #1c1a21, #0f0e13 60%);
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.05),
@@ -31,7 +33,7 @@
   position: relative;
   flex: 1;
   min-height: 0;
-  border-radius: 16px;
+  border-radius: 22px;
   overflow: hidden;
   background: radial-gradient(ellipse at 50% 40%, #16121c 0%, #09080c 75%);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 0 60px rgba(0, 0, 0, 0.8);
@@ -54,11 +56,13 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Three columns: the Sources and credits link (CreditsPanel.module.css) at the left end, the label in the middle of the TV whatever the
+   widths at its sides, and the LED at the right end. */
 .chin {
   height: 34px;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   padding: 0 10px;
 }
 
@@ -70,11 +74,32 @@
 }
 
 .led {
+  justify-self: end;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--pink);
   box-shadow: 0 0 8px var(--pink-glow);
+}
+
+/* On a phone the TV is the whole screen, and every step is on it (Round 6A §3.3, QWW-57): page padding 14 10 12, and it fills
+   the viewport with no height cap. The bezel's numbers above (padding 9 9 0, radius 30 and 22, a 34 px chin with the LED) are
+   6A's on every screen. That tightens the earlier steps by a few px, which is the point. The bottom padding clears the home bar,
+   and the sides the notch of a phone on its side. */
+@media (max-width: 430px) {
+  .stage {
+    min-height: 0;
+    height: 100vh;
+    height: 100dvh;
+    place-items: stretch;
+    grid-template-rows: minmax(0, 1fr);
+    padding: max(14px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+
+  .tv {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 /* ---------- lyrics ---------- */
@@ -83,7 +108,7 @@
 .lyricSmall {
   margin: 0;
   max-width: 18ch;
-  font-size: clamp(28px, 7.4vw, 46px);
+  font-size: clamp(28px, calc(7.4 * var(--vw)), 46px);
   font-weight: 700;
   line-height: 1.15;
   letter-spacing: -0.02em;
@@ -93,7 +118,7 @@
 
 .lyricSmall {
   max-width: 22ch;
-  font-size: clamp(18px, 4.6vw, 24px);
+  font-size: clamp(18px, calc(4.6 * var(--vw)), 24px);
   font-weight: 600;
 }
 
@@ -152,7 +177,7 @@
 
 .sign {
   margin: 0;
-  font-size: clamp(40px, 12vw, 72px);
+  font-size: clamp(40px, calc(12 * var(--vw)), 72px);
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--pink);
@@ -538,6 +563,43 @@
   cursor: pointer;
 }
 
+/* "Back to songs" on the mic and note steps of a redo (BackToSongs.tsx, QWW-57): top left, where the song page's ‹ is, in words
+   because these steps are for older singers who must never be stuck. It stands just before the step's own box, which makes room
+   for it below. 44 px tall, 18 px type like the rest of the mic step's links. */
+.backToSongs {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 2;
+  min-height: 44px;
+  padding: 0 14px 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 22px;
+  background: none;
+  color: var(--dim);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.backToSongs span {
+  font-size: 30px;
+  line-height: 1;
+}
+
+.backToSongs:hover,
+.backToSongs:focus-visible {
+  color: var(--ink);
+}
+
+.backToSongs + .mic,
+.backToSongs + .center,
+.backToSongs + .holdStep {
+  padding-top: 64px;
+}
+
 /* The page's address, to copy by hand when the copy button cannot. 18px keeps iOS from zooming in on focus. */
 .micField {
   width: min(100%, 320px);
@@ -559,7 +621,7 @@
   align-items: baseline;
   gap: 14px;
   margin: 0;
-  font-size: clamp(44px, 13vw, 76px);
+  font-size: clamp(44px, calc(13 * var(--vw)), 76px);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -603,7 +665,7 @@
 }
 
 .results > .lyric {
-  font-size: clamp(24px, 6.4vw, 36px);
+  font-size: clamp(24px, calc(6.4 * var(--vw)), 36px);
   margin-top: 6px;
 }
 
@@ -735,6 +797,188 @@
 .song:disabled {
   opacity: 0.35;
   cursor: default;
+}
+
+/* A result row: the preview's play button (QWW-48), then the song, which opens the song page. Two buttons side by
+   side, never one inside the other. */
+.songRow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.songRow > .song {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+/* ---------- row preview (QWW-48) ---------- */
+
+/* 44 px to tap, with a 36 px ring inside it. */
+.preview {
+  flex: none;
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.preview:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.previewRing {
+  position: absolute;
+  inset: 4px;
+  width: 36px;
+  height: 36px;
+  /* The ring fills clockwise from 12 o'clock. */
+  transform: rotate(-90deg);
+}
+
+.previewTrack {
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1.5;
+}
+
+.previewFill {
+  fill: none;
+  stroke: var(--pink);
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0;
+}
+
+.previewIcon {
+  position: relative;
+  display: block;
+}
+
+/* The song page's ▶ (R27): the row's round ▶ and ring, 64 px, as the page's first action. The button is only the circle, so its focus
+   outline is round; its words ("Play 30 s") hang under it inside the button, so a tap on them plays too, and the margin is their room
+   (gap and line). The ring fills the circle and the strokes stay thin. Pink and glowing like the Start button, the page's other ▶. */
+.previewLarge {
+  --words-gap: 8px;
+  --words-line: 18px;
+  width: 64px;
+  height: 64px;
+  margin: 0 0 calc(var(--words-gap) + var(--words-line));
+  color: var(--pink);
+  box-shadow: 0 0 22px -4px var(--pink-glow);
+}
+
+.previewLarge .previewRing {
+  inset: 0;
+  width: 64px;
+  height: 64px;
+}
+
+.previewLarge .previewTrack {
+  stroke: var(--pink);
+  stroke-opacity: 0.7;
+  stroke-width: 0.9;
+}
+
+.previewLarge .previewFill {
+  stroke-width: 1.3;
+}
+
+.previewLarge .previewIcon {
+  width: 28px;
+  height: 28px;
+}
+
+.previewWords {
+  position: absolute;
+  top: calc(100% + var(--words-gap));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: var(--words-line);
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.preview[data-preview='loading'],
+.preview[data-preview='playing'],
+.preview[data-preview='paused'] {
+  color: var(--pink);
+}
+
+.preview[data-preview='loading'] .previewFill,
+.preview[data-preview='playing'] .previewFill,
+.preview[data-preview='paused'] .previewFill {
+  opacity: 1;
+}
+
+/* Between the tap and the first sound the ring's track glows on and off, so a slow network never looks like a dead button. */
+.preview[data-preview='loading'] .previewTrack {
+  animation: previewWait 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes previewWait {
+  to {
+    stroke: var(--pink-glow);
+  }
+}
+
+@media (hover: hover) {
+  .preview:not(:disabled):hover {
+    color: var(--pink);
+  }
+}
+
+/* The song the player is on (playing or paused) has its title in the accent colour, as Spotify marks its current track. */
+.songRow:has(.preview[data-preview='loading']) .songTitle,
+.songRow:has(.preview[data-preview='playing']) .songTitle,
+.songRow:has(.preview[data-preview='paused']) .songTitle {
+  color: var(--pink);
+}
+
+/* Deezer's logo by the list, which its API terms ask for. Close to the list, inside the screen's 18 px gap. */
+.deezerCredit {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 0 -12px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.deezerCredit a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.deezerMark {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.deezerMark svg {
+  color: #a238ff;
 }
 
 .songText {
@@ -913,7 +1157,7 @@
 
 .detailTitle {
   margin: 0;
-  font-size: clamp(28px, 7.6vw, 44px);
+  font-size: clamp(28px, calc(7.6 * var(--vw)), 44px);
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.1;
@@ -927,7 +1171,7 @@
 }
 
 /* The range bar: two shades only. Your range is the grey stretch, the song the pink one.
-   Note names wait below it and show on hover, focus or a tap. */
+   Its note names sit below it, always (R25). The legend under them shows on a hover, or on a tap where there is no hover (R20). */
 .rangeBar {
   width: 100%;
   max-width: 460px;
@@ -993,15 +1237,6 @@
   position: relative;
   height: 34px;
   margin-top: 6px;
-  opacity: 0;
-  transform: translateY(-3px);
-  transition: opacity 0.15s, transform 0.15s;
-}
-
-.rangeBar:hover .barNames,
-.rangeBar[data-open] .barNames {
-  opacity: 1;
-  transform: none;
 }
 
 .barNameSong,
@@ -1023,6 +1258,16 @@
   color: var(--dim);
 }
 
+/* A bar too short for its two names to stand side by side (NAMES_APART in display.ts) has them outside its ends: the low one ends at its
+   end and the high one starts at its, so they cannot touch, whatever the width. */
+.barNames [data-apart][data-end='low'] {
+  transform: translateX(-100%);
+}
+
+.barNames [data-apart][data-end='high'] {
+  transform: none;
+}
+
 .barLegend {
   display: flex;
   justify-content: center;
@@ -1035,9 +1280,16 @@
   transition: opacity 0.15s;
 }
 
-.rangeBar:hover .barLegend,
 .rangeBar[data-open] .barLegend {
   opacity: 1;
+}
+
+/* Only where there is a pointer to hover with (R20): on a touch screen a tap leaves :hover stuck on the chart, so a second tap could not
+   close the legend. There a tap opens it and a tap closes it (data-open). */
+@media (hover: hover) {
+  .rangeBar:hover .barLegend {
+    opacity: 1;
+  }
 }
 
 .barLegend span {
@@ -1091,14 +1343,26 @@
   text-align: center;
 }
 
+/* "Find on Spotify" and "Open in Spotify" (R27): the page's secondary action, an outlined button under the ▶ (the primary one), with
+   a clear line and no fill, and 44 px to tap. */
 .spotify {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  min-height: 44px;
   font-size: 15px;
   font-weight: 600;
   color: var(--ink);
   text-decoration: none;
   padding: 10px 20px;
   border-radius: 16px;
-  border: 1px solid var(--faint);
+  border: 1.5px solid var(--dim);
+  background: transparent;
+}
+
+/* The mark of a link out of the app (R4): after the text, in the link's own colour, about 0.8 em. */
+.externalIcon {
+  flex: none;
 }
 
 /*
@@ -1123,9 +1387,9 @@
 }
 
 .feedbackQ {
+  margin: 0 4px 0 0;
   font-size: 14px;
   color: var(--dim);
-  margin-right: 4px;
 }
 
 .thumb {
@@ -1140,23 +1404,38 @@
   cursor: pointer;
 }
 
-.thumb:hover,
 .thumb:focus-visible {
   border-color: var(--pink);
   color: var(--pink);
+}
+
+/* Only where there is a pointer to hover with (R20): on a phone a tap leaves :hover on the thumb, which is not a thing to light. */
+@media (hover: hover) {
+  .thumb:not(:disabled):hover {
+    border-color: var(--pink);
+    color: var(--pink);
+  }
+}
+
+/* A like or dislike stays (R26): the picked thumb is pink and filled in, the other is dimmed, and neither can be pressed again. */
+.thumb:disabled {
+  cursor: default;
+}
+
+.thumb[aria-pressed='true'] {
+  border-color: var(--pink);
+  background: rgba(255, 46, 147, 0.14);
+  color: var(--pink);
+}
+
+.thumb:disabled:not([aria-pressed='true']) {
+  opacity: 0.35;
 }
 
 .thanks {
   margin: 0;
   font-size: 15px;
   color: var(--pink);
-}
-
-@media (min-width: 700px) {
-  .tv {
-    padding: 16px 16px 0;
-    border-radius: 32px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1168,7 +1447,8 @@
   .sign,
   .arrow,
   .roundActive .holdDot,
-  .roundActive .micIcon {
+  .roundActive .micIcon,
+  .preview[data-preview='loading'] .previewTrack {
     animation: none;
   }
   .roundButton,
@@ -1177,22 +1457,6 @@
   .accountMenu {
     transition: none;
   }
-}
-
-/* Sources and credits: a pale book in the bottom right corner, there when wanted, never in the way. */
-.credits {
-  align-self: flex-end;
-  display: flex;
-  margin: 4px -6px -10px 0;
-  padding: 6px;
-  border-radius: var(--squircle);
-  color: rgba(244, 241, 246, 0.26);
-  transition: color 0.15s;
-}
-
-.credits:hover,
-.credits:focus-visible {
-  color: var(--dim);
 }
 
 /* ---- results view: Tune (sliders, pink) and Pick (chips, cyan) (QWW-3) ---- */
@@ -1211,10 +1475,18 @@
   transition: color 0.15s;
 }
 
-.connect:hover,
 .connect:focus-visible,
+.connect[data-tip='open'],
 .connectOn {
   color: #1db954;
+}
+
+/* Only where there is a pointer to hover with (QWW-57, R20): on a touch screen a tap leaves :hover stuck on the button, and the tooltip
+   below would stay up after a tap elsewhere. There it comes with the first tap instead (data-tip, ConnectButton.tsx, R30). */
+@media (hover: hover) {
+  .connect:hover {
+    color: #1db954;
+  }
 }
 
 .connectTip {
@@ -1236,10 +1508,17 @@
   transition: opacity 0.15s, transform 0.15s;
 }
 
-.connect:hover .connectTip,
-.connect:focus-visible .connectTip {
+.connect:focus-visible .connectTip,
+.connect[data-tip='open'] .connectTip {
   opacity: 1;
   transform: none;
+}
+
+@media (hover: hover) {
+  .connect:hover .connectTip {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* Signed in: the green logo opens a small box saying who is signed in, with Log out. Pointing at the
@@ -1284,7 +1563,7 @@
   align-items: center;
   gap: 0 8px;
   width: max-content;
-  max-width: min(300px, 78vw);
+  max-width: min(300px, calc(78 * var(--vw)));
   padding: 4px 6px 4px 12px;
   border-radius: 10px;
   background: #1c1a21;
@@ -1678,3 +1957,54 @@
     border-radius: 26px;
   }
 }
+
+/* ===== Turn your phone upright (QWW-57, the review of PR #38, finding 1) =====
+   A phone on its side is wider than 430 px, so it gets the 390 px TV at the window's height less 32 px, which holds no songs
+   (328 px at 640x360). On a touch screen (hover: none, pointer: coarse) in landscape under 500 px tall, RotateNotice covers the
+   page instead, on every step. It is only drawn over the page: nothing underneath is unmounted or changed, so turning the phone
+   back finds it as it was. A tablet (taller than 500 px) and anything with a pointer that hovers never see it. */
+.rotateNotice {
+  /* It takes focus when it comes up (RotateNotice.tsx), as a dialog does, but it is not a control: no ring. */
+  outline: none;
+  display: none;
+  position: fixed;
+  inset: 0;
+  /* Above the account box and the tips (2), the sheet, and everything else on the page. */
+  z-index: 1000;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  /* Never closer to the edge than the page's own padding, and clear of the notch of a phone on its side. */
+  padding: max(16px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  background: radial-gradient(ellipse 70% 55% at 50% 45%, rgba(255, 46, 147, 0.07), transparent 70%), var(--bg);
+  color: var(--ink);
+  text-align: center;
+  /* No pan and no pull to refresh: a drag on the message must not reload the page and lose what is underneath. */
+  touch-action: none;
+}
+
+@media (hover: none) and (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  .rotateNotice {
+    display: flex;
+  }
+}
+
+.rotateIcon {
+  flex: none;
+  color: var(--ink);
+}
+
+.rotateArrow {
+  stroke: var(--pink);
+}
+
+.rotateWords {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+/* ===== end: turn your phone upright ===== */

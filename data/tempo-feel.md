@@ -12,9 +12,11 @@ a measurement: no audio, no measured tempo and no lyrics went in. They were made
 songs, each batch a separate fresh run that saw only its own songs and the instructions below; a song the model did not know
 got no label, and a song that two batches labelled differently became "mid". The second look and the recheck are described
 further down. The file holds 6,196 labels, which cover 6,202 of the catalogue's 7,638 songs (81%) and 97 to 98% of the 300, 1,000, 2,000 and
-3,000 most popular: **685 slow, 3,737 mid and 1,780 upbeat songs**. Of the mids, 691 are songs a later pass
-took away a slow or upbeat label from (method `claude-opus-5-5/feel-recheck-v1`). One label was set by hand after review
-(method `manual/hand-fix-qww-54`): a-ha, Take On Me, from mid to upbeat.
+3,000 most popular: **878 slow, 3,312 mid and 2,012 upbeat songs**. Of the mids, 434 are songs the strict recheck took a
+slow or upbeat label from (method `claude-opus-5-5/feel-recheck-v1`); the band-edge audit below changed 430 labels, but only 2 of
+them to mid (the other 428 went from mid to slow or upbeat). Six labels were set by hand after review: a-ha, Take On Me, from mid
+to upbeat (method `manual/hand-fix-qww-54`); Ed Sheeran, I See Fire, from mid to slow (`manual/hand-fix-qww-54b`); and four songs
+whose label the independent judge put at the opposite end and a second model did not back (`manual/hand-fix-qww-54d`, listed below).
 
 The labels are tuned for precision at the two ends: the instructions say to answer slow or upbeat only when it is
 unmistakable, and mid otherwise. So a song missing from an end is expected, and a song at an end has been vouched for.
@@ -36,6 +38,15 @@ into 70 to 180) puts them like this, by label:
 
 So most slow songs are read at double time or more, and no rule on the numbers alone can tell them from a fast song. With
 the label, 228 of the 297 slow songs are halved into the slow band, 53 go to its top edge and 16 were already in it.
+
+## A mid label can hide a slow song
+
+Mid is not neutral for a song read at double time. A label only moves a reading by whole octaves when that is cheaper than
+leaving it, so a slow ballad whose reading sits near the mid band stays there and is pinned just inside the top edge of the
+mid band (about 125 bpm), right under every upbeat song. That is what happened to Ed Sheeran's "I See Fire", labelled mid: 124.8
+bpm and 72 of 100 on the Tempo gear, near the top at "Upbeat tracks". With the slow label the same reading is halved into the
+slow band. So a wrong mid on a slow or upbeat song shows as a song pinned within a bpm or two of an edge of its band (90 or
+125) while its reading says otherwise; that is where to look for wrong labels.
 
 ## The instructions (feel-v1)
 
@@ -94,6 +105,61 @@ motivated looking (they showed which labels were weak) but no label was changed 
 All three passes are one model answering the same question in different words, so they share blind spots; the hand check of one
 era's lists by Quinn-Wai (QWW-54 "Done when") is the independent test. The one error known so far, Take On Me (published at
 170 bpm, marked "Fast"), was labelled mid by the model and has been set to upbeat by hand.
+
+## The band-edge audit (QWW-54 follow-up, 12 Nov)
+
+A label that disagrees with the measured tempo leaves the song pinned just inside the edge of its band. A wrong mid on a slow
+ballad sits at about 125, right under the upbeat songs: that was Ed Sheeran's "I See Fire". So every labelled song in the best
+1,000 of each release harness range (bass to soprano, low male and beginner) and of F2 to D4, from the tuner's default list and
+from the old whole list, whose effective tempo was within 2 bpm of a band edge (40, 90, 125 or 215), was rechecked: 1,820 songs.
+Three independent runs of `claude-opus-5-5` per song, each given only the artist, title and year and the plain definitions in
+the release harness' judge prompt, never the tempo or the label. A label changed when at least two runs agreed on the same
+different label; a change from one end to the other without all three runs behind it went to mid.
+
+1,388 labels were confirmed, 430 changed and one song had no majority. The 430 are 197 mid to slow, 231 mid to upbeat and 2
+slow to mid; 359 have all three runs behind them. Each is marked `claude-opus-5-5/feel-edge-recheck-v1` in `song_feel.source`.
+All 676 upbeat labels at 125 were confirmed. "I See Fire" was also one of the 1,820 (all three runs said slow); it was set by
+hand in the same week (`manual/hand-fix-qww-54b`) and is left out of these 430. The audit looked only at songs at an edge of their band, not at every label.
+
+The recheck is the same kind of model as the first pass and as the harness' judge, so it is not independent of either; the hand
+check of one era is still the test.
+
+## Clear and weak labels (QWW-54 follow-up, 12 Nov)
+
+An independent judge (OpenAI gpt-6-luna, three runs, the majority verdict) graded every one of the 7,244 songs that fit a test range
+of the release eval. Against its verdicts, a label agrees as often as the pass that made it was strict:
+
+| Label from | slow, judge agrees | upbeat, judge agrees |
+|---|---|---|
+| the strict first pass (`claude-opus-5-5/feel-v1`) | 95% of 600 | 98% of 1,579 |
+| the second look (`…/feel-plain-v1`) | 83% of 53 | 90% of 116 |
+| the audit, all three runs agreeing (`…/feel-edge-recheck-v1`) | 79% of 171 | 89% of 187 |
+| the audit, two of three runs agreeing | 58% of 26 | 61% of 44 |
+
+So a slow or upbeat label made by the second look or the audit (250 slow and 355 upbeat in this file) is a **weak** one. The song
+keeps the label and its band, but `effectiveTempo` puts it in the strip at the band's inner edge, in the order of its own tempo,
+behind the clear songs whose readings fit their band (`isWeakLabelSource`, `src/lib/tempo/feel.ts`). That is not every clear song: a
+clear song whose reading cannot be fitted to its band (a slow label on a song read at 100, say) is forced to the same edge and shares
+the strip with the weak ones. A weak label with no reading at all goes last in the strip, behind the weak songs whose readings back it.
+A weak song still fills an end when an era has too few clear songs. Labels from the strict first pass and from a person (`manual/…`)
+are clear. `tests/tempo/feelFile.test.ts` lists every method this file uses as strict or weak, so a typo or a new pass cannot count
+as strict by default. On the release eval's 144 lists of criterion 2 (Tempo alone), graded on the saved answers of the independent judge, this and the label fixes below took the lists reaching 18 of 20 from 96 to 120 (judge set A); two fresh sets of judge runs gave 90 to 115 and 91 to 119 for the first version of this change.
+
+The same grading showed eight labels at the opposite end from the judge's verdict. The judge also grades the release eval, so moving a
+song only because it disagrees would teach the labels its mistakes; a second model (Gemini, three runs per song) decided which to change.
+Four are changed by hand (`manual/hand-fix-qww-54d`), and a hand-set label counts as clear:
+
+| Song | Was | Judge | Gemini | Now |
+|---|---|---|---|---|
+| Hilary Duff, What Dreams Are Made Of (2003) | slow | upbeat | upbeat | upbeat |
+| Luke Combs, Going, Going, Gone (2023) | slow | upbeat | mid | mid |
+| Sia, Bird Set Free (2015) | slow | upbeat | mid | mid |
+| Dr. Horrible's Sing-Along Blog, Slipping (2008) | upbeat | slow | mid | mid |
+
+Four stay slow, because Gemini says slow too and they are ballads: Whitney Houston, Where Do Broken Hearts Go (the 1988 ballad; the
+uptempo song of that name is One Direction's, from 2014), Hi-Five, I Can't Wait Another Minute, En Vogue, Don't Let Go (Love) and
+The Cover Girls, Wishing on a Star. The judge calls all four upbeat, so each one that reaches a slow top 20 costs the judge's count
+there; the hand check of one era is the test of who is right.
 
 ## Where the songs came from
 

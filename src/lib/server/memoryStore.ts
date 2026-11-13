@@ -12,6 +12,7 @@ import {
   type SongMoodsRecord,
   type SongDeezerRecord,
   type SongFeelRecord,
+  type SongGenreRecord,
   type SongTempoRecord,
   type SongPopularityRecord,
   type SongRangeRecord,
@@ -39,16 +40,19 @@ export function createMemoryStore(): Store {
   const songTempo = new Map<string, SongTempoRecord>();
   const songCanonical = new Map<string, SongCanonical>();
   const songFeel = new Map<string, SongFeelRecord>();
+  const songGenre = new Map<string, SongGenreRecord>();
   let spotifyBlock: number | null = null;
   const libraryStates = new Map<string, StoredLibraryState>();
   const savedTracks = new Map<string, Map<string, { track: Track; pos: number; gen: number }>>();
   const spotifyCalls = new Map<string, { day: string; caller: string; calls: number }>();
-  /** A song's popularity row with its Deezer rank, as getSongPopularity reads it. */
+  /** A song's popularity row with its Deezer rank and track id, as getSongPopularity reads it. */
   const popularityOf = (key: string): SongPopularityRecord | undefined => {
     const p = songPopularity.get(key);
-    const rank = songDeezer.get(key)?.rank;
-    if (rank === undefined) return p && clone(p);
-    return { ...(p ? clone(p) : { key, source: 'deezer' }), deezerRank: rank };
+    const deezer = songDeezer.get(key);
+    if (deezer?.rank === undefined) return p && clone(p);
+    const out: SongPopularityRecord = { ...(p ? clone(p) : { key, source: 'deezer' }), deezerRank: deezer.rank };
+    if (deezer.deezerId !== undefined) out.deezerId = deezer.deezerId;
+    return out;
   };
 
   const newestFirst = <T extends { at: string }>(items: T[]): T[] =>
@@ -344,6 +348,22 @@ export function createMemoryStore(): Store {
     },
     async listSongFeels() {
       return new Map([...songFeel].map(([k, v]) => [k, clone(v)]));
+    },
+
+    // ---- Deezer album genres (QWW-61) ----
+    async putSongGenre(entries) {
+      for (const e of entries) songGenre.set(e.key, clone(e));
+    },
+    async getSongGenres(songKeys) {
+      const out = new Map<string, SongGenreRecord>();
+      for (const k of songKeys) {
+        const g = songGenre.get(k);
+        if (g) out.set(k, clone(g));
+      }
+      return out;
+    },
+    async listSongGenres() {
+      return new Map([...songGenre].map(([k, v]) => [k, clone(v)]));
     },
   };
 }

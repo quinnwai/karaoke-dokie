@@ -11,8 +11,9 @@ import type {
   VocalRange,
 } from '../contracts';
 import type { SongPopularityRecord, SongRangeRecord, Store, UsdbIndexEntry } from './store';
+import { readSongGenres, shownGenre } from '../genres/genres';
 import { hasLittleSinging } from '../songs/resolve';
-import { effectiveTempo } from '../tempo/feel';
+import { effectiveTempo, isWeakLabelSource } from '../tempo/feel';
 import { readSongFeels } from './songFeel';
 import { withKaraokePopularity, type KaraokePopularity } from '../songs/score';
 
@@ -109,12 +110,14 @@ function withIndexPopularity(range: SongRange, row: UsdbIndexEntry | undefined):
  * Year and genre for the decade filter and the song info. The year is the earlier of USDB's (the
  * note file's #YEAR) and Spotify's album year, since a reissue only ever makes a date later; a tie
  * counts as USDB's. A song with neither gets the year of its best Billboard Year-End rank, which
- * can be a year after release (a hit from late in a year charts in the next), so only then.
+ * can be a year after release (a hit from late in a year charts in the next), so only then. The
+ * genre is USDB's, or Deezer's album genres when USDB lists none (QWW-61).
  */
 function songFacts(
   track: Track,
   row: UsdbIndexEntry | undefined,
   popularity: SongPopularityRecord | undefined,
+  deezerGenres: string | undefined,
 ): Pick<Match, 'year' | 'yearSource' | 'genre'> {
   const facts: Pick<Match, 'year' | 'yearSource' | 'genre'> = {};
   const usdb = row?.year;
@@ -129,7 +132,8 @@ function songFacts(
     facts.year = popularity.chartYear;
     facts.yearSource = 'chart';
   }
-  if (row?.genre !== undefined) facts.genre = row.genre;
+  const genre = shownGenre(row?.genre, deezerGenres);
+  if (genre !== undefined) facts.genre = genre;
   return facts;
 }
 
@@ -232,8 +236,8 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
 
   /**
    * The library's songs that fit `userRange`, in play order (the order `walk` visits them). With `all`, each carries
-   * song facts from our USDB index and is scored with our karaoke popularity (QWW-6) and tempo (QWW-40), each read once
-   * for every candidate. Pages leave both out, so they stay exactly as they were.
+   * song facts from our USDB index and Deezer genres (QWW-61) and is scored with our karaoke popularity (QWW-6) and tempo
+   * (QWW-40), each read once for every candidate. Pages leave all of it out, so they stay exactly as they were.
    */
   async function collect(tracks: Track[], userRange: VocalRange, all: boolean) {
     const candidates: { track: Track; key: string; range: SongRange; log: DataSourceLogEntry }[] = [];
@@ -250,9 +254,15 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
     );
 
     const keys = candidates.map((c) => c.key);
-    const [index, popularity, tempos, feels] = all
-      ? await Promise.all([store.findUsdbSongs(keys), store.getSongPopularity(keys), store.getSongTempos(keys), readSongFeels(store, keys)])
-      : [null, null, null, null];
+    const [index, popularity, tempos, feels, genres] = all
+      ? await Promise.all([
+          store.findUsdbSongs(keys),
+          store.getSongPopularity(keys),
+          store.getSongTempos(keys),
+          readSongFeels(store, keys),
+          readSongGenres(store, keys),
+        ])
+      : [null, null, null, null, null];
     const matches: Match[] = [];
     const logs = new Map<string, DataSourceLogEntry>();
     const keyOf = new Map<string, string>();
@@ -261,8 +271,10 @@ export function createSongService(store: Store, deps: SongDeps, opts: SongServic
       const pop = popularity?.get(key);
       const m = deps.matchSong(track, index ? withKaraokePopularity(withIndexPopularity(range, row), pop) : range, userRange);
       if (!m) continue;
-      const tempo = effectiveTempo({ key, record: tempos?.get(key), feel: feels?.get(key)?.feel })?.tempo;
-      matches.push(index ? { ...m, ...songFacts(track, row, pop), ...(tempo !== undefined ? { tempo } : {}) } : m);
+      const label = feels?.get(key);
+      const tempo = effectiveTempo({ key, record: tempos?.get(key), feel: label?.feel, weak: isWeakLabelSource(label?.source) })?.tempo;
+      const deezer = pop?.deezerId !== undefined ? { deezerId: pop.deezerId } : {};
+      matches.push(index ? { ...m, ...songFacts(track, row, pop, genres?.get(key)), ...(tempo !== undefined ? { tempo } : {}), ...deezer } : m);
       logs.set(track.id, log);
       keyOf.set(track.id, key);
     }

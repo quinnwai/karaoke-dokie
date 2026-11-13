@@ -155,6 +155,15 @@ describe('POST /api/setlist, signed out', () => {
     expect(res.body.songs.length).toBeLessThan((await post(body())).body.songs.length);
   });
 
+  it('lists the songs sung as written before the ones that need an octave jump, and still lists those (QWW-58)', async () => {
+    const res = await post(body({ range: { low: 40, high: 70 }, limit: SETLIST_PAGE.max })); // a low range: the mock catalogue has songs sung as written and songs an octave down
+    const sure = res.body.songs.filter((s) => s.match.difficulty !== 'maybe').map((s) => s.match.octave === 'none');
+    // The mock catalogue has both kinds here, or this proves nothing.
+    expect(sure.includes(true) && sure.includes(false)).toBe(true);
+    expect(sure.indexOf(false)).toBe(sure.lastIndexOf(true) + 1); // one block sung as written, then one that needs a jump
+    expect(res.body.total).toBe(res.body.songs.length);
+  });
+
   it('ignores the History gear, on or off: nobody is signed in', async () => {
     const on = await post(body({ off: ['tempo', 'era'], gears: { history: 0 } }));
     const off = await post(body({ off: ['history', 'tempo', 'era'] }));
@@ -345,6 +354,15 @@ describe('POST /api/setlist, signed in', () => {
     const rediscover = await post(body({ off: only, gears: { history: 0 } }), jar);
     const reLibrary = rediscover.body.songs.filter((s) => s.match.difficulty !== 'maybe' && !s.match.track.id.startsWith('cat:'));
     expect(reLibrary.map((s) => s.match.track.id)).toEqual(library.map((s) => s.match.track.id).reverse());
+  });
+
+  it('lists the library\'s songs the same way: sung as written before the ones that need an octave jump (QWW-58)', async () => {
+    const res = await post(body({ range: { low: 40, high: 70 }, limit: SETLIST_PAGE.max }), await signIn());
+    const sure = res.body.songs.filter((s) => s.match.difficulty !== 'maybe');
+    const written = sure.map((s) => s.match.octave === 'none');
+    expect(written.includes(true) && written.includes(false)).toBe(true);
+    expect(written.indexOf(false)).toBe(written.lastIndexOf(true) + 1);
+    expect(sure.some((s) => !s.match.track.id.startsWith('cat:'))).toBe(true); // the library's songs are in the list
   });
 
   it('lists a song once when the library and the catalogue both have it, as the library\'s', async () => {

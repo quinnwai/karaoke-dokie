@@ -1,4 +1,5 @@
-// Who the app's data and know-how come from. Shown on /credits and kept in step with the README.
+// Who the app's data and know-how come from. Shown in the Sources and credits panel inside the TV (CreditsPanel) and on /credits, both
+// by CreditsContent, and kept in step with the README.
 
 export interface Credit {
   name: string;
@@ -50,6 +51,16 @@ export const CREDITS: Credit[] = [
     what: "An AI model that suggests Upbeat and Heartfelt labels from a song's artist, title and year, ahead of time. We show a mood only once its labels pass our accuracy check.",
   },
   {
+    name: 'Inter, by Rasmus Andersson',
+    url: 'https://rsms.me/inter/',
+    what: 'The typeface of the Setlist tuner (SIL Open Font License 1.1), served from this site, not from Google.',
+  },
+  {
+    name: 'Noto Sans JP, Google',
+    url: 'https://fonts.google.com/noto/specimen/Noto+Sans+JP',
+    what: 'The four katakana of the カラオケ sign on the Setlist tuner, a tiny subset of the typeface (SIL Open Font License 1.1), served from this site, not from Google.',
+  },
+  {
     name: 'Material Symbols, Google',
     url: 'https://fonts.google.com/icons',
     what: 'The fast-lyrics, book and reset icons (Apache 2.0).',
@@ -69,4 +80,22 @@ export const CREDITS: Credit[] = [
     url: 'https://developer.spotify.com/',
     what: 'Your saved songs, top tracks and recent plays, and the song player (it loads from Spotify, which sets its own cookies).',
   },
+  {
+    name: 'Deezer',
+    url: 'https://www.deezer.com/',
+    what: 'The 30-second previews behind the play button on each song, streamed from Deezer for your own private, non-commercial listening. We never keep the audio. Deezer’s track ranks are also one of the signs of how well known a song is.',
+  },
 ];
+
+/**
+ * What the beta records about its testers, shown with the credits (QWW-51). Kept in step with the README's Beta event log
+ * row and docs/backend.md: if what is recorded changes, this changes with it.
+ */
+export const ANALYTICS_NOTE = {
+  title: 'Analytics while we test',
+  paragraphs: [
+    'To fix what trips people up, we record what you tap and which screens you reach, under a random number made on your phone. It is never your name, your email or your Spotify account.',
+    'We also record a replay of your screen. Anything you type is hidden, and the replay is off while you are signed in to Spotify, so your name and your own songs are never in it. Your voice is worked out on your phone and is never recorded or sent.',
+    'These records are kept by us and by PostHog (posthog.com), the service we use to look at them.',
+  ],
+};

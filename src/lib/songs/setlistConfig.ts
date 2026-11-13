@@ -3,13 +3,15 @@
 //
 // Why each value (QWW-47, ranking model A, Quinn-Wai 10 Nov): the default view is "most popular
 // first, then easiest" for someone who is logged out, and the engine's weights (Popularity counts
-// double) turn these values into exactly that.
+// double) turn these values into exactly that, among the songs they can sing as written, which come
+// before any song that needs an octave jump (QWW-58).
 //
 //   Difficulty  0    on   "Light work" end: among equally popular songs the easiest comes first. Zero rather
 //                         than a low-ish 15, because a song easier than the target would otherwise lose to one
 //                         sitting on it.
-//   History     100  off  "On repeat" end. Off because a logged-out singer has no history and the default view
-//                         does not use it. Switched on, it starts where it brings their own top and liked songs
+//   History     100  off  "On repeat" end. Off while logged out, because there is no history and the default view
+//                         does not use it. ON when signed in (QWW-57, R31: "that's the purpose of logging in"), so the
+//                         singer's own top and liked songs come first. Switched on, it starts where it brings them
 //                         to the front, so touching it visibly does something.
 //   Popularity  100  on   "Pop hits" end: the most popular songs first.
 //   Tempo       50   off  The neutral middle: tempo is a taste, not a default.
@@ -26,8 +28,16 @@ export const DEFAULTS = Object.freeze({
   eras: Object.freeze([]) as readonly EraId[],
 });
 
-/** The parts that start out reset (off), as the sheet loads. */
+/** The parts that start out reset (off), as the sheet loads for a singer who is not signed in. */
 export const DEFAULT_OFF: readonly TunerPart[] = Object.freeze(['history', 'tempo', 'era']);
+
+/** Signed in (QWW-57, R31): History starts on, at 100, so the singer's own top and liked songs come first. Tempo and Era start off as ever. */
+export const DEFAULT_OFF_SIGNED_IN: readonly TunerPart[] = Object.freeze(['tempo', 'era']);
+
+/** The parts that start out off as the sheet loads: it depends on whether the singer is signed in (there is no history to use without). */
+export function defaultOff(signedIn: boolean): readonly TunerPart[] {
+  return signedIn ? DEFAULT_OFF_SIGNED_IN : DEFAULT_OFF;
+}
 
 /** Songs per page of POST /api/setlist: the number sent when `limit` is left out, and the most one request may ask for. */
 export const SETLIST_PAGE = Object.freeze({ default: 100, max: 200 });
