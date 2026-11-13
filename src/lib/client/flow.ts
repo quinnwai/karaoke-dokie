@@ -18,6 +18,7 @@ import type {
 } from '../contracts';
 import type { BrowserInfo } from './browser';
 import type { MicPermission, MicProblem } from './mic';
+import { deviceRangeWins, fitsServer, newestOnDevice } from './rangeSync';
 import { initialTuner, tunerReducer, type TunerAction } from '../setlist/tuner';
 import type { GearId, TunerState } from '../setlist/types';
 
@@ -73,6 +74,8 @@ export interface MicGate {
 export interface TestProgress {
   low: Midi | null;
   high: Midi | null;
+  /** When a finished test (both notes) was sung (QWW-66), so signing in can tell it from the account's range. */
+  measuredAt?: number;
 }
 
 export type KnownSong = KnownSongsResponse['songs'][number];
@@ -156,15 +159,16 @@ export type FlowEvent =
       me: MeResponse | null;
       progress: TestProgress | null;
       wantsPick: boolean;
-      /** A range kept on this device by someone without Spotify. */
-      savedRange?: { low: Midi; high: Midi } | null;
+      /** The range kept on this device (`kd.range`), with the time it was sung when that is known (QWW-66). */
+      savedRange?: { low: Midi; high: Midi; measuredAt?: number } | null;
       /** Start the tuner's sheet in mini mode (`?mini=1`). */
       mini?: boolean;
     }
   | { type: 'start' }
   | { type: 'quietDone' }
   | { type: 'holdStart' }
-  | { type: 'holdEnd'; midi: Midi | null }
+  /** `at` is when the note was let go (QWW-66): the time a test's range is stamped with, so the range sung last can win. */
+  | { type: 'holdEnd'; midi: Midi | null; at?: number }
   /** The mic step looked at the browser and asked what it already knows about the microphone (this never shows a question). */
   | { type: 'micChecked'; env: BrowserInfo; permission: MicPermission }
   /** "Turn on microphone" or "Try again" was tapped: the browser's own question comes up. */
@@ -202,7 +206,7 @@ export type FlowEvent =
   | { type: 'togglePick'; trackId: string }
   | { type: 'pickDone' };
 
-const testRange = (low: Midi, high: Midi): VocalRange => ({ low, high, source: 'test' });
+const testRange = (low: Midi, high: Midi, measuredAt?: number): VocalRange => ({ low, high, source: 'test', ...(measuredAt === undefined ? {} : { measuredAt }) });
 
 /** Clears everything about results so a new range starts from the top. The tuner keeps what the singer set. */
 function freshResults() {
@@ -243,17 +247,27 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       const fresh = { ...state, tuner: initialTuner({ mini: event.mini, signedIn: me != null }) };
       if (me) {
         const base = { ...fresh, signedIn: true, displayName: me.displayName, low, high, mode: 'library' as const };
-        if (low !== null && high !== null) return { ...base, step: 'saving', range: testRange(low, high) };
+        // The range sung last wins (QWW-66). The device's (a finished test in storage, or the range kept on it) goes to the
+        // account first when it was sung after the account's; the list is then built on it, and the header shows it. The
+        // account's range is what the list used alone before, which left a singer with a newer range on the device with
+        // the older one on their signed-in list.
+        // A range kept on the device that the account would refuse (the test accepts any low note under the high one) is not
+        // offered to it: the signed-in list never depended on that range before, and must not start to dead-end on it.
+        const device = newestOnDevice(
+          low !== null && high !== null ? testRange(low, high, progress?.measuredAt) : null,
+          savedRange && fitsServer(savedRange) ? testRange(savedRange.low, savedRange.high, savedRange.measuredAt) : null,
+        );
+        if (device && (!me.range || deviceRangeWins(device, me.range))) return { ...base, step: 'saving', range: device };
         if (wantsPick) return { ...base, step: 'pick', range: me.range };
         if (me.range) return { ...base, step: 'results', range: me.range, loading: true };
         if (low !== null) return enterMic(base, 'high');
         return { ...base, step: 'landing' };
       }
-      if (low !== null && high !== null) return { ...fresh, step: 'signin', low, high, range: testRange(low, high) };
+      if (low !== null && high !== null) return { ...fresh, step: 'signin', low, high, range: testRange(low, high, progress?.measuredAt) };
       // Half a test left over from a redo that was abandoned, with a range saved: the list, not a first test with no way back to it
       // (the second review of PR #38). Without a saved range it is a first test, and is resumed (the Spotify round trip).
       if (savedRange) {
-        const range = testRange(savedRange.low, savedRange.high);
+        const range = testRange(savedRange.low, savedRange.high, savedRange.measuredAt);
         return { ...fresh, ...freshResults(), step: 'results', mode: 'catalogue', range, loading: true };
       }
       if (low !== null) return enterMic({ ...fresh, low }, 'high');
@@ -267,7 +281,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
       return isHoldStep(state) ? { ...state, hold: 'holding' } : state;
     case 'holdEnd': {
       if (!isHoldStep(state)) return state;
-      const { midi } = event;
+      const { midi, at } = event;
       if (midi === null) return { ...state, hold: 'short' };
       const done = (low: Midi, high: Midi): FlowState => ({
         ...state,
@@ -275,7 +289,7 @@ export function flowReducer(state: FlowState, event: FlowEvent): FlowState {
         high,
         hold: 'ready',
         redoing: null,
-        range: testRange(low, high),
+        range: testRange(low, high, at),
         step: state.signedIn ? 'saving' : 'signin',
       });
       if (state.step === 'low') {

@@ -18,6 +18,11 @@ function isMidi(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
+/** The time a range was sung (QWW-66): milliseconds since 1970. Anything else is as good as no time. */
+function isTime(v: unknown): v is number {
+  return typeof v === 'number' && Number.isSafeInteger(v) && v > 0;
+}
+
 export function loadProgress(): TestProgress | null {
   try {
     const raw = store()?.getItem(PROGRESS_KEY);
@@ -25,7 +30,8 @@ export function loadProgress(): TestProgress | null {
     const parsed = JSON.parse(raw) as Partial<TestProgress>;
     const low = isMidi(parsed.low) ? parsed.low : null;
     const high = isMidi(parsed.high) ? parsed.high : null;
-    return low === null && high === null ? null : { low, high };
+    if (low === null && high === null) return null;
+    return isTime(parsed.measuredAt) ? { low, high, measuredAt: parsed.measuredAt } : { low, high };
   } catch {
     return null;
   }
@@ -73,21 +79,32 @@ function local(): Storage | null {
 
 const SAVED_RANGE_KEY = 'kd.range';
 
-/** The range of someone without Spotify, kept on this device so they come back to their songs. */
-export function loadSavedRange(): { low: number; high: number } | null {
+/** A range kept on this device, with the time it was sung when that is known (QWW-66; one kept earlier has none). */
+export interface DeviceRange {
+  low: number;
+  high: number;
+  measuredAt?: number;
+}
+
+/**
+ * The range kept on this device: the signed-out list's, and the one a signed-in singer's list is checked against.
+ * The device keeps the range of the list the singer last saw, whether or not they were signed in.
+ */
+export function loadSavedRange(): DeviceRange | null {
   try {
     const raw = local()?.getItem(SAVED_RANGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { low?: unknown; high?: unknown };
-    return isMidi(parsed.low) && isMidi(parsed.high) && parsed.low < parsed.high ? { low: parsed.low, high: parsed.high } : null;
+    const parsed = JSON.parse(raw) as { low?: unknown; high?: unknown; measuredAt?: unknown };
+    if (!isMidi(parsed.low) || !isMidi(parsed.high) || parsed.low >= parsed.high) return null;
+    return isTime(parsed.measuredAt) ? { low: parsed.low, high: parsed.high, measuredAt: parsed.measuredAt } : { low: parsed.low, high: parsed.high };
   } catch {
     return null;
   }
 }
 
-export function saveRangeOnDevice(range: { low: number; high: number }): void {
+export function saveRangeOnDevice(range: DeviceRange): void {
   try {
-    local()?.setItem(SAVED_RANGE_KEY, JSON.stringify({ low: range.low, high: range.high }));
+    local()?.setItem(SAVED_RANGE_KEY, JSON.stringify({ low: range.low, high: range.high, measuredAt: range.measuredAt }));
   } catch {}
 }
 
