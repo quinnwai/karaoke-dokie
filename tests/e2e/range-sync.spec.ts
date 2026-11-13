@@ -104,6 +104,9 @@ test('a range sung logged out is carried to the account when the singer signs in
   expect(await kept(page)).toEqual({ ...FS2_C5, measuredAt: NEW });
 
   // Connect Spotify (the sign-in is mocked): back signed in, the account still held F2 to C4.
+  // The first tap on a phone shows the button's tooltip (R30, #38); the second connects.
+  await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
+  await page.waitForTimeout(450); // outside the 400 ms in which the tooltip is read
   await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
   await expect.poll(() => server.libraryBuiltOn.length).toBe(1);
   await expect(page.getByLabel(header('F#2 to C5'))).toBeVisible();
@@ -131,6 +134,9 @@ test('an older range on the device never overwrites a newer one on the account, 
   await expect.poll(() => server.catalogueFor).toEqual(['?low=41&high=60&all=1']);
 
   // Signed in, the account's newer range is the one the list is built on and the header shows, and nothing is saved.
+  // The first tap on a phone shows the button's tooltip (R30, #38); the second connects.
+  await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
+  await page.waitForTimeout(450); // outside the 400 ms in which the tooltip is read
   await page.getByRole('button', { name: 'Connect to Spotify' }).first().click();
   await expect.poll(() => server.libraryBuiltOn.length).toBe(1);
   await expect(page.getByLabel(header('F#2 to C5'))).toBeVisible();

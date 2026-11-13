@@ -183,6 +183,7 @@ export function KaraokeApp({
         progress,
         wantsPick: wantedPick && canPick,
         savedRange,
+        // ?mini=1 starts the tuner's sheet in mini mode (the reference's way to open its "L2 mini" board).
         mini: url.searchParams.get('mini') === '1',
       });
       // On the list, no test is in flight. A finished test left in storage that the account's newer range outranked
