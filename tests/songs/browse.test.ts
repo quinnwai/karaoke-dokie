@@ -308,7 +308,7 @@ describe('slider labels', () => {
       ['Light work', 'Locked in'],
       ['Rediscover', 'On repeat'],
       ['Deep cuts', 'Pop hits'],
-      ['Slow jams', 'Fast tracks'],
+      ['Slow jams', 'Party bops'],
     ]);
     const words = SLIDERS.flatMap((s) => [s.left, s.right]);
     expect(new Set(words).size).toBe(words.length);

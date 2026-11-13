@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest';
 import type { Label, Match, OctaveShift, SongRange, Track } from '../../src/lib/contracts';
 import { ERA_LABEL } from '../../src/lib/setlist/eras';
 import { GEAR_META } from '../../src/lib/setlist/gears';
-import { badgeOf, SHIFT_REASON, SWEET_SPOT, toRow, toRows, whyOf, type WhyTuner } from '../../src/lib/setlist/rows';
+import { moodZone } from '../../src/lib/setlist/art';
+import { badgeOf, MOOD_TAG, SHIFT_REASON, SWEET_SPOT, toRow, toRows, whyOf, type WhyTuner } from '../../src/lib/setlist/rows';
 import { ERA_IDS, type EraId, type SetlistSong } from '../../src/lib/setlist/types';
 import { matchSong, toMatch } from '../../src/lib/songs/match';
 import { applyNarrowRule } from '../../src/lib/songs/range';
@@ -30,11 +31,11 @@ describe('toRow: the words', () => {
   const valerie = rankedSong('v', { title: 'Valerie', artist: 'Amy Winehouse', year: 2007, difficulty: 'medium' });
 
   it('says "title by artist, era, difficulty" for the row\'s button; the reason line is its description, not part of the name', () => {
-    // Medium songs sit at 50 on Difficulty, far from a slider at 0, and nothing else is known: a solid pick.
+    // Medium songs sit at 50 on Difficulty, far from a slider at 0, and nothing else is known: Feel-good, the middle Mood tag.
     const row = toRow(valerie, START);
     expect(row.label).toBe('Valerie by Amy Winehouse, ’00s, Medium');
-    expect(row.why).toBe('Solid pick');
-    expect(row.label).not.toContain('Solid pick');
+    expect(row.why).toBe('Feel-good');
+    expect(row.label).not.toContain('Feel-good');
   });
 
   it.each<[Label, string]>([
@@ -111,7 +112,7 @@ describe('toRow: what it carries', () => {
 
   it('reads the reason line from the tuner it is given: the same song says another thing when Difficulty moves', () => {
     const s = rankedSong('s', { difficulty: 'medium' }); // placed at 50 on Difficulty
-    expect(toRow(s, START).why).toBe('Solid pick');
+    expect(toRow(s, START).why).toBe('Feel-good');
     expect(toRow(s, sweetAt(55)).why).toBe('In your sweet spot');
   });
 });
@@ -123,23 +124,23 @@ describe('whyOf: In your sweet spot (needs Difficulty on, and a place on it)', (
   });
 
   it('does not hold from just past 15 away', () => {
-    for (const place of [34.9, 34, 65.1, 66, 0, 100]) expect(whyOf(placed({ difficulty: place }), sweetAt(50)), `place ${place}`).toBe('Solid pick');
+    for (const place of [34.9, 34, 65.1, 66, 0, 100]) expect(whyOf(placed({ difficulty: place }), sweetAt(50)), `place ${place}`).toBe('Feel-good');
   });
 
   it('needs Difficulty on: with the gear off, a song at the slider\'s own value is not in a sweet spot', () => {
     const off: WhyTuner = { difficulty: 50, off: ['difficulty'] };
-    expect(whyOf(placed({ difficulty: 50 }), off)).toBe('Solid pick');
+    expect(whyOf(placed({ difficulty: 50 }), off)).toBe('Feel-good');
     expect(whyOf(placed({ difficulty: 50 }), sweetAt(50))).toBe('In your sweet spot');
   });
 
   it('is skipped for a song with no place on Difficulty (its range is not trusted)', () => {
-    expect(whyOf(placed({ difficulty: null }), sweetAt(50))).toBe('Solid pick');
+    expect(whyOf(placed({ difficulty: null }), sweetAt(50))).toBe('Feel-good');
   });
 
   it('compares the song\'s place with the slider, as the engine placed it: Easy songs are 0 to 33, Medium 33 to 67, Hard 67 to 100', () => {
     // The default tuner has Difficulty at 0 (the Light work end): the easiest songs are in the sweet spot, Medium ones are not.
     expect(whyOf(rankedSong('e', { difficulty: 'easy' }, { difficulty: 5 }), START)).toBe('In your sweet spot');
-    expect(whyOf(rankedSong('m', { difficulty: 'medium' }), START)).toBe('Solid pick');
+    expect(whyOf(rankedSong('m', { difficulty: 'medium' }), START)).toBe('Feel-good');
   });
 });
 
@@ -193,7 +194,7 @@ describe('whyOf: a Maybe song does not claim the sweet spot (QWW-60)', () => {
   });
 
   it.each([0, 16.7, 50, 100])('is never in a sweet spot, wherever its place is: a Maybe song at %s with the slider on it', (place) => {
-    expect(whyOf(ranked(song('m', { difficulty: 'maybe' }), { difficulty: place }), sweetAt(place))).toBe('Solid pick');
+    expect(whyOf(ranked(song('m', { difficulty: 'maybe' }), { difficulty: place }), sweetAt(place))).toBe('Feel-good');
   });
 });
 
@@ -208,11 +209,11 @@ describe('whyOf: Crowd favourite and Unconventional pick (the song\'s own place 
     [0, 'Unconventional pick'],
   ])('a place of %s says %s', (popularity, word) => {
     const why = whyOf(placed({ popularity }), START);
-    expect(why).toBe(word ?? 'Solid pick');
+    expect(why).toBe(word ?? 'Feel-good');
   });
 
   it('is skipped for a song whose popularity is unknown', () => {
-    expect(whyOf(placed({ popularity: null }), START)).toBe('Solid pick');
+    expect(whyOf(placed({ popularity: null }), START)).toBe('Feel-good');
   });
 
   it('R35 (QWW-57): the least known songs say "Unconventional pick" and no place says "Deep cut" or "Wildcard"; the Popularity gear keeps its "Deep cuts" end label', () => {
@@ -220,7 +221,7 @@ describe('whyOf: Crowd favourite and Unconventional pick (the song\'s own place 
     // on 12 Nov (it may still become "Rare request": one string). The rule (35 or less) is as it was.
     const said = new Set<string>();
     for (let popularity = 0; popularity <= 100; popularity += 0.5) said.add(whyOf(placed({ popularity }), START));
-    expect([...said].sort()).toEqual(['Crowd favourite', 'Solid pick', 'Unconventional pick']);
+    expect([...said].sort()).toEqual(['Crowd favourite', 'Feel-good', 'Unconventional pick']);
     expect([...said].some((why) => /Deep cut|Wildcard/.test(why))).toBe(false);
     // The two that can share a line with the sweet spot are the longest lines there are; that they show whole at 360, 375 and 390 px is tests/e2e/setlist-reasons.spec.ts.
     expect(whyOf(placed({ difficulty: 0, popularity: 10 }), START)).toBe('In your sweet spot · Unconventional pick');
@@ -245,7 +246,7 @@ describe('whyOf: On repeat and Rediscover (the song\'s own place on History)', (
     [20, 'Rediscover'],
     [0, 'Rediscover'],
   ])('a place of %s says %s', (history, word) => {
-    expect(whyOf(placed({ history }), START)).toBe(word ?? 'Solid pick');
+    expect(whyOf(placed({ history }), START)).toBe(word ?? 'Feel-good');
   });
 
   it('never shows signed out, where every History place is null', () => {
@@ -290,38 +291,46 @@ describe('whyOf: the order, and at most two', () => {
   });
 });
 
-describe('whyOf: nothing else to say', () => {
+describe('whyOf: nothing else to say (the Mood tag, Round 7 §2, QWW-72)', () => {
   it.each<[number | null, string]>([
-    [100, 'For the party people'],
-    [70, 'For the party people'],
-    [69.9, 'Solid pick'],
-    [50, 'Solid pick'],
-    [25.1, 'Solid pick'],
-    [25, 'Slow burn'],
-    [0, 'Slow burn'],
-    [null, 'Solid pick'],
+    [100, 'Party bop'],
+    [80, 'Party bop'],
+    [67, 'Party bop'],
+    [66.9, 'Feel-good'],
+    [66, 'Feel-good'],
+    [50, 'Feel-good'],
+    [34, 'Feel-good'],
+    [33.9, 'Slow jam'],
+    [33, 'Slow jam'],
+    [20, 'Slow jam'],
+    [0, 'Slow jam'],
+    [null, 'Feel-good'],
   ])('a tempo place of %s says %s', (tempo, word) => {
     expect(whyOf(placed({ tempo }), START)).toBe(word);
   });
 
-  it('R32 (QWW-57): the only words a tempo can bring are "For the party people", "Slow burn" and "Solid pick", across the whole range', () => {
-    // Quinn-Wai renamed the two tempo words on 12 Nov (see the QWW-57 ticket); the thresholds (70 and 25) are as they were. Every place
+  it('the only words a tempo can bring are "Party bop", "Slow jam" and "Feel-good", across the whole range, and none of the old ones', () => {
+    // The fallback still reads the song's tempo place; its words and cut-offs follow the Mood gear's zones (Round 7 §2, §3). Every place
     // from 0 to 100 in half steps, and none, says one of the three, so the old words cannot come back by another road.
     const said = new Set<string>();
     for (let tempo = 0; tempo <= 100; tempo += 0.5) said.add(whyOf(placed({ tempo }), START));
     said.add(whyOf(placed({ tempo: null }), START));
-    expect([...said].sort()).toEqual(['For the party people', 'Slow burn', 'Solid pick']);
-    expect(whyOf(placed({ tempo: 70 }), START)).toBe('For the party people');
-    expect(whyOf(placed({ tempo: 25 }), START)).toBe('Slow burn');
+    expect([...said].sort()).toEqual(['Feel-good', 'Party bop', 'Slow jam']);
+    expect([...said].some((why) => /party people|Slow burn|Solid pick|tempo/i.test(why))).toBe(false);
   });
 
-  it('is only the last resort: a song with another reason does not also get a tempo line', () => {
+  it('says the zone the Mood gear shows for the same value: Slow jams, Feel-good, Party bops', () => {
+    for (let tempo = 0; tempo <= 100; tempo++) expect(whyOf(placed({ tempo }), START), `at ${tempo}`).toBe(MOOD_TAG[moodZone(tempo)]);
+    expect(MOOD_TAG).toEqual(['Slow jam', 'Feel-good', 'Party bop']);
+  });
+
+  it('is only the last resort: a song with another reason does not also get a Mood tag', () => {
     expect(whyOf(placed({ popularity: 95, tempo: 99 }), START)).toBe('Crowd favourite');
     expect(whyOf(placed({ difficulty: 50, tempo: 1 }), sweetAt(50))).toBe('In your sweet spot');
   });
 
-  it('is a solid pick for a song we know nothing about', () => {
-    expect(whyOf(placed({ difficulty: null, history: null, popularity: null, tempo: null }), START)).toBe('Solid pick');
+  it('is Feel-good, the middle tag, for a song we know nothing about', () => {
+    expect(whyOf(placed({ difficulty: null, history: null, popularity: null, tempo: null }), START)).toBe('Feel-good');
   });
 });
 
@@ -363,8 +372,8 @@ describe('whyOf: a song that fits an octave away says so, and nothing else (QWW-
     expect(whyOf(shifted('none', { difficulty: 50, popularity: 95 }), sweetAt(50))).toBe('In your sweet spot · Crowd favourite');
     expect(whyOf(shifted('none', { popularity: 95 }), START)).toBe('Crowd favourite');
     expect(whyOf(shifted('none', { history: 5 }), START)).toBe('Rediscover');
-    expect(whyOf(shifted('none'), START)).toBe('Solid pick');
-    expect(whyOf(shifted('none', { tempo: 99 }), START)).toBe('For the party people');
+    expect(whyOf(shifted('none'), START)).toBe('Feel-good');
+    expect(whyOf(shifted('none', { tempo: 99 }), START)).toBe('Party bop');
   });
 
   it('is what the row carries, and the badge and the button\'s name are the song\'s own, as for any song', () => {
@@ -433,6 +442,6 @@ describe('toRows', () => {
     ];
     const rows = toRows(mixed, START);
     expect(rows.map((r) => r.badge)).toEqual(['Easy', null, 'Hard']);
-    expect(rows.map((r) => r.why)).toEqual(['In your sweet spot · Crowd favourite', 'Slow burn', 'Rediscover']);
+    expect(rows.map((r) => r.why)).toEqual(['In your sweet spot · Crowd favourite', 'Slow jam', 'Rediscover']);
   });
 });

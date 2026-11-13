@@ -200,25 +200,25 @@ test('11. rack content never overflows: expanded, mini and mini-era', async ({ p
   expect(await rack(page)).toEqual({ height: 164, scroll: 164 });
 });
 
-test.describe('12. the metronome', () => {
+test.describe('12. the Mood speaker (Round 7 test 12)', () => {
   test.use({ contextOptions: { reducedMotion: 'no-preference' } });
 
-  test('Tempo 55 swings with the swing14 keyframes and a 0.45 s half-swing', async ({ page }) => {
+  test('Tempo (shown as Mood) at 80 thumps with the thump12 keyframes, 0.52 s a thump', async ({ page }) => {
     await open(page);
-    await pressKey(page, 'tempo', 'ArrowRight', 5);
-    expect(await value(page, 'tempo')).toBe(55);
+    await pressKey(page, 'tempo', 'ArrowRight', 30);
+    expect(await value(page, 'tempo')).toBe(80);
     const animations = await strip(page, 'tempo').evaluate((el) =>
       el
         .getAnimations({ subtree: true })
         .filter((a): a is CSSAnimation => a instanceof CSSAnimation)
         .map((a) => ({ name: a.animationName, duration: a.effect?.getTiming().duration, paused: a.playState === 'paused' })),
     );
-    expect(animations).toContainEqual({ name: 'swing14', duration: 450, paused: false });
+    expect(animations).toContainEqual({ name: 'thump12', duration: 520, paused: false });
   });
 
-  test('a gear that is off holds its art still: the metronome has no animation at all (6A §7: a switched-off sign)', async ({ page }) => {
+  test('a gear that is off holds its art still: the speaker has no animation at all (6A §7, Round 7 §4: a switched-off sign)', async ({ page }) => {
     await open(page);
-    // Tempo starts off. 6A draws the off state as unlit tubes and sets the pendulum to `animation: none`, rather than pausing it.
+    // Tempo starts off. The off state is drawn as unlit tubes and the cone is set to `animation: none`, rather than paused.
     const animations = await strip(page, 'tempo').evaluate((el) =>
       el
         .getAnimations({ subtree: true })
@@ -1066,9 +1066,9 @@ test('signed in, the Spotify account sits where Connect does: far right, with th
 
 /** What the reference's viewModel() would draw for the real defaults, signed out: the top 4 of the 25 mock songs. */
 const TOP_ROWS = [
-  { title: 'Mr. Brightside', why: 'For the party people', badge: 'Medium' },
+  { title: 'Mr. Brightside', why: 'Party bop', badge: 'Medium' },
   { title: "Don't Stop Believin'", why: 'Crowd favourite', badge: 'Hard' },
-  { title: 'Dancing Queen', why: 'Solid pick', badge: 'Medium' },
+  { title: 'Dancing Queen', why: 'Feel-good', badge: 'Medium' },
   { title: 'Bohemian Rhapsody', why: 'Crowd favourite', badge: 'Hard' },
 ];
 
@@ -1160,25 +1160,30 @@ test('24b. one song says "1 song", in the header', async ({ page }) => {
   await expect(rows(page)).toHaveCount(1);
 });
 
-test('25. Tempo, reset: its label is the raised grey, its metronome strokes are unlit, its pendulum is still; on, it is violet and swings', async ({ page }) => {
+test('25. Tempo (shown as Mood), reset: its label is the raised grey, its speaker strokes are unlit, its cone is still, drawn at the default with 2 waves a side; on, it is violet', async ({ page }) => {
   await open(page);
   // Tempo starts off with the real defaults, so this is the reset state.
   const label = strip(page, 'tempo').locator('label');
   expect(await css(label, 'color')).toBe(OFF_TEXT);
   expect(await css(strip(page, 'tempo').locator('[data-offtag]'), 'color')).toBe(OFF_TEXT);
-  expect(await css(strip(page, 'tempo').locator('svg path').first(), 'stroke')).toBe(UNLIT);
-  expect(await css(strip(page, 'tempo').locator('[data-pendulum]'), 'animation-name')).toBe('none');
+  expect(await css(strip(page, 'tempo').locator('svg rect').first(), 'stroke')).toBe(UNLIT);
+  expect(await css(strip(page, 'tempo').locator('[data-thump]'), 'animation-name')).toBe('none');
+  // Drawn at the gear's default (50 in this app, QWW-47; the README's mock default is 45): Feel-good, so 2 waves a side, strip and tab.
+  expect(DEFAULTS.tempo).toBe(50);
+  expect(await wavesPerSide(art(page, 'tempo'))).toBe(2);
+  expect(await wavesPerSide(tabArt(page, 'tempo'))).toBe(2);
+  expect(await css(tabArt(page, 'tempo').locator('[data-thump]'), 'animation-name')).toBe('none');
   // Not dimmed with opacity or a filter: an off gear looks like a switched-off sign, not a faded one.
   expect(await css(art(page, 'tempo'), 'opacity')).toBe('1');
   expect(await css(art(page, 'tempo'), 'filter')).toBe('none');
   // Turned on, it takes its colour.
   await pressKey(page, 'tempo', 'ArrowRight');
   expect(await css(label, 'color')).toBe(VIOLET);
-  expect(await css(strip(page, 'tempo').locator('svg path').first(), 'stroke')).toBe(VIOLET);
+  expect(await css(strip(page, 'tempo').locator('svg rect').first(), 'stroke')).toBe(VIOLET);
   // And reset again, it goes grey again.
   await resetButton(page, 'tempo').click();
   expect(await css(label, 'color')).toBe(OFF_TEXT);
-  expect(await css(strip(page, 'tempo').locator('svg path').first(), 'stroke')).toBe(UNLIT);
+  expect(await css(strip(page, 'tempo').locator('svg rect').first(), 'stroke')).toBe(UNLIT);
 });
 
 test('25b. an off gear\'s end labels are the raised grey too, and a gear that is on has its own colours', async ({ page }) => {
@@ -1248,20 +1253,20 @@ test('27. the Era tab\'s jukebox (R24): Era off is an unlit body with all three 
 test.describe('motion', () => {
   test.use({ contextOptions: { reducedMotion: 'no-preference' } });
 
-  test('28. Tempo 55: the tab\'s pendulum swings like the strip\'s (swing14, 0.45 s) and its weight is at y 9.9', async ({ page }) => {
+  test('28. Mood at 80: the tab\'s cone thumps like the strip\'s (thump12, 0.52 s) and its radius is 2.18', async ({ page }) => {
     await open(page, { mini: true });
     await tab(page, 'tempo').click();
-    await pressKey(page, 'tempo', 'ArrowRight', 5);
-    expect(await value(page, 'tempo')).toBe(55);
-    const stripPend = strip(page, 'tempo').locator('[data-pendulum]');
-    const tabPend = tabArt(page, 'tempo').locator('[data-pendulum]');
-    for (const pend of [stripPend, tabPend]) {
-      expect(await css(pend, 'animation-name')).toBe('swing14');
-      expect(await css(pend, 'animation-duration')).toBe('0.45s');
-      expect(await css(pend, 'animation-iteration-count')).toBe('infinite');
-      expect(await css(pend, 'animation-direction')).toBe('alternate');
+    await pressKey(page, 'tempo', 'ArrowRight', 30);
+    expect(await value(page, 'tempo')).toBe(80);
+    const stripThump = strip(page, 'tempo').locator('[data-thump]');
+    const tabThump = tabArt(page, 'tempo').locator('[data-thump]');
+    for (const thump of [stripThump, tabThump]) {
+      expect(await css(thump, 'animation-name')).toBe('thump12');
+      expect(await css(thump, 'animation-duration')).toBe('0.52s');
+      expect(await css(thump, 'animation-iteration-count')).toBe('infinite');
+      expect(await css(thump, 'animation-timing-function')).toBe('ease-in-out');
     }
-    expect(await tabArt(page, 'tempo').locator('[data-weight]').getAttribute('y')).toBe('9.9');
+    expect(await tabArt(page, 'tempo').locator('[data-cone]').getAttribute('r')).toBe('2.18');
   });
 
   test('29. turning a reset gear back on (ArrowRight) plays the neon flicker once: neonOn, 0.7 s', async ({ page }) => {
@@ -1300,18 +1305,19 @@ test.describe('motion', () => {
   });
 });
 
-test('30. with reduced motion, the pendulum, the bob, the sign\'s buzz, the titles\' fill and the art\'s flicker are all off', async ({ page }) => {
+test('30. with reduced motion, the speaker\'s thump, the bob, the sign\'s buzz, the titles\' fill and the art\'s flicker are all off', async ({ page }) => {
   await open(page);
-  await pressKey(page, 'tempo', 'ArrowRight', 3); // so the pendulum would swing, and the flicker would play
+  await pressKey(page, 'tempo', 'ArrowRight', 3); // so the cone would thump, and the flicker would play
   const names = {
-    pendulum: await css(strip(page, 'tempo').locator('[data-pendulum]'), 'animation-name'),
+    thump: await css(strip(page, 'tempo').locator('[data-thump]'), 'animation-name'),
+    tabThump: await css(tabArt(page, 'tempo').locator('[data-thump]'), 'animation-name'),
     flicker: await css(art(page, 'tempo'), 'animation-name'),
     flickerDifficulty: await css(art(page, 'difficulty'), 'animation-name'),
     bob: await css(strip(page, 'popularity').locator('[data-bolt] > *').first(), 'animation-name'),
     noteBob: await css(strip(page, 'history').locator('[data-note] > *').first(), 'animation-name'),
     sign: await css(page.locator('[lang="ja"]'), 'animation-name'),
   };
-  expect(names).toEqual({ pendulum: 'none', flicker: 'none', flickerDifficulty: 'none', bob: 'none', noteBob: 'none', sign: 'none' });
+  expect(names).toEqual({ thump: 'none', tabThump: 'none', flicker: 'none', flickerDifficulty: 'none', bob: 'none', noteBob: 'none', sign: 'none' });
   // The titles show, white, with no fill drawn over them (R12: tests/e2e/setlist-rows.spec.ts has the rest).
   const colours = await page.locator('[data-row-title]').evaluateAll((els) => [...new Set(els.map((el) => getComputedStyle(el).color))]);
   expect(colours).toEqual([rgb('#F3EFF7')]);
@@ -1344,7 +1350,7 @@ test('32. no tab label has Japanese in it, and the カラオケ sign is decorati
   await open(page, { mini: true });
   const labels = await page.locator('[data-tab]').allTextContents();
   // R11: Listening History goes last of the four gears; its tab still says "History".
-  expect(labels).toEqual(['Difficulty', 'Popularity', 'Tempo', 'History', 'Era']);
+  expect(labels).toEqual(['Difficulty', 'Popularity', 'Mood', 'History', 'Era']);
   for (const label of labels) expect(label).not.toMatch(/[぀-ヿ一-鿿]/);
   const sign = page.locator('[lang="ja"]');
   await expect(sign).toHaveText('カラオケ');
@@ -1352,6 +1358,119 @@ test('32. no tab label has Japanese in it, and the カラオケ sign is decorati
   // One sign, and the heading is what a screen reader hears.
   await expect(page.getByText('カラオケ')).toHaveCount(1);
   expect(await page.getByRole('heading', { name: 'Tune your setlist' }).count()).toBe(1);
+});
+
+// ============================================================================================================
+// Round 7 (QWW-72): the Tempo gear is shown as Mood. README §8, new tests 33 to 36, for this build
+// ============================================================================================================
+
+/** The test hook's setState (built into the e2e build only). */
+const setTuner = (page: Page, patch: Partial<TunerState>) =>
+  page.evaluate((p) => (window as unknown as { setlist: { setState(p: object): void } }).setlist.setState(p), patch);
+
+/**
+ * How many arcs of sound a speaker shows on each side: the arcs whose opacity is not 0, right (sweep 1) and left (sweep 0) counted apart.
+ * Fails if the two sides differ.
+ */
+async function wavesPerSide(svg: ReturnType<Page['locator']>): Promise<number> {
+  const { right, left } = await svg.evaluate((el) => {
+    const shown = [...el.querySelectorAll('[data-wave]')].filter((w) => getComputedStyle(w).opacity !== '0');
+    const sweep = (w: Element, s: string) => new RegExp(` 0 0 ${s} `).test(w.getAttribute('d') ?? '');
+    return { right: shown.filter((w) => sweep(w, '1')).length, left: shown.filter((w) => sweep(w, '0')).length };
+  });
+  expect(left, 'as many arcs on the left as on the right').toBe(right);
+  return right;
+}
+
+test.describe('33. the Mood zones', () => {
+  test.use({ contextOptions: { reducedMotion: 'no-preference' } });
+
+  test('33. Mood at 20, 50 and 80: 1, 2 and 3 waves a side and thump4, thump8 and thump12, in the strip and in the tab; off, unlit and still with 2', async ({ page }) => {
+    // Mini, on the Mood tab, so the strip and its tab are on screen together; the screenshots are for the review (390 px wide).
+    await open(page, { mini: true });
+    await tab(page, 'tempo').click();
+    const cases = [
+      { value: 20, waves: 1, keyframes: 'thump4', duration: '1.18s' },
+      { value: 50, waves: 2, keyframes: 'thump8', duration: '0.85s' },
+      { value: 80, waves: 3, keyframes: 'thump12', duration: '0.52s' },
+    ];
+    for (const c of cases) {
+      await setTuner(page, { tempo: c.value, off: ['history', 'era'] });
+      await expect.poll(() => value(page, 'tempo')).toBe(c.value);
+      for (const [where, svg] of [['strip', art(page, 'tempo')], ['tab', tabArt(page, 'tempo')]] as const) {
+        // The strip's arcs fade over 180 ms, so wait for them to settle.
+        await expect.poll(() => wavesPerSide(svg), `${where} at ${c.value}`).toBe(c.waves);
+        expect(await css(svg.locator('[data-thump]'), 'animation-name'), `${where} at ${c.value}`).toBe(c.keyframes);
+        expect(await css(svg.locator('[data-thump]'), 'animation-duration'), `${where} at ${c.value}`).toBe(c.duration);
+      }
+      await page.waitForTimeout(250);
+      await page.locator('#sheet').screenshot({ path: path.join(SCREENS, `setlist-mood-${c.value}.png`), animations: 'disabled' });
+    }
+    expect(await art(page, 'tempo').locator('[data-cone]').getAttribute('r')).toBe('12.4');
+    expect(await tabArt(page, 'tempo').locator('[data-cone]').getAttribute('r')).toBe('2.18');
+    // Off: drawn at the default, unlit, still, with the Feel-good zone's 2 waves.
+    await resetButton(page, 'tempo').click();
+    await expect(strip(page, 'tempo')).toHaveAttribute('data-off', /.*/);
+    expect(await value(page, 'tempo')).toBe(DEFAULTS.tempo);
+    for (const svg of [art(page, 'tempo'), tabArt(page, 'tempo')]) {
+      await expect.poll(() => wavesPerSide(svg)).toBe(2);
+      expect(await css(svg.locator('rect').first(), 'stroke')).toBe(UNLIT);
+      expect(await css(svg.locator('[data-thump]'), 'animation-name')).toBe('none');
+    }
+    await page.waitForTimeout(800); // past the turn-off and any flicker
+    await page.locator('#sheet').screenshot({ path: path.join(SCREENS, 'setlist-mood-off.png'), animations: 'disabled' });
+  });
+});
+
+test('34. the strip cone is r 10.0 at 0 and 13.0 at 100', async ({ page }) => {
+  await open(page);
+  await setTuner(page, { tempo: 0, off: ['history', 'era'] });
+  await expect(art(page, 'tempo').locator('[data-cone]')).toHaveAttribute('r', '10.0');
+  await setTuner(page, { tempo: 100, off: ['history', 'era'] });
+  await expect(art(page, 'tempo').locator('[data-cone]')).toHaveAttribute('r', '13.0');
+});
+
+test('35. the words: MOOD, Slow jams to Party bops, a Mood tab, "Turn off mood", MOOD · OFF; nothing a singer sees or hears says tempo', async ({ page }) => {
+  await open(page, { mini: true });
+  await tab(page, 'tempo').click();
+  const label = strip(page, 'tempo').locator('label');
+  // Tempo starts off.
+  await expect(label).toHaveText('MOOD · OFF');
+  await expect(page.getByRole('slider', { name: 'MOOD' })).toHaveAttribute('id', 'slider-tempo');
+  await expect(strip(page, 'tempo').getByText('Slow jams', { exact: true })).toBeVisible();
+  await expect(strip(page, 'tempo').getByText('Party bops', { exact: true })).toBeVisible();
+  await expect(tab(page, 'tempo')).toHaveText('Mood');
+  const said = () =>
+    page.evaluate(() => {
+      const out = [document.body.innerText];
+      for (const el of document.querySelectorAll('[aria-label], [title], [aria-valuetext], [alt], [placeholder]')) {
+        for (const a of ['aria-label', 'title', 'aria-valuetext', 'alt', 'placeholder']) out.push(el.getAttribute(a) ?? '');
+      }
+      return out.join('\n');
+    });
+  expect(await said()).not.toMatch(/tempo/i);
+  // On: the label, the ✕'s name, and still no "tempo", in mini and expanded.
+  await pressKey(page, 'tempo', 'ArrowRight');
+  await expect(label).toHaveText('MOOD');
+  await expect(resetButton(page, 'tempo')).toHaveAttribute('aria-label', 'Turn off mood');
+  expect(await said()).not.toMatch(/tempo/i);
+  await handle(page).click();
+  await expect(page.locator('#app')).toHaveAttribute('data-mode', 'expanded');
+  expect(await said()).not.toMatch(/tempo/i);
+});
+
+test('36. the reason line\'s fallback is the song\'s Mood zone: Party bop, Feel-good, Slow jam, and none of the old words', async ({ page }) => {
+  // Every gear off and every era on, so no sweet spot. Rule 2 (popularity) still reads each song's own place, a percentile among the songs here, so
+  // Since U Been Gone and Respect, the README's examples, say "Unconventional pick" in this build; these three have no other reason and fall
+  // through to their zone: Mr. Brightside (mock tempo 90), Dancing Queen (50) and Stand by Me (30).
+  await open(page);
+  await setTuner(page, { off: ['difficulty', 'history', 'popularity', 'tempo'], eras: ['pre', 's70', 's80', 's90', 's00', 's10', 's20'] });
+  await expect.poll(() => rows(page).count()).toBe(25);
+  const lines = Object.fromEntries(
+    await rows(page).evaluateAll((els) => els.map((el) => [el.querySelector('[data-row-title]')?.textContent ?? '', el.querySelector('[data-row-why]')?.textContent ?? ''])),
+  ) as Record<string, string>;
+  expect({ a: lines['Mr. Brightside'], b: lines['Dancing Queen'], c: lines['Stand by Me'] }).toEqual({ a: 'Party bop', b: 'Feel-good', c: 'Slow jam' });
+  for (const line of Object.values(lines)) expect(line).toMatch(/^(Party bop|Feel-good|Slow jam|Crowd favourite|Unconventional pick)$/);
 });
 
 // "Pre-’70s" is 40 px wide in Inter at 6A's 10.5 px and its button is 35 to 42 px wide (a 360 px phone to the desktop frame), so the

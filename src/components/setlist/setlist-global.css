@@ -1,15 +1,12 @@
-/* The gear art's global keyframes (Round 6A §6, §7, §10): the metronome's swings, one per amplitude, +/-20 degrees (slow)
-   down to +/-8 (fast), and the flicker a strip's art plays when its gear is turned on. Copied from the reference.
+/* The gear art's global keyframes (Round 6A §7, §10, Round 7 §4): the Mood speaker's thump, one per zone, the cone swelling by 4%
+   (Slow jams), 8% (Feel-good) or 12% (Party bops), and the flicker a strip's art plays when its gear is turned on. Copied from the
+   reference.
 
-   These are global on purpose. Both animations are inline styles (metronome(value).animation and neonFlicker(off, armed) in
-   src/lib/setlist/art.ts, for example "swing14 0.45s ease-in-out infinite alternate" and "neonOn 0.7s linear 1"), and an
+   These are global on purpose. Both animations are inline styles (speaker(value).animation and neonFlicker(off, armed) in
+   src/lib/setlist/art.ts, for example "thump12 0.52s ease-in-out infinite" and "neonOn 0.7s linear 1"), and an
    inline style can only name a keyframes rule by its plain name. A rule inside GearArt.module.css would be renamed by CSS
    Modules and the inline name would no longer match it. Import this file once, in the screen. */
-@keyframes swing20 { from { transform: rotate(-20deg); } to { transform: rotate(20deg); } }
-@keyframes swing18 { from { transform: rotate(-18deg); } to { transform: rotate(18deg); } }
-@keyframes swing16 { from { transform: rotate(-16deg); } to { transform: rotate(16deg); } }
-@keyframes swing14 { from { transform: rotate(-14deg); } to { transform: rotate(14deg); } }
-@keyframes swing12 { from { transform: rotate(-12deg); } to { transform: rotate(12deg); } }
-@keyframes swing10 { from { transform: rotate(-10deg); } to { transform: rotate(10deg); } }
-@keyframes swing8  { from { transform: rotate(-8deg); }  to { transform: rotate(8deg); } }
+@keyframes thump4  { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes thump8  { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+@keyframes thump12 { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
 @keyframes neonOn { 0% { opacity: 0.25; } 8% { opacity: 1; } 12% { opacity: 0.35; } 20% { opacity: 1; } 26% { opacity: 0.6; } 34% { opacity: 1; } 100% { opacity: 1; } }

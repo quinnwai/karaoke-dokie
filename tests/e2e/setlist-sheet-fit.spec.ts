@@ -70,7 +70,7 @@ const SLACK = 1.04;
  */
 async function expectTabsFit(page: Page, width: number) {
   const labels = await tabLabels(page);
-  expect(labels.map((l) => l.name), `${width} px`).toEqual(['Difficulty', 'Popularity', 'Tempo', 'History', 'Era']);
+  expect(labels.map((l) => l.name), `${width} px`).toEqual(['Difficulty', 'Popularity', 'Mood', 'History', 'Era']);
   for (const l of labels) expect(l.text + CLEAR, `${width} px: ${l.name} is ${l.text.toFixed(2)} px wide in a ${l.client} px tab`).toBeLessThanOrEqual(l.client);
   const size = labels[0]!.size;
   expect(new Set(labels.map((l) => l.size)).size, `${width} px: the five labels' sizes ${labels.map((l) => l.size)}`).toBe(1);

@@ -9,3 +9,5 @@ playwright-report/
 next-env.d.ts
 .vercel
 eval-out/
+# The output of npm run tempo:dashboard (scripts/tempo-dashboard.ts)
+tempo-dashboard.html

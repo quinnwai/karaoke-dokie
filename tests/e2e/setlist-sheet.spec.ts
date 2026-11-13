@@ -209,7 +209,7 @@ const knobBox = (page: Page, gear: GearId) =>
 const ENDS: Record<GearId, [string, string]> = {
   difficulty: ['Light work', 'Locked in'],
   popularity: ['Deep cuts', 'Pop hits'],
-  tempo: ['Slow jams', 'Fast tracks'],
+  tempo: ['Slow jams', 'Party bops'],
   history: ['Rediscover', 'On repeat'],
 };
 
@@ -595,7 +595,7 @@ test('R11. the strips are Difficulty, Popularity, Tempo, Listening History, in t
     els.map((el) => ({ gear: (el as HTMLElement).dataset.gear, y: el.getBoundingClientRect().y, label: el.querySelector('label')?.firstChild?.textContent })),
   );
   expect(strips.map((s) => s.gear)).toEqual(['difficulty', 'popularity', 'tempo', 'history']);
-  expect(strips.map((s) => s.label)).toEqual(['DIFFICULTY', 'POPULARITY', 'TEMPO', 'LISTENING HISTORY']);
+  expect(strips.map((s) => s.label)).toEqual(['DIFFICULTY', 'POPULARITY', 'MOOD', 'LISTENING HISTORY']);
   expect(strips.map((s) => s.y)).toEqual([...strips.map((s) => s.y)].sort((a, b) => a - b));
   // Listening History is the last of them, directly above the Era panel.
   const era = (await page.locator('#era-panel').boundingBox())!;
@@ -612,7 +612,7 @@ test('R11. the tabs are Difficulty, Popularity, Tempo, History, Era, in the DOM 
     els.map((el) => ({ gear: (el as HTMLElement).dataset.gear, x: el.getBoundingClientRect().x, text: el.textContent })),
   );
   expect(tabs.map((t) => t.gear)).toEqual(['difficulty', 'popularity', 'tempo', 'history', 'era']);
-  expect(tabs.map((t) => t.text)).toEqual(['Difficulty', 'Popularity', 'Tempo', 'History', 'Era']);
+  expect(tabs.map((t) => t.text)).toEqual(['Difficulty', 'Popularity', 'Mood', 'History', 'Era']);
   expect(tabs.map((t) => t.x)).toEqual([...tabs.map((t) => t.x)].sort((a, b) => a - b));
   // Mini opens on the first of them, Difficulty, and on no other, signed in or out.
   await expect(page.locator('#app')).toHaveAttribute('data-open', 'difficulty');

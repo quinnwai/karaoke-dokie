@@ -1,6 +1,7 @@
-// The gear art (Round 6A §6 to §9): the neon tubes on each gear's strip, the simplified icon on its tab, the Era tab's
-// jukebox, and the icon on each era button. The geometry is copied from docs/setlist-round6a/setlist-round6a.html, and
-// tests/setlist/gearArt.test.tsx checks it against that file, element by element.
+// The gear art (Round 6A §6 to §9, Round 7 §4, §5): the neon tubes on each gear's strip, the simplified icon on its tab, the Era
+// tab's jukebox, and the icon on each era button. The geometry is copied from docs/setlist-round7/setlist-round7-mood.html (Round
+// 6A's reference with the Tempo gear drawn as the Mood speaker), and tests/setlist/gearArt.test.tsx checks it against that file,
+// element by element.
 //
 // What moves with a value, what an off gear looks like, which notes, bolts and rays are lit and which jukebox lights are on
 // come from src/lib/setlist/art.ts; this file only applies it. Presentational, but for the one thing a strip's root keeps: whether
@@ -19,9 +20,9 @@ import {
   itemArt,
   jukeboxArt,
   laneArt,
-  metronome,
   neonFlicker,
   noteColor,
+  speaker,
   tabGlow,
   tube,
 } from '../../lib/setlist/art';
@@ -36,7 +37,7 @@ export interface GearArtProps {
   variant: GearArtVariant;
   /** The 0 to 100 value to draw. While the gear is off this is its default. */
   value: number;
-  /** The gear is off (reset, not factored in): it is drawn as unlit tubes, the metronome still, no flicker (§7). */
+  /** The gear is off (reset, not factored in): it is drawn as unlit tubes, the speaker still, no flicker (§7). */
   off: boolean;
   /** For the parent: the strip art's size, corner radius and the box behind it. The tab icon brings its own size. */
   className?: string;
@@ -415,24 +416,54 @@ function PopularityTab({ value, off, className }: ArtProps) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Tempo: a metronome. The pendulum swings at the speed and width metronome(value) gives, and its weight slides down.
-// An off metronome is unlit and still.
+// Tempo, shown to users as Mood (Round 7 §4, §5): a neon speaker. The cone thumps by zone and value, and one, two or three arcs of
+// sound show on each side, by zone (speaker(value) in art.ts). An off speaker is unlit and still, drawn at the default.
+
+/** The strip's arcs, right then left for each ring, inner to outer. */
+const STRIP_WAVES = [
+  ['M98.9 40.2 A9 9 0 0 1 98.9 51.8', 'M41.1 40.2 A9 9 0 0 0 41.1 51.8'],
+  ['M105 35.1 A17 17 0 0 1 105 56.9', 'M35 35.1 A17 17 0 0 0 35 56.9'],
+  ['M111.2 29.9 A25 25 0 0 1 111.2 62.1', 'M28.8 29.9 A25 25 0 0 0 28.8 62.1'],
+] as const;
+
+/** The tab's arcs, in the same order. */
+const TAB_WAVES = [
+  ['M21.5 10.1 A3 3 0 0 1 21.5 13.9', 'M6.5 10.1 A3 3 0 0 0 6.5 13.9'],
+  ['M23.4 8.5 A5.5 5.5 0 0 1 23.4 15.5', 'M4.6 8.5 A5.5 5.5 0 0 0 4.6 15.5'],
+  ['M25.3 6.9 A8 8 0 0 1 25.3 17.1', 'M2.7 6.9 A8 8 0 0 0 2.7 17.1'],
+] as const;
+
+/**
+ * The arcs, inner ring first. The inner pair always shows and has no opacity of its own; the middle and outer pairs are shown or
+ * hidden with an opacity, which fades over 180 ms on the strip (`fade`) and switches on the tab, as in the reference.
+ */
+function Waves({ rings, shown, fade }: { rings: typeof STRIP_WAVES | typeof TAB_WAVES; shown: number; fade?: string }) {
+  return rings.flatMap((pair, ring) =>
+    pair.map((d) =>
+      ring === 0 ? (
+        <path key={d} data-wave={ring} d={d} />
+      ) : (
+        <path key={d} data-wave={ring} className={fade} d={d} style={{ opacity: ring < shown ? 1 : 0 }} />
+      ),
+    ),
+  );
+}
 
 function TempoStrip({ value, off, className }: ArtProps) {
   const glow = useFilterId();
-  const pendulum = metronome(value, off);
+  const spk = speaker(value, off);
   return (
     <StripSvg off={off} className={className}>
       <Glow id={glow} y="-20%" height="140%" />
-      <g filter={`url(#${glow})`} fill="none" strokeLinecap="round" strokeLinejoin="round" stroke={pendulum.color}>
-        <path d="M65 10 H85 L104 76 H46 Z" strokeWidth="2.4" />
-        <path d="M70 10 L75 5 L80 10" strokeWidth="2" />
-        <path d="M53 56 H97" strokeWidth="1.8" />
-        <path d="M101.5 64 H107" strokeWidth="1.8" />
-        <circle cx="110.5" cy="64" r="3.5" strokeWidth="1.8" />
-        <g className={styles.pend} data-pendulum="" style={{ animation: pendulum.animation }}>
-          <path d="M75 56 V16" strokeWidth="2" />
-          <rect data-weight="" x="69" y={pendulum.weightY} width="12" height="7" rx="2" strokeWidth="1.8" />
+      <g filter={`url(#${glow})`} fill="none" strokeLinecap="round" strokeLinejoin="round" stroke={spk.color}>
+        <rect x="52" y="8" width="36" height="64" rx="5" strokeWidth="2.4" />
+        <circle cx="70" cy="21" r="4.5" strokeWidth="1.8" />
+        <g className={styles.thump} data-thump="" style={{ animation: spk.animation }}>
+          <circle data-cone="" cx="70" cy="48" strokeWidth="2.2" r={spk.coneR} />
+          <circle cx="70" cy="48" r="4" strokeWidth="1.8" />
+        </g>
+        <g strokeWidth="2">
+          <Waves rings={STRIP_WAVES} shown={spk.waves} fade={styles.fade} />
         </g>
       </g>
     </StripSvg>
@@ -440,22 +471,24 @@ function TempoStrip({ value, off, className }: ArtProps) {
 }
 
 function TempoTab({ value, off, className }: ArtProps) {
-  const pendulum = metronome(value, off);
+  const spk = speaker(value, off);
   return (
     <svg
       {...TAB}
-      strokeWidth="1.6"
+      strokeWidth="1.4"
       strokeLinecap="round"
       strokeLinejoin="round"
-      stroke={pendulum.color}
+      stroke={spk.color}
       className={className}
       style={{ filter: tabGlow(VIOLET, off) }}
     >
-      <path d="M11 3 H17 L22 20 H6 Z" />
-      <path d="M8.2 15.5 H19.8" strokeWidth="1.2" />
-      <g className={styles.pendTab} data-pendulum="" style={{ animation: pendulum.animation }}>
-        <path d="M14 15.5 V5" />
-        <rect data-weight="" x="12.4" y={pendulum.tabWeightY} width="3.2" height="2.2" rx="0.6" strokeWidth="1.1" />
+      <rect x="10.2" y="2.5" width="7.6" height="17" rx="1.6" />
+      <circle cx="14" cy="6" r="1.1" strokeWidth="1" />
+      <g className={styles.thumpTab} data-thump="" style={{ animation: spk.animation }}>
+        <circle data-cone="" cx="14" cy="13.6" strokeWidth="1.2" r={spk.tabConeR} />
+      </g>
+      <g strokeWidth="1.2">
+        <Waves rings={TAB_WAVES} shown={spk.waves} />
       </g>
     </svg>
   );

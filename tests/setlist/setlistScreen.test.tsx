@@ -253,7 +253,7 @@ describe('the tab bar', () => {
   it('labels each tab in English only', () => {
     mini();
     const labels = all(`${SEL.tabs} [data-tab]`).map((t) => t.textContent ?? '');
-    expect(labels).toEqual(['Difficulty', 'Popularity', 'Tempo', 'History', 'Era']);
+    expect(labels).toEqual(['Difficulty', 'Popularity', 'Mood', 'History', 'Era']);
     for (const label of labels) expect(label).not.toMatch(/[぀-ヿ㐀-鿿]/);
   });
 
@@ -602,7 +602,8 @@ describe('the handle when the sheet cannot expand (QWW-57, decision 1)', () => {
 
 describe('gear strips', () => {
   // Round 6A §5 shortened History's label to "HISTORY"; QWW-57's review (R6) put "LISTENING HISTORY" back (its tab is still "History").
-  const NAME: Record<GearId, string> = { difficulty: 'DIFFICULTY', history: 'LISTENING HISTORY', popularity: 'POPULARITY', tempo: 'TEMPO' };
+  // The Tempo gear is shown as Mood (QWW-72): its input is named MOOD; its id is still slider-tempo.
+  const NAME: Record<GearId, string> = { difficulty: 'DIFFICULTY', history: 'LISTENING HISTORY', popularity: 'POPULARITY', tempo: 'MOOD' };
   const VALUE: Record<GearId, number> = { difficulty: 11, history: 22, popularity: 33, tempo: 44 };
   const label = (gear: GearId) => el<HTMLLabelElement>(`label[for="slider-${gear}"]`);
 
@@ -653,7 +654,7 @@ describe('gear strips', () => {
     ['difficulty', 'Light work', 'Locked in'],
     ['history', 'Rediscover', 'On repeat'],
     ['popularity', 'Deep cuts', 'Pop hits'],
-    ['tempo', 'Slow jams', 'Fast tracks'],
+    ['tempo', 'Slow jams', 'Party bops'],
   ] as const)('%s draws its end labels, %s and %s, under the track', (gear, left, right) => {
     draw([rankedSong('a')], signedIn({ off: [] }));
     const ends = within(el(SEL.strip(gear)));
@@ -798,8 +799,8 @@ describe('History', () => {
     expect(label().textContent).toBe('LISTENING HISTORY');
     expect(strip().querySelector('[data-offtag]')).toBeNull();
     expect(within(strip()).getByText(hint)).toBeTruthy();
-    // The other gears are untouched: Tempo is off and usable, so it says so.
-    expect(el<HTMLLabelElement>('label[for="slider-tempo"]').textContent).toBe('TEMPO · OFF');
+    // The other gears are untouched: Tempo (shown as Mood) is off and usable, so it says so.
+    expect(el<HTMLLabelElement>('label[for="slider-tempo"]').textContent).toBe('MOOD · OFF');
   });
 
   it('has no OFF tag while it is disabled even with History on in the tuner (a signed-out singer\'s tuner can have it on)', () => {
@@ -871,7 +872,7 @@ describe('reset buttons', () => {
     difficulty: 'Turn off difficulty',
     history: 'Turn off listening history',
     popularity: 'Turn off popularity',
-    tempo: 'Turn off tempo',
+    tempo: 'Turn off mood',
     era: 'Turn off era',
   };
 

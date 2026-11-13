@@ -174,7 +174,7 @@ export interface Match {
   year?: number;
   yearSource?: 'usdb' | 'spotify' | 'chart';
   /**
-   * The song's place on the Tempo gear, in beats per minute: the one tempo the ranking uses (src/lib/tempo/feel.ts effectiveTempo),
+   * The song's place on the Tempo gear (shown to users as Mood, QWW-72), in beats per minute: the one tempo the ranking uses (src/lib/tempo/feel.ts effectiveTempo),
    * which only its rank matters for. With a feel label it is a measured tempo moved into the label's band; without one, a measured
    * tempo (Deezer, a beat tracker or the note file, QWW-40) squeezed into 90 to 125. Not a plain bpm. Unset when unknown.
    */
@@ -242,7 +242,8 @@ export const ERA_IDS: EraId[] = ['pre', 's70', 's80', 's90', 's00', 's10', 's20'
 
 /**
  * A gear's value, or a song's place on it: 0 to 100. The ends of the tracks: Difficulty Light work to Locked in,
- * History Rediscover to On repeat, Popularity Deep cuts to Pop hits, Tempo Slow jams to Fast tracks.
+ * History Rediscover to On repeat, Popularity Deep cuts to Pop hits, Tempo (shown as Mood,
+ * QWW-72) Slow jams to Party bops.
  */
 export type GearValues = Record<GearId, number>;
 

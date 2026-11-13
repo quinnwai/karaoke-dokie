@@ -1,5 +1,6 @@
-// The art rules from Round 6A §6 (gear art), §7 (the off state) and §9 (the Era tab's jukebox, QWW-57 R24), with the numbers the spec
-// gives. The numbers the reference's own view model draws are checked, tempo by tempo and value by value, in gearArt.test.tsx.
+// The art rules from Round 6A §6 (gear art), §7 (the off state) and §9 (the Era tab's jukebox, QWW-57 R24), and Round 7 §3 to §5 (the
+// Mood speaker), with the numbers the spec gives. The numbers the reference's own view model draws are checked, value by value, in
+// gearArt.test.tsx.
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -16,6 +17,7 @@ import {
   TAB_GLOW_DEVIATION,
   TAB_GLOW_PX,
   TAB_PX_PER_UNIT,
+  THUMP_KEYFRAMES,
   UNLIT,
   VIOLET,
   flickerSession,
@@ -26,10 +28,11 @@ import {
   jukeboxLit,
   laneArt,
   laneColor,
-  metronome,
+  moodZone,
   neonFlicker,
   noteColor,
   resetFlickerSession,
+  speaker,
   tabGlow,
   tube,
 } from '../../src/lib/setlist/art';
@@ -176,57 +179,43 @@ describe('history notes and popularity bolts (Round 6A §1, §6; QWW-57, R7)', (
   });
 });
 
-describe('metronome (Round 6A §6, Round 5 test 12)', () => {
-  it('Tempo 55 swings ±14° with a half-swing of 0.45 s', () => {
-    expect(metronome(55)).toMatchObject({
-      amplitude: 14,
-      keyframes: 'swing14',
-      period: '0.45',
-      animation: 'swing14 0.45s ease-in-out infinite alternate',
-    });
+describe('the Mood speaker (Round 7 §3 to §5, QWW-72)', () => {
+  it('puts the Tempo value in three zones: Slow jams below 34, Feel-good from 34, Party bops from 67 (§3)', () => {
+    expect([0, 20, 33, 33.9, 34, 50, 66, 66.9, 67, 80, 100].map(moodZone)).toEqual([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2]);
   });
 
-  it('swings ±20° at the slow end and ±8° at the fast end', () => {
-    expect(metronome(0)).toMatchObject({ amplitude: 20, keyframes: 'swing20', period: '1.20' });
-    expect(metronome(100)).toMatchObject({ amplitude: 8, keyframes: 'swing8', period: '0.30' });
+  it('at 20, 50 and 80 shows 1, 2 and 3 waves a side and thumps with thump4, thump8 and thump12 (README test 33, test 12)', () => {
+    expect(speaker(20)).toMatchObject({ zone: 0, waves: 1, keyframes: 'thump4', duration: '1.18' });
+    expect(speaker(50)).toMatchObject({ zone: 1, waves: 2, keyframes: 'thump8', duration: '0.85' });
+    expect(speaker(80)).toMatchObject({ zone: 2, waves: 3, keyframes: 'thump12', duration: '0.52', animation: 'thump12 0.52s ease-in-out infinite' });
   });
 
-  it('times the half-swing from a whole bpm, bpm = round(50 + 1.5 × tempo), as the 6A reference does', () => {
-    expect(metronome(55).bpm).toBe(133); // 132.5 rounds up
-    expect(metronome(0).bpm).toBe(50);
-    expect(metronome(100).bpm).toBe(200);
-    // At tempo 1 the bpm is 51.5, so 52, and 60 / 52 is 1.15 (an unrounded 60 / 51.5 would give 1.17).
-    expect(metronome(1)).toMatchObject({ bpm: 52, period: '1.15' });
-    expect(metronome(63)).toMatchObject({ bpm: 145, period: '0.41' });
+  it('times a thump at 1.4 - value × 0.011 s, 2 decimals: 1.40 s at 0, 0.90 s at the default 45, 0.30 s at 100', () => {
+    expect(speaker(0).duration).toBe('1.40');
+    expect(speaker(45).duration).toBe('0.90');
+    expect(speaker(100).duration).toBe('0.30');
+    for (let t = 0; t <= 100; t++) expect(speaker(t).duration, `at ${t}`).toBe((1.4 - t * 0.011).toFixed(2));
   });
 
-  it('slides the strip weight down the rod as tempo rises: y = round(18 + tempo × 0.27)', () => {
-    expect(metronome(0).weightY).toBe(18);
-    expect(metronome(45).weightY).toBe(30);
-    expect(metronome(55).weightY).toBe(33);
-    expect(metronome(100).weightY).toBe(45);
+  it('grows the strip cone from r 10.0 to 13.0 and the tab cone from 1.70 to 2.30; the tab cone is 2.18 at 80 (README tests 28, 34)', () => {
+    expect(speaker(0).coneR).toBe('10.0');
+    expect(speaker(100).coneR).toBe('13.0');
+    expect(speaker(0).tabConeR).toBe('1.70');
+    expect(speaker(80).tabConeR).toBe('2.18');
+    expect(speaker(100).tabConeR).toBe('2.30');
   });
 
-  it('puts the tab weight at 6 + tempo × 0.07, to one decimal, as a string: 9.9 at tempo 55 (test 28)', () => {
-    expect(metronome(55).tabWeightY).toBe('9.9');
-    expect(metronome(0).tabWeightY).toBe('6.0');
-    expect(metronome(50).tabWeightY).toBe('9.5');
-    expect(metronome(100).tabWeightY).toBe('13.0');
-    for (let t = 0; t <= 100; t++) expect(metronome(t).tabWeightY, `at ${t}`).toBe((6 + t * 0.07).toFixed(1));
-  });
-
-  it('is violet while on and, while off, unlit and still, at the default value it is drawn at (§7, test 25)', () => {
-    expect(metronome(55).color).toBe(VIOLET);
-    expect(metronome(55, false).animation).toBe('swing14 0.45s ease-in-out infinite alternate');
-    const off = metronome(55, true);
-    expect(off).toMatchObject({ color: UNLIT, animation: 'none' });
-    // Everything else is the value's, so the unlit metronome keeps its shape.
-    expect({ ...off, color: '', animation: '' }).toEqual({ ...metronome(55), color: '', animation: '' });
+  it('is violet while on and, while off, unlit and still, drawn at the default 45 with 2 waves a side (§4, README test 25)', () => {
+    expect(speaker(45).color).toBe(VIOLET);
+    const off = speaker(45, true);
+    expect(off).toMatchObject({ color: UNLIT, animation: 'none', waves: 2 });
+    // Everything else is the value's, so the unlit speaker keeps its shape.
+    expect({ ...off, color: '', animation: '' }).toEqual({ ...speaker(45), color: '', animation: '' });
   });
 
   it('only uses keyframes that exist', () => {
-    const names = new Set([20, 18, 16, 14, 12, 10, 8].map((n) => `swing${n}`));
-    for (let t = 0; t <= 100; t++) expect(names.has(metronome(t).keyframes)).toBe(true);
+    expect(THUMP_KEYFRAMES).toEqual(['thump4', 'thump8', 'thump12']);
+    for (let t = 0; t <= 100; t++) expect(THUMP_KEYFRAMES).toContain(speaker(t).keyframes);
   });
 });
 

@@ -603,14 +603,15 @@ describe('sheet.module.css (QWW-57: R5, R6, R8, R10; the review of #38: findings
     const PAIRS: Record<GearId, [string, string]> = {
       difficulty: ['Light work', 'Locked in'],
       popularity: ['Deep cuts', 'Pop hits'],
-      tempo: ['Slow jams', 'Fast tracks'],
+      tempo: ['Slow jams', 'Party bops'],
       history: ['Rediscover', 'On repeat'],
     };
     for (const g of GEAR_IDS) expect([GEAR_META[g].left, GEAR_META[g].right], g).toEqual(PAIRS[g]);
     // Inter 500 at 12 px, as Chromium lays it out: each pair's width, in px. All four fit in the narrowest body, 129 px (the mini sheet at 360 px),
     // with 8 px or more between the labels. Tempo's was "Upbeat tracks" (138.516 px, so 9.5 px too wide there, and it had a rule that tightened
-    // its tracking and size below a body of 144 px); "Fast tracks" (QWW-54) is the widest of the four now, and the rule is gone.
-    const AT_12 = { difficulty: 115.594, popularity: 104.141, tempo: 120.891, history: 120.438 };
+    // its tracking and size below a body of 144 px), then "Fast tracks" (QWW-54, 120.891 px). Shown as Mood, its pair is "Slow jams" and
+    // "Party bops" (QWW-72, 57.938 + 62.297 px), measured the same way: Chromium, @fontsource/inter's latin 500 woff2 at 12 px.
+    const AT_12 = { difficulty: 115.594, popularity: 104.141, tempo: 120.234, history: 120.438 };
     expect(rule('.ends')).toContain('font-size: 12px;');
     for (const g of GEAR_IDS) expect(129 - AT_12[g], g).toBeGreaterThanOrEqual(8);
     expect(css).not.toMatch(/\.strip\[data-gear=['"]?tempo['"]?\]\s*\.ends/);
