@@ -34,7 +34,7 @@ export const SLIDERS: SliderDef[] = [
   { id: 'difficulty', left: 'Light work', right: 'Locked in' },
   { id: 'familiarity', left: 'Rediscover', right: 'On repeat' },
   { id: 'popularity', left: 'Deep cuts', right: 'Pop hits' },
-  { id: 'tempo', left: 'Slow jams', right: 'Fast tracks' },
+  { id: 'tempo', left: 'Slow jams', right: 'Party bops' }, // the Mood gear's words (Round 7, QWW-72)
 ];
 
 export const DECADES: { id: Decade; label: string }[] = [

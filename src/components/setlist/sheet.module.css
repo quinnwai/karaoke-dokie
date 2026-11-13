@@ -349,9 +349,10 @@ button.resetButton:focus-visible {
 }
 
 /* The four pairs of end labels fit on one line in the narrowest strip body, 129 px (the mini sheet at 360 px), at 6A's 12 px in Inter 500:
-   104 to 121 px, 8.1 px or more apart ("Slow jams" and "Fast tracks" is the widest, 120.9 px; `tests/setlist/tuner.test.ts` has each pair's
-   width). A longer word has to be measured again: Tempo's "Upbeat tracks" was 138.5 px, so both labels wrapped there, the row took two
-   lines and the slider sat 7 px off the drawn knob, and Tempo's pair had a rule of its own that tightened its tracking and size. */
+   104 to 121 px, 8.5 px or more apart ("Rediscover" and "On repeat" is the widest, 120.4 px; Mood's "Slow jams" and "Party bops", QWW-72,
+   is 120.2 px; `tests/setlist/tuner.test.ts` has each pair's width). A longer word has to be measured again: Tempo's "Upbeat tracks" was
+   138.5 px, so both labels wrapped there, the row took two lines and the slider sat 7 px off the drawn knob, and Tempo's pair had a rule
+   of its own that tightened its tracking and size. */
 
 /* What the strip says in the place of its end labels when the gear cannot be used (History without Spotify): all of it, on as many
    lines as it takes (the adversarial review of #38 found it cut off). The strip is 76 px tall, 94 in the mini sheet, and the rack's height

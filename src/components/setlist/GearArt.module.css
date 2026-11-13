@@ -22,26 +22,33 @@
   animation: bob 1.1s ease-in-out infinite alternate;
 }
 
-/* The pendulum swings around its pivot: (75, 56) in the strip's 150x80 viewBox, (14, 15.5) in the tab's 28x22. Its keyframes
-   are global, in setlist-global.css: the animation is an inline style, and an inline style cannot name a keyframes rule
-   that CSS Modules would rename. */
-.pend {
-  transform-origin: 75px 56px;
-}
-.pendTab {
-  transform-origin: 14px 15.5px;
+/* The Mood speaker's middle and outer arcs of sound show and hide with the zone (Round 7 §4): on the strip they fade over 180 ms.
+   The `.fade > *` rule at the top fades the children of a note or a bolt; this one fades the arc itself. */
+path.fade {
+  transition: opacity 180ms;
 }
 
-/* !important so it also beats the inline animations: the pendulum's, and the strip's turn-on flicker (`.flick`, the strip's
+/* The speaker's cone and dust cap thump around the cone's centre: (70, 48) in the strip's 150x80 viewBox, (14, 13.6) in the tab's
+   28x22. Its keyframes are global, in setlist-global.css: the animation is an inline style, and an inline style cannot name a
+   keyframes rule that CSS Modules would rename. */
+.thump {
+  transform-origin: 70px 48px;
+}
+.thumpTab {
+  transform-origin: 14px 13.6px;
+}
+
+/* !important so it also beats the inline animations: the speaker's thump, and the strip's turn-on flicker (`.flick`, the strip's
    root, has no other rule; its flicker is an inline style that is set only while a flicker is due: on first load and when the gear goes from off to on). */
 @media (prefers-reduced-motion: reduce) {
-  .pend,
-  .pendTab,
+  .thump,
+  .thumpTab,
   .bob,
   .flick {
     animation: none !important;
   }
-  .fade > * {
+  .fade > *,
+  path.fade {
     transition: none !important;
   }
 }

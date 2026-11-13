@@ -8,8 +8,12 @@
 
 import { difficultyLabel } from '../client/display';
 import type { Match } from '../contracts';
+import { moodZone } from './art';
 import { ERA_LABEL } from './eras';
 import type { EraId, SetlistSong, TunerState } from './types';
+
+/** The reason line's fallback tag for each Mood zone: Slow jams, Feel-good, Party bops (Round 7 §2). */
+export const MOOD_TAG = ['Slow jam', 'Feel-good', 'Party bop'] as const;
 
 /** The word in the badge at the end of a row. */
 export type RowBadge = 'Easy' | 'Medium' | 'Hard';
@@ -75,9 +79,9 @@ export function whyOf(song: SetlistSong, tuner: WhyTuner): string {
     if (history >= 85) reasons.push('On repeat');
     else if (history <= 20) reasons.push('Rediscover');
   }
-  // 4. Nothing else to say: what it sounds like (QWW-57, R32: Quinn-Wai renamed the two tempo words, 12 Nov; the rules are as they were). A song with no
-  // tempo is a solid pick.
-  if (reasons.length === 0) reasons.push(tempo !== null && tempo >= 70 ? 'For the party people' : tempo !== null && tempo <= 25 ? 'Slow burn' : 'Solid pick');
+  // 4. Nothing else to say: the song's zone on the Mood gear (Round 7 §2, §3, QWW-72), which still reads its tempo place. The tag matches the zone the
+  // singer sees on the gear: Party bop from 67, Slow jam below 34, Feel-good between. A song with no tempo is Feel-good, the middle tag.
+  if (reasons.length === 0) reasons.push(tempo === null ? MOOD_TAG[1] : MOOD_TAG[moodZone(tempo)]);
   return reasons.slice(0, 2).join(' · ');
 }
 

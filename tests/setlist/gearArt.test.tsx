@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-// The gear art against the reference (Round 6A §6 to §9). docs/setlist-round6a/setlist-round6a.html is parsed as the markup
+// The gear art against the reference (Round 6A §6 to §9, Round 7 §4, §5). docs/setlist-round7/setlist-round7-mood.html, which is Round
+// 6A's reference with the Tempo gear drawn as the Mood speaker and nothing else of the art changed (QWW-72), is parsed as the markup
 // as authored, and its script is run once, in a document of its own, only to ask its viewModel() what it draws for a state
 // (README §2). Each component is rendered to static markup and parsed the same way, and the two trees are walked together:
 // at every position the tag and every attribute must be identical, except
@@ -31,10 +32,11 @@ import { StrictMode, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EraIcon, EraTabArt, GearArt, type GearArtVariant } from '../../src/components/setlist/GearArt';
-import { FLICKER_MS, TAB_PX_PER_UNIT, flickerSession, metronome, neonFlicker, resetFlickerSession } from '../../src/lib/setlist/art';
+import { FLICKER_MS, TAB_PX_PER_UNIT, flickerSession, neonFlicker, resetFlickerSession, speaker } from '../../src/lib/setlist/art';
+import { DEFAULTS } from '../../src/lib/setlist/defaults';
 import { ERA_IDS, GEAR_IDS, type EraId, type GearId } from '../../src/lib/setlist/types';
 
-const REFERENCE = join(__dirname, '../../docs/setlist-round6a/setlist-round6a.html');
+const REFERENCE = join(__dirname, '../../docs/setlist-round7/setlist-round7-mood.html');
 const MODULE_CSS = join(__dirname, '../../src/components/setlist/GearArt.module.css');
 const GLOBAL_CSS = join(__dirname, '../../src/components/setlist/setlist-global.css');
 
@@ -234,9 +236,9 @@ function expectedClass(referenceClass: string, variant: Context['variant']): str
     case 'fade':
     case 'bob':
       return [referenceClass];
-    case 'pend':
-      // The pivot differs between the strip's 150x80 grid and the tab's 28x22, so the module has a class for each.
-      return [variant === 'tab' ? 'pendTab' : 'pend'];
+    case 'thump':
+      // The cone's centre differs between the strip's 150x80 grid and the tab's 28x22, so the module has a class for each.
+      return [variant === 'tab' ? 'thumpTab' : 'thump'];
     default:
       throw new Error(`The reference class "${referenceClass}" has no mapping in this test`);
   }
@@ -245,12 +247,12 @@ function expectedClass(referenceClass: string, variant: Context['variant']): str
 /** The attributes the walk does not compare one by one. */
 const NOT_COMPARED = new Set(['class', 'style', 'id', 'data-b', 'data-on']);
 /** What the components add so the browser tests can find a part. Each is asserted on its own. */
-const HOOKS = new Set(['data-note', 'data-bolt', 'data-ray', 'data-i', 'data-pendulum', 'data-weight', 'data-jukebox']);
+const HOOKS = new Set(['data-note', 'data-bolt', 'data-ray', 'data-i', 'data-thump', 'data-cone', 'data-wave', 'data-jukebox']);
 /** An id that is safe inside `url(#...)`. */
 const PLAIN_ID = /^[A-Za-z][\w-]*$/;
 
 const classTokens = (el: Element) => (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
-/** vitest turns a module class `pend` into `_pend_<hash>`; a real build has its own scheme. Compare by name. */
+/** vitest turns a module class `thump` into `_thump_<hash>`; a real build has its own scheme. Compare by name. */
 const moduleName = (token: string) => /^_(.+)_[0-9a-f]+$/.exec(token)?.[1] ?? token;
 
 function styleOf(el: Element): Record<string, string> {
@@ -340,7 +342,7 @@ function walk(ref: Element, got: Element, path: string, ctx: Context, out: Walk,
     }
   }
 
-  // Inline style: the reference's own, then what its bindings write. The pendulum's pivot is in the module CSS (checked
+  // Inline style: the reference's own, then what its bindings write. The speaker cone's centre is in the module CSS (checked
   // with the CSS below), so it must not be inline.
   const wantStyle = styleOf(ref);
   delete wantStyle['transform-origin'];
@@ -518,7 +520,7 @@ describe('the reference this test reads', () => {
 
   it('leaves the parts that follow a state to its bindings, which is why the walk reads them', () => {
     // The raw markup has no opacity, animation or colour on the parts that move; its script writes them.
-    expect(reference.querySelectorAll('.fade[style], .bob[style*="opacity"], .pend[style*="animation"]')).toHaveLength(0);
+    expect(reference.querySelectorAll('.fade[style], .bob[style*="opacity"], .thump[style*="animation"]')).toHaveLength(0);
     expect(reference.querySelectorAll('.strip > svg[style], .tab > svg[style]')).toHaveLength(0);
   });
 
@@ -527,8 +529,9 @@ describe('the reference this test reads', () => {
     const vm = viewModelFor();
     expect(INDEXES.map((i) => lookup(vm, `art.o${i}`))).toEqual([1, 1, 1, 1, 1, 0, 0]);
     expect(INDEXES.map((i) => lookup(vm, `art.q${i}`))).toEqual([1, 1, 1, 1, 1, 1, 0]);
-    expect(lookup(viewModelFor({ off: ['tempo'] }), 'metro.anim')).toBe('none');
-    expect(lookup(viewModelFor({ tempo: 55 }), 'metro.tabWeightY')).toBe('9.9');
+    expect(lookup(viewModelFor({ off: ['tempo'] }), 'spk.anim')).toBe('none');
+    expect(lookup(viewModelFor({ tempo: 80 }), 'spk.anim')).toBe('thump12 0.52s ease-in-out infinite');
+    expect(lookup(viewModelFor({ tempo: 80 }), 'spk.tabConeR')).toBe('2.18');
   });
 
   it('binds every part of its art that follows a state to a view-model value that exists', () => {
@@ -611,7 +614,7 @@ describe('GearArt: the markup is the reference markup', () => {
 describe('GearArt: every value, on and off, is drawn as the reference draws it', () => {
   // The reference's view model is asked for each value; the walk expects the component to hold exactly what it gives. This
   // covers the pitch lane's band and dashes at every difficulty, the thresholds of the seven notes, bolts and rays, and the
-  // metronome's swing, period and weight at every tempo (the reference rounds its bpm; see art.ts).
+  // Mood speaker's waves, thump and cone at every value of the Tempo gear.
   for (const gear of GEAR_IDS) {
     it(`${gear}, strip and tab, at every value from 0 to 100`, () => {
       const parts = VARIANTS.map((variant): Part => ({ gear, variant }));
@@ -802,41 +805,74 @@ describe('GearArt: history notes and popularity bolts follow the value', () => {
   });
 });
 
-describe('GearArt: tempo follows the value (the metronome)', () => {
-  // Faster tempo: a shorter half-swing, a narrower swing and the weight further down the rod.
-  const TEMPO = [
-    { value: 0, animation: 'swing20 1.20s ease-in-out infinite alternate', weight: '18', tabWeight: '6.0' },
-    { value: 55, animation: 'swing14 0.45s ease-in-out infinite alternate', weight: '33', tabWeight: '9.9' },
-    { value: 100, animation: 'swing8 0.30s ease-in-out infinite alternate', weight: '45', tabWeight: '13.0' },
+describe('GearArt: tempo follows the value (the Mood speaker, Round 7 §4, §5)', () => {
+  /** How many arcs show on each side: the inner pair always, the others while their opacity is 1. */
+  const wavesPerSide = (root: Element) => {
+    const shown = all(root, '[data-wave]').filter((el) => styleOf(el).opacity !== '0');
+    const right = shown.filter((el) => / 0 0 1 /.test(el.getAttribute('d') ?? '')).length;
+    const left = shown.filter((el) => / 0 0 0 /.test(el.getAttribute('d') ?? '')).length;
+    expect(left, 'as many arcs on the left as on the right').toBe(right);
+    return right;
+  };
+  const thump = (root: Element) => styleOf(one(root, '[data-thump]')).animation;
+  const cone = (root: Element) => one(root, '[data-cone]').getAttribute('r');
+
+  // README test 33 and the brief's check: 1, 2 and 3 waves a side, thump4, thump8 and thump12, in the strip and the tab.
+  const ZONES = [
+    { value: 20, waves: 1, animation: 'thump4 1.18s ease-in-out infinite', coneR: '10.6', tabConeR: '1.82' },
+    { value: 50, waves: 2, animation: 'thump8 0.85s ease-in-out infinite', coneR: '11.5', tabConeR: '2.00' },
+    { value: 80, waves: 3, animation: 'thump12 0.52s ease-in-out infinite', coneR: '12.4', tabConeR: '2.18' },
   ];
-
-  for (const { value, animation, weight, tabWeight } of TEMPO) {
-    it(`strip at ${value}: ${animation}, weight at y ${weight}`, () => {
-      const root = art('tempo', 'strip', value, false);
-      expect(styleOf(one(root, '[data-pendulum]')).animation).toBe(animation);
-      expect(one(root, '[data-weight]').getAttribute('y')).toBe(weight);
-    });
-
-    it(`tab at ${value}: ${animation}, weight at y ${tabWeight}`, () => {
-      const root = art('tempo', 'tab', value, false);
-      expect(styleOf(one(root, '[data-pendulum]')).animation).toBe(animation);
-      expect(one(root, '[data-weight]').getAttribute('y')).toBe(tabWeight);
+  for (const { value, waves, animation, coneR, tabConeR } of ZONES) {
+    it(`at ${value}: ${waves} wave(s) a side and ${animation}, strip and tab`, () => {
+      const strip = art('tempo', 'strip', value, false);
+      const tab = art('tempo', 'tab', value, false);
+      expect(wavesPerSide(strip)).toBe(waves);
+      expect(wavesPerSide(tab)).toBe(waves);
+      expect(thump(strip)).toBe(animation);
+      expect(thump(tab)).toBe(animation);
+      expect(cone(strip)).toBe(coneR);
+      expect(cone(tab)).toBe(tabConeR);
     });
   }
 
-  it('at tempo 55 the tab pendulum has the strip pendulum\'s animation, swing14 at 0.45 s, and the tab weight is at y 9.9 (README test 28)', () => {
-    const strip = art('tempo', 'strip', 55, false);
-    const tab = art('tempo', 'tab', 55, false);
-    const swing = (root: Element) => styleOf(one(root, '[data-pendulum]')).animation;
-    expect(swing(strip)).toBe('swing14 0.45s ease-in-out infinite alternate');
-    expect(swing(tab)).toBe(swing(strip));
-    expect(one(tab, '[data-weight]').getAttribute('y')).toBe('9.9');
-    expect(one(strip, '[data-weight]').getAttribute('y')).toBe('33');
+  it('at 80 the tab cone has the strip cone\'s animation, thump12 at 0.52 s, and r 2.18 (README test 28)', () => {
+    const strip = art('tempo', 'strip', 80, false);
+    const tab = art('tempo', 'tab', 80, false);
+    expect(thump(strip)).toBe('thump12 0.52s ease-in-out infinite');
+    expect(thump(tab)).toBe(thump(strip));
+    expect(cone(tab)).toBe('2.18');
   });
 
-  it('swings each pendulum around its own pivot, the strip\'s and the tab\'s', () => {
-    expect(classTokens(one(art('tempo', 'strip', 50, false), '[data-pendulum]')).map(moduleName)).toEqual(['pend']);
-    expect(classTokens(one(art('tempo', 'tab', 50, false), '[data-pendulum]')).map(moduleName)).toEqual(['pendTab']);
+  it('grows the strip cone from r 10.0 at 0 to 13.0 at 100 (README test 34)', () => {
+    expect(cone(art('tempo', 'strip', 0, false))).toBe('10.0');
+    expect(cone(art('tempo', 'strip', 100, false))).toBe('13.0');
+  });
+
+  it('adds a wave pair at each zone\'s edge: 33 and 34, 66 and 67', () => {
+    for (const variant of VARIANTS) {
+      expect([33, 34, 66, 67].map((v) => wavesPerSide(art('tempo', variant, v, false))), variant).toEqual([1, 2, 2, 3]);
+    }
+  });
+
+  it('fades the strip\'s middle and outer arcs, and only those; the tab\'s arcs have no fade, as in the reference', () => {
+    const faded = (root: Element) => all(root, '[data-wave]').map((el) => classTokens(el).map(moduleName).join(' '));
+    expect(faded(art('tempo', 'strip', 50, false))).toEqual(['', '', 'fade', 'fade', 'fade', 'fade']);
+    expect(faded(art('tempo', 'tab', 50, false))).toEqual(['', '', '', '', '', '']);
+  });
+
+  it('thumps each cone around its own centre, the strip\'s and the tab\'s', () => {
+    expect(classTokens(one(art('tempo', 'strip', 50, false), '[data-thump]')).map(moduleName)).toEqual(['thump']);
+    expect(classTokens(one(art('tempo', 'tab', 50, false), '[data-thump]')).map(moduleName)).toEqual(['thumpTab']);
+  });
+
+  it('draws what speaker() in art.ts gives, at every value', () => {
+    for (const value of VALUES) {
+      const spk = speaker(value);
+      expect(thump(art('tempo', 'strip', value, false)), `at ${value}`).toBe(spk.animation);
+      expect(cone(art('tempo', 'strip', value, false)), `at ${value}`).toBe(spk.coneR);
+      expect(cone(art('tempo', 'tab', value, false)), `at ${value}`).toBe(spk.tabConeR);
+    }
   });
 });
 
@@ -994,13 +1030,17 @@ describe('GearArt: an off gear is a switched-off sign (README §7, test 25)', ()
     }
   });
 
-  it('stills the metronome: a reset Tempo has unlit strokes and a pendulum with no animation, strip and tab', () => {
+  it('stills the speaker: a reset Tempo (Mood) has unlit strokes and a cone with no animation, drawn at the default with 2 waves a side, strip and tab', () => {
+    // The app's default is 50 (QWW-47); the README's mock default is 45. Both are Feel-good, so 2 waves a side either way.
+    expect(DEFAULTS.tempo).toBe(50);
     for (const variant of VARIANTS) {
-      const root = art('tempo', variant, 50, true);
+      const root = art('tempo', variant, DEFAULTS.tempo, true);
       expect(paints(root), variant).toEqual([COLOR.unlit]);
-      expect(styleOf(one(root, '[data-pendulum]')).animation, variant).toBe('none');
-      // It still stands where its value puts it.
-      expect(one(root, '[data-weight]').getAttribute('y'), variant).toBe(variant === 'strip' ? '32' : '9.5');
+      expect(styleOf(one(root, '[data-thump]')).animation, variant).toBe('none');
+      // It still has the shape its value gives it.
+      const shown = all(root, '[data-wave]').filter((el) => styleOf(el).opacity !== '0');
+      expect(shown, variant).toHaveLength(4);
+      expect(one(root, '[data-cone]').getAttribute('r'), variant).toBe(variant === 'strip' ? '11.5' : '2.00');
     }
   });
 
@@ -1300,13 +1340,14 @@ describe('GearArt: the hooks the browser tests use', () => {
     notes: all(root, '[data-note]').length,
     bolts: all(root, '[data-bolt]').length,
     rays: all(root, '[data-ray]').length,
-    pendulums: all(root, '[data-pendulum]').length,
-    weights: all(root, '[data-weight]').length,
+    thumps: all(root, '[data-thump]').length,
+    cones: all(root, '[data-cone]').length,
+    waves: all(root, '[data-wave]').length,
     jukebox: all(root, '[data-jukebox]').length,
     indexed: all(root, '[data-i]').length,
     lit: all(root, '[data-lit]').length,
   });
-  const NONE = { notes: 0, bolts: 0, rays: 0, pendulums: 0, weights: 0, jukebox: 0, indexed: 0, lit: 0 };
+  const NONE = { notes: 0, bolts: 0, rays: 0, thumps: 0, cones: 0, waves: 0, jukebox: 0, indexed: 0, lit: 0 };
 
   it('puts each hook on its own part and nowhere else', () => {
     expect(counts(art('difficulty', 'strip', 50, false))).toEqual(NONE);
@@ -1316,12 +1357,12 @@ describe('GearArt: the hooks the browser tests use', () => {
     expect(counts(art('popularity', 'strip', 50, false))).toEqual({ ...NONE, bolts: 7, indexed: 7, lit: 7 });
     expect(counts(art('popularity', 'tab', 50, false))).toEqual({ ...NONE, rays: 7, indexed: 7, lit: 7 });
     for (const variant of VARIANTS) {
-      expect(counts(art('tempo', variant, 50, false)), variant).toEqual({ ...NONE, pendulums: 1, weights: 1 });
+      expect(counts(art('tempo', variant, 50, false)), variant).toEqual({ ...NONE, thumps: 1, cones: 1, waves: 6 });
     }
     expect(counts(eraTab([], false))).toEqual({ ...NONE, jukebox: 4, indexed: 3 });
   });
 
-  it('puts them on the elements the tests read: notes and bolts on their group, rays on their path, the weight on its rect', () => {
+  it('puts them on the elements the tests read: notes and bolts on their group, rays on their path, the speaker\'s thump on its group, its cone and arcs on their own shapes', () => {
     const tags = (root: Element, selector: string) => [...new Set(all(root, selector).map((el) => el.localName))];
     expect(tags(art('history', 'strip', 50, false), '[data-note]')).toEqual(['g']);
     expect(tags(art('popularity', 'strip', 50, false), '[data-bolt]')).toEqual(['g']);
@@ -1329,8 +1370,9 @@ describe('GearArt: the hooks the browser tests use', () => {
       expect(tags(art(gear, 'tab', 50, false), '[data-ray]'), gear).toEqual(['path']);
     }
     for (const variant of VARIANTS) {
-      expect(tags(art('tempo', variant, 50, false), '[data-pendulum]'), variant).toEqual(['g']);
-      expect(tags(art('tempo', variant, 50, false), '[data-weight]'), variant).toEqual(['rect']);
+      expect(tags(art('tempo', variant, 50, false), '[data-thump]'), variant).toEqual(['g']);
+      expect(tags(art('tempo', variant, 50, false), '[data-cone]'), variant).toEqual(['circle']);
+      expect(tags(art('tempo', variant, 50, false), '[data-wave]'), variant).toEqual(['path']);
     }
   });
 
@@ -1717,8 +1759,8 @@ describe('GearArt.module.css', () => {
     for (const [, root] of everyRoot()) {
       for (const el of [root, ...root.querySelectorAll('*')]) for (const token of classTokens(el)) used.add(moduleName(token));
     }
-    // The strip root's flicker hook and the tab pendulum's pivot class are both drawn by the roots above.
-    expect([...used].sort()).toEqual(['bob', 'fade', 'flick', 'pend', 'pendTab']);
+    // The strip root's flicker hook and the tab cone's thump class are both drawn by the roots above.
+    expect([...used].sort()).toEqual(['bob', 'fade', 'flick', 'thump', 'thumpTab']);
     const defined = new Set([...squash(moduleCss).matchAll(/\.([A-Za-z_][\w-]*)/g)].map((m) => m[1] ?? ''));
     expect([...used].sort()).toEqual([...defined].sort());
   });
@@ -1735,32 +1777,34 @@ describe('GearArt.module.css', () => {
     expect(bodyOf(referenceCss, '.fade')).toBe('transition:opacity 180ms;');
     expect(bodyOf(moduleCss, '.bob')).toBe('animation:bob 1.1s ease-in-out infinite alternate;');
     expect(bodyOf(moduleCss, '.fade > *')).toBe('transition:fill 180ms;');
+    // The Mood speaker's arcs are hidden by opacity as in the reference (Round 7 §4), so on them it is the opacity that fades.
+    expect(bodyOf(moduleCss, 'path.fade')).toBe(bodyOf(referenceCss, '.fade'));
   });
 
-  it('pivots the pendulum where the reference does: (75, 56) on the strip and (14, 15.5) on the tab', () => {
-    // The reference sets the pivot inline on each pendulum, strip first; the module carries it in a class for each.
-    const origins = [...reference.querySelectorAll('.pend')].map((el) => styleOf(el)['transform-origin']);
-    expect(origins).toEqual(['75px 56px', '14px 15.5px']);
-    expect(bodyOf(moduleCss, '.pend')).toBe(`transform-origin:${origins[0]};`);
-    expect(bodyOf(moduleCss, '.pendTab')).toBe(`transform-origin:${origins[1]};`);
+  it('thumps the cone around its centre where the reference does: (70, 48) on the strip and (14, 13.6) on the tab', () => {
+    // The reference sets the origin inline on each cone group, strip first; the module carries it in a class for each.
+    const origins = [...reference.querySelectorAll('.thump')].map((el) => styleOf(el)['transform-origin']);
+    expect(origins).toEqual(['70px 48px', '14px 13.6px']);
+    expect(bodyOf(moduleCss, '.thump')).toBe(`transform-origin:${origins[0]};`);
+    expect(bodyOf(moduleCss, '.thumpTab')).toBe(`transform-origin:${origins[1]};`);
   });
 
-  it("turns the pendulums, the bob and the strip flicker off for reduced motion, and the fade's transition, with !important (README test 30)", () => {
+  it("turns the thump, the bob and the strip flicker off for reduced motion, and the fade's transition, with !important (README test 30)", () => {
     // In the reference that block also holds the sign's buzz, the lyric wipe and the rows' and the rack's transitions, which
-    // are not the art's. The art's classes are the reference's .pend, .bob, .flick and .fade, and .pend has a twin for the tab.
+    // are not the art's. The art's classes are the reference's .thump, .bob, .flick and .fade, and .thump has a twin for the tab.
     const OWN: Record<string, string[]> = {
-      '.pend': ['.pend', '.pendTab'],
+      '.thump': ['.thump', '.thumpTab'],
       '.bob': ['.bob'],
       '.flick': ['.flick'],
-      '.fade': ['.fade > *'],
+      '.fade': ['.fade > *', 'path.fade'],
     };
     const owned = rulesOf(bodyOf(referenceCss, REDUCED))
       .map(([selectors, body]): [string, string] => [selectors.split(',').flatMap((s) => OWN[s] ?? []).join(','), body])
       .filter(([selectors]) => selectors !== '');
     expect(owned).toEqual([
-      ['.pend,.pendTab,.bob,.flick', 'animation:none !important;'],
-      // The reference's `.fade`; here the transition is on the group's child (see above).
-      ['.fade > *', 'transition:none !important;'],
+      ['.thump,.thumpTab,.bob,.flick', 'animation:none !important;'],
+      // The reference's `.fade`; here the transition is on the group's child, and on a speaker arc itself (see above).
+      ['.fade > *,path.fade', 'transition:none !important;'],
     ]);
     expect(rulesOf(bodyOf(moduleCss, REDUCED))).toEqual(owned);
   });
@@ -1772,19 +1816,20 @@ describe('GearArt.module.css', () => {
   });
 
   it('leaves the keyframes of the inline animations to setlist-global.css, where CSS Modules cannot rename them', () => {
-    expect(squash(moduleCss)).not.toMatch(/@keyframes (swing|neonOn)/);
+    expect(squash(moduleCss)).not.toMatch(/@keyframes (thump|swing|neonOn)/);
     expect(squash(moduleCss)).not.toContain('var(');
   });
 });
 
 describe('setlist-global.css', () => {
   const globalCss = readFileSync(GLOBAL_CSS, 'utf8');
-  /** The keyframes the art needs from the reference: the swings, and the flicker. */
-  const artKeyframes = (css: string) => rulesOf(css).filter(([prelude]) => /^@keyframes (swing\d+|neonOn)$/.test(prelude));
+  /** The keyframes the art needs from the reference: the thumps, and the flicker. */
+  const artKeyframes = (css: string) => rulesOf(css).filter(([prelude]) => /^@keyframes (thump\d+|neonOn)$/.test(prelude));
 
-  it('holds the reference swing keyframes and the neonOn flicker, and nothing else', () => {
+  it('holds the reference thump keyframes and the neonOn flicker, and nothing else: the metronome\'s swings are gone (Round 7 §6)', () => {
     expect(rulesOf(globalCss)).toEqual(artKeyframes(referenceCss));
-    const names = ['20', '18', '16', '14', '12', '10', '8'].map((n) => `@keyframes swing${n}`);
+    expect(squash(globalCss)).not.toContain('swing');
+    const names = ['4', '8', '12'].map((n) => `@keyframes thump${n}`);
     expect(artKeyframes(globalCss).map(([prelude]) => prelude)).toEqual([...names, '@keyframes neonOn']);
   });
 
@@ -1795,7 +1840,7 @@ describe('setlist-global.css', () => {
   });
 
   it('has a keyframes rule for every animation name the art can ask for', () => {
-    const asked = new Set([...VALUES.map((tempo) => metronome(tempo).keyframes), neonFlicker(false, true).split(' ')[0]]);
+    const asked = new Set([...VALUES.map((tempo) => speaker(tempo).keyframes), neonFlicker(false, true).split(' ')[0]]);
     const defined = rulesOf(globalCss).map(([prelude]) => prelude.replace('@keyframes ', ''));
     expect([...asked].sort()).toEqual(defined.sort());
   });

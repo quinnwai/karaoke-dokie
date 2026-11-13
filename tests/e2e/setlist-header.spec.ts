@@ -157,7 +157,7 @@ test('R21. each gear\'s reset arrow is a ✕ named "Turn off <gear>", and a tap 
   await open(page);
   await page.locator('#app').evaluate((el) => el.getAttribute('data-mode')); // the sheet in whichever mode the phone opens it
   await hook(page, { off: [], mini: false });
-  const names: Record<string, string> = { difficulty: 'Turn off difficulty', popularity: 'Turn off popularity', tempo: 'Turn off tempo', era: 'Turn off era' };
+  const names: Record<string, string> = { difficulty: 'Turn off difficulty', popularity: 'Turn off popularity', tempo: 'Turn off mood', era: 'Turn off era' };
   await hook(page, { eras: ['s90'], off: [] });
   for (const [gear, name] of Object.entries(names)) {
     const button = page.locator(`button[data-reset="${gear}"]`);

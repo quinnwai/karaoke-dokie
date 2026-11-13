@@ -20,7 +20,9 @@ export const GEAR_META: Record<GearId, GearMeta> = {
   difficulty: { eyebrow: 'DIFFICULTY', tab: 'Difficulty', left: 'Light work', right: 'Locked in', resetLabel: 'Turn off difficulty' },
   history: { eyebrow: 'LISTENING HISTORY', tab: 'History', left: 'Rediscover', right: 'On repeat', resetLabel: 'Turn off listening history' },
   popularity: { eyebrow: 'POPULARITY', tab: 'Popularity', left: 'Deep cuts', right: 'Pop hits', resetLabel: 'Turn off popularity' },
-  tempo: { eyebrow: 'TEMPO', tab: 'Tempo', left: 'Slow jams', right: 'Fast tracks', resetLabel: 'Turn off tempo' },
+  // The Tempo gear is shown as Mood (Round 7, QWW-72): only its words change. Its id, state key and value are still `tempo`, and it still
+  // ranks by the songs' tempo. The ✕ keeps the "Turn off X" pattern (Quinn-Wai, 13 Nov), not Round 7's "Reset mood to default".
+  tempo: { eyebrow: 'MOOD', tab: 'Mood', left: 'Slow jams', right: 'Party bops', resetLabel: 'Turn off mood' },
 };
 
 /**

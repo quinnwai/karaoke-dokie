@@ -1,5 +1,5 @@
-// The numbers behind the gear art (Round 6A §6 to §9): which colour, how tall a band, which notes are showing, how the
-// metronome swings, which jukebox lights are on. Pure, so each rule from the spec has a test. The SVG itself is
+// The numbers behind the gear art (Round 6A §6 to §9, Round 7 §3 to §5): which colour, how tall a band, which notes are showing,
+// how the Mood speaker thumps, which jukebox lights are on. Pure, so each rule from the spec has a test. The SVG itself is
 // src/components/setlist/GearArt.tsx; it only applies what these return.
 
 import { ERA_IDS, type EraId } from './types';
@@ -12,7 +12,7 @@ export const UNLIT = '#34313D'; // an unlit neon tube: what an off gear's art is
 export const PINK = '#FF4FA0'; // Era, lit selections, the mic
 export const CYAN = '#4FDDE8'; // History
 export const AMBER = '#FFC24A'; // Popularity, the Era jukebox lights, Difficulty's middle tier
-export const VIOLET = '#B583FF'; // Tempo
+export const VIOLET = '#B583FF'; // Tempo, shown as Mood
 
 /** Difficulty tier colours. `v` is a 0 to 100 difficulty. */
 export const EASY = '#4DE89A';
@@ -108,40 +108,48 @@ export function itemArt(color: string, value: number, i: number, off: boolean): 
 export const NOTE_PINK = [false, true, true, false, false, true, false] as const;
 export const noteColor = (i: number): string => (NOTE_PINK[i] ? PINK : CYAN);
 
-export interface Metronome {
-  /** Swing amplitude, degrees each side: ±20 (slow) down to ±8 (fast). */
-  amplitude: number;
-  /** Beats per minute, whole: the half-swing is timed from this. */
-  bpm: number;
-  /** Seconds per half-swing. */
-  period: string;
-  /** The keyframes name (global, in setlist-global.css). */
-  keyframes: string;
-  /** The whole `animation` value. `none` while the gear is off: an unlit metronome stands still (Round 6A §7). */
+/**
+ * The Tempo gear is shown to users as Mood (Round 7, QWW-72), and its 0 to 100 value falls in three zones: Slow jams below 34,
+ * Feel-good from 34, Party bops from 67 (Round 7 §3). Nothing stores the zone; the speaker's waves and thump follow it, and so
+ * does the reason line's fallback tag (rows.ts). 0, 1 or 2.
+ */
+export type MoodZone = 0 | 1 | 2;
+export const moodZone = (value: number): MoodZone => (value < 34 ? 0 : value < 67 ? 1 : 2);
+
+/** The thump's keyframes, by zone: the cone swells by 4%, 8% or 12% (Round 7 §4). Global, in setlist-global.css. */
+export const THUMP_KEYFRAMES = ['thump4', 'thump8', 'thump12'] as const;
+
+export interface Speaker {
+  zone: MoodZone;
+  /** How many arcs of sound show on each side: 1, 2 or 3. The inner pair always shows (Round 7 §4). */
+  waves: 1 | 2 | 3;
+  /** The keyframes name, by zone. */
+  keyframes: (typeof THUMP_KEYFRAMES)[number];
+  /** Seconds per thump, 2 decimals: 1.40 at 0, 0.90 at 45, 0.30 at 100. */
+  duration: string;
+  /** The whole `animation` value. `none` while the gear is off: an unlit speaker is still (Round 7 §4). */
   animation: string;
-  /** y of the weight on the strip's rod, which runs from y 56 (the pivot) up to y 16. */
-  weightY: number;
-  /** y of the weight on the tab's rod, to one decimal as a string ("9.9"): the tab is drawn on a 28×22 grid. */
-  tabWeightY: string;
-  /** The metronome's tube: violet, or UNLIT while the gear is off. */
+  /** The strip's woofer cone radius, 1 decimal: "10.0" to "13.0". */
+  coneR: string;
+  /** The tab's cone radius, 2 decimals: "1.70" to "2.30". */
+  tabConeR: string;
+  /** The speaker's tube: violet, or UNLIT while the gear is off. */
   color: string;
 }
 
-export function metronome(tempo: number, off = false): Metronome {
-  const amplitude = 20 - 2 * Math.round((tempo / 100) * 6);
-  // The 6A reference rounds the bpm before it takes the period (README §6; Round 5's reference did not). The two agree at 0,
-  // 45, 50, 55 and 100 and differ by 0.01 s or 0.02 s at ten other tempos; this follows 6A.
-  const bpm = Math.round(50 + tempo * 1.5);
-  const period = (60 / bpm).toFixed(2);
-  const keyframes = `swing${amplitude}`;
+/** The Mood gear's speaker (Round 7 §4, §5) at the Tempo gear's value. An off gear is drawn at its default, so the caller passes that. */
+export function speaker(tempo: number, off = false): Speaker {
+  const zone = moodZone(tempo);
+  const keyframes = THUMP_KEYFRAMES[zone];
+  const duration = (1.4 - tempo * 0.011).toFixed(2);
   return {
-    amplitude,
-    bpm,
-    period,
+    zone,
+    waves: (zone + 1) as 1 | 2 | 3,
     keyframes,
-    animation: off ? 'none' : `${keyframes} ${period}s ease-in-out infinite alternate`,
-    weightY: Math.round(18 + tempo * 0.27),
-    tabWeightY: (6 + tempo * 0.07).toFixed(1),
+    duration,
+    animation: off ? 'none' : `${keyframes} ${duration}s ease-in-out infinite`,
+    coneR: (10 + tempo * 0.03).toFixed(1),
+    tabConeR: (1.7 + tempo * 0.006).toFixed(2),
     color: tube(VIOLET, off),
   };
 }
@@ -228,7 +236,7 @@ export const TAB_GLOW_PX = 3;
 
 /**
  * The glow around a tab icon (Round 6A §7, §9): a 3 px drop-shadow in the gear's colour while it is on, none while it is off. It is a
- * CSS filter on the icon's root, so it reaches every part of the icon. Difficulty, Tempo and Era have no unlit ray and keep it;
+ * CSS filter on the icon's root, so it reaches every part of the icon. Difficulty, Tempo (Mood) and Era have no unlit ray and keep it;
  * History and Popularity have, and glow only what is lit with `TAB_GLOW_DEVIATION` (QWW-57, R7).
  */
 export const tabGlow = (color: string, off: boolean): string => (off ? 'none' : `drop-shadow(0 0 ${TAB_GLOW_PX}px ${color})`);
