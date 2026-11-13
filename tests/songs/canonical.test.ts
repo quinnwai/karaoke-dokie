@@ -462,8 +462,8 @@ describe('buildCanonical: songs of three or more rows, some an octave apart', ()
     const build = buildCanonical([lowRecording, recording, noteFile]);
     expect(shownKeys(build)).toEqual([recording.key]);
     expect(build.groups[0]).toMatchObject({ canonicalKey: recording.key, octave: true });
-    // Without the note file the part takes nothing, and the usual rules show the plain row, as before this rule
-    expect(shownKeys(buildCanonical([lowRecording, recording]))).toEqual([lowRecording.key]);
+    // QWW-62: without the note file the part takes nothing, and it still shows the confident recording, not the plain low-confidence one
+    expect(shownKeys(buildCanonical([lowRecording, recording]))).toEqual([recording.key]);
   });
 
   it('needs every row folded in to sit an octave from the row shown, not only the head of its part', () => {
@@ -511,6 +511,86 @@ describe('buildCanonical: songs of three or more rows, some an octave apart', ()
     const build = buildCanonical([narrow, wide]);
     expect(build.groups).toEqual([]);
     expect(shownKeys(build)).toEqual([narrow.key, wide.key].sort());
+  });
+});
+
+describe('buildCanonical: a song with a confident row is never shown as a Maybe (QWW-62)', () => {
+  const shownKeys = (b: ReturnType<typeof buildCanonical>) => b.records.filter((r) => r.canonicalKey === r.key).map((r) => r.key).sort();
+  const low = (artist: string, title: string, rank: number, extra: Partial<CanonicalInput> = {}) =>
+    row(artist, title, rank, { confidence: 'low', source: 'audio-full', trust: 0, ...extra });
+  const sure = (artist: string, title: string, rank: number, extra: Partial<CanonicalInput> = {}) =>
+    row(artist, title, rank, { confidence: 'high', source: 'note-file', trust: 0, ...extra });
+
+  it('shows the confident note file when the most popular row is a low-confidence recording at nearly the same range', () => {
+    // The pattern of the 8 songs on production after #33 and #44: a recording #44 marked low (5 semitones wide, 63 to 68) beside a
+    // confident note file at 63 to 72. Both end within 4 semitones, so they are one song, and the recording was shown.
+    const recording = low('A', 'Song', 0.9, { low: 63, high: 68 });
+    const noteFile = sure('A', 'Song ', 0.3, { low: 63, high: 72 });
+    for (const rows of [[recording, noteFile], [noteFile, recording]]) {
+      const build = buildCanonical(rows);
+      expect(shownKeys(build)).toEqual([noteFile.key]);
+      expect(byKey(build).get(recording.key)).toMatchObject({ canonicalKey: noteFile.key, reason: 'folded' });
+      expect(build.groups[0]).toMatchObject({ canonicalKey: noteFile.key, octave: false });
+    }
+  });
+
+  it('applies to a part that takes nothing, with or without a version tag on the confident row', () => {
+    const plainLow = low('A', 'Song', 0.9, { low: 50, high: 62 });
+    const taggedSure = sure('A', 'Song (Live)', 0.2, { low: 51, high: 63 });
+    expect(shownKeys(buildCanonical([plainLow, taggedSure]))).toEqual([taggedSure.key]);
+    // the confident row's own title and artist are what the list shows: the tag comes off, the song is the same one
+    expect(byKey(buildCanonical([plainLow, taggedSure])).get(taggedSure.key)).toMatchObject({ title: 'Song', reason: 'cleaned' });
+  });
+
+  it('keeps the usual rules among the confident rows: the plain title first, then an alternate that is clearly more popular', () => {
+    const lowPlain = low('A', 'Song', 0.99, { low: 50, high: 62 });
+    const plain = sure('A', 'Song ', 0.4, { low: 50, high: 62 });
+    const near = sure('A', 'Song (Live)', 0.5, { low: 50, high: 62 }); // 0.1 above the plain one: not clearly
+    expect(shownKeys(buildCanonical([lowPlain, plain, near]))).toEqual([plain.key]);
+    const clear = sure('A', 'Song (Acoustic)', 0.6, { low: 50, high: 62 }); // 0.2 above: clearly
+    const build = buildCanonical([lowPlain, plain, near, clear]);
+    expect(shownKeys(build)).toEqual([clear.key]);
+    expect(build.groups[0]).toMatchObject({ alternate: true });
+  });
+
+  it('leaves the usual rules alone when every row is low confidence: there is nothing better to show', () => {
+    const a = low('A', 'Song', 0.4, { low: 50, high: 62 });
+    const b = low('A', 'Song ', 0.8, { low: 51, high: 62 });
+    expect(shownKeys(buildCanonical([a, b]))).toEqual([b.key]);
+    expect(shownKeys(buildCanonical([b, a]))).toEqual([b.key]);
+  });
+
+  it('does not reach across the range rule: a confident row whose range disagrees is another song, and the Maybe stays a Maybe', () => {
+    const recording = low('A', 'Song', 0.9, { low: 63, high: 68 });
+    const far = sure('A', 'Song ', 0.3, { low: 63, high: 75 }); // 7 semitones off at the top: not one song
+    const build = buildCanonical([recording, far]);
+    expect(shownKeys(build)).toEqual([far.key, recording.key].sort());
+    expect(build.groups).toEqual([]);
+  });
+
+  it('decides the same way in every order, for every mix of confidence, title tag and popularity among three rows of one range', () => {
+    // The rule written plainly: among the rows that are not low confidence (all of them when none is), the plain title with the
+    // best popularity, unless a tagged row is at least 0.15 more popular than it, in which case the most popular such tagged row.
+    let cases = 0;
+    for (let code = 0; code < 4 ** 3; code++) {
+      const bits = [0, 1, 2].map((i) => Math.floor(code / 4 ** i) % 4);
+      for (const ranks of [[0.9, 0.5, 0.2], [0.2, 0.5, 0.9], [0.5, 0.9, 0.2], [0.4, 0.41, 0.42]]) {
+        const rows = bits.map((b, i) => {
+          const title = `Song${' '.repeat(i)}${b & 2 ? ' (Live)' : ''}`;
+          return b & 1 ? low('A', title, ranks[i]!, { low: 50, high: 62 }) : sure('A', title, ranks[i]!, { low: 50, high: 62 });
+        });
+        const confident = rows.filter((r) => r.confidence !== 'low');
+        const pool = [...(confident.length ? confident : rows)].sort((a, b) => b.rank - a.rank);
+        const main = pool.find((r) => !r.title.includes('(')) ?? pool[0]!;
+        const challenger = !main.title.includes('(') ? pool.find((r) => r.title.includes('(') && r.rank - main.rank >= 0.15) : undefined;
+        const expected = (challenger ?? main).key;
+        for (const seed of [1, 2]) {
+          expect(shownKeys(buildCanonical(shuffle(rows, cases + seed))), `confidence/tag codes ${String(bits)}, ranks ${String(ranks)}`).toEqual([expected]);
+        }
+        cases++;
+      }
+    }
+    expect(cases).toBe(256);
   });
 });
 

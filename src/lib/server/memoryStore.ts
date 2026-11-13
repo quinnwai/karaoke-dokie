@@ -243,7 +243,10 @@ export function createMemoryStore(): Store {
         if (!range || !isMeasured(range)) continue;
         const popularity = popularityOf(key);
         const evidence = { source: range.source, confidence: range.confidence, octaveFrom: range.octaveFrom };
-        out.push({ key, artist: log.artist, title: log.title, rank: catalogueRank(range, best.get(key), popularity), low: range.low, high: range.high, trust: rangeTrust(evidence), ...evidence });
+        out.push({
+          key, artist: log.artist, title: log.title, rank: catalogueRank(range, best.get(key), popularity), low: range.low, high: range.high, trust: rangeTrust(evidence), ...evidence,
+          charted: popularity?.chartRank !== undefined,
+        });
       }
       return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     },
