@@ -9,6 +9,8 @@
 //   eventNames.ts). Whatever posthog-js makes up itself (pageviews, autocapture and its click text, heatmaps, dead
 //   clicks, exceptions, surveys) is switched off, and anything else it might send (web vitals, say) is dropped in
 //   beforeSend, which also strips props that name a Spotify account, whoever added them.
+// - The browser talks to our own origin only (QWW-63): ad and privacy blockers refuse *.posthog.com, so the screen
+//   sends to POSTHOG_PROXY_PATH and the server forwards it, without our cookies (src/lib/server/postHogProxy.ts).
 // - Every event says which environment sent it, because previews and production share one PostHog project.
 // - Session replay masks inputs and is on only while the visitor is known to be signed out (setReplay): a signed-in
 //   screen shows their Spotify name and songs from their library.
@@ -18,6 +20,7 @@ import type { CaptureResult, PostHog, PostHogConfig } from 'posthog-js';
 import type { AppEvent, EventValue, PostHogSettings } from '../contracts';
 import { POSTHOG_PROPS } from '../eventNames';
 import { EVENT_NAME, isForbiddenProp } from '../eventRules';
+import { toProxyPath } from '../postHogProxy';
 import type { EventSink } from './events';
 
 /** The slice of posthog-js the sink drives. Tests pass a fake. */
@@ -55,7 +58,14 @@ export function beforeSend(environment: string): (event: CaptureResult) => Captu
 /** posthog-js's settings for this device. Exported so a test can pin down every privacy-relevant choice. */
 export function postHogConfig(settings: PostHogSettings, anonId: string): Partial<PostHogConfig> {
   return {
+    // Our own origin (QWW-63): ad and privacy blockers refuse *.posthog.com, and the server forwards what arrives here.
     api_host: settings.host,
+    ui_host: settings.uiHost,
+    // The recorder's file name is one the block lists name; on our origin it goes by another (see postHogProxy.ts).
+    rewriteRequestPath: (url) => {
+      url.pathname = toProxyPath(url.pathname);
+      return url;
+    },
     // The device id is the distinct id, set at every load; with memory persistence PostHog keeps nothing on the device.
     bootstrap: { distinctID: anonId },
     persistence: 'memory',

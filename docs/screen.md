@@ -375,7 +375,7 @@ tutorial (`SpotifyPlayer.tsx`). No script and no package, and the app never sign
 | `src/lib/client/useRankedSetlist.ts` | Asks the engine for the list that goes with the tuner, drops answers that arrive after a newer request. |
 | `src/lib/songs/browse.ts` | The old sliders, chips and counts (no longer used by the screen; QWW-47 owns what becomes of them), and `difficultyBand` and `decadeOf`, which the tuner reads. |
 | `src/lib/client/funnel.ts`, `events.ts` | What each action records in the beta event log, and the batching tracker that sends it. |
-| `src/lib/client/posthog.ts`, `src/lib/eventNames.ts` | PostHog as the tracker's second sink (replay only while signed out), and the release funnel's event names, shared with the mic flow, tuner and play row. |
+| `src/lib/client/posthog.ts`, `src/lib/postHogProxy.ts`, `src/lib/eventNames.ts` | PostHog as the tracker's second sink (replay only while signed out) and the path on our own origin it sends to (`/roadie`, so blockers that refuse `*.posthog.com` cannot hide it), and the release funnel's event names, shared with the mic flow, tuner and play row. |
 | `src/lib/client/spotifyEmbed.ts` | A song's `open.spotify.com/track/ID` link to the address of Spotify's player, or null. |
 | `src/components/KaraokeApp.tsx` | Client component: effects, mic handling, renders each step. Takes `api`, `mic`, `navigate`, `reload`, `quietMs` props for tests. |
 | `src/components/{Tv,Lyric,HoldStep,SongDetail,PickSongs}.tsx` | The screen pieces. |
