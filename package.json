@@ -38,6 +38,7 @@
     "tempo:feel": "tsx scripts/tempo-feel.ts",
     "genres:deezer": "tsx scripts/genres-deezer.ts",
     "smoke:live": "tsx scripts/smoke-live.ts",
+    "e2e:preview": "tsx scripts/e2e-preview.ts",
     "eval:release": "tsx scripts/eval-release.ts"
   },
   "devDependencies": {
