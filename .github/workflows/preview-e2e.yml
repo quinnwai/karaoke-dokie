@@ -1,0 +1,64 @@
+name: preview-e2e
+# QWW-93: the @live suite (tests/live) against the Vercel preview a PR got, on the commit that was deployed, in the
+# browsers Quinn-Wai tests with (iPhone-shaped touch WebKit and desktop Chromium). It reports a commit status named
+# `preview-e2e` on that exact SHA. Needs the repository secret VERCEL_AUTOMATION_BYPASS_SECRET (Vercel: Project, Settings,
+# Deployment Protection, Protection Bypass for Automation). Read-only against the preview's database.
+on:
+  deployment_status
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: preview-e2e-${{ github.event.deployment.sha }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    # Only a successful deployment of a preview; Production and failed or pending states do nothing.
+    if: github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Preview'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      SHA: ${{ github.event.deployment.sha }}
+      PREVIEW_URL: ${{ github.event.deployment_status.target_url }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Mark preview-e2e pending
+        run: gh api "repos/${{ github.repository }}/statuses/$SHA" -f state=pending -f context=preview-e2e -f description="Running against $PREVIEW_URL" -f target_url="$RUN_URL"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Browsers (WebKit for the iPhone project, Chromium for desktop)
+        run: |
+          npx playwright install webkit chromium
+          timeout 180 npx playwright install-deps webkit chromium || echo "Skipped apt dependencies, the runner image has most libraries."
+      - name: The bypass secret is set
+        run: test -n "$VERCEL_AUTOMATION_BYPASS_SECRET" || { echo "::error::VERCEL_AUTOMATION_BYPASS_SECRET is not set; a protected preview shows a login page"; exit 1; }
+      - name: Run the @live suite against ${{ github.event.deployment_status.target_url }}
+        run: npm run e2e:preview -- "$PREVIEW_URL"
+        env:
+          CI: 'true'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preview-e2e-screenshots-${{ github.event.deployment.sha }}
+          path: |
+            test-results/live-screens/
+            test-results/live/
+            playwright-report/live/
+          if-no-files-found: ignore
+      - name: Report preview-e2e on the deployed SHA
+        if: always()
+        run: |
+          state=failure; desc="@live suite failed on $PREVIEW_URL"
+          if [ "${{ job.status }}" = "success" ]; then state=success; desc="@live suite passed on $PREVIEW_URL"; fi
+          gh api "repos/${{ github.repository }}/statuses/$SHA" -f state="$state" -f context=preview-e2e -f description="$desc" -f target_url="$RUN_URL"
